@@ -27,7 +27,9 @@ RUN apt update \
     libgeos-c1v5  \
     libgeos-dev  \
     libgeos-doc \
-    xterm
+    xterm \
+    ninja-build \
+    gdb
 
 # eigen setup
 RUN cd /usr/local/include \ 
@@ -59,18 +61,6 @@ RUN cd /workspace/thirdparty \
     && cd /workspace/thirdparty/NumCpp \
     && cmake -B build \ 
     && cmake --build build --target install 
-
-# build gnssfgo
-ENV CPATH="/opt/ros/humble/include/pcl_msgs:/opt/ros/humble/include/visualization_msgs"
-RUN mkdir -p /workspace/fgo_ws/src \
-    && cd /workspace/fgo_ws/src \
-    && git clone --recursive https://github.com/rwth-irt/gnssFGO.git \
-    && rm -rf /workspace/fgo_ws/src/gnssFGO/novatel_oem7_utilities/novatel_oem7_driver
-
-# this command will build above pkg (high time and memory usage)
-RUN cd /workspace/fgo_ws \
-    && source /opt/ros/humble/setup.bash \
-    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 # final update gnssFGO
 RUN echo "source /workspace/mapviz_ws/install/setup.bash" >> ~/.bashrc \
