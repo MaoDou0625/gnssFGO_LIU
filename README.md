@@ -59,16 +59,7 @@ For more information and sample request, please contact h.zhang@irt.rwth-aachen.
 
 ---
 ## How to start
-1. Download the [datasets](https://rwth-aachen.sciebo.de/s/OCEZPLE9wFHv1pp)
-2. Install ros2 (recommend: rolling or humble)
-3. Clone this repo with submodules in your colcon workspace 
-```
-git clone --recursive https://github.com/rwth-irt/gnssFGO.git
-```
-4. compile 
-```
-colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
-```
+See above how to run the docker
 
 ---
 ## How to run

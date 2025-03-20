@@ -8,7 +8,7 @@ This is a dockerfile example based on ROS2 humble for using gnssFGO and adapted 
 2. cd gnssFGO/docker
 3. run following
 ```bash
-docker build -t irt/gnssfgo .
+docker build -t haomingac/gnssfgo:latest .
 ```
 
 ## OR download the docker image
@@ -24,7 +24,7 @@ If you have `docker compose` installed, you can run it with `compose.yaml`. Most
 1. clone the repository
 2. cd gnssFGO/docker
 3. build docker image. If you have built it, skip this step.
-4. If you do not use Nvidia GPU, remove `deploy` part (Line 18-23) in `compose.yaml`.
+4. If you do not use Nvidia GPU, remove `deploy` part in `compose.yaml`.
 5. run following to start the container
 ```bash
 docker compose up -d
@@ -37,4 +37,15 @@ docker exec -it gnssfgo bash
 If you got error on '' Authorization required, but no authorization protocol specified'', then start a terminal and run
 ```bash
 xhost +
+```
+
+7. And compile the code
+```
+export CPATH="/opt/ros/humble/include/pcl_msgs:/opt/ros/humble/include/visualization_msgs"
+cd /workspace/fgo_ws \
+  && source /opt/ros/humble/setup.bash \
+  && colcon build --cmake-args " -GNinja" --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+source /workspace/mapviz_ws/install/setup.bash
+source /workspace/fgo_ws/install/setup.bash
+ldconfig
 ```
