@@ -4,6 +4,8 @@
 #include <limits>
 #include <stdexcept>
 
+#include "offline_lc_minimal/core/StaticImuAlignment.h"
+
 namespace offline_lc_minimal {
 
 namespace {
@@ -23,6 +25,9 @@ InitialPoseEstimate TrajectoryInitializer::Estimate(
   const std::vector<ImuSample> &imu_samples,
   const std::vector<GnssSolutionSample> &gnss_samples,
   const std::size_t start_gnss_index,
+  const double start_time_s,
+  const Eigen::Vector3d &earth_rate_enu,
+  const std::vector<std::size_t> &yaw_candidate_indices,
   const OfflineRunnerConfig &config) {
   if (imu_samples.empty()) {
     throw std::runtime_error("trajectory initialization requires IMU samples");
@@ -31,39 +36,35 @@ InitialPoseEstimate TrajectoryInitializer::Estimate(
     throw std::runtime_error("trajectory initialization start_gnss_index out of range");
   }
 
-  const double start_time_s = gnss_samples[start_gnss_index].time_s;
-  const double stationary_window_end_s = start_time_s + config.stationary_window_s;
+  InitialPoseEstimate initial_pose;
 
-  Eigen::Vector3d accel_sum = Eigen::Vector3d::Zero();
-  std::size_t stationary_count = 0;
-  for (const auto &imu_sample : imu_samples) {
-    if (imu_sample.time_s > stationary_window_end_s) {
-      break;
-    }
-    const double gyro_norm = imu_sample.gyro_radps.norm();
-    const double accel_norm_error = std::abs(imu_sample.accel_mps2.norm() - config.gravity_mps2);
-    if (gyro_norm <= config.stationary_gyro_threshold_radps &&
-        accel_norm_error <= config.stationary_acc_tolerance_mps2) {
-      accel_sum += imu_sample.accel_mps2;
-      ++stationary_count;
-    }
-  }
-
-  if (stationary_count == 0U) {
-    for (const auto &imu_sample : imu_samples) {
-      if (imu_sample.time_s > stationary_window_end_s) {
-        break;
-      }
-      accel_sum += imu_sample.accel_mps2;
-      ++stationary_count;
+  if (config.prefer_imu_initial_yaw) {
+    const auto dual_vector_window = StaticImuAlignment::CollectWindow(
+      imu_samples,
+      start_time_s,
+      config.imu_dual_vector_window_s,
+      config,
+      false);
+    if (StaticImuAlignment::TryEstimateDualVectorInitialization(
+          dual_vector_window,
+          earth_rate_enu,
+          config,
+          initial_pose)) {
+      return initial_pose;
     }
   }
 
-  if (stationary_count == 0U) {
+  const auto gravity_window = StaticImuAlignment::CollectWindow(
+    imu_samples,
+    start_time_s,
+    config.stationary_window_s,
+    config,
+    true);
+  if (gravity_window.sample_count == 0U) {
     throw std::runtime_error("trajectory initialization could not collect an initial IMU window");
   }
 
-  Eigen::Vector3d gravity_alignment = accel_sum / static_cast<double>(stationary_count);
+  Eigen::Vector3d gravity_alignment = gravity_window.mean_acc_mps2;
   if (gravity_alignment.z() < 0.0) {
     gravity_alignment *= -1.0;
   }
@@ -78,7 +79,10 @@ InitialPoseEstimate TrajectoryInitializer::Estimate(
   std::string yaw_source = "fallback";
   const auto &start_sample = gnss_samples[start_gnss_index];
   if (start_sample.has_enu_position) {
-    for (std::size_t index = start_gnss_index + 1; index < gnss_samples.size(); ++index) {
+    for (const std::size_t index : yaw_candidate_indices) {
+      if (index <= start_gnss_index || index >= gnss_samples.size()) {
+        continue;
+      }
       const auto &sample = gnss_samples[index];
       if (!sample.has_enu_position) {
         continue;
@@ -92,11 +96,10 @@ InitialPoseEstimate TrajectoryInitializer::Estimate(
     }
   }
 
-  InitialPoseEstimate initial_pose;
   initial_pose.roll_rad = roll_rad;
   initial_pose.pitch_rad = pitch_rad;
   initial_pose.yaw_rad = NormalizeYaw(yaw_rad);
-  initial_pose.stationary_sample_count = stationary_count;
+  initial_pose.stationary_sample_count = gravity_window.sample_count;
   initial_pose.yaw_source = yaw_source;
   initial_pose.orientation = gtsam::Rot3::Ypr(initial_pose.yaw_rad, initial_pose.pitch_rad, initial_pose.roll_rad);
   return initial_pose;

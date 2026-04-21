@@ -50,7 +50,11 @@ add_library(offline_lc_minimal_lib
   src/common/Config.cpp
   src/common/GeoUtils.cpp
   src/common/ResultWriter.cpp
+  src/gp/Pose3Utils.cpp
   src/io/TextDatasetLoader.cpp
+  src/core/ImuIntegrationUtils.cpp
+  src/core/ImuRateAvpReconstructor.cpp
+  src/core/StaticImuAlignment.cpp
   src/core/TrajectoryInitializer.cpp
   src/core/OfflineBatchRunner.cpp
 )

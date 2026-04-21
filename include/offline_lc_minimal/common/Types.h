@@ -22,6 +22,24 @@ enum class GnssFixType : int {
   kNoSolution = 4,
 };
 
+enum class GnssNoiseModel : int {
+  kGaussian = 0,
+  kCauchy = 1,
+  kHuber = 2,
+  kDcs = 3,
+  kTukey = 4,
+  kGemanMcClure = 5,
+  kWelsch = 6,
+};
+
+enum class StateMeasSyncStatus : int {
+  kDropped = 0,
+  kSynchronizedI = 1,
+  kSynchronizedJ = 2,
+  kInterpolated = 3,
+  kCached = 4,
+};
+
 inline std::string ToString(const GnssFixType fix_type) {
   switch (fix_type) {
     case GnssFixType::kRtkFix:
@@ -33,6 +51,43 @@ inline std::string ToString(const GnssFixType fix_type) {
     case GnssFixType::kNoSolution:
     default:
       return "NO_SOLUTION";
+  }
+}
+
+inline std::string ToString(const GnssNoiseModel noise_model) {
+  switch (noise_model) {
+    case GnssNoiseModel::kGaussian:
+      return "gaussian";
+    case GnssNoiseModel::kCauchy:
+      return "cauchy";
+    case GnssNoiseModel::kHuber:
+      return "huber";
+    case GnssNoiseModel::kDcs:
+      return "dcs";
+    case GnssNoiseModel::kTukey:
+      return "tukey";
+    case GnssNoiseModel::kGemanMcClure:
+      return "geman_mcclure";
+    case GnssNoiseModel::kWelsch:
+      return "welsch";
+    default:
+      return "unknown";
+  }
+}
+
+inline std::string ToString(const StateMeasSyncStatus status) {
+  switch (status) {
+    case StateMeasSyncStatus::kSynchronizedI:
+      return "SYNCHRONIZED_I";
+    case StateMeasSyncStatus::kSynchronizedJ:
+      return "SYNCHRONIZED_J";
+    case StateMeasSyncStatus::kInterpolated:
+      return "INTERPOLATED";
+    case StateMeasSyncStatus::kCached:
+      return "CACHED";
+    case StateMeasSyncStatus::kDropped:
+    default:
+      return "DROPPED";
   }
 }
 
@@ -138,6 +193,40 @@ struct InitialPoseEstimate {
   double yaw_rad = 0.0;
   std::size_t stationary_sample_count = 0;
   std::string yaw_source = "fallback";
+  gtsam::imuBias::ConstantBias imu_bias;
+};
+
+struct StateMeasSyncResult {
+  bool found_i = false;
+  std::size_t key_index_i = 0;
+  std::size_t key_index_j = 0;
+  double timestamp_i_s = 0.0;
+  double timestamp_j_s = 0.0;
+  double duration_from_state_i_s = 0.0;
+  StateMeasSyncStatus status = StateMeasSyncStatus::kDropped;
+
+  [[nodiscard]] bool state_j_exists() const {
+    return status == StateMeasSyncStatus::kSynchronizedI ||
+           status == StateMeasSyncStatus::kSynchronizedJ ||
+           status == StateMeasSyncStatus::kInterpolated;
+  }
+};
+
+struct GnssFactorRecord {
+  std::size_t sample_index = 0;
+  double raw_time_s = 0.0;
+  double corrected_time_s = 0.0;
+  double state_time_i_s = std::numeric_limits<double>::quiet_NaN();
+  double state_time_j_s = std::numeric_limits<double>::quiet_NaN();
+  double duration_from_state_i_s = std::numeric_limits<double>::quiet_NaN();
+  std::size_t state_index_i = 0;
+  std::size_t state_index_j = 0;
+  std::size_t synchronized_state_index = 0;
+  bool factor_used = false;
+  GnssFixType gnss_fix_type = GnssFixType::kNoSolution;
+  StateMeasSyncStatus sync_status = StateMeasSyncStatus::kDropped;
+  Eigen::Vector3d measurement_enu_m = Eigen::Vector3d::Zero();
+  double residual_m = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct TrajectoryRow {
@@ -145,6 +234,7 @@ struct TrajectoryRow {
   Eigen::Vector3d enu_position_m = Eigen::Vector3d::Zero();
   Eigen::Vector3d enu_velocity_mps = Eigen::Vector3d::Zero();
   Eigen::Vector3d ypr_rad = Eigen::Vector3d::Zero();
+  Eigen::Vector3d omega_radps = Eigen::Vector3d::Zero();
   Eigen::Vector3d bias_acc = Eigen::Vector3d::Zero();
   Eigen::Vector3d bias_gyro = Eigen::Vector3d::Zero();
   bool gnss_factor_used = false;
@@ -152,13 +242,40 @@ struct TrajectoryRow {
   double gnss_residual_m = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct ImuRateAvpRow {
+  double time_s = 0.0;
+  Eigen::Vector3d enu_position_m = Eigen::Vector3d::Zero();
+  Eigen::Vector3d enu_velocity_mps = Eigen::Vector3d::Zero();
+  Eigen::Vector3d ypr_rad = Eigen::Vector3d::Zero();
+  Eigen::Vector3d bias_acc = Eigen::Vector3d::Zero();
+  Eigen::Vector3d bias_gyro = Eigen::Vector3d::Zero();
+};
+
+struct ImuRateIntervalDiagnostic {
+  std::size_t interval_index = 0;
+  double start_time_s = 0.0;
+  double end_time_s = 0.0;
+  std::size_t imu_sample_count = 0;
+  std::size_t emitted_sample_count = 0;
+  bool used_interval = false;
+  std::string status = "UNSET";
+};
+
 struct RunSummary {
   bool gnss_enabled = true;
   std::size_t state_count = 0;
   std::size_t gnss_factor_count = 0;
+  std::size_t imu_rate_avp_count = 0;
+  std::size_t imu_rate_interval_count = 0;
+  std::size_t imu_rate_skipped_interval_count = 0;
+  std::size_t gnss_synced_factor_count = 0;
+  std::size_t gnss_interpolated_factor_count = 0;
+  std::size_t gnss_dropped_count = 0;
+  std::size_t gnss_cached_count = 0;
   std::size_t dropped_no_solution_count = 0;
   std::size_t dropped_nonfinite_sigma_count = 0;
   std::size_t dropped_bad_status_count = 0;
+  std::size_t dropped_out_of_imu_coverage_count = 0;
   double initial_error = 0.0;
   double final_error = 0.0;
   double origin_lat_rad = 0.0;
@@ -171,9 +288,17 @@ struct RunSummary {
     oss << "gnss_enabled=" << (gnss_enabled ? "true" : "false") << '\n'
         << "state_count=" << state_count << '\n'
         << "gnss_factor_count=" << gnss_factor_count << '\n'
+        << "imu_rate_avp_count=" << imu_rate_avp_count << '\n'
+        << "imu_rate_interval_count=" << imu_rate_interval_count << '\n'
+        << "imu_rate_skipped_interval_count=" << imu_rate_skipped_interval_count << '\n'
+        << "gnss_synced_factor_count=" << gnss_synced_factor_count << '\n'
+        << "gnss_interpolated_factor_count=" << gnss_interpolated_factor_count << '\n'
+        << "gnss_dropped_count=" << gnss_dropped_count << '\n'
+        << "gnss_cached_count=" << gnss_cached_count << '\n'
         << "dropped_no_solution_count=" << dropped_no_solution_count << '\n'
         << "dropped_nonfinite_sigma_count=" << dropped_nonfinite_sigma_count << '\n'
         << "dropped_bad_status_count=" << dropped_bad_status_count << '\n'
+        << "dropped_out_of_imu_coverage_count=" << dropped_out_of_imu_coverage_count << '\n'
         << "initial_error=" << initial_error << '\n'
         << "final_error=" << final_error << '\n'
         << "origin_lat_rad=" << origin_lat_rad << '\n'
@@ -188,6 +313,9 @@ struct OfflineRunResult {
   DataSummary data_summary;
   RunSummary run_summary;
   std::vector<TrajectoryRow> trajectory;
+  std::vector<ImuRateAvpRow> imu_rate_avp;
+  std::vector<ImuRateIntervalDiagnostic> imu_rate_interval_diagnostics;
+  std::vector<GnssFactorRecord> gnss_factor_records;
 };
 
 }  // namespace offline_lc_minimal

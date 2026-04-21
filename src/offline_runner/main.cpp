@@ -79,6 +79,31 @@ int main(int argc, char **argv) {
       config.verbose = true;
     }
 
+    if (config.state_meas_sync_lower_bound_s > config.state_meas_sync_upper_bound_s) {
+      throw std::runtime_error("state_meas_sync_lower_bound_s must be <= state_meas_sync_upper_bound_s");
+    }
+    if (config.state_meas_sync_lower_bound_s > 0.0 || config.state_meas_sync_upper_bound_s < 0.0) {
+      throw std::runtime_error("state_meas_sync bounds must satisfy lower <= 0 <= upper");
+    }
+    if (config.state_frequency_hz <= 0.0) {
+      throw std::runtime_error("state_frequency_hz must be positive");
+    }
+    if (config.gnss_position_robust_param <= 0.0) {
+      throw std::runtime_error("gnss_position_robust_param must be positive");
+    }
+    if (config.stationary_window_s <= 0.0) {
+      throw std::runtime_error("stationary_window_s must be positive");
+    }
+    if (config.imu_dual_vector_window_s <= 0.0) {
+      throw std::runtime_error("imu_dual_vector_window_s must be positive");
+    }
+    if (config.imu_dual_vector_min_sample_count <= 0) {
+      throw std::runtime_error("imu_dual_vector_min_sample_count must be positive");
+    }
+    if (config.imu_dual_vector_min_cross_norm <= 0.0) {
+      throw std::runtime_error("imu_dual_vector_min_cross_norm must be positive");
+    }
+
     if (config.imu_path.empty() || config.gnss_path.empty()) {
       throw std::runtime_error("both imu_path and gnss_path must be provided");
     }

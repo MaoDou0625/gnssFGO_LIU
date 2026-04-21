@@ -3,6 +3,8 @@
 #include <string>
 #include <string_view>
 
+#include "offline_lc_minimal/common/Types.h"
+
 namespace offline_lc_minimal {
 
 struct OfflineRunnerConfig {
@@ -11,8 +13,14 @@ struct OfflineRunnerConfig {
   std::string output_dir = "./runs/default_offline";
 
   bool enable_gnss = true;
+  bool enable_gp_interpolated_gnss = true;
   bool verbose = false;
   bool write_debug_csv = true;
+  bool write_imu_rate_avp = false;
+  double state_frequency_hz = 20.0;
+  double gnss_time_offset_s = 0.0;
+  double state_meas_sync_lower_bound_s = -0.02;
+  double state_meas_sync_upper_bound_s = 0.02;
 
   double gravity_mps2 = 9.81;
   double imu_sigma_acc = 0.08;
@@ -26,6 +34,10 @@ struct OfflineRunnerConfig {
   double stationary_window_s = 1.0;
   double stationary_acc_tolerance_mps2 = 0.8;
   double stationary_gyro_threshold_radps = 0.02;
+  bool prefer_imu_initial_yaw = false;
+  double imu_dual_vector_window_s = 100.0;
+  int imu_dual_vector_min_sample_count = 1000;
+  double imu_dual_vector_min_cross_norm = 1e-3;
   double yaw_min_distance_m = 1.0;
   double fallback_initial_yaw_rad = 0.0;
 
@@ -34,6 +46,8 @@ struct OfflineRunnerConfig {
 
   double position_sigma_floor_m = 0.5;
   double position_sigma_ceiling_m = 50.0;
+  GnssNoiseModel gnss_position_noise_model = GnssNoiseModel::kCauchy;
+  double gnss_position_robust_param = 0.5;
   double rtkfix_scale = 1.0;
   double rtkfloat_scale = 2.0;
   double single_scale = 5.0;

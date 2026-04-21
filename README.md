@@ -11,6 +11,11 @@ In this repository line it lives under the dedicated branch worktree:
 
 See [BRANCH_LAYOUT.md](BRANCH_LAYOUT.md) and [WORKFLOW_WINDOWS_WSL.md](WORKFLOW_WINDOWS_WSL.md) for branch-level workflow details.
 
+Algorithm notes:
+
+- [OFFLINE_IMU_GNSS_CURRENT_VS_ORIGINAL.md](OFFLINE_IMU_GNSS_CURRENT_VS_ORIGINAL.md)
+- [OFFLINE_IMU_GNSS_PRECISION_ENHANCEMENT.md](OFFLINE_IMU_GNSS_PRECISION_ENHANCEMENT.md)
+
 ## Architecture
 
 - `fgo_core`
@@ -35,14 +40,24 @@ See [BRANCH_LAYOUT.md](BRANCH_LAYOUT.md) and [WORKFLOW_WINDOWS_WSL.md](WORKFLOW_
   - `gnss_solution_gnss_fgo.txt`
 - Factors:
   - IMU `CombinedImuFactor`
-  - GNSS position factor only
+  - GNSS position factor
+  - GP-interpolated GNSS position factor when measurements fall between state timestamps
 - Initialization:
-  - position from first valid GNSS solution
+  - position from first quality-filtered GNSS solution with IMU coverage
   - velocity default `0`
-  - roll/pitch from gravity alignment
-  - yaw from early displacement, then fallback yaw if displacement is too small
+  - roll/pitch from gravity alignment by default
+  - optional static dual-vector IMU alignment for initial attitude, yaw, and bias estimation
+  - fallback yaw path remains early GNSS displacement, then configured yaw if displacement is too small
 - IMU preintegration:
   - `Use2ndOrderCoriolis(true)` enabled by default
+- GNSS weighting:
+  - robust loss is configurable
+  - default uses `cauchy + 0.5`
+  - `NO_SOLUTION` stays dropped by default
+- IMU-first yaw option:
+  - set `prefer_imu_initial_yaw = true` to try static dual-vector alignment first
+  - uses `imu_dual_vector_window_s`, `imu_dual_vector_min_sample_count`, and `imu_dual_vector_min_cross_norm`
+  - falls back to GNSS displacement / configured yaw if the IMU alignment is not reliable
 
 ## Build
 
@@ -81,6 +96,36 @@ Each run writes:
 - `config_snapshot.cfg`
 - `trajectory.csv`
 - `gnss_residuals.csv`
+  - compatibility-friendly per-state GNSS summary
+- `gnss_alignment.csv`
+  - per-measurement sync/interpolation/drop diagnostics
+  - written when `write_debug_csv = true`
+- `trajectory_imu_rate.csv`
+  - optional IMU-rate AVP export
+  - written when `write_imu_rate_avp = true`
+- `trajectory_imu_rate_diagnostics.csv`
+  - per-interval IMU-rate reconstruction status
+  - written when both `write_imu_rate_avp = true` and `write_debug_csv = true`
+
+`trajectory.csv` keeps the low-rate optimized state outputs:
+
+- pose and velocity
+- IMU-driven orientation (`yaw/pitch/roll`)
+- bias terms and GNSS usage/residual columns
+
+`trajectory_imu_rate.csv` includes:
+
+- IMU-rate pose / velocity / attitude
+- linearly blended bias output between optimized node biases
+- LLH converted from the fused ENU trajectory
+
+`summary.txt` now reports:
+
+- total GNSS factor count
+- synchronized GNSS factor count
+- interpolated GNSS factor count
+- dropped / cached GNSS counts
+- optional IMU-rate export count / interval count / skipped interval count
 
 Optional comparison plot:
 
@@ -98,3 +143,5 @@ python scripts/plot_nav_vs_rtk.py \
 - Phase 1 targets an engineering baseline: deterministic runs, stable optimization, inspectable residuals, and a clean module boundary.
 - TC is intentionally out of scope until per-satellite observations are available.
 - `run_offline.sh` adds the local GTSAM library directory to `LD_LIBRARY_PATH` when the dependency is installed from source.
+- The current offline path keeps IMU attitude in `Pose3.rotation()` and adds an `omega` state only to support finer GNSS time alignment.
+- Set `write_imu_rate_avp = true` to enable the dual-end constrained scheme C IMU-rate AVP reconstruction.

@@ -53,6 +53,36 @@ int ParseInt(const std::string &value) {
   return std::stoi(value);
 }
 
+GnssNoiseModel ParseNoiseModel(const std::string &value) {
+  std::string lowered = value;
+  std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](const unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+
+  if (lowered == "gaussian") {
+    return GnssNoiseModel::kGaussian;
+  }
+  if (lowered == "cauchy") {
+    return GnssNoiseModel::kCauchy;
+  }
+  if (lowered == "huber") {
+    return GnssNoiseModel::kHuber;
+  }
+  if (lowered == "dcs") {
+    return GnssNoiseModel::kDcs;
+  }
+  if (lowered == "tukey") {
+    return GnssNoiseModel::kTukey;
+  }
+  if (lowered == "geman_mcclure") {
+    return GnssNoiseModel::kGemanMcClure;
+  }
+  if (lowered == "welsch") {
+    return GnssNoiseModel::kWelsch;
+  }
+  throw std::runtime_error("invalid GNSS noise model: " + value);
+}
+
 }  // namespace
 
 OfflineRunnerConfig DefaultConfig() {
@@ -71,10 +101,22 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.output_dir = normalized_value;
   } else if (normalized_key == "enable_gnss") {
     config.enable_gnss = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_gp_interpolated_gnss") {
+    config.enable_gp_interpolated_gnss = ParseBool(normalized_value);
   } else if (normalized_key == "verbose") {
     config.verbose = ParseBool(normalized_value);
   } else if (normalized_key == "write_debug_csv") {
     config.write_debug_csv = ParseBool(normalized_value);
+  } else if (normalized_key == "write_imu_rate_avp") {
+    config.write_imu_rate_avp = ParseBool(normalized_value);
+  } else if (normalized_key == "state_frequency_hz") {
+    config.state_frequency_hz = ParseDouble(normalized_value);
+  } else if (normalized_key == "gnss_time_offset_s") {
+    config.gnss_time_offset_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "state_meas_sync_lower_bound_s") {
+    config.state_meas_sync_lower_bound_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "state_meas_sync_upper_bound_s") {
+    config.state_meas_sync_upper_bound_s = ParseDouble(normalized_value);
   } else if (normalized_key == "gravity_mps2") {
     config.gravity_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "imu_sigma_acc") {
@@ -97,6 +139,14 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.stationary_acc_tolerance_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "stationary_gyro_threshold_radps") {
     config.stationary_gyro_threshold_radps = ParseDouble(normalized_value);
+  } else if (normalized_key == "prefer_imu_initial_yaw") {
+    config.prefer_imu_initial_yaw = ParseBool(normalized_value);
+  } else if (normalized_key == "imu_dual_vector_window_s") {
+    config.imu_dual_vector_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "imu_dual_vector_min_sample_count") {
+    config.imu_dual_vector_min_sample_count = ParseInt(normalized_value);
+  } else if (normalized_key == "imu_dual_vector_min_cross_norm") {
+    config.imu_dual_vector_min_cross_norm = ParseDouble(normalized_value);
   } else if (normalized_key == "yaw_min_distance_m") {
     config.yaw_min_distance_m = ParseDouble(normalized_value);
   } else if (normalized_key == "fallback_initial_yaw_rad") {
@@ -109,6 +159,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.position_sigma_floor_m = ParseDouble(normalized_value);
   } else if (normalized_key == "position_sigma_ceiling_m") {
     config.position_sigma_ceiling_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "gnss_position_noise_model") {
+    config.gnss_position_noise_model = ParseNoiseModel(normalized_value);
+  } else if (normalized_key == "gnss_position_robust_param") {
+    config.gnss_position_robust_param = ParseDouble(normalized_value);
   } else if (normalized_key == "rtkfix_scale") {
     config.rtkfix_scale = ParseDouble(normalized_value);
   } else if (normalized_key == "rtkfloat_scale") {
@@ -141,6 +195,30 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
 OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const OfflineRunnerConfig &base_config) {
   OfflineRunnerConfig config = base_config;
   if (config_path.empty()) {
+    if (config.state_meas_sync_lower_bound_s > config.state_meas_sync_upper_bound_s) {
+      throw std::runtime_error("state_meas_sync_lower_bound_s must be <= state_meas_sync_upper_bound_s");
+    }
+    if (config.state_meas_sync_lower_bound_s > 0.0 || config.state_meas_sync_upper_bound_s < 0.0) {
+      throw std::runtime_error("state_meas_sync bounds must satisfy lower <= 0 <= upper");
+    }
+    if (config.state_frequency_hz <= 0.0) {
+      throw std::runtime_error("state_frequency_hz must be positive");
+    }
+    if (config.gnss_position_robust_param <= 0.0) {
+      throw std::runtime_error("gnss_position_robust_param must be positive");
+    }
+    if (config.stationary_window_s <= 0.0) {
+      throw std::runtime_error("stationary_window_s must be positive");
+    }
+    if (config.imu_dual_vector_window_s <= 0.0) {
+      throw std::runtime_error("imu_dual_vector_window_s must be positive");
+    }
+    if (config.imu_dual_vector_min_sample_count <= 0) {
+      throw std::runtime_error("imu_dual_vector_min_sample_count must be positive");
+    }
+    if (config.imu_dual_vector_min_cross_norm <= 0.0) {
+      throw std::runtime_error("imu_dual_vector_min_cross_norm must be positive");
+    }
     return config;
   }
 
@@ -172,6 +250,31 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     OverrideConfigField(config, key, value);
   }
 
+  if (config.state_meas_sync_lower_bound_s > config.state_meas_sync_upper_bound_s) {
+    throw std::runtime_error("state_meas_sync_lower_bound_s must be <= state_meas_sync_upper_bound_s");
+  }
+  if (config.state_meas_sync_lower_bound_s > 0.0 || config.state_meas_sync_upper_bound_s < 0.0) {
+    throw std::runtime_error("state_meas_sync bounds must satisfy lower <= 0 <= upper");
+  }
+  if (config.state_frequency_hz <= 0.0) {
+    throw std::runtime_error("state_frequency_hz must be positive");
+  }
+  if (config.gnss_position_robust_param <= 0.0) {
+    throw std::runtime_error("gnss_position_robust_param must be positive");
+  }
+  if (config.stationary_window_s <= 0.0) {
+    throw std::runtime_error("stationary_window_s must be positive");
+  }
+  if (config.imu_dual_vector_window_s <= 0.0) {
+    throw std::runtime_error("imu_dual_vector_window_s must be positive");
+  }
+  if (config.imu_dual_vector_min_sample_count <= 0) {
+    throw std::runtime_error("imu_dual_vector_min_sample_count must be positive");
+  }
+  if (config.imu_dual_vector_min_cross_norm <= 0.0) {
+    throw std::runtime_error("imu_dual_vector_min_cross_norm must be positive");
+  }
+
   return config;
 }
 
@@ -181,8 +284,14 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "gnss_path=" << config.gnss_path << '\n'
       << "output_dir=" << config.output_dir << '\n'
       << "enable_gnss=" << (config.enable_gnss ? "true" : "false") << '\n'
+      << "enable_gp_interpolated_gnss=" << (config.enable_gp_interpolated_gnss ? "true" : "false") << '\n'
       << "verbose=" << (config.verbose ? "true" : "false") << '\n'
       << "write_debug_csv=" << (config.write_debug_csv ? "true" : "false") << '\n'
+      << "write_imu_rate_avp=" << (config.write_imu_rate_avp ? "true" : "false") << '\n'
+      << "state_frequency_hz=" << config.state_frequency_hz << '\n'
+      << "gnss_time_offset_s=" << config.gnss_time_offset_s << '\n'
+      << "state_meas_sync_lower_bound_s=" << config.state_meas_sync_lower_bound_s << '\n'
+      << "state_meas_sync_upper_bound_s=" << config.state_meas_sync_upper_bound_s << '\n'
       << "gravity_mps2=" << config.gravity_mps2 << '\n'
       << "imu_sigma_acc=" << config.imu_sigma_acc << '\n'
       << "imu_sigma_gyro=" << config.imu_sigma_gyro << '\n'
@@ -194,12 +303,18 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "stationary_window_s=" << config.stationary_window_s << '\n'
       << "stationary_acc_tolerance_mps2=" << config.stationary_acc_tolerance_mps2 << '\n'
       << "stationary_gyro_threshold_radps=" << config.stationary_gyro_threshold_radps << '\n'
+      << "prefer_imu_initial_yaw=" << (config.prefer_imu_initial_yaw ? "true" : "false") << '\n'
+      << "imu_dual_vector_window_s=" << config.imu_dual_vector_window_s << '\n'
+      << "imu_dual_vector_min_sample_count=" << config.imu_dual_vector_min_sample_count << '\n'
+      << "imu_dual_vector_min_cross_norm=" << config.imu_dual_vector_min_cross_norm << '\n'
       << "yaw_min_distance_m=" << config.yaw_min_distance_m << '\n'
       << "fallback_initial_yaw_rad=" << config.fallback_initial_yaw_rad << '\n'
       << "early_gnss_relaxation_duration_s=" << config.early_gnss_relaxation_duration_s << '\n'
       << "early_gnss_relaxation_scale=" << config.early_gnss_relaxation_scale << '\n'
       << "position_sigma_floor_m=" << config.position_sigma_floor_m << '\n'
       << "position_sigma_ceiling_m=" << config.position_sigma_ceiling_m << '\n'
+      << "gnss_position_noise_model=" << ToString(config.gnss_position_noise_model) << '\n'
+      << "gnss_position_robust_param=" << config.gnss_position_robust_param << '\n'
       << "rtkfix_scale=" << config.rtkfix_scale << '\n'
       << "rtkfloat_scale=" << config.rtkfloat_scale << '\n'
       << "single_scale=" << config.single_scale << '\n'

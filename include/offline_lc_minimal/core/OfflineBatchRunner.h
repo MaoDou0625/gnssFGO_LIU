@@ -14,9 +14,19 @@ class OfflineBatchRunner {
   [[nodiscard]] const OfflineRunnerConfig &config() const { return config_; }
 
  private:
-  [[nodiscard]] std::size_t FindOriginIndex(const std::vector<GnssSolutionSample> &gnss_samples) const;
+  [[nodiscard]] std::size_t FindOriginIndex(
+    const std::vector<GnssSolutionSample> &gnss_samples,
+    const std::vector<ImuSample> &imu_samples) const;
+  [[nodiscard]] std::vector<std::size_t> CollectInitializationCandidateIndices(
+    const std::vector<GnssSolutionSample> &gnss_samples,
+    const std::vector<ImuSample> &imu_samples) const;
   void PopulateEnuPositions(std::vector<GnssSolutionSample> &gnss_samples, const GeoReference &geo_reference) const;
   [[nodiscard]] bool ShouldUseGnssFactor(const GnssSolutionSample &sample, RunSummary &run_summary) const;
+  [[nodiscard]] bool CanUseGnssSampleForInitialization(
+    const GnssSolutionSample &sample,
+    const std::vector<ImuSample> &imu_samples) const;
+  [[nodiscard]] bool IsWithinImuCoverage(const std::vector<ImuSample> &imu_samples, double time_s) const;
+  [[nodiscard]] double CorrectedGnssTime(const GnssSolutionSample &sample) const;
   [[nodiscard]] double GnssFixScale(GnssFixType fix_type) const;
   [[nodiscard]] Eigen::Vector3d ClampGnssSigma(const GnssSolutionSample &sample) const;
 
