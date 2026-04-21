@@ -1,8 +1,6 @@
 # Branch Layout
 
-This branch is intentionally reduced to a single top-level project:
-
-- `offline_lc_minimal/`
+This branch is intentionally reduced to a single root-level project.
 
 ## Purpose
 
@@ -12,9 +10,8 @@ This branch is intentionally reduced to a single top-level project:
 
 ## Paths
 
-- Windows worktree root: `D:\Code\gnssFGO_offline_lc_minimal`
-- Windows project root: `D:\Code\gnssFGO_offline_lc_minimal\offline_lc_minimal`
-- WSL project root: `/mnt/d/Code/gnssFGO_offline_lc_minimal/offline_lc_minimal`
+- Windows repository root: `D:\Code\offline_lc_minimal`
+- WSL repository root: `/mnt/d/Code/offline_lc_minimal`
 
 ## Branch identity
 

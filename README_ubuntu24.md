@@ -51,16 +51,16 @@ cmake --install ~/third_party/rwth_irt_gtsam/build
 Build the runner:
 
 ```bash
-cmake -S /mnt/d/Code/gnssFGO/offline_lc_minimal -B /mnt/d/Code/gnssFGO/offline_lc_minimal/build -G Ninja \
+cmake -S /mnt/d/Code/offline_lc_minimal -B /mnt/d/Code/offline_lc_minimal/build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DGTSAM_DIR=$HOME/.local/offline_lc_minimal/gtsam/lib/cmake/GTSAM
-cmake --build /mnt/d/Code/gnssFGO/offline_lc_minimal/build
+cmake --build /mnt/d/Code/offline_lc_minimal/build
 ```
 
 ## Quick smoke run
 
 ```bash
-cd /mnt/d/Code/gnssFGO/offline_lc_minimal
+cd /mnt/d/Code/offline_lc_minimal
 chmod +x run_offline.sh
 ./run_offline.sh --config config/default_offline.cfg
 ```

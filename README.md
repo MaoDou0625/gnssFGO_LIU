@@ -6,8 +6,8 @@ It is intentionally independent from `online_fgo` and does not depend on ROS, pl
 
 In this repository line it lives under the dedicated branch worktree:
 
-- Windows: `D:\Code\gnssFGO_offline_lc_minimal\offline_lc_minimal`
-- WSL: `/mnt/d/Code/gnssFGO_offline_lc_minimal/offline_lc_minimal`
+- Windows: `D:\Code\offline_lc_minimal`
+- WSL: `/mnt/d/Code/offline_lc_minimal`
 
 See [BRANCH_LAYOUT.md](BRANCH_LAYOUT.md) and [WORKFLOW_WINDOWS_WSL.md](WORKFLOW_WINDOWS_WSL.md) for branch-level workflow details.
 
