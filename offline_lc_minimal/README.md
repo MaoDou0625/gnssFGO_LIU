@@ -9,7 +9,7 @@ In this repository line it lives under the dedicated branch worktree:
 - Windows: `D:\Code\gnssFGO_offline_lc_minimal\offline_lc_minimal`
 - WSL: `/mnt/d/Code/gnssFGO_offline_lc_minimal/offline_lc_minimal`
 
-See [../OFFLINE_LC_MINIMAL_BRANCH.md](../OFFLINE_LC_MINIMAL_BRANCH.md) and [WORKFLOW_WINDOWS_WSL.md](WORKFLOW_WINDOWS_WSL.md) for branch-level workflow details.
+See [BRANCH_LAYOUT.md](BRANCH_LAYOUT.md) and [WORKFLOW_WINDOWS_WSL.md](WORKFLOW_WINDOWS_WSL.md) for branch-level workflow details.
 
 ## Architecture
 
