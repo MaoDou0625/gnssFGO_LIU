@@ -43,17 +43,20 @@ Algorithm notes:
   - GNSS position factor
   - GP-interpolated GNSS position factor when measurements fall between state timestamps
 - Initialization:
-  - position from first quality-filtered GNSS solution with IMU coverage
+  - optional initial static alignment phase before navigation states are created
+  - position from the first quality-filtered GNSS solution after the static alignment phase
   - velocity default `0`
   - roll/pitch from gravity alignment by default
   - optional static dual-vector IMU alignment for initial attitude, yaw, and bias estimation
   - fallback yaw path remains early GNSS displacement, then configured yaw if displacement is too small
+  - `static_alignment_duration_s` controls how long the initial IMU-only static alignment period lasts
 - IMU preintegration:
   - `Use2ndOrderCoriolis(true)` enabled by default
 - GNSS weighting:
   - robust loss is configurable
   - default uses `cauchy + 0.5`
   - `NO_SOLUTION` stays dropped by default
+  - set `drop_non_rtkfix = true` to treat `RTKFLOAT` and `SINGLE` as deleted instead of merely down-weighted
 - IMU-first yaw option:
   - set `prefer_imu_initial_yaw = true` to try static dual-vector alignment first
   - uses `imu_dual_vector_window_s`, `imu_dual_vector_min_sample_count`, and `imu_dual_vector_min_cross_norm`
@@ -125,6 +128,7 @@ Each run writes:
 - synchronized GNSS factor count
 - interpolated GNSS factor count
 - dropped / cached GNSS counts
+- optional `dropped_non_rtkfix_count` when `drop_non_rtkfix = true`
 - optional IMU-rate export count / interval count / skipped interval count
 
 Optional comparison plot:
@@ -136,6 +140,16 @@ python scripts/plot_nav_vs_rtk.py \
   --gnss /path/to/gnss_solution_gnss_fgo.txt \
   --output runs/default_offline/nav_vs_rtk.png
 ```
+
+Optional attitude plot:
+
+```bash
+python scripts/plot_attitude_over_time.py \
+  --trajectory runs/default_offline/trajectory.csv \
+  --output runs/default_offline/attitude_over_time.png
+```
+
+`attitude_over_time.png` uses three subplots for `yaw`, `pitch`, and `roll`.
 
 ## Notes
 

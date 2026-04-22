@@ -13,7 +13,9 @@ class TrajectoryInitializer {
     const std::vector<ImuSample> &imu_samples,
     const std::vector<GnssSolutionSample> &gnss_samples,
     std::size_t start_gnss_index,
-    double start_time_s,
+    double alignment_start_time_s,
+    double alignment_end_time_s,
+    double navigation_start_time_s,
     const Eigen::Vector3d &earth_rate_enu,
     const std::vector<std::size_t> &yaw_candidate_indices,
     const OfflineRunnerConfig &config);

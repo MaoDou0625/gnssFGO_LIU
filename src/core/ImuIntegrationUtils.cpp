@@ -41,6 +41,9 @@ ImuWindowIntegration IntegrateImuWindow(
 
   ImuSample held_sample = imu_samples[hold_index];
   double last_time_s = start_time_s;
+  gtsam::Vector3 weighted_gyro_sum = gtsam::Vector3::Zero();
+  gtsam::Vector3 weighted_acc_sum = gtsam::Vector3::Zero();
+  double accumulated_dt_s = 0.0;
 
   for (std::size_t index = begin_index; index < imu_samples.size(); ++index) {
     const auto &current_sample = imu_samples[index];
@@ -54,6 +57,13 @@ ImuWindowIntegration IntegrateImuWindow(
         held_sample.accel_mps2,
         held_sample.gyro_radps,
         dt_s);
+      window.preintegrated_imu_measurements.integrateMeasurement(
+        held_sample.accel_mps2,
+        held_sample.gyro_radps,
+        dt_s);
+      weighted_acc_sum += held_sample.accel_mps2 * dt_s;
+      weighted_gyro_sum += held_sample.gyro_radps * dt_s;
+      accumulated_dt_s += dt_s;
       ++window.imu_segments;
     }
     held_sample = current_sample;
@@ -65,6 +75,13 @@ ImuWindowIntegration IntegrateImuWindow(
       held_sample.accel_mps2,
       held_sample.gyro_radps,
       end_time_s - last_time_s);
+    window.preintegrated_imu_measurements.integrateMeasurement(
+      held_sample.accel_mps2,
+      held_sample.gyro_radps,
+      end_time_s - last_time_s);
+    weighted_acc_sum += held_sample.accel_mps2 * (end_time_s - last_time_s);
+    weighted_gyro_sum += held_sample.gyro_radps * (end_time_s - last_time_s);
+    accumulated_dt_s += end_time_s - last_time_s;
     ++window.imu_segments;
   }
 
@@ -73,6 +90,13 @@ ImuWindowIntegration IntegrateImuWindow(
   }
 
   window.end_gyro_radps = held_sample.gyro_radps;
+  if (accumulated_dt_s > 0.0) {
+    window.mean_acc_mps2 = weighted_acc_sum / accumulated_dt_s;
+    window.mean_gyro_radps = weighted_gyro_sum / accumulated_dt_s;
+  } else {
+    window.mean_acc_mps2 = held_sample.accel_mps2;
+    window.mean_gyro_radps = held_sample.gyro_radps;
+  }
   return window;
 }
 

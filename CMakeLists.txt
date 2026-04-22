@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(offline_lc_minimal VERSION 0.1.0 LANGUAGES CXX)
+project(offline_lc_minimal VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(OFFLINE_LC_MINIMAL_BUILD_RUNNER "Build the offline LC runner executable." ON)
+option(OFFLINE_LC_MINIMAL_BUILD_TESTS "Build lightweight native tests." ON)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -52,6 +53,7 @@ add_library(offline_lc_minimal_lib
   src/common/ResultWriter.cpp
   src/gp/Pose3Utils.cpp
   src/io/TextDatasetLoader.cpp
+  src/core/InitialStaticConstraintBuilder.cpp
   src/core/ImuIntegrationUtils.cpp
   src/core/ImuRateAvpReconstructor.cpp
   src/core/StaticImuAlignment.cpp
@@ -100,4 +102,31 @@ if(OFFLINE_LC_MINIMAL_BUILD_RUNNER)
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
     )
   endif()
+endif()
+
+if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
+  enable_testing()
+
+  add_executable(reweighted_combined_imu_factor_test
+    tests/reweighted_combined_imu_factor_test.cpp
+  )
+
+  target_link_libraries(reweighted_combined_imu_factor_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  if(OFFLINE_LC_MINIMAL_RUNTIME_RPATH)
+    set_target_properties(
+      reweighted_combined_imu_factor_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+  endif()
+
+  add_test(
+    NAME reweighted_combined_imu_factor_test
+    COMMAND $<TARGET_FILE:reweighted_combined_imu_factor_test>
+  )
 endif()

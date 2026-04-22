@@ -5,7 +5,10 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <numeric>
+#include <optional>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 #include <gtsam/base/numericalDerivative.h>
@@ -13,15 +16,27 @@
 #include <gtsam/linear/NoiseModel.h>
 #include <gtsam/navigation/CombinedImuFactor.h>
 #include <gtsam/navigation/GPSFactor.h>
+#include <gtsam/navigation/ImuFactor.h>
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/slam/PriorFactor.h>
 
 #include "offline_lc_minimal/core/ImuIntegrationUtils.h"
+#include "offline_lc_minimal/core/InitialStaticConstraintBuilder.h"
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
 #include "offline_lc_minimal/factor/AngularRateFactor.h"
+#include "offline_lc_minimal/factor/BiasGmTransitionFactor.h"
+#include "offline_lc_minimal/factor/GlobalAccelBiasFactor.h"
+#include "offline_lc_minimal/factor/GlobalGyroBiasFactor.h"
+#include "offline_lc_minimal/factor/GlobalPlanarAccelBiasFactor.h"
+#include "offline_lc_minimal/factor/SegmentBiasFeedbackFactor.h"
+#include "offline_lc_minimal/factor/ReweightedCombinedImuFactor.h"
+#include "offline_lc_minimal/factor/StaticZeroAngularRateFactor.h"
+#include "offline_lc_minimal/factor/StaticSpecificForceFactor.h"
+#include "offline_lc_minimal/factor/StaticAttitudeDriftFactor.h"
+#include "offline_lc_minimal/factor/VerticalAccelBiasGmTransitionFactor.h"
 #include "offline_lc_minimal/factor/GPInterpolatedGPSFactor.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
 
@@ -29,18 +44,610 @@ namespace offline_lc_minimal {
 
 namespace {
 
+constexpr double kNumericalSigmaFloorM = 1e-4;
+
 using gtsam::symbol_shorthand::B;
 using gtsam::symbol_shorthand::V;
 using gtsam::symbol_shorthand::W;
 using gtsam::symbol_shorthand::X;
 
 constexpr double kTimeEpsilonS = 1e-9;
+constexpr double kChiSquareDegreesOfFreedom = 3.0;
 constexpr double kAngularRateSigmaRadps = 0.1;
 constexpr double kInterpolatorQcVariance = 10000.0;
+constexpr double kDisabledAccBiasPriorSigmaMps2 = 1e6;
+constexpr double kDisabledGyroBiasPriorSigmaRadps = 1e6;
+
+struct GraphTimeline {
+  std::vector<double> timestamps_s;
+  std::size_t dynamic_start_index = 0;
+  std::size_t initial_static_state_count = 0;
+};
+
+struct SegmentGnssStatsAccumulator {
+  std::size_t gnss_factor_count = 0;
+  double prefit_nis_sum = 0.0;
+  double postfit_nis_sum = 0.0;
+  double covariance_scale_sum = 0.0;
+  std::size_t prefit_nis_count = 0;
+  std::size_t postfit_nis_count = 0;
+  std::size_t covariance_scale_count = 0;
+};
 
 Eigen::Vector3d Rot3ToYpr(const gtsam::Rot3 &rotation) {
   const auto ypr = rotation.ypr();
   return Eigen::Vector3d(ypr.x(), ypr.y(), ypr.z());
+}
+
+ReferenceNodeState MakeReferenceNodeState(
+  const double time_s,
+  const gtsam::NavState &nav_state,
+  const gtsam::imuBias::ConstantBias &bias,
+  const gtsam::Vector3 &omega) {
+  ReferenceNodeState state;
+  state.time_s = time_s;
+  state.pose = nav_state.pose();
+  state.velocity = nav_state.v();
+  state.bias = bias;
+  state.omega = omega;
+  return state;
+}
+
+ReferenceNodeRow MakeReferenceNodeRow(const ReferenceNodeState &state) {
+  ReferenceNodeRow row;
+  row.time_s = state.time_s;
+  row.enu_position_m =
+    Eigen::Vector3d(state.pose.translation().x(), state.pose.translation().y(), state.pose.translation().z());
+  row.enu_velocity_mps = Eigen::Vector3d(state.velocity.x(), state.velocity.y(), state.velocity.z());
+  row.ypr_rad = Rot3ToYpr(state.pose.rotation());
+  row.bias_acc = state.bias.accelerometer();
+  row.bias_gyro = state.bias.gyroscope();
+  return row;
+}
+
+double ComputeBiasDecay(const double dt_s, const double tau_s) {
+  return std::exp(-std::max(dt_s, 0.0) / std::max(tau_s, 1e-9));
+}
+
+gtsam::Matrix3 ComputeBiasPhi(const double dt_s, const double tau_s) {
+  return ComputeBiasDecay(dt_s, tau_s) * gtsam::I_3x3;
+}
+
+double ComputeVerticalAccBiasProcessVariance(const double dt_s, const OfflineRunnerConfig &config) {
+  const double bounded_dt_s = std::max(dt_s, 1e-6);
+  return std::pow(config.bias_acc_sigma, 2.0) * config.vertical_acc_bias_process_noise_scale *
+         std::max(1.0 - std::exp(-2.0 * bounded_dt_s / std::max(config.vertical_acc_bias_tau_s, 1e-9)), 1e-9);
+}
+
+gtsam::Matrix66 ComputeBiasProcessCovariance(const double dt_s, const OfflineRunnerConfig &config) {
+  const double bounded_dt_s = std::max(dt_s, 1e-6);
+  const double acc_variance =
+    std::pow(config.bias_acc_sigma, 2.0) * config.bias_process_noise_acc_scale *
+    std::max(1.0 - std::exp(-2.0 * bounded_dt_s / std::max(config.tau_acc_bias_s, 1e-9)), 1e-9);
+  const double gyro_variance =
+    std::pow(config.bias_gyro_sigma, 2.0) * config.bias_process_noise_gyro_scale *
+    std::max(1.0 - std::exp(-2.0 * bounded_dt_s / std::max(config.tau_gyro_bias_s, 1e-9)), 1e-12);
+
+  gtsam::Matrix66 covariance = gtsam::Matrix66::Zero();
+  covariance.block<3, 3>(0, 0) = acc_variance * gtsam::I_3x3;
+  covariance.block<3, 3>(3, 3) = gyro_variance * gtsam::I_3x3;
+  return covariance;
+}
+
+gtsam::Rot3 InterpolateRotation(const gtsam::Rot3 &left, const gtsam::Rot3 &right, const double alpha) {
+  const gtsam::Vector3 delta = gtsam::Rot3::Logmap(left.between(right));
+  return left.compose(gtsam::Rot3::Expmap(alpha * delta));
+}
+
+ReferenceNodeState InterpolateReferenceState(
+  const std::vector<ReferenceNodeState> &reference_states,
+  const double time_s) {
+  if (reference_states.empty()) {
+    throw std::runtime_error("reference node state sequence is empty");
+  }
+  if (reference_states.size() == 1U || time_s <= reference_states.front().time_s + kTimeEpsilonS) {
+    return reference_states.front();
+  }
+  if (time_s >= reference_states.back().time_s - kTimeEpsilonS) {
+    return reference_states.back();
+  }
+
+  const auto upper_it = std::upper_bound(
+    reference_states.begin(),
+    reference_states.end(),
+    time_s,
+    [](const double timestamp_s, const ReferenceNodeState &state) { return timestamp_s < state.time_s; });
+  const std::size_t right_index = static_cast<std::size_t>(std::distance(reference_states.begin(), upper_it));
+  const std::size_t left_index = right_index - 1U;
+  const auto &left_state = reference_states[left_index];
+  const auto &right_state = reference_states[right_index];
+  const double alpha =
+    std::clamp((time_s - left_state.time_s) / (right_state.time_s - left_state.time_s), 0.0, 1.0);
+
+  ReferenceNodeState interpolated;
+  interpolated.time_s = time_s;
+  interpolated.pose = gtsam::Pose3(
+    InterpolateRotation(left_state.pose.rotation(), right_state.pose.rotation(), alpha),
+    gtsam::Point3(
+      (1.0 - alpha) * left_state.pose.translation().x() + alpha * right_state.pose.translation().x(),
+      (1.0 - alpha) * left_state.pose.translation().y() + alpha * right_state.pose.translation().y(),
+      (1.0 - alpha) * left_state.pose.translation().z() + alpha * right_state.pose.translation().z()));
+  interpolated.velocity = (1.0 - alpha) * left_state.velocity + alpha * right_state.velocity;
+  interpolated.bias = gtsam::imuBias::ConstantBias(
+    (1.0 - alpha) * left_state.bias.accelerometer() + alpha * right_state.bias.accelerometer(),
+    (1.0 - alpha) * left_state.bias.gyroscope() + alpha * right_state.bias.gyroscope());
+  interpolated.omega = (1.0 - alpha) * left_state.omega + alpha * right_state.omega;
+  return interpolated;
+}
+
+Eigen::Vector3d ComputePositionResidualEnu(
+  const gtsam::Pose3 &pose,
+  const Eigen::Vector3d &measurement_enu_m) {
+  return Eigen::Vector3d(
+           pose.translation().x(),
+           pose.translation().y(),
+           pose.translation().z()) -
+         measurement_enu_m;
+}
+
+double ComputeNis(const Eigen::Vector3d &residual_enu_m, const Eigen::Vector3d &sigma_m) {
+  Eigen::Vector3d variances = sigma_m.array().square().matrix();
+  for (int axis = 0; axis < variances.size(); ++axis) {
+    variances[axis] = std::max(variances[axis], 1e-12);
+  }
+  return residual_enu_m.x() * residual_enu_m.x() / variances.x() +
+         residual_enu_m.y() * residual_enu_m.y() / variances.y() +
+         residual_enu_m.z() * residual_enu_m.z() / variances.z();
+}
+
+double InverseNormalCdf(const double probability) {
+  if (probability <= 0.0 || probability >= 1.0) {
+    throw std::runtime_error("inverse normal CDF requires probability in (0, 1)");
+  }
+
+  constexpr double a1 = -3.969683028665376e+01;
+  constexpr double a2 = 2.209460984245205e+02;
+  constexpr double a3 = -2.759285104469687e+02;
+  constexpr double a4 = 1.383577518672690e+02;
+  constexpr double a5 = -3.066479806614716e+01;
+  constexpr double a6 = 2.506628277459239e+00;
+  constexpr double b1 = -5.447609879822406e+01;
+  constexpr double b2 = 1.615858368580409e+02;
+  constexpr double b3 = -1.556989798598866e+02;
+  constexpr double b4 = 6.680131188771972e+01;
+  constexpr double b5 = -1.328068155288572e+01;
+  constexpr double c1 = -7.784894002430293e-03;
+  constexpr double c2 = -3.223964580411365e-01;
+  constexpr double c3 = -2.400758277161838e+00;
+  constexpr double c4 = -2.549732539343734e+00;
+  constexpr double c5 = 4.374664141464968e+00;
+  constexpr double c6 = 2.938163982698783e+00;
+  constexpr double d1 = 7.784695709041462e-03;
+  constexpr double d2 = 3.224671290700398e-01;
+  constexpr double d3 = 2.445134137142996e+00;
+  constexpr double d4 = 3.754408661907416e+00;
+  constexpr double p_low = 0.02425;
+  constexpr double p_high = 1.0 - p_low;
+
+  if (probability < p_low) {
+    const double q = std::sqrt(-2.0 * std::log(probability));
+    return (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
+           ((((d1 * q + d2) * q + d3) * q + d4) * q + 1.0);
+  }
+  if (probability > p_high) {
+    const double q = std::sqrt(-2.0 * std::log(1.0 - probability));
+    return -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
+           ((((d1 * q + d2) * q + d3) * q + d4) * q + 1.0);
+  }
+
+  const double q = probability - 0.5;
+  const double r = q * q;
+  return (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q /
+         (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1.0);
+}
+
+double ChiSquareQuantile3D(const double confidence) {
+  const double z = InverseNormalCdf(confidence);
+  const double term =
+    1.0 - (2.0 / (9.0 * kChiSquareDegreesOfFreedom)) +
+    z * std::sqrt(2.0 / (9.0 * kChiSquareDegreesOfFreedom));
+  return kChiSquareDegreesOfFreedom * term * term * term;
+}
+
+double ComputeConsistencyScale(
+  const GnssConsistencyGateMode gate_mode,
+  const double nis,
+  const double nis_threshold,
+  const double relaxed_threshold_ratio,
+  const double max_scale) {
+  if (gate_mode != GnssConsistencyGateMode::kNis || !std::isfinite(nis) || !std::isfinite(nis_threshold) ||
+      nis <= 0.0) {
+    return 1.0;
+  }
+  const double relaxed_threshold = std::max(relaxed_threshold_ratio * nis_threshold, 1e-6);
+  if (nis >= relaxed_threshold) {
+    return nis > nis_threshold
+             ? std::clamp(std::sqrt(nis / std::max(nis_threshold, 1e-9)), 1.0, max_scale)
+             : 1.0;
+  }
+  return std::clamp(std::sqrt(relaxed_threshold / std::max(nis, 1e-9)), 1.0, max_scale);
+}
+
+struct ScalarSummaryStats {
+  double mean = std::numeric_limits<double>::quiet_NaN();
+  double median = std::numeric_limits<double>::quiet_NaN();
+  double p95 = std::numeric_limits<double>::quiet_NaN();
+};
+
+ScalarSummaryStats ComputeScalarSummaryStats(std::vector<double> values) {
+  ScalarSummaryStats stats;
+  values.erase(
+    std::remove_if(values.begin(), values.end(), [](const double value) { return !std::isfinite(value); }),
+    values.end());
+  if (values.empty()) {
+    return stats;
+  }
+  std::sort(values.begin(), values.end());
+  const double sum = std::accumulate(values.begin(), values.end(), 0.0);
+  stats.mean = sum / static_cast<double>(values.size());
+  const std::size_t median_index = values.size() / 2U;
+  if (values.size() % 2U == 0U) {
+    stats.median = 0.5 * (values[median_index - 1U] + values[median_index]);
+  } else {
+    stats.median = values[median_index];
+  }
+  const double p95_index = 0.95 * static_cast<double>(values.size() - 1U);
+  const auto lower_index = static_cast<std::size_t>(std::floor(p95_index));
+  const auto upper_index = static_cast<std::size_t>(std::ceil(p95_index));
+  const double alpha = p95_index - static_cast<double>(lower_index);
+  stats.p95 = (1.0 - alpha) * values[lower_index] + alpha * values[upper_index];
+  return stats;
+}
+
+struct ForwardDriftSummary {
+  double up_slope_10s = std::numeric_limits<double>::quiet_NaN();
+  double up_slope_30s = std::numeric_limits<double>::quiet_NaN();
+  double horizontal_slope_10s = std::numeric_limits<double>::quiet_NaN();
+  double horizontal_slope_30s = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct WindowVariationSummary {
+  double up_total_variation_m = std::numeric_limits<double>::quiet_NaN();
+  double vz_total_variation_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
+double ComputeTotalVariation(const std::vector<double> &values) {
+  if (values.size() < 2U) {
+    return 0.0;
+  }
+  double total_variation = 0.0;
+  for (std::size_t index = 0; index + 1U < values.size(); ++index) {
+    total_variation += std::abs(values[index + 1U] - values[index]);
+  }
+  return total_variation;
+}
+
+ForwardDriftSummary ComputeFeedbackForwardDriftSummary(
+  const std::vector<ImuSample> &imu_samples,
+  const gtsam::Pose3 &start_pose,
+  const gtsam::Vector3 &start_velocity,
+  const gtsam::imuBias::ConstantBias &bias,
+  const double start_time_s,
+  const double max_time_s,
+  const double gravity_mps2) {
+  ForwardDriftSummary summary;
+  if (imu_samples.size() < 2U || max_time_s <= start_time_s + kTimeEpsilonS) {
+    return summary;
+  }
+
+  const Eigen::Vector3d initial_position(
+    start_pose.translation().x(),
+    start_pose.translation().y(),
+    start_pose.translation().z());
+  Eigen::Vector3d current_position = initial_position;
+  Eigen::Vector3d current_velocity(start_velocity.x(), start_velocity.y(), start_velocity.z());
+  gtsam::Rot3 current_rotation = start_pose.rotation();
+  const Eigen::Vector3d gravity_enu(0.0, 0.0, gravity_mps2);
+  bool reached_10s = false;
+  bool reached_30s = false;
+
+  const auto fill_summary =
+    [&](const double duration_s, const Eigen::Vector3d &position) {
+      const Eigen::Vector3d delta = position - initial_position;
+      if (std::abs(duration_s - 10.0) <= 1e-6) {
+        summary.up_slope_10s = delta.z() / duration_s;
+        summary.horizontal_slope_10s = delta.head<2>().norm() / duration_s;
+      } else if (std::abs(duration_s - 30.0) <= 1e-6) {
+        summary.up_slope_30s = delta.z() / duration_s;
+        summary.horizontal_slope_30s = delta.head<2>().norm() / duration_s;
+      }
+    };
+
+  for (std::size_t imu_index = 0; imu_index + 1U < imu_samples.size(); ++imu_index) {
+    const auto &current_sample = imu_samples[imu_index];
+    const auto &next_sample = imu_samples[imu_index + 1U];
+    const double interval_start_s = std::max(current_sample.time_s, start_time_s);
+    const double interval_end_s = std::min(next_sample.time_s, max_time_s);
+    if (interval_end_s <= interval_start_s + kTimeEpsilonS) {
+      continue;
+    }
+
+    const double delta_time_s = interval_end_s - interval_start_s;
+    const Eigen::Vector3d corrected_gyro = current_sample.gyro_radps - bias.gyroscope();
+    const Eigen::Vector3d corrected_acc = current_sample.accel_mps2 - bias.accelerometer();
+    const Eigen::Vector3d nav_specific_force = current_rotation.matrix() * corrected_acc;
+    const Eigen::Vector3d nav_acc = nav_specific_force - gravity_enu;
+
+    current_position += current_velocity * delta_time_s + 0.5 * nav_acc * delta_time_s * delta_time_s;
+    current_velocity += nav_acc * delta_time_s;
+    current_rotation =
+      current_rotation.compose(gtsam::Rot3::Expmap(gtsam::Vector3(
+        corrected_gyro.x() * delta_time_s,
+        corrected_gyro.y() * delta_time_s,
+        corrected_gyro.z() * delta_time_s)));
+
+    const double elapsed_s = interval_end_s - start_time_s;
+    if (!reached_10s && elapsed_s >= 10.0 - kTimeEpsilonS) {
+      fill_summary(10.0, current_position);
+      reached_10s = true;
+    }
+    if (!reached_30s && elapsed_s >= 30.0 - kTimeEpsilonS) {
+      fill_summary(30.0, current_position);
+      reached_30s = true;
+      break;
+    }
+  }
+
+  return summary;
+}
+
+WindowVariationSummary ComputeForwardWindowVariationSummary(
+  const std::vector<ImuSample> &imu_samples,
+  const gtsam::Pose3 &start_pose,
+  const gtsam::Vector3 &start_velocity,
+  const gtsam::imuBias::ConstantBias &bias,
+  const double start_time_s,
+  const double duration_s,
+  const double gravity_mps2) {
+  WindowVariationSummary summary;
+  if (imu_samples.size() < 2U || duration_s <= 0.0) {
+    return summary;
+  }
+
+  const double end_time_s = start_time_s + duration_s;
+  Eigen::Matrix3d current_rotation = start_pose.rotation().matrix();
+  Eigen::Vector3d current_position(
+    start_pose.translation().x(),
+    start_pose.translation().y(),
+    start_pose.translation().z());
+  Eigen::Vector3d current_velocity(start_velocity.x(), start_velocity.y(), start_velocity.z());
+  const Eigen::Vector3d bias_acc = bias.accelerometer();
+  const Eigen::Vector3d bias_gyro = bias.gyroscope();
+  const Eigen::Vector3d gravity_enu(0.0, 0.0, gravity_mps2);
+
+  std::vector<double> up_values;
+  std::vector<double> vz_values;
+  up_values.push_back(current_position.z());
+  vz_values.push_back(current_velocity.z());
+
+  for (std::size_t imu_index = 0; imu_index + 1U < imu_samples.size(); ++imu_index) {
+    const auto &current_sample = imu_samples[imu_index];
+    const auto &next_sample = imu_samples[imu_index + 1U];
+    const double interval_start_s = std::max(current_sample.time_s, start_time_s);
+    const double interval_end_s = std::min(next_sample.time_s, end_time_s);
+    if (interval_end_s <= interval_start_s + kTimeEpsilonS) {
+      continue;
+    }
+
+    const double delta_time_s = interval_end_s - interval_start_s;
+    const Eigen::Vector3d corrected_gyro = current_sample.gyro_radps - bias_gyro;
+    const Eigen::Vector3d corrected_acc = current_sample.accel_mps2 - bias_acc;
+    const Eigen::Vector3d nav_specific_force = current_rotation * corrected_acc;
+    const Eigen::Vector3d nav_acc = nav_specific_force - gravity_enu;
+
+    current_position += current_velocity * delta_time_s + 0.5 * nav_acc * delta_time_s * delta_time_s;
+    current_velocity += nav_acc * delta_time_s;
+
+    const gtsam::Rot3 delta_rotation = gtsam::Rot3::Expmap(
+      gtsam::Vector3(
+        corrected_gyro.x() * delta_time_s,
+        corrected_gyro.y() * delta_time_s,
+        corrected_gyro.z() * delta_time_s));
+    current_rotation *= delta_rotation.matrix();
+
+    up_values.push_back(current_position.z());
+    vz_values.push_back(current_velocity.z());
+
+    if (interval_end_s >= end_time_s - kTimeEpsilonS) {
+      break;
+    }
+  }
+
+  if (!up_values.empty()) {
+    summary.up_total_variation_m = ComputeTotalVariation(up_values);
+  }
+  if (!vz_values.empty()) {
+    summary.vz_total_variation_mps = ComputeTotalVariation(vz_values);
+  }
+  return summary;
+}
+
+void AccumulateInitialDynamicConsistencyMetrics(
+  const std::vector<TrajectoryRow> &trajectory_rows,
+  const gtsam::imuBias::ConstantBias &static_bias,
+  const gtsam::Pose3 &static_orientation_with_dynamic_origin,
+  const std::vector<ImuSample> &imu_samples,
+  const double gravity_mps2,
+  RunSummary &run_summary) {
+  run_summary.static_baz_mps2 = static_bias.accelerometer().z();
+  run_summary.static_bgz_radps = static_bias.gyroscope().z();
+
+  if (trajectory_rows.empty()) {
+    return;
+  }
+
+  const double start_time_s = trajectory_rows.front().time_s;
+  const double end_time_s = start_time_s + 30.0;
+  std::vector<double> baz_values;
+  std::vector<double> bgz_values;
+  std::vector<double> roll_values;
+  std::vector<double> pitch_values;
+  std::vector<double> yaw_values;
+  std::vector<double> up_values;
+  std::vector<double> vz_values;
+
+  for (const auto &row : trajectory_rows) {
+    if (row.time_s > end_time_s + kTimeEpsilonS) {
+      break;
+    }
+    baz_values.push_back(row.bias_acc.z());
+    bgz_values.push_back(row.bias_gyro.z());
+    yaw_values.push_back(row.ypr_rad.x());
+    pitch_values.push_back(row.ypr_rad.y());
+    roll_values.push_back(row.ypr_rad.z());
+    up_values.push_back(row.enu_position_m.z());
+    vz_values.push_back(row.enu_velocity_mps.z());
+  }
+
+  if (!baz_values.empty()) {
+    run_summary.optimized_first30s_mean_baz_mps2 =
+      std::accumulate(baz_values.begin(), baz_values.end(), 0.0) / static_cast<double>(baz_values.size());
+    run_summary.optimized_first30s_mean_bgz_radps =
+      std::accumulate(bgz_values.begin(), bgz_values.end(), 0.0) / static_cast<double>(bgz_values.size());
+    run_summary.optimized_first30s_mean_roll_rad =
+      std::accumulate(roll_values.begin(), roll_values.end(), 0.0) / static_cast<double>(roll_values.size());
+    run_summary.optimized_first30s_mean_pitch_rad =
+      std::accumulate(pitch_values.begin(), pitch_values.end(), 0.0) / static_cast<double>(pitch_values.size());
+    run_summary.optimized_first30s_mean_yaw_rad =
+      std::accumulate(yaw_values.begin(), yaw_values.end(), 0.0) / static_cast<double>(yaw_values.size());
+    run_summary.optimized_first30s_up_total_variation_m = ComputeTotalVariation(up_values);
+    run_summary.optimized_first30s_vz_total_variation_mps = ComputeTotalVariation(vz_values);
+  }
+
+  const auto &first_row = trajectory_rows.front();
+  const gtsam::Pose3 forward_start_pose(
+    static_orientation_with_dynamic_origin.rotation(),
+    gtsam::Point3(
+      first_row.enu_position_m.x(),
+      first_row.enu_position_m.y(),
+      first_row.enu_position_m.z()));
+  const WindowVariationSummary forward_summary = ComputeForwardWindowVariationSummary(
+    imu_samples,
+    forward_start_pose,
+    gtsam::Vector3(
+      first_row.enu_velocity_mps.x(),
+      first_row.enu_velocity_mps.y(),
+      first_row.enu_velocity_mps.z()),
+    static_bias,
+    start_time_s,
+    30.0,
+    gravity_mps2);
+  run_summary.forward_first30s_up_total_variation_m = forward_summary.up_total_variation_m;
+  run_summary.forward_first30s_vz_total_variation_mps = forward_summary.vz_total_variation_mps;
+}
+
+std::vector<SegmentErrorDiagnostic> BuildSegmentErrorDiagnostics(
+  const std::vector<double> &state_timestamps,
+  const std::vector<ImuSample> &imu_samples,
+  const boost::shared_ptr<gtsam::PreintegrationCombinedParams> &imu_params,
+  const gtsam::Values &optimized_values,
+  const std::vector<GnssFactorRecord> &gnss_factor_records,
+  const std::vector<GnssConsistencyRecord> &gnss_consistency_records,
+  const OfflineRunnerConfig &config) {
+  if (state_timestamps.size() < 2U) {
+    return {};
+  }
+
+  std::unordered_map<std::size_t, SegmentGnssStatsAccumulator> gnss_stats_by_segment;
+  for (std::size_t record_index = 0; record_index < gnss_factor_records.size(); ++record_index) {
+    const auto &record = gnss_factor_records[record_index];
+    if (!record.factor_used) {
+      continue;
+    }
+
+    std::optional<std::size_t> segment_index;
+    if ((record.sync_status == StateMeasSyncStatus::kSynchronizedI ||
+         record.sync_status == StateMeasSyncStatus::kSynchronizedJ) &&
+        record.synchronized_state_index > 0U) {
+      segment_index = record.synchronized_state_index - 1U;
+    } else if (record.sync_status == StateMeasSyncStatus::kInterpolated) {
+      segment_index = record.state_index_i;
+    }
+    if (!segment_index.has_value()) {
+      continue;
+    }
+
+    auto &accumulator = gnss_stats_by_segment[*segment_index];
+    ++accumulator.gnss_factor_count;
+    if (record_index < gnss_consistency_records.size()) {
+      const auto &consistency_record = gnss_consistency_records[record_index];
+      if (std::isfinite(consistency_record.prefit_nis)) {
+        accumulator.prefit_nis_sum += consistency_record.prefit_nis;
+        ++accumulator.prefit_nis_count;
+      }
+      if (std::isfinite(consistency_record.postfit_nis)) {
+        accumulator.postfit_nis_sum += consistency_record.postfit_nis;
+        ++accumulator.postfit_nis_count;
+      }
+      if (std::isfinite(consistency_record.covariance_scale)) {
+        accumulator.covariance_scale_sum += consistency_record.covariance_scale;
+        ++accumulator.covariance_scale_count;
+      }
+    }
+  }
+
+  std::vector<SegmentErrorDiagnostic> diagnostics;
+  diagnostics.reserve(state_timestamps.size() - 1U);
+  for (std::size_t state_index = 1; state_index < state_timestamps.size(); ++state_index) {
+    const std::size_t segment_index = state_index - 1U;
+    const double start_time_s = state_timestamps[segment_index];
+    const double end_time_s = state_timestamps[state_index];
+    const auto start_pose = optimized_values.at<gtsam::Pose3>(X(segment_index));
+    const auto start_velocity = optimized_values.at<gtsam::Vector3>(V(segment_index));
+    const auto start_bias = optimized_values.at<gtsam::imuBias::ConstantBias>(B(segment_index));
+    const auto end_pose = optimized_values.at<gtsam::Pose3>(X(state_index));
+    const auto end_velocity = optimized_values.at<gtsam::Vector3>(V(state_index));
+    const auto end_bias = optimized_values.at<gtsam::imuBias::ConstantBias>(B(state_index));
+    const auto imu_window =
+      IntegrateImuWindow(imu_samples, start_time_s, end_time_s, imu_params, start_bias);
+    const gtsam::NavState predicted_state =
+      imu_window.preintegrated_measurements.predict(gtsam::NavState(start_pose, start_velocity), start_bias);
+    SegmentErrorDiagnostic diagnostic;
+    diagnostic.segment_index = segment_index;
+    diagnostic.start_time_s = start_time_s;
+    diagnostic.end_time_s = end_time_s;
+    diagnostic.dtheta_rad = gtsam::Rot3::Logmap(predicted_state.pose().rotation().between(end_pose.rotation()));
+    diagnostic.dv_mps = end_velocity - predicted_state.v();
+    diagnostic.dp_m = Eigen::Vector3d(
+      end_pose.translation().x() - predicted_state.position().x(),
+      end_pose.translation().y() - predicted_state.position().y(),
+      end_pose.translation().z() - predicted_state.position().z());
+    const double delta_time_s = end_time_s - start_time_s;
+    diagnostic.dba_mps2 =
+      end_bias.accelerometer() - ComputeBiasPhi(delta_time_s, config.tau_acc_bias_s) * start_bias.accelerometer();
+    diagnostic.dbg_radps =
+      end_bias.gyroscope() - ComputeBiasPhi(delta_time_s, config.tau_gyro_bias_s) * start_bias.gyroscope();
+
+    if (const auto stats_it = gnss_stats_by_segment.find(segment_index); stats_it != gnss_stats_by_segment.end()) {
+      const auto &stats = stats_it->second;
+      diagnostic.gnss_factor_count = stats.gnss_factor_count;
+      diagnostic.mean_prefit_nis =
+        stats.prefit_nis_count > 0U
+          ? stats.prefit_nis_sum / static_cast<double>(stats.prefit_nis_count)
+          : std::numeric_limits<double>::quiet_NaN();
+      diagnostic.mean_postfit_nis =
+        stats.postfit_nis_count > 0U
+          ? stats.postfit_nis_sum / static_cast<double>(stats.postfit_nis_count)
+          : std::numeric_limits<double>::quiet_NaN();
+      diagnostic.mean_covariance_scale =
+        stats.covariance_scale_count > 0U
+          ? stats.covariance_scale_sum / static_cast<double>(stats.covariance_scale_count)
+          : std::numeric_limits<double>::quiet_NaN();
+    }
+
+    diagnostics.push_back(diagnostic);
+  }
+  return diagnostics;
 }
 
 gtsam::SharedNoiseModel MakeGnssNoiseModel(const OfflineRunnerConfig &config, const Eigen::Vector3d &sigma_m) {
@@ -111,6 +718,44 @@ std::vector<double> BuildStateTimestamps(
     throw std::runtime_error("state timeline must contain at least two states");
   }
   return timestamps;
+}
+
+GraphTimeline BuildGraphTimeline(
+  const double alignment_start_time_s,
+  const double alignment_end_time_s,
+  const double navigation_start_time_s,
+  const double end_time_s,
+  const OfflineRunnerConfig &config) {
+  GraphTimeline timeline;
+  if (config.enable_initial_static_subgraph && alignment_end_time_s > alignment_start_time_s + kTimeEpsilonS) {
+    timeline.timestamps_s = BuildStateTimestamps(
+      alignment_start_time_s,
+      alignment_end_time_s,
+      config.initial_static_state_frequency_hz);
+    timeline.initial_static_state_count = timeline.timestamps_s.size();
+  }
+
+  std::vector<double> dynamic_timestamps =
+    BuildStateTimestamps(navigation_start_time_s, end_time_s, config.state_frequency_hz);
+  const bool shares_boundary =
+    !timeline.timestamps_s.empty() &&
+    !dynamic_timestamps.empty() &&
+    std::abs(dynamic_timestamps.front() - timeline.timestamps_s.back()) <= kTimeEpsilonS;
+  if (shares_boundary) {
+    dynamic_timestamps.erase(dynamic_timestamps.begin());
+    timeline.dynamic_start_index = timeline.timestamps_s.size() - 1U;
+  } else {
+    timeline.dynamic_start_index = timeline.timestamps_s.size();
+  }
+  timeline.timestamps_s.insert(
+    timeline.timestamps_s.end(),
+    dynamic_timestamps.begin(),
+    dynamic_timestamps.end());
+
+  if (timeline.timestamps_s.size() < 2U) {
+    throw std::runtime_error("graph timeline must contain at least two states");
+  }
+  return timeline;
 }
 
 StateMeasSyncResult FindStateForMeasurement(
@@ -254,14 +899,141 @@ StateMeasSyncResult FindStateForMeasurement(
   return result;
 }
 
-double ComputeResidualNorm(
-  const gtsam::Pose3 &pose,
-  const Eigen::Vector3d &measurement_enu_m) {
-  const Eigen::Vector3d position(
-    pose.translation().x(),
-    pose.translation().y(),
-    pose.translation().z());
-  return (position - measurement_enu_m).norm();
+void AccumulateStaticConsistencyMetrics(
+  const gtsam::Values &optimized_values,
+  const GraphTimeline &graph_timeline,
+  RunSummary &run_summary) {
+  if (graph_timeline.initial_static_state_count == 0U) {
+    return;
+  }
+
+  const std::size_t last_static_index = std::min(
+    graph_timeline.initial_static_state_count - 1U,
+    graph_timeline.timestamps_s.size() - 1U);
+  if (last_static_index >= graph_timeline.timestamps_s.size()) {
+    return;
+  }
+
+  const gtsam::Pose3 reference_pose = optimized_values.at<gtsam::Pose3>(X(0));
+  const Eigen::Vector3d reference_position(
+    reference_pose.translation().x(),
+    reference_pose.translation().y(),
+    reference_pose.translation().z());
+
+  std::vector<double> velocity_norms;
+  velocity_norms.reserve(last_static_index + 1U);
+  double max_horizontal_drift_m = 0.0;
+  double max_up_drift_m = 0.0;
+  double max_3d_drift_m = 0.0;
+
+  for (std::size_t state_index = 0; state_index <= last_static_index; ++state_index) {
+    const auto pose = optimized_values.at<gtsam::Pose3>(X(state_index));
+    const auto velocity = optimized_values.at<gtsam::Vector3>(V(state_index));
+    const Eigen::Vector3d position(
+      pose.translation().x(),
+      pose.translation().y(),
+      pose.translation().z());
+    const Eigen::Vector3d delta = position - reference_position;
+
+    max_horizontal_drift_m = std::max(max_horizontal_drift_m, delta.head<2>().norm());
+    max_up_drift_m = std::max(max_up_drift_m, std::abs(delta.z()));
+    max_3d_drift_m = std::max(max_3d_drift_m, delta.norm());
+    velocity_norms.push_back(velocity.norm());
+  }
+
+  if (!velocity_norms.empty()) {
+    const double mean_velocity_norm =
+      std::accumulate(velocity_norms.begin(), velocity_norms.end(), 0.0) /
+      static_cast<double>(velocity_norms.size());
+    double variance = 0.0;
+    for (const double value : velocity_norms) {
+      const double delta = value - mean_velocity_norm;
+      variance += delta * delta;
+    }
+    variance /= static_cast<double>(velocity_norms.size());
+    run_summary.initial_static_velocity_norm_mean_mps = mean_velocity_norm;
+    run_summary.initial_static_velocity_norm_std_mps = std::sqrt(variance);
+    run_summary.initial_static_velocity_norm_max_mps =
+      *std::max_element(velocity_norms.begin(), velocity_norms.end());
+  }
+  run_summary.initial_static_horizontal_drift_max_m = max_horizontal_drift_m;
+  run_summary.initial_static_up_drift_max_m = max_up_drift_m;
+  run_summary.initial_static_3d_drift_max_m = max_3d_drift_m;
+}
+
+void AccumulateStaticSpecificForceWindowMetrics(
+  const std::vector<ImuSample> &imu_samples,
+  const double start_time_s,
+  const double end_time_s,
+  const double window_duration_s,
+  RunSummary &run_summary) {
+  if (imu_samples.empty() || end_time_s <= start_time_s + kTimeEpsilonS || window_duration_s <= 0.0) {
+    return;
+  }
+
+  const auto imu_begin = std::lower_bound(
+    imu_samples.begin(),
+    imu_samples.end(),
+    start_time_s,
+    [](const ImuSample &sample, const double time_s) { return sample.time_s < time_s; });
+  std::size_t sample_index = static_cast<std::size_t>(std::distance(imu_samples.begin(), imu_begin));
+  std::vector<Eigen::Vector3d> window_means;
+
+  for (double window_start_s = start_time_s; window_start_s < end_time_s - kTimeEpsilonS;
+       window_start_s += window_duration_s) {
+    const double window_end_s = std::min(window_start_s + window_duration_s, end_time_s);
+    const bool is_last_window = window_end_s >= end_time_s - kTimeEpsilonS;
+    Eigen::Vector3d sum_acc_mps2 = Eigen::Vector3d::Zero();
+    std::size_t sample_count = 0U;
+
+    while (sample_index < imu_samples.size() && imu_samples[sample_index].time_s < window_start_s - kTimeEpsilonS) {
+      ++sample_index;
+    }
+
+    std::size_t scan_index = sample_index;
+    while (scan_index < imu_samples.size()) {
+      const double sample_time_s = imu_samples[scan_index].time_s;
+      if ((!is_last_window && sample_time_s >= window_end_s - kTimeEpsilonS) ||
+          (is_last_window && sample_time_s > window_end_s + kTimeEpsilonS)) {
+        break;
+      }
+      if (sample_time_s >= window_start_s - kTimeEpsilonS) {
+        sum_acc_mps2 += imu_samples[scan_index].accel_mps2;
+        ++sample_count;
+      }
+      ++scan_index;
+    }
+
+    if (sample_count > 0U) {
+      window_means.push_back(sum_acc_mps2 / static_cast<double>(sample_count));
+    }
+    sample_index = scan_index;
+  }
+
+  if (window_means.empty()) {
+    return;
+  }
+
+  Eigen::Vector3d mean_specific_force_mps2 = Eigen::Vector3d::Zero();
+  for (const auto &window_mean : window_means) {
+    mean_specific_force_mps2 += window_mean;
+  }
+  mean_specific_force_mps2 /= static_cast<double>(window_means.size());
+
+  Eigen::Vector3d variance_mps4 = Eigen::Vector3d::Zero();
+  double squared_norm_sum = 0.0;
+  for (const auto &window_mean : window_means) {
+    const Eigen::Vector3d centered = window_mean - mean_specific_force_mps2;
+    variance_mps4 += centered.cwiseProduct(centered);
+    squared_norm_sum += centered.squaredNorm();
+  }
+  variance_mps4 /= static_cast<double>(window_means.size());
+  squared_norm_sum /= static_cast<double>(window_means.size());
+
+  run_summary.static_specific_force_window_std_x_mps2 = std::sqrt(std::max(variance_mps4.x(), 0.0));
+  run_summary.static_specific_force_window_std_y_mps2 = std::sqrt(std::max(variance_mps4.y(), 0.0));
+  run_summary.static_specific_force_window_std_z_mps2 = std::sqrt(std::max(variance_mps4.z(), 0.0));
+  run_summary.static_specific_force_window_rms_xyz_mps2 = std::sqrt(std::max(squared_norm_sum, 0.0));
 }
 
 }  // namespace
@@ -271,6 +1043,33 @@ OfflineBatchRunner::OfflineBatchRunner(OfflineRunnerConfig config)
 
 double OfflineBatchRunner::CorrectedGnssTime(const GnssSolutionSample &sample) const {
   return sample.time_s - config_.gnss_time_offset_s;
+}
+
+bool OfflineBatchRunner::IsAllowedGnssFixType(const GnssFixType fix_type) const {
+  if (!config_.drop_non_rtkfix) {
+    return true;
+  }
+  return fix_type == GnssFixType::kRtkFix;
+}
+
+bool OfflineBatchRunner::PassesGnssQualityFilters(const GnssSolutionSample &sample) const {
+  if (!sample.has_valid_position()) {
+    return false;
+  }
+  if (config_.required_best_sol_status_code > 0 &&
+      sample.best_sol_status_code != config_.required_best_sol_status_code) {
+    return false;
+  }
+  if (config_.drop_no_solution && sample.fix_type() == GnssFixType::kNoSolution) {
+    return false;
+  }
+  if (!IsAllowedGnssFixType(sample.fix_type())) {
+    return false;
+  }
+  if (config_.drop_nonfinite_sigma && !sample.has_finite_sigma()) {
+    return false;
+  }
+  return true;
 }
 
 bool OfflineBatchRunner::IsWithinImuCoverage(const std::vector<ImuSample> &imu_samples, const double time_s) const {
@@ -284,17 +1083,7 @@ bool OfflineBatchRunner::IsWithinImuCoverage(const std::vector<ImuSample> &imu_s
 bool OfflineBatchRunner::CanUseGnssSampleForInitialization(
   const GnssSolutionSample &sample,
   const std::vector<ImuSample> &imu_samples) const {
-  if (!sample.has_valid_position()) {
-    return false;
-  }
-  if (config_.required_best_sol_status_code > 0 &&
-      sample.best_sol_status_code != config_.required_best_sol_status_code) {
-    return false;
-  }
-  if (config_.drop_no_solution && sample.fix_type() == GnssFixType::kNoSolution) {
-    return false;
-  }
-  if (config_.drop_nonfinite_sigma && !sample.has_finite_sigma()) {
+  if (!PassesGnssQualityFilters(sample)) {
     return false;
   }
   return IsWithinImuCoverage(imu_samples, CorrectedGnssTime(sample));
@@ -309,6 +1098,24 @@ std::size_t OfflineBatchRunner::FindOriginIndex(
     }
   }
   throw std::runtime_error("failed to find a GNSS origin sample that also passes quality and IMU coverage checks");
+}
+
+std::size_t OfflineBatchRunner::FindNavigationStartIndex(
+  const std::vector<GnssSolutionSample> &gnss_samples,
+  const std::vector<ImuSample> &imu_samples,
+  const std::size_t origin_index,
+  const double navigation_start_min_time_s) const {
+  for (std::size_t index = origin_index; index < gnss_samples.size(); ++index) {
+    if (!CanUseGnssSampleForInitialization(gnss_samples[index], imu_samples)) {
+      continue;
+    }
+    if (CorrectedGnssTime(gnss_samples[index]) + kTimeEpsilonS < navigation_start_min_time_s) {
+      continue;
+    }
+    return index;
+  }
+  throw std::runtime_error(
+    "failed to find a navigation start GNSS sample after the requested static alignment duration");
 }
 
 std::vector<std::size_t> OfflineBatchRunner::CollectInitializationCandidateIndices(
@@ -352,6 +1159,11 @@ bool OfflineBatchRunner::ShouldUseGnssFactor(const GnssSolutionSample &sample, R
     ++run_summary.gnss_dropped_count;
     return false;
   }
+  if (!IsAllowedGnssFixType(sample.fix_type())) {
+    ++run_summary.dropped_non_rtkfix_count;
+    ++run_summary.gnss_dropped_count;
+    return false;
+  }
   if (config_.drop_nonfinite_sigma && !sample.has_finite_sigma()) {
     ++run_summary.dropped_nonfinite_sigma_count;
     ++run_summary.gnss_dropped_count;
@@ -376,15 +1188,110 @@ double OfflineBatchRunner::GnssFixScale(const GnssFixType fix_type) const {
 
 Eigen::Vector3d OfflineBatchRunner::ClampGnssSigma(const GnssSolutionSample &sample) const {
   Eigen::Vector3d sigma(sample.sigma_lon_m, sample.sigma_lat_m, sample.sigma_h_m);
-  for (int dimension = 0; dimension < sigma.size(); ++dimension) {
-    if (!std::isfinite(sigma[dimension])) {
-      sigma[dimension] = config_.position_sigma_ceiling_m;
-    }
-    sigma[dimension] =
-      std::clamp(sigma[dimension], config_.position_sigma_floor_m, config_.position_sigma_ceiling_m);
+  if (!std::isfinite(sigma.x())) {
+    sigma.x() = config_.position_sigma_ceiling_m;
   }
+  if (!std::isfinite(sigma.y())) {
+    sigma.y() = config_.position_sigma_ceiling_m;
+  }
+  if (config_.gnss_vertical_sigma_mode == GnssVerticalSigmaMode::kFixed) {
+    sigma.z() = config_.gnss_vertical_fixed_sigma_m;
+  } else if (!std::isfinite(sigma.z())) {
+    sigma.z() = config_.position_sigma_ceiling_m;
+  }
+  sigma.x() *= config_.gnss_sigma_scale_horizontal;
+  sigma.y() *= config_.gnss_sigma_scale_horizontal;
+  sigma.z() *= config_.gnss_sigma_scale_up;
+  sigma.x() = std::clamp(
+    sigma.x(),
+    std::max(config_.position_sigma_floor_horizontal_m, kNumericalSigmaFloorM),
+    config_.position_sigma_ceiling_m);
+  sigma.y() = std::clamp(
+    sigma.y(),
+    std::max(config_.position_sigma_floor_horizontal_m, kNumericalSigmaFloorM),
+    config_.position_sigma_ceiling_m);
+  sigma.z() = std::clamp(
+    sigma.z(),
+    std::max(config_.position_sigma_floor_up_m, kNumericalSigmaFloorM),
+    config_.position_sigma_ceiling_m);
   sigma *= GnssFixScale(sample.fix_type());
   return sigma;
+}
+
+std::vector<double> OfflineBatchRunner::BuildGnssVerticalReferenceUpBySample(
+  const std::vector<GnssSolutionSample> &gnss_samples,
+  const std::vector<ImuSample> &imu_samples,
+  const std::size_t navigation_start_index) const {
+  std::vector<double> references(gnss_samples.size(), std::numeric_limits<double>::quiet_NaN());
+  if (!config_.enable_gnss_vertical_drift_model || gnss_samples.empty()) {
+    return references;
+  }
+
+  const double window_s = config_.gnss_vertical_drift_window_s;
+  const double half_window_s = 0.5 * window_s;
+  if (window_s <= 0.0) {
+    return references;
+  }
+
+  struct VerticalReferenceSample {
+    std::size_t sample_index = 0;
+    double corrected_time_s = 0.0;
+    double up_m = 0.0;
+  };
+
+  std::vector<VerticalReferenceSample> valid_samples;
+  valid_samples.reserve(gnss_samples.size());
+  for (std::size_t sample_index = 0; sample_index < gnss_samples.size(); ++sample_index) {
+    const auto &sample = gnss_samples[sample_index];
+    if (sample_index <= navigation_start_index) {
+      continue;
+    }
+    if (!sample.has_valid_position()) {
+      continue;
+    }
+    if (!PassesGnssQualityFilters(sample)) {
+      continue;
+    }
+    if (!IsWithinImuCoverage(imu_samples, CorrectedGnssTime(sample))) {
+      continue;
+    }
+    if (!sample.has_enu_position || !std::isfinite(sample.enu_position_m.z())) {
+      continue;
+    }
+    valid_samples.push_back(VerticalReferenceSample{
+      sample_index,
+      CorrectedGnssTime(sample),
+      sample.enu_position_m.z(),
+    });
+  }
+  if (valid_samples.empty()) {
+    return references;
+  }
+
+  std::size_t left_index = 0U;
+  std::size_t right_index = 0U;
+  double up_sum = 0.0;
+  for (std::size_t center_index = 0; center_index < valid_samples.size(); ++center_index) {
+    const double center_time_s = valid_samples[center_index].corrected_time_s;
+    while (left_index < valid_samples.size() &&
+           valid_samples[left_index].corrected_time_s < center_time_s - half_window_s) {
+      up_sum -= valid_samples[left_index].up_m;
+      ++left_index;
+    }
+    while (right_index < valid_samples.size() &&
+           valid_samples[right_index].corrected_time_s <= center_time_s + half_window_s) {
+      up_sum += valid_samples[right_index].up_m;
+      ++right_index;
+    }
+    const std::size_t count = right_index - left_index;
+    if (count == 0U) {
+      references[valid_samples[center_index].sample_index] = valid_samples[center_index].up_m;
+    } else {
+      references[valid_samples[center_index].sample_index] = up_sum / static_cast<double>(count);
+    }
+  }
+
+  return references;
 }
 
 OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
@@ -398,33 +1305,66 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   OfflineRunResult run_result;
   run_result.data_summary = dataset.summary;
   run_result.run_summary.gnss_enabled = config_.enable_gnss;
+  run_result.run_summary.initial_static_constraints_enabled = config_.enable_initial_static_zupt_zaru;
+  run_result.run_summary.initial_static_subgraph_enabled = config_.enable_initial_static_subgraph;
 
   const std::size_t origin_index = FindOriginIndex(dataset.gnss_samples, dataset.imu_samples);
   const auto &origin_sample = dataset.gnss_samples[origin_index];
+  const double alignment_start_time_s = CorrectedGnssTime(origin_sample);
+  const double navigation_start_min_time_s = alignment_start_time_s + config_.static_alignment_duration_s;
+  const std::size_t navigation_start_index =
+    FindNavigationStartIndex(dataset.gnss_samples, dataset.imu_samples, origin_index, navigation_start_min_time_s);
+  const auto &navigation_start_sample = dataset.gnss_samples[navigation_start_index];
+  const double alignment_end_time_s =
+    config_.static_alignment_duration_s > 0.0 ? navigation_start_min_time_s : CorrectedGnssTime(navigation_start_sample);
   GeoReference geo_reference(origin_sample.lat_rad, origin_sample.lon_rad, origin_sample.h_m);
   PopulateEnuPositions(dataset.gnss_samples, geo_reference);
+  const std::vector<double> gnss_vertical_reference_up_by_sample =
+    BuildGnssVerticalReferenceUpBySample(dataset.gnss_samples, dataset.imu_samples, navigation_start_index);
 
   run_result.run_summary.origin_lat_rad = geo_reference.origin_lat_rad();
   run_result.run_summary.origin_lon_rad = geo_reference.origin_lon_rad();
   run_result.run_summary.origin_h_m = geo_reference.origin_h_m();
+  run_result.run_summary.alignment_start_time_s = alignment_start_time_s;
+  run_result.run_summary.static_alignment_duration_s = config_.static_alignment_duration_s;
 
   const std::vector<std::size_t> initialization_candidate_indices =
     CollectInitializationCandidateIndices(dataset.gnss_samples, dataset.imu_samples);
-  const double start_time_s = CorrectedGnssTime(origin_sample);
+  const double start_time_s = CorrectedGnssTime(navigation_start_sample);
+  run_result.run_summary.navigation_start_time_s = start_time_s;
   const InitialPoseEstimate initial_pose =
     TrajectoryInitializer::Estimate(
       dataset.imu_samples,
       dataset.gnss_samples,
-      origin_index,
+      navigation_start_index,
+      alignment_start_time_s,
+      alignment_end_time_s,
       start_time_s,
       geo_reference.EarthRateEnu(),
       initialization_candidate_indices,
       config_);
   run_result.run_summary.yaw_source = initial_pose.yaw_source;
+  const InitialStaticConstraintData initial_static_constraint_data =
+    InitialStaticConstraintBuilder::Collect(
+      dataset.imu_samples,
+      alignment_start_time_s,
+      alignment_end_time_s,
+      config_);
+  run_result.run_summary.initial_static_constraint_sample_count =
+    initial_static_constraint_data.window_summary.sample_count;
+  AccumulateStaticSpecificForceWindowMetrics(
+    dataset.imu_samples,
+    alignment_start_time_s,
+    alignment_end_time_s,
+    1.0 / std::max(config_.state_frequency_hz, 1e-9),
+    run_result.run_summary);
 
   double end_time_s = std::numeric_limits<double>::lowest();
   for (const auto &sample : dataset.gnss_samples) {
     if (!sample.has_valid_position()) {
+      continue;
+    }
+    if (config_.drop_non_rtkfix && !IsAllowedGnssFixType(sample.fix_type())) {
       continue;
     }
     const double corrected_time_s = CorrectedGnssTime(sample);
@@ -436,17 +1376,38 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     throw std::runtime_error("failed to find a valid offline processing time range");
   }
 
-  const std::vector<double> state_timestamps = BuildStateTimestamps(start_time_s, end_time_s, config_.state_frequency_hz);
+  const GraphTimeline graph_timeline = BuildGraphTimeline(
+    alignment_start_time_s,
+    alignment_end_time_s,
+    start_time_s,
+    end_time_s,
+    config_);
+  const std::vector<double> &state_timestamps = graph_timeline.timestamps_s;
+  run_result.run_summary.initial_static_state_count = graph_timeline.initial_static_state_count;
   std::map<std::size_t, double> state_timestamp_map;
   for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
     state_timestamp_map.emplace(index, state_timestamps[index]);
   }
+  const bool collect_error_diagnostics = config_.write_error_diagnostics;
+  const bool collect_segment_error_diagnostics =
+    config_.write_segment_error_diagnostics || config_.enable_segment_error_feedback;
+  const bool collect_reference_states =
+    collect_error_diagnostics ||
+    collect_segment_error_diagnostics ||
+    config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone;
+  run_result.run_summary.error_state_count = 0;
 
   const auto imu_params = gtsam::PreintegrationCombinedParams::MakeSharedU(config_.gravity_mps2);
   imu_params->accelerometerCovariance = std::pow(config_.imu_sigma_acc, 2.0) * gtsam::I_3x3;
   imu_params->gyroscopeCovariance = std::pow(config_.imu_sigma_gyro, 2.0) * gtsam::I_3x3;
   imu_params->integrationCovariance = std::pow(config_.integration_sigma, 2.0) * gtsam::I_3x3;
   imu_params->biasAccCovariance = std::pow(config_.bias_acc_sigma, 2.0) * gtsam::I_3x3;
+  if (config_.enable_vertical_acc_bias_gm_process) {
+    // In the Stage 2 route, let the explicit ba_z GM factor be the dominant
+    // cross-node model for vertical accelerometer bias instead of stacking two
+    // equally strong z-bias evolution assumptions.
+    imu_params->biasAccCovariance(2, 2) *= 1e6;
+  }
   imu_params->biasOmegaCovariance = std::pow(config_.bias_gyro_sigma, 2.0) * gtsam::I_3x3;
   imu_params->setOmegaCoriolis(geo_reference.EarthRateEnu());
   imu_params->setUse2ndOrderCoriolis(true);
@@ -454,17 +1415,21 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   gtsam::NonlinearFactorGraph graph;
   gtsam::Values initial_values;
 
+  const Eigen::Vector3d initial_position_enu =
+    graph_timeline.dynamic_start_index > 0U ? origin_sample.enu_position_m : navigation_start_sample.enu_position_m;
   const gtsam::Pose3 initial_pose_world(
     initial_pose.orientation,
     gtsam::Point3(
-      origin_sample.enu_position_m.x(),
-      origin_sample.enu_position_m.y(),
-      origin_sample.enu_position_m.z()));
+      initial_position_enu.x(),
+      initial_position_enu.y(),
+      initial_position_enu.z()));
   const gtsam::Vector3 initial_velocity = gtsam::Vector3::Zero();
   const gtsam::imuBias::ConstantBias initial_bias = initial_pose.imu_bias;
-  const std::size_t initial_imu_index = FindNearestImuIndex(dataset.imu_samples, start_time_s);
+  const std::size_t initial_imu_index = FindNearestImuIndex(dataset.imu_samples, state_timestamps.front());
   const gtsam::Vector3 initial_omega =
     initial_bias.correctGyroscope(dataset.imu_samples[initial_imu_index].gyro_radps);
+  const gtsam::Key global_acc_bias_key = gtsam::Symbol('a', 0);
+  const gtsam::Key global_gyro_bias_key = gtsam::Symbol('g', 0);
 
   const gtsam::Vector6 pose_sigmas =
     (gtsam::Vector6() << config_.initial_roll_pitch_sigma_rad,
@@ -486,37 +1451,115 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     B(0),
     initial_bias,
     gtsam::noiseModel::Diagonal::Sigmas(
-      (gtsam::Vector6() << config_.bias_acc_prior_sigma,
-        config_.bias_acc_prior_sigma,
-        config_.bias_acc_prior_sigma,
-        config_.bias_gyro_prior_sigma,
-        config_.bias_gyro_prior_sigma,
-        config_.bias_gyro_prior_sigma).finished())));
+      (gtsam::Vector6() << (config_.enable_global_acc_bias ? kDisabledAccBiasPriorSigmaMps2 : config_.bias_acc_prior_sigma),
+        (config_.enable_global_acc_bias ? kDisabledAccBiasPriorSigmaMps2 : config_.bias_acc_prior_sigma),
+        (config_.enable_global_acc_bias ? kDisabledAccBiasPriorSigmaMps2 : config_.bias_acc_prior_sigma),
+        (config_.enable_global_gyro_bias ? kDisabledGyroBiasPriorSigmaRadps : config_.bias_gyro_prior_sigma),
+        (config_.enable_global_gyro_bias ? kDisabledGyroBiasPriorSigmaRadps : config_.bias_gyro_prior_sigma),
+        (config_.enable_global_gyro_bias ? kDisabledGyroBiasPriorSigmaRadps : config_.bias_gyro_prior_sigma)).finished())));
   graph.add(gtsam::PriorFactor<gtsam::Vector3>(
     W(0),
     initial_omega,
     gtsam::noiseModel::Isotropic::Sigma(3, kAngularRateSigmaRadps)));
+  graph.add(factor::AngularRateFactor(
+    W(0),
+    B(0),
+    dataset.imu_samples[initial_imu_index].gyro_radps,
+    gtsam::noiseModel::Isotropic::Sigma(3, kAngularRateSigmaRadps)));
+  if (config_.enable_global_acc_bias) {
+    graph.add(gtsam::PriorFactor<gtsam::Vector3>(
+      global_acc_bias_key,
+      initial_bias.accelerometer(),
+      gtsam::noiseModel::Isotropic::Sigma(3, config_.bias_acc_prior_sigma)));
+    if (config_.enable_vertical_acc_bias_gm_process) {
+      graph.add(factor::GlobalPlanarAccelBiasFactor(
+        B(0),
+        global_acc_bias_key,
+        gtsam::noiseModel::Isotropic::Sigma(2, config_.global_acc_bias_tie_sigma_xy_mps2)));
+    } else {
+      graph.add(factor::GlobalAccelBiasFactor(
+        B(0),
+        global_acc_bias_key,
+        gtsam::noiseModel::Isotropic::Sigma(3, config_.global_acc_bias_tie_sigma_mps2)));
+    }
+  }
+  if (config_.enable_global_gyro_bias) {
+    graph.add(gtsam::PriorFactor<gtsam::Vector3>(
+      global_gyro_bias_key,
+      initial_bias.gyroscope(),
+      gtsam::noiseModel::Isotropic::Sigma(3, config_.bias_gyro_prior_sigma)));
+    graph.add(factor::GlobalGyroBiasFactor(
+      B(0),
+      global_gyro_bias_key,
+      gtsam::noiseModel::Isotropic::Sigma(3, config_.global_gyro_bias_tie_sigma_radps)));
+  }
+  InitialStaticConstraintBuilder::AddFactors(
+    initial_static_constraint_data,
+    geo_reference.EarthRateEnu(),
+    config_,
+    graph,
+    X(0),
+    V(0),
+    B(0));
 
   initial_values.insert(X(0), initial_pose_world);
   initial_values.insert(V(0), initial_velocity);
   initial_values.insert(B(0), initial_bias);
   initial_values.insert(W(0), initial_omega);
+  if (config_.enable_global_acc_bias) {
+    initial_values.insert(global_acc_bias_key, initial_bias.accelerometer());
+  }
+  if (config_.enable_global_gyro_bias) {
+    initial_values.insert(global_gyro_bias_key, initial_bias.gyroscope());
+  }
+
+  std::vector<ReferenceNodeState> reference_node_states;
+  if (collect_reference_states) {
+    reference_node_states.reserve(state_timestamps.size());
+    reference_node_states.push_back(MakeReferenceNodeState(
+      state_timestamps.front(),
+      gtsam::NavState(initial_pose_world, initial_velocity),
+      initial_bias,
+      initial_omega));
+  }
 
   gtsam::NavState previous_nav_state(initial_pose_world, initial_velocity);
   gtsam::imuBias::ConstantBias previous_bias = initial_bias;
   double previous_time_s = state_timestamps.front();
-
-  run_result.trajectory.reserve(state_timestamps.size());
-  {
-    TrajectoryRow row;
-    row.time_s = state_timestamps.front();
-    row.enu_position_m = origin_sample.enu_position_m;
-    row.enu_velocity_mps = Eigen::Vector3d::Zero();
-    row.ypr_rad = Eigen::Vector3d(initial_pose.yaw_rad, initial_pose.pitch_rad, initial_pose.roll_rad);
-    row.omega_radps = Eigen::Vector3d(initial_omega.x(), initial_omega.y(), initial_omega.z());
-    row.bias_acc = initial_bias.accelerometer();
-    row.bias_gyro = initial_bias.gyroscope();
-    run_result.trajectory.push_back(row);
+  std::vector<std::optional<std::size_t>> trajectory_row_index_by_state(state_timestamps.size(), std::nullopt);
+  run_result.trajectory.reserve(state_timestamps.size() - graph_timeline.dynamic_start_index);
+  const auto graph_state_to_trajectory_row = [&](const std::size_t state_index) -> long long {
+    if (state_index >= trajectory_row_index_by_state.size()) {
+      return -1;
+    }
+    if (!trajectory_row_index_by_state[state_index].has_value()) {
+      return -1;
+    }
+    return static_cast<long long>(*trajectory_row_index_by_state[state_index]);
+  };
+  const auto append_trajectory_row =
+    [&](const std::size_t state_index,
+        const gtsam::NavState &nav_state,
+        const gtsam::imuBias::ConstantBias &bias,
+        const gtsam::Vector3 &omega,
+        const double time_s) {
+      if (state_index < graph_timeline.dynamic_start_index) {
+        return;
+      }
+      TrajectoryRow row;
+      row.time_s = time_s;
+      row.enu_position_m =
+        Eigen::Vector3d(nav_state.position().x(), nav_state.position().y(), nav_state.position().z());
+      row.enu_velocity_mps = Eigen::Vector3d(nav_state.v().x(), nav_state.v().y(), nav_state.v().z());
+      row.ypr_rad = Rot3ToYpr(nav_state.pose().rotation());
+      row.omega_radps = Eigen::Vector3d(omega.x(), omega.y(), omega.z());
+      row.bias_acc = bias.accelerometer();
+      row.bias_gyro = bias.gyroscope();
+      trajectory_row_index_by_state[state_index] = run_result.trajectory.size();
+      run_result.trajectory.push_back(row);
+    };
+  if (graph_timeline.dynamic_start_index == 0U) {
+    append_trajectory_row(0U, previous_nav_state, initial_bias, initial_omega, state_timestamps.front());
   }
 
   for (std::size_t state_index = 1; state_index < state_timestamps.size(); ++state_index) {
@@ -524,54 +1567,192 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     const auto imu_window =
       IntegrateImuWindow(dataset.imu_samples, previous_time_s, current_time_s, imu_params, previous_bias);
 
-    graph.add(gtsam::CombinedImuFactor(
-      X(state_index - 1U),
-      V(state_index - 1U),
-      X(state_index),
-      V(state_index),
-      B(state_index - 1U),
-      B(state_index),
-      imu_window.preintegrated_measurements));
+    if (config_.enable_segment_error_feedback) {
+      graph.add(gtsam::ImuFactor(
+        X(state_index - 1U),
+        V(state_index - 1U),
+        X(state_index),
+        V(state_index),
+        B(state_index - 1U),
+        imu_window.preintegrated_imu_measurements));
+    } else if (config_.enable_reweighted_combined_imu_factor) {
+      graph.add(factor::MakeReweightedCombinedImuFactor(
+        X(state_index - 1U),
+        V(state_index - 1U),
+        X(state_index),
+        V(state_index),
+        B(state_index - 1U),
+        B(state_index),
+        imu_window.preintegrated_measurements,
+        config_.reweighted_combined_imu_attitude_sigma_rad,
+        gtsam::Vector3(
+          config_.reweighted_combined_imu_specific_force_sigma_x_mps2,
+          config_.reweighted_combined_imu_specific_force_sigma_y_mps2,
+          config_.reweighted_combined_imu_specific_force_sigma_z_mps2)));
+    } else {
+      graph.add(gtsam::CombinedImuFactor(
+        X(state_index - 1U),
+        V(state_index - 1U),
+        X(state_index),
+        V(state_index),
+        B(state_index - 1U),
+        B(state_index),
+        imu_window.preintegrated_measurements));
+    }
 
     const gtsam::NavState predicted_state =
-      imu_window.preintegrated_measurements.predict(previous_nav_state, previous_bias);
+      config_.enable_segment_error_feedback
+        ? imu_window.preintegrated_imu_measurements.predict(previous_nav_state, previous_bias)
+        : imu_window.preintegrated_measurements.predict(previous_nav_state, previous_bias);
     initial_values.insert(X(state_index), predicted_state.pose());
     initial_values.insert(V(state_index), predicted_state.v());
     initial_values.insert(B(state_index), previous_bias);
     initial_values.insert(W(state_index), imu_window.end_gyro_radps);
+    if (collect_reference_states) {
+      reference_node_states.push_back(MakeReferenceNodeState(
+        current_time_s,
+        predicted_state,
+        previous_bias,
+        imu_window.end_gyro_radps));
+    }
+    if (config_.enable_global_acc_bias) {
+      if (config_.enable_vertical_acc_bias_gm_process) {
+        graph.add(factor::GlobalPlanarAccelBiasFactor(
+          B(state_index),
+          global_acc_bias_key,
+          gtsam::noiseModel::Isotropic::Sigma(2, config_.global_acc_bias_tie_sigma_xy_mps2)));
+      } else {
+        graph.add(factor::GlobalAccelBiasFactor(
+          B(state_index),
+          global_acc_bias_key,
+          gtsam::noiseModel::Isotropic::Sigma(3, config_.global_acc_bias_tie_sigma_mps2)));
+      }
+    }
+    if (config_.enable_global_gyro_bias) {
+      graph.add(factor::GlobalGyroBiasFactor(
+        B(state_index),
+        global_gyro_bias_key,
+        gtsam::noiseModel::Isotropic::Sigma(3, config_.global_gyro_bias_tie_sigma_radps)));
+    }
+    if (config_.enable_vertical_acc_bias_gm_process) {
+      const double delta_time_s = current_time_s - previous_time_s;
+      const double phi_vertical_acc = ComputeBiasDecay(delta_time_s, config_.vertical_acc_bias_tau_s);
+      const double vertical_acc_variance = ComputeVerticalAccBiasProcessVariance(delta_time_s, config_);
+      graph.add(factor::VerticalAccelBiasGmTransitionFactor(
+        B(state_index - 1U),
+        B(state_index),
+        global_acc_bias_key,
+        phi_vertical_acc,
+        gtsam::noiseModel::Isotropic::Sigma(1, std::sqrt(std::max(vertical_acc_variance, 1e-12)))));
+    }
+    if (config_.enable_segment_error_feedback) {
+      const double delta_time_s = current_time_s - previous_time_s;
+      const gtsam::Matrix3 phi_acc = ComputeBiasPhi(delta_time_s, config_.tau_acc_bias_s);
+      const gtsam::Matrix3 phi_gyro = ComputeBiasPhi(delta_time_s, config_.tau_gyro_bias_s);
+      graph.add(factor::BiasGmTransitionFactor(
+        B(state_index - 1U),
+        B(state_index),
+        phi_acc,
+        phi_gyro,
+        gtsam::noiseModel::Gaussian::Covariance(ComputeBiasProcessCovariance(delta_time_s, config_))));
+      if (config_.enable_segment_local_error_feedback) {
+        const gtsam::Vector6 segment_feedback_sigmas =
+          (gtsam::Vector6() << config_.segment_feedback_acc_sigma_mps2,
+            config_.segment_feedback_acc_sigma_mps2,
+            config_.segment_feedback_acc_sigma_mps2,
+            config_.segment_feedback_gyro_sigma_radps,
+            config_.segment_feedback_gyro_sigma_radps,
+            config_.segment_feedback_gyro_sigma_radps).finished();
+        graph.add(factor::SegmentBiasFeedbackFactor(
+          X(state_index - 1U),
+          V(state_index - 1U),
+          B(state_index - 1U),
+          X(state_index),
+          V(state_index),
+          B(state_index),
+          imu_window.preintegrated_imu_measurements,
+          phi_acc,
+          phi_gyro,
+          delta_time_s,
+          config_.segment_feedback_attitude_gain,
+          config_.segment_feedback_velocity_gain,
+          config_.segment_feedback_position_gain,
+          gtsam::noiseModel::Diagonal::Sigmas(segment_feedback_sigmas)));
+      }
+    }
 
     graph.add(factor::AngularRateFactor(
       W(state_index),
       B(state_index),
       imu_window.end_gyro_radps,
       gtsam::noiseModel::Isotropic::Sigma(3, kAngularRateSigmaRadps)));
-
-    TrajectoryRow row;
-    row.time_s = current_time_s;
-    row.enu_position_m =
-      Eigen::Vector3d(predicted_state.position().x(), predicted_state.position().y(), predicted_state.position().z());
-    row.enu_velocity_mps = Eigen::Vector3d(predicted_state.v().x(), predicted_state.v().y(), predicted_state.v().z());
-    row.ypr_rad = Rot3ToYpr(predicted_state.pose().rotation());
-    row.omega_radps = Eigen::Vector3d(
-      imu_window.end_gyro_radps.x(),
-      imu_window.end_gyro_radps.y(),
-      imu_window.end_gyro_radps.z());
-    row.bias_acc = previous_bias.accelerometer();
-    row.bias_gyro = previous_bias.gyroscope();
-    run_result.trajectory.push_back(row);
+    if (config_.enable_initial_static_subgraph && state_timestamps[state_index] <= alignment_end_time_s + kTimeEpsilonS) {
+      if (config_.enable_initial_static_zupt_zaru && initial_static_constraint_data.valid) {
+        double static_zaru_sigma = config_.initial_static_zaru_sigma_radps;
+        if (imu_window.imu_segments > 0U && initial_static_constraint_data.window_summary.sample_count > 0U) {
+          static_zaru_sigma *= std::sqrt(
+            static_cast<double>(initial_static_constraint_data.window_summary.sample_count) /
+            static_cast<double>(imu_window.imu_segments));
+        }
+        graph.add(gtsam::PriorFactor<gtsam::Vector3>(
+          V(state_index),
+          gtsam::Vector3::Zero(),
+          gtsam::noiseModel::Isotropic::Sigma(3, config_.initial_static_zupt_velocity_sigma_mps)));
+        graph.add(factor::StaticZeroAngularRateFactor(
+          X(state_index),
+          B(state_index),
+          imu_window.mean_gyro_radps,
+          geo_reference.EarthRateEnu(),
+          gtsam::noiseModel::Isotropic::Sigma(3, static_zaru_sigma)));
+      }
+      if (config_.enable_initial_static_zero_specific_force && initial_static_constraint_data.valid) {
+        double static_specific_force_sigma = config_.initial_static_specific_force_sigma_mps2;
+        if (imu_window.imu_segments > 0U && initial_static_constraint_data.window_summary.sample_count > 0U) {
+          static_specific_force_sigma *= std::sqrt(
+            static_cast<double>(initial_static_constraint_data.window_summary.sample_count) /
+            static_cast<double>(imu_window.imu_segments));
+        }
+        graph.add(factor::StaticSpecificForceFactor(
+          X(state_index),
+          B(state_index),
+          imu_window.mean_acc_mps2,
+          Eigen::Vector3d(0.0, 0.0, config_.gravity_mps2),
+          gtsam::noiseModel::Isotropic::Sigma(3, static_specific_force_sigma)));
+      }
+      graph.add(factor::StaticAttitudeDriftFactor(
+        X(state_index - 1U),
+        X(state_index),
+        gtsam::noiseModel::Isotropic::Sigma(3, config_.initial_static_attitude_drift_sigma_rad)));
+    }
+    append_trajectory_row(state_index, predicted_state, previous_bias, imu_window.end_gyro_radps, current_time_s);
 
     previous_nav_state = predicted_state;
     previous_time_s = current_time_s;
   }
 
-  run_result.run_summary.state_count = state_timestamps.size();
+  run_result.run_summary.state_count = run_result.trajectory.size();
+  if (collect_reference_states) {
+    run_result.reference_node_trajectory.reserve(reference_node_states.size());
+    for (const auto &reference_state : reference_node_states) {
+      run_result.reference_node_trajectory.push_back(MakeReferenceNodeRow(reference_state));
+    }
+  }
+
+  const bool collect_gnss_consistency =
+    config_.enable_gnss &&
+    (collect_error_diagnostics || collect_segment_error_diagnostics ||
+     config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone);
+  const double gnss_nis_threshold =
+    config_.gnss_consistency_gate_mode == GnssConsistencyGateMode::kNis
+      ? ChiSquareQuantile3D(config_.gnss_nis_confidence)
+      : std::numeric_limits<double>::quiet_NaN();
 
   if (config_.enable_gnss) {
     const gp::GPWNOJInterpolator base_interpolator(
       gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(kInterpolatorQcVariance)));
 
     for (std::size_t sample_index = 0; sample_index < dataset.gnss_samples.size(); ++sample_index) {
-      if (sample_index == origin_index) {
+      if (sample_index <= navigation_start_index) {
         continue;
       }
       const auto &gnss_sample = dataset.gnss_samples[sample_index];
@@ -580,6 +1761,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       record.raw_time_s = gnss_sample.time_s;
       record.corrected_time_s = CorrectedGnssTime(gnss_sample);
       record.gnss_fix_type = gnss_sample.fix_type();
+      GnssConsistencyRecord consistency_record;
+      consistency_record.sample_index = sample_index;
+      consistency_record.raw_time_s = gnss_sample.time_s;
+      consistency_record.corrected_time_s = record.corrected_time_s;
+      consistency_record.gnss_fix_type = gnss_sample.fix_type();
+      consistency_record.raw_sigma_h_m = gnss_sample.sigma_h_m;
+      consistency_record.prefit_residual_enu_m = Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+      consistency_record.postfit_residual_enu_m = Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
       if (gnss_sample.has_enu_position) {
         record.measurement_enu_m = gnss_sample.enu_position_m;
       }
@@ -587,6 +1776,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       if (!ShouldUseGnssFactor(gnss_sample, run_result.run_summary)) {
         record.sync_status = StateMeasSyncStatus::kDropped;
         run_result.gnss_factor_records.push_back(record);
+        if (collect_gnss_consistency) {
+          consistency_record.sync_status = StateMeasSyncStatus::kDropped;
+          run_result.gnss_consistency_records.push_back(consistency_record);
+        }
         continue;
       }
       if (!IsWithinImuCoverage(dataset.imu_samples, record.corrected_time_s)) {
@@ -594,25 +1787,80 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         ++run_result.run_summary.gnss_dropped_count;
         record.sync_status = StateMeasSyncStatus::kDropped;
         run_result.gnss_factor_records.push_back(record);
+        if (collect_gnss_consistency) {
+          consistency_record.sync_status = StateMeasSyncStatus::kDropped;
+          run_result.gnss_consistency_records.push_back(consistency_record);
+        }
         continue;
       }
 
       const StateMeasSyncResult sync_result =
         FindStateForMeasurement(state_timestamp_map, record.corrected_time_s, config_);
       record.sync_status = sync_result.status;
+      consistency_record.sync_status = sync_result.status;
       record.state_index_i = sync_result.key_index_i;
       record.state_index_j = sync_result.key_index_j;
+      record.trajectory_row_index_i = graph_state_to_trajectory_row(sync_result.key_index_i);
+      record.trajectory_row_index_j = graph_state_to_trajectory_row(sync_result.key_index_j);
       record.state_time_i_s = sync_result.timestamp_i_s;
       record.state_time_j_s = sync_result.timestamp_j_s;
       record.duration_from_state_i_s = sync_result.duration_from_state_i_s;
 
-      const double elapsed_s = record.corrected_time_s - state_timestamps.front();
-      Eigen::Vector3d sigma_m = ClampGnssSigma(gnss_sample);
+      const double elapsed_s = record.corrected_time_s - start_time_s;
+      if (config_.enable_gnss_vertical_drift_model && sample_index < gnss_vertical_reference_up_by_sample.size()) {
+        const double vertical_reference_up_m = gnss_vertical_reference_up_by_sample[sample_index];
+        if (std::isfinite(vertical_reference_up_m)) {
+          record.measurement_enu_m.z() = vertical_reference_up_m;
+          consistency_record.vertical_reference_up_m = vertical_reference_up_m;
+          consistency_record.vertical_reference_used = true;
+        }
+      }
+      const Eigen::Vector3d base_sigma_m = ClampGnssSigma(gnss_sample);
+      Eigen::Vector3d sigma_m = base_sigma_m;
       if (config_.early_gnss_relaxation_duration_s > 0.0 &&
           elapsed_s < config_.early_gnss_relaxation_duration_s) {
         const double alpha = 1.0 - (elapsed_s / config_.early_gnss_relaxation_duration_s);
         sigma_m *= 1.0 + alpha * (config_.early_gnss_relaxation_scale - 1.0);
       }
+      consistency_record.sigma_e_m = sigma_m.x();
+      consistency_record.sigma_n_m = sigma_m.y();
+      consistency_record.sigma_u_m = sigma_m.z();
+      if (collect_gnss_consistency) {
+        const gtsam::Pose3 prefit_pose =
+          sync_result.status == StateMeasSyncStatus::kInterpolated
+            ? InterpolateReferenceState(reference_node_states, record.corrected_time_s).pose
+            : reference_node_states[
+                sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i : sync_result.key_index_j]
+                .pose;
+        consistency_record.prefit_residual_enu_m = ComputePositionResidualEnu(prefit_pose, record.measurement_enu_m);
+        consistency_record.prefit_nis = ComputeNis(consistency_record.prefit_residual_enu_m, sigma_m);
+        consistency_record.covariance_scale_e = ComputeConsistencyScale(
+          config_.gnss_consistency_gate_mode,
+          consistency_record.prefit_nis,
+          gnss_nis_threshold,
+          config_.gnss_consistency_relaxed_threshold_ratio,
+          config_.gnss_consistency_max_scale_horizontal);
+        consistency_record.covariance_scale_n = ComputeConsistencyScale(
+          config_.gnss_consistency_gate_mode,
+          consistency_record.prefit_nis,
+          gnss_nis_threshold,
+          config_.gnss_consistency_relaxed_threshold_ratio,
+          config_.gnss_consistency_max_scale_horizontal);
+        consistency_record.covariance_scale_u = ComputeConsistencyScale(
+          config_.gnss_consistency_gate_mode,
+          consistency_record.prefit_nis,
+          gnss_nis_threshold,
+          config_.gnss_consistency_relaxed_threshold_ratio,
+          config_.gnss_consistency_max_scale_up);
+        consistency_record.covariance_scale =
+          (consistency_record.covariance_scale_e + consistency_record.covariance_scale_n +
+           consistency_record.covariance_scale_u) /
+          3.0;
+        sigma_m.x() *= consistency_record.covariance_scale_e;
+        sigma_m.y() *= consistency_record.covariance_scale_n;
+        sigma_m.z() *= consistency_record.covariance_scale_u;
+      }
+      consistency_record.effective_sigma_u_m = sigma_m.z();
       const auto noise_model = MakeGnssNoiseModel(config_, sigma_m);
 
       switch (sync_result.status) {
@@ -623,17 +1871,22 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           graph.add(gtsam::GPSFactor(
             X(sync_state_index),
             gtsam::Point3(
-              gnss_sample.enu_position_m.x(),
-              gnss_sample.enu_position_m.y(),
-              gnss_sample.enu_position_m.z()),
+              record.measurement_enu_m.x(),
+              record.measurement_enu_m.y(),
+              record.measurement_enu_m.z()),
             noise_model));
           ++run_result.run_summary.gnss_factor_count;
           ++run_result.run_summary.gnss_synced_factor_count;
           record.factor_used = true;
           record.synchronized_state_index = sync_state_index;
-          run_result.trajectory[sync_state_index].gnss_factor_used = true;
-          if (run_result.trajectory[sync_state_index].gnss_fix_type == GnssFixType::kNoSolution) {
-            run_result.trajectory[sync_state_index].gnss_fix_type = gnss_sample.fix_type();
+          record.synchronized_trajectory_row_index = graph_state_to_trajectory_row(sync_state_index);
+          if (sync_state_index < trajectory_row_index_by_state.size() &&
+              trajectory_row_index_by_state[sync_state_index].has_value()) {
+            auto &row = run_result.trajectory[*trajectory_row_index_by_state[sync_state_index]];
+            row.gnss_factor_used = true;
+            if (row.gnss_fix_type == GnssFixType::kNoSolution) {
+              row.gnss_fix_type = gnss_sample.fix_type();
+            }
           }
           break;
         }
@@ -654,22 +1907,30 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
             V(sync_result.key_index_j),
             W(sync_result.key_index_j),
             gtsam::Point3(
-              gnss_sample.enu_position_m.x(),
-              gnss_sample.enu_position_m.y(),
-              gnss_sample.enu_position_m.z()),
+              record.measurement_enu_m.x(),
+              record.measurement_enu_m.y(),
+              record.measurement_enu_m.z()),
             gtsam::Vector3::Zero(),
             noise_model,
             interpolator));
           ++run_result.run_summary.gnss_factor_count;
           ++run_result.run_summary.gnss_interpolated_factor_count;
           record.factor_used = true;
-          run_result.trajectory[sync_result.key_index_i].gnss_factor_used = true;
-          run_result.trajectory[sync_result.key_index_j].gnss_factor_used = true;
-          if (run_result.trajectory[sync_result.key_index_i].gnss_fix_type == GnssFixType::kNoSolution) {
-            run_result.trajectory[sync_result.key_index_i].gnss_fix_type = gnss_sample.fix_type();
+          if (sync_result.key_index_i < trajectory_row_index_by_state.size() &&
+              trajectory_row_index_by_state[sync_result.key_index_i].has_value()) {
+            auto &row_i = run_result.trajectory[*trajectory_row_index_by_state[sync_result.key_index_i]];
+            row_i.gnss_factor_used = true;
+            if (row_i.gnss_fix_type == GnssFixType::kNoSolution) {
+              row_i.gnss_fix_type = gnss_sample.fix_type();
+            }
           }
-          if (run_result.trajectory[sync_result.key_index_j].gnss_fix_type == GnssFixType::kNoSolution) {
-            run_result.trajectory[sync_result.key_index_j].gnss_fix_type = gnss_sample.fix_type();
+          if (sync_result.key_index_j < trajectory_row_index_by_state.size() &&
+              trajectory_row_index_by_state[sync_result.key_index_j].has_value()) {
+            auto &row_j = run_result.trajectory[*trajectory_row_index_by_state[sync_result.key_index_j]];
+            row_j.gnss_factor_used = true;
+            if (row_j.gnss_fix_type == GnssFixType::kNoSolution) {
+              row_j.gnss_fix_type = gnss_sample.fix_type();
+            }
           }
           break;
         }
@@ -682,7 +1943,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           break;
       }
 
+      consistency_record.factor_used = record.factor_used;
       run_result.gnss_factor_records.push_back(record);
+      if (collect_gnss_consistency) {
+        run_result.gnss_consistency_records.push_back(consistency_record);
+      }
     }
   }
 
@@ -696,12 +1961,33 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.initial_error = optimizer.error();
   const gtsam::Values optimized_values = optimizer.optimize();
   run_result.run_summary.final_error = graph.error(optimized_values);
+  AccumulateStaticConsistencyMetrics(optimized_values, graph_timeline, run_result.run_summary);
+  run_result.error_state_trajectory.clear();
+  if (graph_timeline.dynamic_start_index < state_timestamps.size()) {
+    const std::size_t first_dynamic_index = graph_timeline.dynamic_start_index;
+    const auto first_dynamic_pose = optimized_values.at<gtsam::Pose3>(X(first_dynamic_index));
+    const auto first_dynamic_velocity = optimized_values.at<gtsam::Vector3>(V(first_dynamic_index));
+    const auto first_dynamic_bias = optimized_values.at<gtsam::imuBias::ConstantBias>(B(first_dynamic_index));
+    const ForwardDriftSummary drift_summary = ComputeFeedbackForwardDriftSummary(
+      dataset.imu_samples,
+      first_dynamic_pose,
+      first_dynamic_velocity,
+      first_dynamic_bias,
+      state_timestamps[first_dynamic_index],
+      state_timestamps.back(),
+      config_.gravity_mps2);
+    run_result.run_summary.feedback_forward_up_slope_10s = drift_summary.up_slope_10s;
+    run_result.run_summary.feedback_forward_up_slope_30s = drift_summary.up_slope_30s;
+    run_result.run_summary.feedback_forward_horizontal_slope_10s = drift_summary.horizontal_slope_10s;
+    run_result.run_summary.feedback_forward_horizontal_slope_30s = drift_summary.horizontal_slope_30s;
+  }
 
   for (std::size_t index = 0; index < run_result.trajectory.size(); ++index) {
-    const auto pose = optimized_values.at<gtsam::Pose3>(X(index));
-    const auto velocity = optimized_values.at<gtsam::Vector3>(V(index));
-    const auto bias = optimized_values.at<gtsam::imuBias::ConstantBias>(B(index));
-    const auto omega = optimized_values.at<gtsam::Vector3>(W(index));
+    const std::size_t graph_index = graph_timeline.dynamic_start_index + index;
+    const auto pose = optimized_values.at<gtsam::Pose3>(X(graph_index));
+    const auto velocity = optimized_values.at<gtsam::Vector3>(V(graph_index));
+    const auto bias = optimized_values.at<gtsam::imuBias::ConstantBias>(B(graph_index));
+    const auto omega = optimized_values.at<gtsam::Vector3>(W(graph_index));
 
     auto &row = run_result.trajectory[index];
     row.enu_position_m = Eigen::Vector3d(pose.translation().x(), pose.translation().y(), pose.translation().z());
@@ -712,10 +1998,39 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     row.bias_gyro = bias.gyroscope();
   }
 
+  AccumulateInitialDynamicConsistencyMetrics(
+    run_result.trajectory,
+    initial_bias,
+    initial_pose_world,
+    dataset.imu_samples,
+    config_.gravity_mps2,
+    run_result.run_summary);
+
+  run_result.initial_static_trajectory.clear();
+  if (graph_timeline.initial_static_state_count > 0U) {
+    run_result.initial_static_trajectory.reserve(graph_timeline.initial_static_state_count);
+    for (std::size_t graph_index = 0; graph_index < graph_timeline.initial_static_state_count; ++graph_index) {
+      TrajectoryRow row;
+      row.time_s = state_timestamps[graph_index];
+      const auto pose = optimized_values.at<gtsam::Pose3>(X(graph_index));
+      const auto velocity = optimized_values.at<gtsam::Vector3>(V(graph_index));
+      const auto bias = optimized_values.at<gtsam::imuBias::ConstantBias>(B(graph_index));
+      const auto omega = optimized_values.at<gtsam::Vector3>(W(graph_index));
+      row.enu_position_m = Eigen::Vector3d(pose.translation().x(), pose.translation().y(), pose.translation().z());
+      row.enu_velocity_mps = Eigen::Vector3d(velocity.x(), velocity.y(), velocity.z());
+      row.ypr_rad = Rot3ToYpr(pose.rotation());
+      row.omega_radps = Eigen::Vector3d(omega.x(), omega.y(), omega.z());
+      row.bias_acc = bias.accelerometer();
+      row.bias_gyro = bias.gyroscope();
+      run_result.initial_static_trajectory.push_back(row);
+    }
+  }
+  run_result.run_summary.initial_static_trajectory_count = run_result.initial_static_trajectory.size();
+
   if (config_.write_imu_rate_avp) {
     std::vector<OptimizedNodeState> optimized_node_states;
-    optimized_node_states.reserve(state_timestamps.size());
-    for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    optimized_node_states.reserve(run_result.trajectory.size());
+    for (std::size_t index = graph_timeline.dynamic_start_index; index < state_timestamps.size(); ++index) {
       OptimizedNodeState node_state;
       node_state.time_s = state_timestamps[index];
       node_state.pose = optimized_values.at<gtsam::Pose3>(X(index));
@@ -733,7 +2048,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.imu_rate_avp = std::move(imu_rate_result.rows);
     run_result.imu_rate_interval_diagnostics = std::move(imu_rate_result.diagnostics);
     run_result.run_summary.imu_rate_avp_count = run_result.imu_rate_avp.size();
-    run_result.run_summary.imu_rate_interval_count = state_timestamps.size() - 1U;
+    run_result.run_summary.imu_rate_interval_count =
+      optimized_node_states.size() > 1U ? optimized_node_states.size() - 1U : 0U;
     run_result.run_summary.imu_rate_skipped_interval_count =
       std::count_if(
         run_result.imu_rate_interval_diagnostics.begin(),
@@ -745,7 +2061,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     const gp::GPWNOJInterpolator base_interpolator(
       gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(kInterpolatorQcVariance)));
 
-    for (auto &record : run_result.gnss_factor_records) {
+    for (std::size_t record_index = 0; record_index < run_result.gnss_factor_records.size(); ++record_index) {
+      auto &record = run_result.gnss_factor_records[record_index];
+      GnssConsistencyRecord *consistency_record =
+        collect_gnss_consistency && record_index < run_result.gnss_consistency_records.size()
+          ? &run_result.gnss_consistency_records[record_index]
+          : nullptr;
       if (!record.factor_used) {
         continue;
       }
@@ -753,10 +2074,22 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       if (record.sync_status == StateMeasSyncStatus::kSynchronizedI ||
           record.sync_status == StateMeasSyncStatus::kSynchronizedJ) {
         const auto pose = optimized_values.at<gtsam::Pose3>(X(record.synchronized_state_index));
-        record.residual_m = ComputeResidualNorm(pose, record.measurement_enu_m);
-        auto &row = run_result.trajectory[record.synchronized_state_index];
-        if (!std::isfinite(row.gnss_residual_m)) {
-          row.gnss_residual_m = record.residual_m;
+        const Eigen::Vector3d residual_enu_m = ComputePositionResidualEnu(pose, record.measurement_enu_m);
+        record.residual_m = residual_enu_m.norm();
+        if (consistency_record != nullptr) {
+          consistency_record->postfit_residual_enu_m = residual_enu_m;
+          const Eigen::Vector3d scaled_sigma_m(
+            consistency_record->sigma_e_m * consistency_record->covariance_scale_e,
+            consistency_record->sigma_n_m * consistency_record->covariance_scale_n,
+            consistency_record->sigma_u_m * consistency_record->covariance_scale_u);
+          consistency_record->postfit_nis = ComputeNis(residual_enu_m, scaled_sigma_m);
+        }
+        if (record.synchronized_state_index < trajectory_row_index_by_state.size() &&
+            trajectory_row_index_by_state[record.synchronized_state_index].has_value()) {
+          auto &row = run_result.trajectory[*trajectory_row_index_by_state[record.synchronized_state_index]];
+          if (!std::isfinite(row.gnss_residual_m)) {
+            row.gnss_residual_m = record.residual_m;
+          }
         }
       } else if (record.sync_status == StateMeasSyncStatus::kInterpolated) {
         gp::GPWNOJInterpolator interpolator = base_interpolator;
@@ -770,17 +2103,78 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           optimized_values.at<gtsam::Pose3>(X(record.state_index_j)),
           optimized_values.at<gtsam::Vector3>(V(record.state_index_j)),
           optimized_values.at<gtsam::Vector3>(W(record.state_index_j)));
-        record.residual_m = ComputeResidualNorm(interpolated_pose, record.measurement_enu_m);
-        auto &row_i = run_result.trajectory[record.state_index_i];
-        auto &row_j = run_result.trajectory[record.state_index_j];
-        if (!std::isfinite(row_i.gnss_residual_m)) {
-          row_i.gnss_residual_m = record.residual_m;
+        const Eigen::Vector3d residual_enu_m = ComputePositionResidualEnu(interpolated_pose, record.measurement_enu_m);
+        record.residual_m = residual_enu_m.norm();
+        if (consistency_record != nullptr) {
+          consistency_record->postfit_residual_enu_m = residual_enu_m;
+          const Eigen::Vector3d scaled_sigma_m(
+            consistency_record->sigma_e_m * consistency_record->covariance_scale_e,
+            consistency_record->sigma_n_m * consistency_record->covariance_scale_n,
+            consistency_record->sigma_u_m * consistency_record->covariance_scale_u);
+          consistency_record->postfit_nis = ComputeNis(residual_enu_m, scaled_sigma_m);
         }
-        if (!std::isfinite(row_j.gnss_residual_m)) {
-          row_j.gnss_residual_m = record.residual_m;
+        if (record.state_index_i < trajectory_row_index_by_state.size() &&
+            trajectory_row_index_by_state[record.state_index_i].has_value()) {
+          auto &row_i = run_result.trajectory[*trajectory_row_index_by_state[record.state_index_i]];
+          if (!std::isfinite(row_i.gnss_residual_m)) {
+            row_i.gnss_residual_m = record.residual_m;
+          }
+        }
+        if (record.state_index_j < trajectory_row_index_by_state.size() &&
+            trajectory_row_index_by_state[record.state_index_j].has_value()) {
+          auto &row_j = run_result.trajectory[*trajectory_row_index_by_state[record.state_index_j]];
+          if (!std::isfinite(row_j.gnss_residual_m)) {
+            row_j.gnss_residual_m = record.residual_m;
+          }
         }
       }
     }
+
+    if (collect_gnss_consistency) {
+      std::vector<double> postfit_nis_values;
+      std::size_t axis_pass_count = 0U;
+      std::size_t axis_total_count = 0U;
+      for (const auto &record : run_result.gnss_consistency_records) {
+        if (!record.factor_used || !std::isfinite(record.postfit_nis)) {
+          continue;
+        }
+        postfit_nis_values.push_back(record.postfit_nis);
+        const Eigen::Vector3d scaled_sigma_m(
+          record.sigma_e_m * record.covariance_scale_e,
+          record.sigma_n_m * record.covariance_scale_n,
+          record.sigma_u_m * record.covariance_scale_u);
+        for (int axis = 0; axis < 3; ++axis) {
+          if (!std::isfinite(scaled_sigma_m[axis]) || scaled_sigma_m[axis] <= 0.0 ||
+              !std::isfinite(record.postfit_residual_enu_m[axis])) {
+            continue;
+          }
+          ++axis_total_count;
+          if (std::abs(record.postfit_residual_enu_m[axis]) <= config_.gnss_axis_sigma_multiple * scaled_sigma_m[axis]) {
+            ++axis_pass_count;
+          }
+        }
+      }
+      const ScalarSummaryStats nis_stats = ComputeScalarSummaryStats(std::move(postfit_nis_values));
+      run_result.run_summary.gnss_nis_mean = nis_stats.mean;
+      run_result.run_summary.gnss_nis_median = nis_stats.median;
+      run_result.run_summary.gnss_nis_p95 = nis_stats.p95;
+      run_result.run_summary.axis_2sigma_pass_rate =
+        axis_total_count > 0U
+          ? static_cast<double>(axis_pass_count) / static_cast<double>(axis_total_count)
+          : std::numeric_limits<double>::quiet_NaN();
+    }
+  }
+
+  if (collect_segment_error_diagnostics) {
+    run_result.segment_error_diagnostics = BuildSegmentErrorDiagnostics(
+      state_timestamps,
+      dataset.imu_samples,
+      imu_params,
+      optimized_values,
+      run_result.gnss_factor_records,
+      run_result.gnss_consistency_records,
+      config_);
+    run_result.run_summary.segment_error_count = run_result.segment_error_diagnostics.size();
   }
 
   return run_result;

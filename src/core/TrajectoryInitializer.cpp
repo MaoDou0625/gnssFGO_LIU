@@ -25,7 +25,9 @@ InitialPoseEstimate TrajectoryInitializer::Estimate(
   const std::vector<ImuSample> &imu_samples,
   const std::vector<GnssSolutionSample> &gnss_samples,
   const std::size_t start_gnss_index,
-  const double start_time_s,
+  const double alignment_start_time_s,
+  const double alignment_end_time_s,
+  const double navigation_start_time_s,
   const Eigen::Vector3d &earth_rate_enu,
   const std::vector<std::size_t> &yaw_candidate_indices,
   const OfflineRunnerConfig &config) {
@@ -35,14 +37,24 @@ InitialPoseEstimate TrajectoryInitializer::Estimate(
   if (start_gnss_index >= gnss_samples.size()) {
     throw std::runtime_error("trajectory initialization start_gnss_index out of range");
   }
+  if (alignment_end_time_s < alignment_start_time_s) {
+    throw std::runtime_error("trajectory initialization alignment_end_time_s must be >= alignment_start_time_s");
+  }
+  if (navigation_start_time_s < alignment_end_time_s) {
+    throw std::runtime_error("trajectory initialization navigation_start_time_s must be >= alignment_end_time_s");
+  }
 
   InitialPoseEstimate initial_pose;
+
+  const double dual_vector_duration_s = config.static_alignment_duration_s > 0.0
+                                          ? alignment_end_time_s - alignment_start_time_s
+                                          : config.imu_dual_vector_window_s;
 
   if (config.prefer_imu_initial_yaw) {
     const auto dual_vector_window = StaticImuAlignment::CollectWindow(
       imu_samples,
-      start_time_s,
-      config.imu_dual_vector_window_s,
+      alignment_start_time_s,
+      dual_vector_duration_s,
       config,
       false);
     if (StaticImuAlignment::TryEstimateDualVectorInitialization(
@@ -56,7 +68,7 @@ InitialPoseEstimate TrajectoryInitializer::Estimate(
 
   const auto gravity_window = StaticImuAlignment::CollectWindow(
     imu_samples,
-    start_time_s,
+    alignment_start_time_s,
     config.stationary_window_s,
     config,
     true);

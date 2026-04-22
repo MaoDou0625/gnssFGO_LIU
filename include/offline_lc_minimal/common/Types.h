@@ -15,6 +15,9 @@
 
 namespace offline_lc_minimal {
 
+using ErrorStateVector = Eigen::Matrix<double, 15, 1>;
+using ErrorStateMatrix = Eigen::Matrix<double, 15, 15>;
+
 enum class GnssFixType : int {
   kRtkFix = 1,
   kRtkFloat = 2,
@@ -30,6 +33,20 @@ enum class GnssNoiseModel : int {
   kTukey = 4,
   kGemanMcClure = 5,
   kWelsch = 6,
+};
+
+enum class GnssConsistencyGateMode : int {
+  kNone = 0,
+  kNis = 1,
+};
+
+enum class GnssVerticalSigmaMode : int {
+  kFromFile = 0,
+  kFixed = 1,
+};
+
+enum class GnssVerticalDriftReferenceMode : int {
+  kMovingAverage = 0,
 };
 
 enum class StateMeasSyncStatus : int {
@@ -72,6 +89,34 @@ inline std::string ToString(const GnssNoiseModel noise_model) {
       return "welsch";
     default:
       return "unknown";
+  }
+}
+
+inline std::string ToString(const GnssConsistencyGateMode mode) {
+  switch (mode) {
+    case GnssConsistencyGateMode::kNis:
+      return "nis";
+    case GnssConsistencyGateMode::kNone:
+    default:
+      return "none";
+  }
+}
+
+inline std::string ToString(const GnssVerticalSigmaMode mode) {
+  switch (mode) {
+    case GnssVerticalSigmaMode::kFixed:
+      return "fixed";
+    case GnssVerticalSigmaMode::kFromFile:
+    default:
+      return "from_file";
+  }
+}
+
+inline std::string ToString(const GnssVerticalDriftReferenceMode mode) {
+  switch (mode) {
+    case GnssVerticalDriftReferenceMode::kMovingAverage:
+    default:
+      return "moving_average";
   }
 }
 
@@ -222,6 +267,9 @@ struct GnssFactorRecord {
   std::size_t state_index_i = 0;
   std::size_t state_index_j = 0;
   std::size_t synchronized_state_index = 0;
+  long long trajectory_row_index_i = -1;
+  long long trajectory_row_index_j = -1;
+  long long synchronized_trajectory_row_index = -1;
   bool factor_used = false;
   GnssFixType gnss_fix_type = GnssFixType::kNoSolution;
   StateMeasSyncStatus sync_status = StateMeasSyncStatus::kDropped;
@@ -240,6 +288,67 @@ struct TrajectoryRow {
   bool gnss_factor_used = false;
   GnssFixType gnss_fix_type = GnssFixType::kNoSolution;
   double gnss_residual_m = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct ReferenceNodeRow {
+  double time_s = 0.0;
+  Eigen::Vector3d enu_position_m = Eigen::Vector3d::Zero();
+  Eigen::Vector3d enu_velocity_mps = Eigen::Vector3d::Zero();
+  Eigen::Vector3d ypr_rad = Eigen::Vector3d::Zero();
+  Eigen::Vector3d bias_acc = Eigen::Vector3d::Zero();
+  Eigen::Vector3d bias_gyro = Eigen::Vector3d::Zero();
+};
+
+struct ReferenceNodeState {
+  double time_s = 0.0;
+  gtsam::Pose3 pose;
+  gtsam::Vector3 velocity = gtsam::Vector3::Zero();
+  gtsam::imuBias::ConstantBias bias;
+  gtsam::Vector3 omega = gtsam::Vector3::Zero();
+};
+
+struct ErrorStateRow {
+  double time_s = 0.0;
+  ErrorStateVector state = ErrorStateVector::Zero();
+};
+
+struct SegmentErrorDiagnostic {
+  std::size_t segment_index = 0;
+  double start_time_s = 0.0;
+  double end_time_s = 0.0;
+  Eigen::Vector3d dtheta_rad = Eigen::Vector3d::Zero();
+  Eigen::Vector3d dv_mps = Eigen::Vector3d::Zero();
+  Eigen::Vector3d dp_m = Eigen::Vector3d::Zero();
+  Eigen::Vector3d dbg_radps = Eigen::Vector3d::Zero();
+  Eigen::Vector3d dba_mps2 = Eigen::Vector3d::Zero();
+  std::size_t gnss_factor_count = 0;
+  double mean_prefit_nis = std::numeric_limits<double>::quiet_NaN();
+  double mean_postfit_nis = std::numeric_limits<double>::quiet_NaN();
+  double mean_covariance_scale = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct GnssConsistencyRecord {
+  std::size_t sample_index = 0;
+  double raw_time_s = 0.0;
+  double corrected_time_s = 0.0;
+  bool factor_used = false;
+  bool vertical_reference_used = false;
+  GnssFixType gnss_fix_type = GnssFixType::kNoSolution;
+  StateMeasSyncStatus sync_status = StateMeasSyncStatus::kDropped;
+  double raw_sigma_h_m = std::numeric_limits<double>::quiet_NaN();
+  double sigma_e_m = std::numeric_limits<double>::quiet_NaN();
+  double sigma_n_m = std::numeric_limits<double>::quiet_NaN();
+  double sigma_u_m = std::numeric_limits<double>::quiet_NaN();
+  double effective_sigma_u_m = std::numeric_limits<double>::quiet_NaN();
+  double vertical_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double covariance_scale = 1.0;
+  double covariance_scale_e = 1.0;
+  double covariance_scale_n = 1.0;
+  double covariance_scale_u = 1.0;
+  Eigen::Vector3d prefit_residual_enu_m = Eigen::Vector3d::Zero();
+  Eigen::Vector3d postfit_residual_enu_m = Eigen::Vector3d::Zero();
+  double prefit_nis = std::numeric_limits<double>::quiet_NaN();
+  double postfit_nis = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct ImuRateAvpRow {
@@ -263,7 +372,11 @@ struct ImuRateIntervalDiagnostic {
 
 struct RunSummary {
   bool gnss_enabled = true;
+  bool initial_static_constraints_enabled = false;
+  bool initial_static_subgraph_enabled = false;
   std::size_t state_count = 0;
+  std::size_t initial_static_state_count = 0;
+  std::size_t initial_static_trajectory_count = 0;
   std::size_t gnss_factor_count = 0;
   std::size_t imu_rate_avp_count = 0;
   std::size_t imu_rate_interval_count = 0;
@@ -272,21 +385,61 @@ struct RunSummary {
   std::size_t gnss_interpolated_factor_count = 0;
   std::size_t gnss_dropped_count = 0;
   std::size_t gnss_cached_count = 0;
+  std::size_t dropped_non_rtkfix_count = 0;
   std::size_t dropped_no_solution_count = 0;
   std::size_t dropped_nonfinite_sigma_count = 0;
   std::size_t dropped_bad_status_count = 0;
   std::size_t dropped_out_of_imu_coverage_count = 0;
+  std::size_t initial_static_constraint_sample_count = 0;
+  std::size_t error_state_count = 0;
+  std::size_t segment_error_count = 0;
+  double initial_static_velocity_norm_mean_mps = 0.0;
+  double initial_static_velocity_norm_std_mps = 0.0;
+  double initial_static_velocity_norm_max_mps = 0.0;
+  double static_specific_force_window_std_x_mps2 = 0.0;
+  double static_specific_force_window_std_y_mps2 = 0.0;
+  double static_specific_force_window_std_z_mps2 = 0.0;
+  double static_specific_force_window_rms_xyz_mps2 = 0.0;
+  double static_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double static_bgz_radps = std::numeric_limits<double>::quiet_NaN();
+  double initial_static_horizontal_drift_max_m = 0.0;
+  double initial_static_up_drift_max_m = 0.0;
+  double initial_static_3d_drift_max_m = 0.0;
+  double gnss_nis_mean = std::numeric_limits<double>::quiet_NaN();
+  double gnss_nis_median = std::numeric_limits<double>::quiet_NaN();
+  double gnss_nis_p95 = std::numeric_limits<double>::quiet_NaN();
+  double axis_2sigma_pass_rate = std::numeric_limits<double>::quiet_NaN();
+  double feedback_forward_up_slope_10s = std::numeric_limits<double>::quiet_NaN();
+  double feedback_forward_up_slope_30s = std::numeric_limits<double>::quiet_NaN();
+  double feedback_forward_horizontal_slope_10s = std::numeric_limits<double>::quiet_NaN();
+  double feedback_forward_horizontal_slope_30s = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first30s_mean_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first30s_mean_bgz_radps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first30s_mean_roll_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first30s_mean_pitch_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first30s_mean_yaw_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first30s_up_total_variation_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first30s_vz_total_variation_mps = std::numeric_limits<double>::quiet_NaN();
+  double forward_first30s_up_total_variation_m = std::numeric_limits<double>::quiet_NaN();
+  double forward_first30s_vz_total_variation_mps = std::numeric_limits<double>::quiet_NaN();
   double initial_error = 0.0;
   double final_error = 0.0;
   double origin_lat_rad = 0.0;
   double origin_lon_rad = 0.0;
   double origin_h_m = 0.0;
+  double alignment_start_time_s = 0.0;
+  double navigation_start_time_s = 0.0;
+  double static_alignment_duration_s = 0.0;
   std::string yaw_source = "fallback";
 
   [[nodiscard]] std::string ToMultilineString() const {
     std::ostringstream oss;
     oss << "gnss_enabled=" << (gnss_enabled ? "true" : "false") << '\n'
+        << "initial_static_constraints_enabled=" << (initial_static_constraints_enabled ? "true" : "false") << '\n'
+        << "initial_static_subgraph_enabled=" << (initial_static_subgraph_enabled ? "true" : "false") << '\n'
         << "state_count=" << state_count << '\n'
+        << "initial_static_state_count=" << initial_static_state_count << '\n'
+        << "initial_static_trajectory_count=" << initial_static_trajectory_count << '\n'
         << "gnss_factor_count=" << gnss_factor_count << '\n'
         << "imu_rate_avp_count=" << imu_rate_avp_count << '\n'
         << "imu_rate_interval_count=" << imu_rate_interval_count << '\n'
@@ -295,15 +448,51 @@ struct RunSummary {
         << "gnss_interpolated_factor_count=" << gnss_interpolated_factor_count << '\n'
         << "gnss_dropped_count=" << gnss_dropped_count << '\n'
         << "gnss_cached_count=" << gnss_cached_count << '\n'
+        << "dropped_non_rtkfix_count=" << dropped_non_rtkfix_count << '\n'
         << "dropped_no_solution_count=" << dropped_no_solution_count << '\n'
         << "dropped_nonfinite_sigma_count=" << dropped_nonfinite_sigma_count << '\n'
         << "dropped_bad_status_count=" << dropped_bad_status_count << '\n'
         << "dropped_out_of_imu_coverage_count=" << dropped_out_of_imu_coverage_count << '\n'
+        << "initial_static_constraint_sample_count=" << initial_static_constraint_sample_count << '\n'
+        << "error_state_count=" << error_state_count << '\n'
+        << "segment_error_count=" << segment_error_count << '\n'
+        << "initial_static_velocity_norm_mean_mps=" << initial_static_velocity_norm_mean_mps << '\n'
+        << "initial_static_velocity_norm_std_mps=" << initial_static_velocity_norm_std_mps << '\n'
+        << "initial_static_velocity_norm_max_mps=" << initial_static_velocity_norm_max_mps << '\n'
+        << "static_specific_force_window_std_x_mps2=" << static_specific_force_window_std_x_mps2 << '\n'
+        << "static_specific_force_window_std_y_mps2=" << static_specific_force_window_std_y_mps2 << '\n'
+        << "static_specific_force_window_std_z_mps2=" << static_specific_force_window_std_z_mps2 << '\n'
+        << "static_specific_force_window_rms_xyz_mps2=" << static_specific_force_window_rms_xyz_mps2 << '\n'
+        << "static_baz_mps2=" << static_baz_mps2 << '\n'
+        << "static_bgz_radps=" << static_bgz_radps << '\n'
+        << "initial_static_horizontal_drift_max_m=" << initial_static_horizontal_drift_max_m << '\n'
+        << "initial_static_up_drift_max_m=" << initial_static_up_drift_max_m << '\n'
+        << "initial_static_3d_drift_max_m=" << initial_static_3d_drift_max_m << '\n'
+        << "gnss_nis_mean=" << gnss_nis_mean << '\n'
+        << "gnss_nis_median=" << gnss_nis_median << '\n'
+        << "gnss_nis_p95=" << gnss_nis_p95 << '\n'
+        << "axis_2sigma_pass_rate=" << axis_2sigma_pass_rate << '\n'
+        << "feedback_forward_up_slope_10s=" << feedback_forward_up_slope_10s << '\n'
+        << "feedback_forward_up_slope_30s=" << feedback_forward_up_slope_30s << '\n'
+        << "feedback_forward_horizontal_slope_10s=" << feedback_forward_horizontal_slope_10s << '\n'
+        << "feedback_forward_horizontal_slope_30s=" << feedback_forward_horizontal_slope_30s << '\n'
+        << "optimized_first30s_mean_baz_mps2=" << optimized_first30s_mean_baz_mps2 << '\n'
+        << "optimized_first30s_mean_bgz_radps=" << optimized_first30s_mean_bgz_radps << '\n'
+        << "optimized_first30s_mean_roll_rad=" << optimized_first30s_mean_roll_rad << '\n'
+        << "optimized_first30s_mean_pitch_rad=" << optimized_first30s_mean_pitch_rad << '\n'
+        << "optimized_first30s_mean_yaw_rad=" << optimized_first30s_mean_yaw_rad << '\n'
+        << "optimized_first30s_up_total_variation_m=" << optimized_first30s_up_total_variation_m << '\n'
+        << "optimized_first30s_vz_total_variation_mps=" << optimized_first30s_vz_total_variation_mps << '\n'
+        << "forward_first30s_up_total_variation_m=" << forward_first30s_up_total_variation_m << '\n'
+        << "forward_first30s_vz_total_variation_mps=" << forward_first30s_vz_total_variation_mps << '\n'
         << "initial_error=" << initial_error << '\n'
         << "final_error=" << final_error << '\n'
         << "origin_lat_rad=" << origin_lat_rad << '\n'
         << "origin_lon_rad=" << origin_lon_rad << '\n'
         << "origin_h_m=" << origin_h_m << '\n'
+        << "alignment_start_time_s=" << alignment_start_time_s << '\n'
+        << "navigation_start_time_s=" << navigation_start_time_s << '\n'
+        << "static_alignment_duration_s=" << static_alignment_duration_s << '\n'
         << "yaw_source=" << yaw_source << '\n';
     return oss.str();
   }
@@ -312,10 +501,15 @@ struct RunSummary {
 struct OfflineRunResult {
   DataSummary data_summary;
   RunSummary run_summary;
+  std::vector<TrajectoryRow> initial_static_trajectory;
+  std::vector<ReferenceNodeRow> reference_node_trajectory;
+  std::vector<ErrorStateRow> error_state_trajectory;
+  std::vector<SegmentErrorDiagnostic> segment_error_diagnostics;
   std::vector<TrajectoryRow> trajectory;
   std::vector<ImuRateAvpRow> imu_rate_avp;
   std::vector<ImuRateIntervalDiagnostic> imu_rate_interval_diagnostics;
   std::vector<GnssFactorRecord> gnss_factor_records;
+  std::vector<GnssConsistencyRecord> gnss_consistency_records;
 };
 
 }  // namespace offline_lc_minimal

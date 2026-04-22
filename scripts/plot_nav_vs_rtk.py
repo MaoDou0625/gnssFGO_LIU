@@ -303,7 +303,6 @@ def make_plot(
     nav_east = [float(row["east_m"]) for row in trajectory_rows]
     nav_north = [float(row["north_m"]) for row in trajectory_rows]
     nav_up = [float(row["up_m"]) for row in trajectory_rows]
-
     rtk_time = [row["time_s"] for row in rtk_rows]
     rtk_east = [row["east_m"] for row in rtk_rows]
     rtk_north = [row["north_m"] for row in rtk_rows]

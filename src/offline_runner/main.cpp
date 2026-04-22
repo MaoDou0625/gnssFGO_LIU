@@ -94,6 +94,26 @@ int main(int argc, char **argv) {
     if (config.stationary_window_s <= 0.0) {
       throw std::runtime_error("stationary_window_s must be positive");
     }
+    if (config.global_acc_bias_tie_sigma_mps2 <= 0.0) {
+      throw std::runtime_error("global_acc_bias_tie_sigma_mps2 must be positive");
+    }
+    if (config.global_gyro_bias_tie_sigma_radps <= 0.0) {
+      throw std::runtime_error("global_gyro_bias_tie_sigma_radps must be positive");
+    }
+    if (config.reweighted_combined_imu_attitude_sigma_rad <= 0.0) {
+      throw std::runtime_error("reweighted_combined_imu_attitude_sigma_rad must be positive");
+    }
+    if (config.reweighted_combined_imu_specific_force_sigma_x_mps2 < 0.0 ||
+        config.reweighted_combined_imu_specific_force_sigma_y_mps2 < 0.0 ||
+        config.reweighted_combined_imu_specific_force_sigma_z_mps2 < 0.0) {
+      throw std::runtime_error("reweighted_combined_imu_specific_force_sigma_{x,y,z}_mps2 must be non-negative");
+    }
+    if (config.reweighted_combined_imu_position_sigma_m < 0.0) {
+      throw std::runtime_error("reweighted_combined_imu_position_sigma_m must be non-negative");
+    }
+    if (config.reweighted_combined_imu_velocity_sigma_mps < 0.0) {
+      throw std::runtime_error("reweighted_combined_imu_velocity_sigma_mps must be non-negative");
+    }
     if (config.imu_dual_vector_window_s <= 0.0) {
       throw std::runtime_error("imu_dual_vector_window_s must be positive");
     }
@@ -102,6 +122,65 @@ int main(int argc, char **argv) {
     }
     if (config.imu_dual_vector_min_cross_norm <= 0.0) {
       throw std::runtime_error("imu_dual_vector_min_cross_norm must be positive");
+    }
+    if (config.initial_static_zupt_velocity_sigma_mps <= 0.0) {
+      throw std::runtime_error("initial_static_zupt_velocity_sigma_mps must be positive");
+    }
+    if (config.initial_static_zaru_sigma_radps <= 0.0) {
+      throw std::runtime_error("initial_static_zaru_sigma_radps must be positive");
+    }
+    if (config.initial_static_specific_force_sigma_mps2 <= 0.0) {
+      throw std::runtime_error("initial_static_specific_force_sigma_mps2 must be positive");
+    }
+    if (config.initial_static_state_frequency_hz <= 0.0) {
+      throw std::runtime_error("initial_static_state_frequency_hz must be positive");
+    }
+    if (config.initial_static_attitude_drift_sigma_rad <= 0.0) {
+      throw std::runtime_error("initial_static_attitude_drift_sigma_rad must be positive");
+    }
+    if (config.error_process_noise_scale <= 0.0) {
+      throw std::runtime_error("error_process_noise_scale must be positive");
+    }
+    if (config.tau_acc_bias_s <= 0.0) {
+      throw std::runtime_error("tau_acc_bias_s must be positive");
+    }
+    if (config.tau_gyro_bias_s <= 0.0) {
+      throw std::runtime_error("tau_gyro_bias_s must be positive");
+    }
+    if (config.bias_process_noise_acc_scale <= 0.0) {
+      throw std::runtime_error("bias_process_noise_acc_scale must be positive");
+    }
+    if (config.bias_process_noise_gyro_scale <= 0.0) {
+      throw std::runtime_error("bias_process_noise_gyro_scale must be positive");
+    }
+    if (config.gnss_nis_confidence <= 0.0 || config.gnss_nis_confidence >= 1.0) {
+      throw std::runtime_error("gnss_nis_confidence must be in (0, 1)");
+    }
+    if (config.gnss_axis_sigma_multiple <= 0.0) {
+      throw std::runtime_error("gnss_axis_sigma_multiple must be positive");
+    }
+  if (config.enable_segment_error_feedback && (config.enable_global_acc_bias || config.enable_global_gyro_bias)) {
+    throw std::runtime_error(
+      "enable_segment_error_feedback is incompatible with enable_global_acc_bias/enable_global_gyro_bias");
+  }
+  if (config.enable_segment_local_error_feedback && !config.enable_segment_error_feedback) {
+    throw std::runtime_error("enable_segment_local_error_feedback requires enable_segment_error_feedback");
+  }
+  if (config.segment_feedback_attitude_gain < 0.0 || config.segment_feedback_velocity_gain < 0.0 ||
+      config.segment_feedback_position_gain < 0.0) {
+    throw std::runtime_error("segment_feedback gains must be non-negative");
+  }
+  if (config.segment_feedback_acc_sigma_mps2 <= 0.0 || config.segment_feedback_gyro_sigma_radps <= 0.0) {
+    throw std::runtime_error("segment_feedback sigmas must be positive");
+  }
+    if (config.enable_initial_static_zupt_zaru && config.static_alignment_duration_s <= 0.0) {
+      throw std::runtime_error("enable_initial_static_zupt_zaru requires static_alignment_duration_s > 0");
+    }
+    if (config.enable_initial_static_zero_specific_force && config.static_alignment_duration_s <= 0.0) {
+      throw std::runtime_error("enable_initial_static_zero_specific_force requires static_alignment_duration_s > 0");
+    }
+    if (config.enable_initial_static_subgraph && config.static_alignment_duration_s <= 0.0) {
+      throw std::runtime_error("enable_initial_static_subgraph requires static_alignment_duration_s > 0");
     }
 
     if (config.imu_path.empty() || config.gnss_path.empty()) {
