@@ -83,6 +83,7 @@ if(DEFINED GTSAM_DIR)
   )
   list(APPEND OFFLINE_LC_MINIMAL_RUNTIME_RPATH "${OFFLINE_LC_MINIMAL_GTSAM_LIB_DIR}")
 endif()
+string(JOIN ":" OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH ${OFFLINE_LC_MINIMAL_RUNTIME_RPATH})
 
 if(OFFLINE_LC_MINIMAL_BUILD_RUNNER)
   add_executable(offline_lc_runner
@@ -125,8 +126,18 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
   endif()
 
-  add_test(
-    NAME reweighted_combined_imu_factor_test
-    COMMAND $<TARGET_FILE:reweighted_combined_imu_factor_test>
-  )
+  if(OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH)
+    add_test(
+      NAME reweighted_combined_imu_factor_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:reweighted_combined_imu_factor_test>
+    )
+  else()
+    add_test(
+      NAME reweighted_combined_imu_factor_test
+      COMMAND $<TARGET_FILE:reweighted_combined_imu_factor_test>
+    )
+  endif()
 endif()
