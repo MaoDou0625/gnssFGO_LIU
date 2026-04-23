@@ -1,4 +1,5 @@
 import importlib.util
+import math
 import pathlib
 import tempfile
 import unittest
@@ -75,6 +76,22 @@ class PlotSegmentErrorDiagnosticsTests(unittest.TestCase):
 
         filtered = plot_segment_error_diagnostics.filter_dynamic_rows(rows, 1.0)
         self.assertEqual(filtered, rows[2:])
+
+    def test_convert_rows_to_display_units_converts_dtheta_to_deg(self) -> None:
+        rows = [
+            {
+                "dtheta_x_rad": math.pi / 2.0,
+                "dtheta_y_rad": -math.pi,
+                "dtheta_z_rad": math.pi / 4.0,
+                "dv_x_mps": 1.23,
+            }
+        ]
+
+        converted = plot_segment_error_diagnostics.convert_rows_to_display_units(rows)
+        self.assertAlmostEqual(converted[0]["dtheta_x_rad"], 90.0, places=9)
+        self.assertAlmostEqual(converted[0]["dtheta_y_rad"], -180.0, places=9)
+        self.assertAlmostEqual(converted[0]["dtheta_z_rad"], 45.0, places=9)
+        self.assertAlmostEqual(converted[0]["dv_x_mps"], 1.23, places=9)
 
     def test_resolve_trajectory_path_defaults_to_sibling_file(self) -> None:
         segment_error_path = pathlib.Path("/tmp/demo/segment_error_diagnostics.csv")

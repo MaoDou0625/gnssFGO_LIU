@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import statistics
 from pathlib import Path
 
@@ -17,7 +18,7 @@ except ImportError as exc:  # pragma: no cover
 
 
 GROUPS = [
-    ("dtheta", "Attitude Error [rad]", ["dtheta_x_rad", "dtheta_y_rad", "dtheta_z_rad"]),
+    ("dtheta", "Attitude Error [deg]", ["dtheta_x_rad", "dtheta_y_rad", "dtheta_z_rad"]),
     ("dv", "Velocity Error [m/s]", ["dv_x_mps", "dv_y_mps", "dv_z_mps"]),
     ("dp", "Position Error [m]", ["dp_x_m", "dp_y_m", "dp_z_m"]),
     ("dbg", "Gyro Bias Error [rad/s]", ["dbg_x_radps", "dbg_y_radps", "dbg_z_radps"]),
@@ -27,6 +28,7 @@ GROUPS = [
 COMPONENT_LABELS = {"x": "x", "y": "y", "z": "z"}
 COLORS = {"x": "#1f77b4", "y": "#ff7f0e", "z": "#2ca02c"}
 TIME_EPSILON_S = 1e-9
+DTHETA_COLUMNS = {"dtheta_x_rad", "dtheta_y_rad", "dtheta_z_rad"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -96,6 +98,16 @@ def filter_dynamic_rows(
     if filtered:
         return filtered
     return rows
+
+
+def convert_rows_to_display_units(rows: list[dict[str, float]]) -> list[dict[str, float]]:
+    converted_rows: list[dict[str, float]] = []
+    for row in rows:
+        converted = dict(row)
+        for column in DTHETA_COLUMNS:
+            converted[column] = math.degrees(row[column])
+        converted_rows.append(converted)
+    return converted_rows
 
 
 def total_variation(values: list[float]) -> float:
@@ -226,8 +238,9 @@ def main() -> int:
     trajectory_path = resolve_trajectory_path(segment_error_path, args.trajectory)
     dynamic_start_time_s = read_dynamic_start_time(trajectory_path)
     rows = filter_dynamic_rows(rows, dynamic_start_time_s)
-    stats = summarize(rows)
-    make_plot(rows, output_path, args.title, dynamic_start_time_s)
+    display_rows = convert_rows_to_display_units(rows)
+    stats = summarize(display_rows)
+    make_plot(display_rows, output_path, args.title, dynamic_start_time_s)
     write_summary_csv(csv_output_path, stats)
 
     print(f"plot_saved={output_path}")
