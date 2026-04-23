@@ -28,17 +28,19 @@
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
 #include "offline_lc_minimal/factor/AngularRateFactor.h"
 #include "offline_lc_minimal/factor/BiasGmTransitionFactor.h"
+#include "offline_lc_minimal/factor/GPInterpolatedGPSFactor.h"
+#include "offline_lc_minimal/factor/GPInterpolatedHorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/GlobalAccelBiasFactor.h"
 #include "offline_lc_minimal/factor/GlobalGyroBiasFactor.h"
 #include "offline_lc_minimal/factor/GlobalPlanarAccelBiasFactor.h"
-#include "offline_lc_minimal/factor/SegmentBiasFeedbackFactor.h"
+#include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/ReweightedCombinedImuFactor.h"
+#include "offline_lc_minimal/factor/SegmentBiasFeedbackFactor.h"
 #include "offline_lc_minimal/factor/StaticZeroAngularRateFactor.h"
 #include "offline_lc_minimal/factor/StaticSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/StaticAttitudeDriftFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasGmTransitionFactor.h"
 #include "offline_lc_minimal/factor/VerticalRtkPreintegrationFeedbackFactor.h"
-#include "offline_lc_minimal/factor/GPInterpolatedGPSFactor.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
 
 namespace offline_lc_minimal {
@@ -81,6 +83,51 @@ struct SegmentGnssStatsAccumulator {
   std::size_t vertical_gate_inside_count = 0;
   std::size_t target_baz_count = 0;
   std::size_t feedback_attitude_scale_count = 0;
+};
+
+struct VerticalRtkFeedbackWindowAccumulator {
+  std::optional<std::size_t> start_state_index;
+  double start_vertical_residual_m = 0.0;
+  double end_vertical_residual_m = 0.0;
+  double feedback_gain_scale_sum = 0.0;
+  std::size_t sample_count = 0;
+
+  void Start(const std::size_t anchor_state_index, const double vertical_residual_m, const double feedback_gain_scale) {
+    start_state_index = anchor_state_index;
+    start_vertical_residual_m = vertical_residual_m;
+    end_vertical_residual_m = vertical_residual_m;
+    feedback_gain_scale_sum = feedback_gain_scale;
+    sample_count = 1;
+  }
+
+  void UpdateStartAnchor(const double vertical_residual_m, const double feedback_gain_scale) {
+    start_vertical_residual_m = vertical_residual_m;
+    end_vertical_residual_m = vertical_residual_m;
+    feedback_gain_scale_sum = feedback_gain_scale;
+    sample_count = 1;
+  }
+
+  void AccumulateFutureAnchor(const double vertical_residual_m, const double feedback_gain_scale) {
+    end_vertical_residual_m = vertical_residual_m;
+    feedback_gain_scale_sum += feedback_gain_scale;
+    ++sample_count;
+  }
+
+  [[nodiscard]] bool HasSamples() const {
+    return sample_count > 0U;
+  }
+
+  [[nodiscard]] double ResidualDriftM() const {
+    return sample_count > 0U
+             ? end_vertical_residual_m - start_vertical_residual_m
+             : std::numeric_limits<double>::quiet_NaN();
+  }
+
+  [[nodiscard]] double MeanFeedbackGainScale() const {
+    return sample_count > 0U
+             ? feedback_gain_scale_sum / static_cast<double>(sample_count)
+             : std::numeric_limits<double>::quiet_NaN();
+  }
 };
 
 Eigen::Vector3d Rot3ToYpr(const gtsam::Rot3 &rotation) {
@@ -207,6 +254,15 @@ double ComputeNis(const Eigen::Vector3d &residual_enu_m, const Eigen::Vector3d &
   return residual_enu_m.x() * residual_enu_m.x() / variances.x() +
          residual_enu_m.y() * residual_enu_m.y() / variances.y() +
          residual_enu_m.z() * residual_enu_m.z() / variances.z();
+}
+
+double ComputeHorizontalNis(const Eigen::Vector3d &residual_enu_m, const Eigen::Vector2d &sigma_m) {
+  Eigen::Vector2d variances = sigma_m.array().square().matrix();
+  for (int axis = 0; axis < variances.size(); ++axis) {
+    variances[axis] = std::max(variances[axis], 1e-12);
+  }
+  return residual_enu_m.x() * residual_enu_m.x() / variances.x() +
+         residual_enu_m.y() * residual_enu_m.y() / variances.y();
 }
 
 double InverseNormalCdf(const double probability) {
@@ -383,9 +439,10 @@ std::optional<std::size_t> ResolveVerticalFeedbackAnchorState(
 }
 
 gtsam::SharedNoiseModel MakeVerticalRtkFeedbackNoiseModel(const OfflineRunnerConfig &config) {
-  return gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(
+  return gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4(
     config.vertical_rtk_feedback_sigma_attitude_rad,
     config.vertical_rtk_feedback_sigma_attitude_rad,
+    config.vertical_rtk_feedback_sigma_dp_m,
     config.vertical_rtk_feedback_sigma_baz_mps2));
 }
 
@@ -740,13 +797,9 @@ std::vector<SegmentErrorDiagnostic> BuildSegmentErrorDiagnostics(
   return diagnostics;
 }
 
-gtsam::SharedNoiseModel MakeGnssNoiseModel(const OfflineRunnerConfig &config, const Eigen::Vector3d &sigma_m) {
-  const gtsam::Vector3 variances(
-    sigma_m.x() * sigma_m.x(),
-    sigma_m.y() * sigma_m.y(),
-    sigma_m.z() * sigma_m.z());
-  const auto gaussian_model = gtsam::noiseModel::Diagonal::Variances(variances);
-
+gtsam::SharedNoiseModel WrapGnssNoiseModel(
+  const OfflineRunnerConfig &config,
+  const gtsam::SharedNoiseModel &gaussian_model) {
   switch (config.gnss_position_noise_model) {
     case GnssNoiseModel::kGaussian:
       return gaussian_model;
@@ -777,6 +830,21 @@ gtsam::SharedNoiseModel MakeGnssNoiseModel(const OfflineRunnerConfig &config, co
     default:
       return gaussian_model;
   }
+}
+
+gtsam::SharedNoiseModel MakeGnssNoiseModel(const OfflineRunnerConfig &config, const Eigen::Vector3d &sigma_m) {
+  const gtsam::Vector3 variances(
+    sigma_m.x() * sigma_m.x(),
+    sigma_m.y() * sigma_m.y(),
+    sigma_m.z() * sigma_m.z());
+  return WrapGnssNoiseModel(config, gtsam::noiseModel::Diagonal::Variances(variances));
+}
+
+gtsam::SharedNoiseModel MakeHorizontalGnssNoiseModel(const OfflineRunnerConfig &config, const Eigen::Vector2d &sigma_m) {
+  const gtsam::Vector2 variances(
+    sigma_m.x() * sigma_m.x(),
+    sigma_m.y() * sigma_m.y());
+  return WrapGnssNoiseModel(config, gtsam::noiseModel::Diagonal::Variances(variances));
 }
 
 std::vector<double> BuildStateTimestamps(
@@ -1848,7 +1916,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   if (config_.enable_gnss) {
     const gp::GPWNOJInterpolator base_interpolator(
       gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(kInterpolatorQcVariance)));
-    std::optional<std::size_t> previous_vertical_feedback_anchor_state;
+    VerticalRtkFeedbackWindowAccumulator vertical_feedback_window;
 
     for (std::size_t sample_index = 0; sample_index < dataset.gnss_samples.size(); ++sample_index) {
       if (sample_index <= navigation_start_index) {
@@ -1924,6 +1992,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       consistency_record.sigma_e_m = sigma_m.x();
       consistency_record.sigma_n_m = sigma_m.y();
       consistency_record.sigma_u_m = sigma_m.z();
+      const Eigen::Vector3d consistency_base_sigma_m = sigma_m;
       std::optional<gtsam::Pose3> prefit_pose;
       if (sync_result.status == StateMeasSyncStatus::kInterpolated) {
         prefit_pose = InterpolateReferenceState(reference_node_states, record.corrected_time_s).pose;
@@ -1935,22 +2004,23 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       if (collect_gnss_consistency) {
         if (prefit_pose.has_value()) {
           consistency_record.prefit_residual_enu_m = ComputePositionResidualEnu(*prefit_pose, record.measurement_enu_m);
-          consistency_record.prefit_nis = ComputeNis(consistency_record.prefit_residual_enu_m, sigma_m);
+          const double full_prefit_nis = ComputeNis(consistency_record.prefit_residual_enu_m, consistency_base_sigma_m);
+          consistency_record.prefit_nis = full_prefit_nis;
           consistency_record.covariance_scale_e = ComputeConsistencyScale(
             config_.gnss_consistency_gate_mode,
-            consistency_record.prefit_nis,
+            full_prefit_nis,
             gnss_nis_threshold,
             config_.gnss_consistency_relaxed_threshold_ratio,
             config_.gnss_consistency_max_scale_horizontal);
           consistency_record.covariance_scale_n = ComputeConsistencyScale(
             config_.gnss_consistency_gate_mode,
-            consistency_record.prefit_nis,
+            full_prefit_nis,
             gnss_nis_threshold,
             config_.gnss_consistency_relaxed_threshold_ratio,
             config_.gnss_consistency_max_scale_horizontal);
           consistency_record.covariance_scale_u = ComputeConsistencyScale(
             config_.gnss_consistency_gate_mode,
-            consistency_record.prefit_nis,
+            full_prefit_nis,
             gnss_nis_threshold,
             config_.gnss_consistency_relaxed_threshold_ratio,
             config_.gnss_consistency_max_scale_up);
@@ -1972,25 +2042,67 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         const bool inside_gate =
           std::abs(consistency_record.prefit_residual_enu_m.z()) <= consistency_record.vertical_gate_threshold_m;
         consistency_record.vertical_gate_inside = inside_gate ? 1.0 : 0.0;
+        if (inside_gate && prefit_pose.has_value()) {
+          const double horizontal_prefit_nis = ComputeHorizontalNis(
+            consistency_record.prefit_residual_enu_m,
+            Eigen::Vector2d(consistency_base_sigma_m.x(), consistency_base_sigma_m.y()));
+          consistency_record.prefit_nis = horizontal_prefit_nis;
+          consistency_record.covariance_scale_e = ComputeConsistencyScale(
+            config_.gnss_consistency_gate_mode,
+            horizontal_prefit_nis,
+            gnss_nis_threshold,
+            config_.gnss_consistency_relaxed_threshold_ratio,
+            config_.gnss_consistency_max_scale_horizontal);
+          consistency_record.covariance_scale_n = ComputeConsistencyScale(
+            config_.gnss_consistency_gate_mode,
+            horizontal_prefit_nis,
+            gnss_nis_threshold,
+            config_.gnss_consistency_relaxed_threshold_ratio,
+            config_.gnss_consistency_max_scale_horizontal);
+          consistency_record.covariance_scale =
+            (consistency_record.covariance_scale_e + consistency_record.covariance_scale_n +
+             consistency_record.covariance_scale_u) /
+            3.0;
+          sigma_m.x() = consistency_base_sigma_m.x() * consistency_record.covariance_scale_e;
+          sigma_m.y() = consistency_base_sigma_m.y() * consistency_record.covariance_scale_n;
+        }
         sigma_m.z() *= inside_gate
                          ? config_.vertical_rtk_inside_gate_sigma_scale
                          : config_.vertical_rtk_outside_gate_sigma_scale;
       }
-      consistency_record.vertical_sigma_u_used_m = sigma_m.z();
+      const bool use_horizontal_only_position_factor =
+        config_.enable_vertical_rtk_preintegration_feedback && consistency_record.vertical_gate_inside >= 0.5;
+      consistency_record.vertical_direct_position_factor_used = !use_horizontal_only_position_factor;
+      consistency_record.vertical_sigma_u_used_m =
+        consistency_record.vertical_direct_position_factor_used
+          ? sigma_m.z()
+          : std::numeric_limits<double>::quiet_NaN();
       const auto noise_model = MakeGnssNoiseModel(config_, sigma_m);
+      const Eigen::Vector2d horizontal_sigma_m(sigma_m.x(), sigma_m.y());
+      const auto horizontal_noise_model =
+        use_horizontal_only_position_factor
+          ? MakeHorizontalGnssNoiseModel(config_, horizontal_sigma_m)
+          : gtsam::SharedNoiseModel{};
 
       switch (sync_result.status) {
         case StateMeasSyncStatus::kSynchronizedI:
         case StateMeasSyncStatus::kSynchronizedJ: {
           const std::size_t sync_state_index =
             sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i : sync_result.key_index_j;
-          graph.add(gtsam::GPSFactor(
-            X(sync_state_index),
-            gtsam::Point3(
-              record.measurement_enu_m.x(),
-              record.measurement_enu_m.y(),
-              record.measurement_enu_m.z()),
-            noise_model));
+          if (use_horizontal_only_position_factor) {
+            graph.add(factor::HorizontalPositionFactor(
+              X(sync_state_index),
+              gtsam::Point2(record.measurement_enu_m.x(), record.measurement_enu_m.y()),
+              horizontal_noise_model));
+          } else {
+            graph.add(gtsam::GPSFactor(
+              X(sync_state_index),
+              gtsam::Point3(
+                record.measurement_enu_m.x(),
+                record.measurement_enu_m.y(),
+                record.measurement_enu_m.z()),
+              noise_model));
+          }
           ++run_result.run_summary.gnss_factor_count;
           ++run_result.run_summary.gnss_synced_factor_count;
           record.factor_used = true;
@@ -2015,20 +2127,34 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           interpolator.Recalculate(
             sync_result.timestamp_j_s - sync_result.timestamp_i_s,
             sync_result.duration_from_state_i_s);
-          graph.add(factor::GPInterpolatedGPSFactor(
-            X(sync_result.key_index_i),
-            V(sync_result.key_index_i),
-            W(sync_result.key_index_i),
-            X(sync_result.key_index_j),
-            V(sync_result.key_index_j),
-            W(sync_result.key_index_j),
-            gtsam::Point3(
-              record.measurement_enu_m.x(),
-              record.measurement_enu_m.y(),
-              record.measurement_enu_m.z()),
-            gtsam::Vector3::Zero(),
-            noise_model,
-            interpolator));
+          if (use_horizontal_only_position_factor) {
+            graph.add(factor::GPInterpolatedHorizontalPositionFactor(
+              X(sync_result.key_index_i),
+              V(sync_result.key_index_i),
+              W(sync_result.key_index_i),
+              X(sync_result.key_index_j),
+              V(sync_result.key_index_j),
+              W(sync_result.key_index_j),
+              gtsam::Point2(record.measurement_enu_m.x(), record.measurement_enu_m.y()),
+              gtsam::Vector3::Zero(),
+              horizontal_noise_model,
+              interpolator));
+          } else {
+            graph.add(factor::GPInterpolatedGPSFactor(
+              X(sync_result.key_index_i),
+              V(sync_result.key_index_i),
+              W(sync_result.key_index_i),
+              X(sync_result.key_index_j),
+              V(sync_result.key_index_j),
+              W(sync_result.key_index_j),
+              gtsam::Point3(
+                record.measurement_enu_m.x(),
+                record.measurement_enu_m.y(),
+                record.measurement_enu_m.z()),
+              gtsam::Vector3::Zero(),
+              noise_model,
+              interpolator));
+          }
           ++run_result.run_summary.gnss_factor_count;
           ++run_result.run_summary.gnss_interpolated_factor_count;
           record.factor_used = true;
@@ -2061,7 +2187,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
 
       if (config_.enable_vertical_rtk_preintegration_feedback &&
           record.factor_used &&
-          std::isfinite(consistency_record.vertical_gate_inside)) {
+          std::isfinite(consistency_record.vertical_gate_inside) &&
+          std::isfinite(consistency_record.prefit_residual_enu_m.z())) {
         if (consistency_record.vertical_gate_inside >= 0.5) {
           ++run_result.run_summary.vertical_gate_inside_count;
         } else {
@@ -2071,49 +2198,71 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         const auto feedback_anchor_state =
           ResolveVerticalFeedbackAnchorState(record, graph_timeline.dynamic_start_index);
         if (feedback_anchor_state.has_value()) {
-          if (previous_vertical_feedback_anchor_state.has_value() &&
-              *feedback_anchor_state > *previous_vertical_feedback_anchor_state) {
-            const std::size_t state_index_i = *previous_vertical_feedback_anchor_state;
+          const double sample_feedback_gain_scale =
+            consistency_record.vertical_gate_inside >= 0.5
+              ? config_.vertical_rtk_inside_feedback_gain_scale
+              : config_.vertical_rtk_outside_feedback_gain_scale;
+          if (!vertical_feedback_window.start_state_index.has_value()) {
+            vertical_feedback_window.Start(
+              *feedback_anchor_state,
+              consistency_record.prefit_residual_enu_m.z(),
+              sample_feedback_gain_scale);
+          } else if (*feedback_anchor_state == *vertical_feedback_window.start_state_index) {
+            vertical_feedback_window.UpdateStartAnchor(
+              consistency_record.prefit_residual_enu_m.z(),
+              sample_feedback_gain_scale);
+          } else {
+            vertical_feedback_window.AccumulateFutureAnchor(
+              consistency_record.prefit_residual_enu_m.z(),
+              sample_feedback_gain_scale);
+          }
+
+          if (*feedback_anchor_state > *vertical_feedback_window.start_state_index &&
+              vertical_feedback_window.HasSamples()) {
+            const std::size_t state_index_i = *vertical_feedback_window.start_state_index;
             const std::size_t state_index_j = *feedback_anchor_state;
             const double segment_start_time_s = state_timestamps[state_index_i];
             const double segment_end_time_s = state_timestamps[state_index_j];
             const double delta_time_s = std::max(segment_end_time_s - segment_start_time_s, 1e-6);
-            const double feedback_gain_scale =
-              consistency_record.vertical_gate_inside >= 0.5
-                ? config_.vertical_rtk_inside_feedback_gain_scale
-                : config_.vertical_rtk_outside_feedback_gain_scale;
-            const auto imu_window = IntegrateImuWindow(
-              dataset.imu_samples,
-              segment_start_time_s,
-              segment_end_time_s,
-              imu_params,
-              reference_node_states[state_index_i].bias);
-            const double target_baz_mps2 =
-              -feedback_gain_scale * config_.vertical_rtk_feedback_bias_gain *
-              consistency_record.prefit_residual_enu_m.z() /
-              (delta_time_s * delta_time_s);
-            const double feedback_attitude_scale =
-              feedback_gain_scale * config_.vertical_rtk_feedback_attitude_gain;
-            graph.add(factor::VerticalRtkPreintegrationFeedbackFactor(
-              X(state_index_i),
-              V(state_index_i),
-              B(state_index_i),
-              X(state_index_j),
-              V(state_index_j),
-              B(state_index_j),
-              global_acc_bias_key,
-              imu_window.preintegrated_imu_measurements,
-              ComputeBiasDecay(delta_time_s, config_.vertical_acc_bias_tau_s),
-              delta_time_s,
-              consistency_record.prefit_residual_enu_m.z(),
-              feedback_gain_scale,
-              config_.vertical_rtk_feedback_bias_gain,
-              config_.vertical_rtk_feedback_attitude_gain,
-              vertical_rtk_feedback_noise_model));
-            consistency_record.vertical_feedback_target_baz_mps2 = target_baz_mps2;
-            consistency_record.vertical_feedback_attitude_scale = feedback_attitude_scale;
+            if (delta_time_s >= config_.vertical_rtk_feedback_min_interval_s) {
+              const double feedback_vertical_residual_m =
+                vertical_feedback_window.ResidualDriftM();
+              const double feedback_gain_scale = vertical_feedback_window.MeanFeedbackGainScale();
+              const auto imu_window = IntegrateImuWindow(
+                dataset.imu_samples,
+                segment_start_time_s,
+                segment_end_time_s,
+                imu_params,
+                reference_node_states[state_index_i].bias);
+              const double target_baz_mps2 =
+                -feedback_gain_scale * config_.vertical_rtk_feedback_bias_gain * feedback_vertical_residual_m /
+                (delta_time_s * delta_time_s);
+              const double feedback_attitude_scale =
+                feedback_gain_scale * config_.vertical_rtk_feedback_attitude_gain;
+              graph.add(factor::VerticalRtkPreintegrationFeedbackFactor(
+                X(state_index_i),
+                V(state_index_i),
+                B(state_index_i),
+                X(state_index_j),
+                V(state_index_j),
+                B(state_index_j),
+                global_acc_bias_key,
+                imu_window.preintegrated_imu_measurements,
+                ComputeBiasDecay(delta_time_s, config_.vertical_acc_bias_tau_s),
+                delta_time_s,
+                feedback_vertical_residual_m,
+                feedback_gain_scale,
+                config_.vertical_rtk_feedback_bias_gain,
+                config_.vertical_rtk_feedback_attitude_gain,
+                vertical_rtk_feedback_noise_model));
+              consistency_record.vertical_feedback_target_baz_mps2 = target_baz_mps2;
+              consistency_record.vertical_feedback_attitude_scale = feedback_attitude_scale;
+              vertical_feedback_window.Start(
+                *feedback_anchor_state,
+                consistency_record.prefit_residual_enu_m.z(),
+                sample_feedback_gain_scale);
+            }
           }
-          previous_vertical_feedback_anchor_state = *feedback_anchor_state;
         }
       }
 
@@ -2249,14 +2398,24 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           record.sync_status == StateMeasSyncStatus::kSynchronizedJ) {
         const auto pose = optimized_values.at<gtsam::Pose3>(X(record.synchronized_state_index));
         const Eigen::Vector3d residual_enu_m = ComputePositionResidualEnu(pose, record.measurement_enu_m);
-        record.residual_m = residual_enu_m.norm();
+        const bool use_vertical_direct_position =
+          consistency_record == nullptr || consistency_record->vertical_direct_position_factor_used;
+        record.residual_m =
+          use_vertical_direct_position ? residual_enu_m.norm() : residual_enu_m.head<2>().norm();
         if (consistency_record != nullptr) {
           consistency_record->postfit_residual_enu_m = residual_enu_m;
-          const Eigen::Vector3d scaled_sigma_m(
+          const Eigen::Vector2d scaled_horizontal_sigma_m(
             consistency_record->sigma_e_m * consistency_record->covariance_scale_e,
-            consistency_record->sigma_n_m * consistency_record->covariance_scale_n,
-            consistency_record->vertical_sigma_u_used_m);
-          consistency_record->postfit_nis = ComputeNis(residual_enu_m, scaled_sigma_m);
+            consistency_record->sigma_n_m * consistency_record->covariance_scale_n);
+          if (use_vertical_direct_position) {
+            const Eigen::Vector3d scaled_sigma_m(
+              scaled_horizontal_sigma_m.x(),
+              scaled_horizontal_sigma_m.y(),
+              consistency_record->vertical_sigma_u_used_m);
+            consistency_record->postfit_nis = ComputeNis(residual_enu_m, scaled_sigma_m);
+          } else {
+            consistency_record->postfit_nis = ComputeHorizontalNis(residual_enu_m, scaled_horizontal_sigma_m);
+          }
         }
         if (record.synchronized_state_index < trajectory_row_index_by_state.size() &&
             trajectory_row_index_by_state[record.synchronized_state_index].has_value()) {
@@ -2278,14 +2437,24 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           optimized_values.at<gtsam::Vector3>(V(record.state_index_j)),
           optimized_values.at<gtsam::Vector3>(W(record.state_index_j)));
         const Eigen::Vector3d residual_enu_m = ComputePositionResidualEnu(interpolated_pose, record.measurement_enu_m);
-        record.residual_m = residual_enu_m.norm();
+        const bool use_vertical_direct_position =
+          consistency_record == nullptr || consistency_record->vertical_direct_position_factor_used;
+        record.residual_m =
+          use_vertical_direct_position ? residual_enu_m.norm() : residual_enu_m.head<2>().norm();
         if (consistency_record != nullptr) {
           consistency_record->postfit_residual_enu_m = residual_enu_m;
-          const Eigen::Vector3d scaled_sigma_m(
+          const Eigen::Vector2d scaled_horizontal_sigma_m(
             consistency_record->sigma_e_m * consistency_record->covariance_scale_e,
-            consistency_record->sigma_n_m * consistency_record->covariance_scale_n,
-            consistency_record->vertical_sigma_u_used_m);
-          consistency_record->postfit_nis = ComputeNis(residual_enu_m, scaled_sigma_m);
+            consistency_record->sigma_n_m * consistency_record->covariance_scale_n);
+          if (use_vertical_direct_position) {
+            const Eigen::Vector3d scaled_sigma_m(
+              scaled_horizontal_sigma_m.x(),
+              scaled_horizontal_sigma_m.y(),
+              consistency_record->vertical_sigma_u_used_m);
+            consistency_record->postfit_nis = ComputeNis(residual_enu_m, scaled_sigma_m);
+          } else {
+            consistency_record->postfit_nis = ComputeHorizontalNis(residual_enu_m, scaled_horizontal_sigma_m);
+          }
         }
         if (record.state_index_i < trajectory_row_index_by_state.size() &&
             trajectory_row_index_by_state[record.state_index_i].has_value()) {
@@ -2317,7 +2486,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           record.sigma_e_m * record.covariance_scale_e,
           record.sigma_n_m * record.covariance_scale_n,
           record.vertical_sigma_u_used_m);
-        for (int axis = 0; axis < 3; ++axis) {
+        const int axis_limit = record.vertical_direct_position_factor_used ? 3 : 2;
+        for (int axis = 0; axis < axis_limit; ++axis) {
           if (!std::isfinite(scaled_sigma_m[axis]) || scaled_sigma_m[axis] <= 0.0 ||
               !std::isfinite(record.postfit_residual_enu_m[axis])) {
             continue;

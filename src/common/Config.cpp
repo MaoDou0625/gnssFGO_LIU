@@ -237,10 +237,14 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_rtk_feedback_bias_gain = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_rtk_feedback_attitude_gain") {
     config.vertical_rtk_feedback_attitude_gain = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_rtk_feedback_sigma_dp_m") {
+    config.vertical_rtk_feedback_sigma_dp_m = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_rtk_feedback_sigma_baz_mps2") {
     config.vertical_rtk_feedback_sigma_baz_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_rtk_feedback_sigma_attitude_rad") {
     config.vertical_rtk_feedback_sigma_attitude_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_rtk_feedback_min_interval_s") {
+    config.vertical_rtk_feedback_min_interval_s = ParseDouble(normalized_value);
   } else if (normalized_key == "reserve_vertical_velocity_feedback_interface") {
     config.reserve_vertical_velocity_feedback_interface = ParseBool(normalized_value);
   } else if (
@@ -560,9 +564,13 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     if (config.vertical_rtk_feedback_bias_gain < 0.0 || config.vertical_rtk_feedback_attitude_gain < 0.0) {
       throw std::runtime_error("vertical RTK feedback gains must be non-negative");
     }
-    if (config.vertical_rtk_feedback_sigma_baz_mps2 <= 0.0 ||
+    if (config.vertical_rtk_feedback_sigma_dp_m <= 0.0 ||
+        config.vertical_rtk_feedback_sigma_baz_mps2 <= 0.0 ||
         config.vertical_rtk_feedback_sigma_attitude_rad <= 0.0) {
       throw std::runtime_error("vertical RTK feedback sigmas must be positive");
+    }
+    if (config.vertical_rtk_feedback_min_interval_s < 0.0) {
+      throw std::runtime_error("vertical_rtk_feedback_min_interval_s must be non-negative");
     }
     if (config.static_alignment_duration_s < 0.0) {
       throw std::runtime_error("static_alignment_duration_s must be non-negative");
@@ -781,9 +789,13 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
   if (config.vertical_rtk_feedback_bias_gain < 0.0 || config.vertical_rtk_feedback_attitude_gain < 0.0) {
     throw std::runtime_error("vertical RTK feedback gains must be non-negative");
   }
-  if (config.vertical_rtk_feedback_sigma_baz_mps2 <= 0.0 ||
+  if (config.vertical_rtk_feedback_sigma_dp_m <= 0.0 ||
+      config.vertical_rtk_feedback_sigma_baz_mps2 <= 0.0 ||
       config.vertical_rtk_feedback_sigma_attitude_rad <= 0.0) {
     throw std::runtime_error("vertical RTK feedback sigmas must be positive");
+  }
+  if (config.vertical_rtk_feedback_min_interval_s < 0.0) {
+    throw std::runtime_error("vertical_rtk_feedback_min_interval_s must be non-negative");
   }
   if (config.static_alignment_duration_s < 0.0) {
     throw std::runtime_error("static_alignment_duration_s must be non-negative");
@@ -870,8 +882,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "vertical_rtk_outside_feedback_gain_scale=" << config.vertical_rtk_outside_feedback_gain_scale << '\n'
       << "vertical_rtk_feedback_bias_gain=" << config.vertical_rtk_feedback_bias_gain << '\n'
       << "vertical_rtk_feedback_attitude_gain=" << config.vertical_rtk_feedback_attitude_gain << '\n'
+      << "vertical_rtk_feedback_sigma_dp_m=" << config.vertical_rtk_feedback_sigma_dp_m << '\n'
       << "vertical_rtk_feedback_sigma_baz_mps2=" << config.vertical_rtk_feedback_sigma_baz_mps2 << '\n'
       << "vertical_rtk_feedback_sigma_attitude_rad=" << config.vertical_rtk_feedback_sigma_attitude_rad << '\n'
+      << "vertical_rtk_feedback_min_interval_s=" << config.vertical_rtk_feedback_min_interval_s << '\n'
       << "reserve_vertical_velocity_feedback_interface="
       << (config.reserve_vertical_velocity_feedback_interface ? "true" : "false") << '\n'
       << "enable_reweighted_combined_imu_factor="

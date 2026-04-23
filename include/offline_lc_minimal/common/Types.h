@@ -347,6 +347,7 @@ struct GnssConsistencyRecord {
   double vertical_gate_threshold_m = std::numeric_limits<double>::quiet_NaN();
   double vertical_gate_inside = std::numeric_limits<double>::quiet_NaN();
   double vertical_sigma_u_used_m = std::numeric_limits<double>::quiet_NaN();
+  bool vertical_direct_position_factor_used = false;
   double vertical_feedback_target_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
   double vertical_feedback_attitude_scale = std::numeric_limits<double>::quiet_NaN();
   double vertical_reference_up_m = std::numeric_limits<double>::quiet_NaN();

@@ -32,10 +32,12 @@ class VerticalRtkPreintegrationFeedbackFactor
         imu_factor_(pose_i_key, vel_i_key, pose_j_key, vel_j_key, bias_i_key, preintegrated_measurements),
         phi_vertical_acc_(phi_vertical_acc),
         delta_time_s_(std::max(delta_time_s, 1e-6)),
+        vertical_rtk_residual_m_(vertical_rtk_residual_m),
         target_baz_mps2_(
           -feedback_gain_scale * vertical_rtk_feedback_bias_gain * vertical_rtk_residual_m /
           (delta_time_s_ * delta_time_s_)),
-        attitude_scale_(feedback_gain_scale * vertical_rtk_feedback_attitude_gain) {}
+        attitude_scale_(feedback_gain_scale * vertical_rtk_feedback_attitude_gain),
+        position_scale_(feedback_gain_scale) {}
 
   [[nodiscard]] gtsam::NonlinearFactor::shared_ptr clone() const override {
     return boost::static_pointer_cast<gtsam::NonlinearFactor>(
@@ -112,42 +114,45 @@ class VerticalRtkPreintegrationFeedbackFactor
       h3 ? boost::optional<gtsam::Matrix &>(h_bias_i_imu) : boost::none);
 
     const gtsam::Vector3 dtheta_rad = imu_error.segment<3>(0);
+    const gtsam::Vector3 dp_m = imu_error.segment<3>(3);
     const double mean_baz = global_acc_bias.z();
     const double predicted_baz = mean_baz + phi_vertical_acc_ * (bias_i.accelerometer().z() - mean_baz);
 
-    gtsam::Vector3 residual = gtsam::Vector3::Zero();
+    gtsam::Vector4 residual = gtsam::Vector4::Zero();
     residual.x() = attitude_scale_ * dtheta_rad.x();
     residual.y() = attitude_scale_ * dtheta_rad.y();
-    residual.z() = bias_j.accelerometer().z() - predicted_baz - target_baz_mps2_;
+    residual.z() = position_scale_ * (dp_m.z() + vertical_rtk_residual_m_);
+    residual.w() = bias_j.accelerometer().z() - predicted_baz - target_baz_mps2_;
 
     if (h1) {
-      *h1 = ComposeAttitudeJacobian(h_pose_i_imu);
+      *h1 = ComposeFeedbackJacobian(h_pose_i_imu);
     }
     if (h2) {
-      *h2 = ComposeAttitudeJacobian(h_vel_i_imu);
+      *h2 = ComposeFeedbackJacobian(h_vel_i_imu);
     }
     if (h3) {
-      gtsam::Matrix jacobian = gtsam::Matrix::Zero(3, 6);
+      gtsam::Matrix jacobian = gtsam::Matrix::Zero(4, 6);
       if (h_bias_i_imu.rows() == 9 && h_bias_i_imu.cols() == 6) {
         jacobian.block(0, 0, 2, 6) = attitude_scale_ * h_bias_i_imu.block(0, 0, 2, 6);
+        jacobian.block(2, 0, 1, 6) = position_scale_ * h_bias_i_imu.block(5, 0, 1, 6);
       }
-      jacobian(2, 2) = -phi_vertical_acc_;
+      jacobian(3, 2) = -phi_vertical_acc_;
       *h3 = jacobian;
     }
     if (h4) {
-      *h4 = ComposeAttitudeJacobian(h_pose_j_imu);
+      *h4 = ComposeFeedbackJacobian(h_pose_j_imu);
     }
     if (h5) {
-      *h5 = ComposeAttitudeJacobian(h_vel_j_imu);
+      *h5 = ComposeFeedbackJacobian(h_vel_j_imu);
     }
     if (h6) {
-      gtsam::Matrix jacobian = gtsam::Matrix::Zero(3, 6);
-      jacobian(2, 2) = 1.0;
+      gtsam::Matrix jacobian = gtsam::Matrix::Zero(4, 6);
+      jacobian(3, 2) = 1.0;
       *h6 = jacobian;
     }
     if (h7) {
-      gtsam::Matrix jacobian = gtsam::Matrix::Zero(3, 3);
-      jacobian(2, 2) = -(1.0 - phi_vertical_acc_);
+      gtsam::Matrix jacobian = gtsam::Matrix::Zero(4, 3);
+      jacobian(3, 2) = -(1.0 - phi_vertical_acc_);
       *h7 = jacobian;
     }
 
@@ -155,20 +160,23 @@ class VerticalRtkPreintegrationFeedbackFactor
   }
 
  private:
-  [[nodiscard]] gtsam::Matrix ComposeAttitudeJacobian(const gtsam::Matrix &imu_jacobian) const {
-    gtsam::Matrix jacobian = gtsam::Matrix::Zero(3, imu_jacobian.cols());
+  [[nodiscard]] gtsam::Matrix ComposeFeedbackJacobian(const gtsam::Matrix &imu_jacobian) const {
+    gtsam::Matrix jacobian = gtsam::Matrix::Zero(4, imu_jacobian.cols());
     if (imu_jacobian.rows() != 9) {
       return jacobian;
     }
     jacobian.block(0, 0, 2, imu_jacobian.cols()) = attitude_scale_ * imu_jacobian.block(0, 0, 2, imu_jacobian.cols());
+    jacobian.block(2, 0, 1, imu_jacobian.cols()) = position_scale_ * imu_jacobian.block(5, 0, 1, imu_jacobian.cols());
     return jacobian;
   }
 
   gtsam::ImuFactor imu_factor_;
   double phi_vertical_acc_ = 1.0;
   double delta_time_s_ = 1e-6;
+  double vertical_rtk_residual_m_ = 0.0;
   double target_baz_mps2_ = 0.0;
   double attitude_scale_ = 0.0;
+  double position_scale_ = 0.0;
 };
 
 }  // namespace offline_lc_minimal::factor

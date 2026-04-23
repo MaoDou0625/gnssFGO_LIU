@@ -52,8 +52,10 @@ struct OfflineRunnerConfig {
   double vertical_rtk_outside_feedback_gain_scale = 1.0;
   double vertical_rtk_feedback_bias_gain = 1e-4;
   double vertical_rtk_feedback_attitude_gain = 1e-3;
+  double vertical_rtk_feedback_sigma_dp_m = 5.0;
   double vertical_rtk_feedback_sigma_baz_mps2 = 10.0;
   double vertical_rtk_feedback_sigma_attitude_rad = 1.0;
+  double vertical_rtk_feedback_min_interval_s = 1.0;
   bool reserve_vertical_velocity_feedback_interface = false;
   bool enable_reweighted_combined_imu_factor = false;
   double reweighted_combined_imu_attitude_sigma_rad = 1e-3;

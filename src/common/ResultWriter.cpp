@@ -271,7 +271,8 @@ void WriteGnssConsistencyCsv(
   stream
     << "sample_index,raw_time_s,corrected_time_s,factor_used,fix_type,sync_status,raw_sigma_h_m,"
        "sigma_e_m,sigma_n_m,sigma_u_m,effective_sigma_u_m,vertical_gate_threshold_m,vertical_gate_inside,"
-       "vertical_sigma_u_used_m,vertical_feedback_target_baz_mps2,vertical_feedback_attitude_scale,"
+       "vertical_sigma_u_used_m,vertical_direct_position_factor_used,"
+       "vertical_feedback_target_baz_mps2,vertical_feedback_attitude_scale,"
        "vertical_reference_up_m,vertical_reference_used,"
        "covariance_scale,covariance_scale_e,covariance_scale_n,covariance_scale_u,"
        "prefit_residual_e_m,prefit_residual_n_m,prefit_residual_u_m,postfit_residual_e_m,"
@@ -291,6 +292,7 @@ void WriteGnssConsistencyCsv(
            << row.vertical_gate_threshold_m << ','
            << row.vertical_gate_inside << ','
            << row.vertical_sigma_u_used_m << ','
+           << (row.vertical_direct_position_factor_used ? 1 : 0) << ','
            << row.vertical_feedback_target_baz_mps2 << ','
            << row.vertical_feedback_attitude_scale << ','
            << row.vertical_reference_up_m << ','

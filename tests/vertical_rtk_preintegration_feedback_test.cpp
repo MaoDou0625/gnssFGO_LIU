@@ -10,12 +10,14 @@
 #include <gtsam/navigation/ImuFactor.h>
 
 #include "offline_lc_minimal/common/Config.h"
+#include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/VerticalRtkPreintegrationFeedbackFactor.h"
 
 namespace {
 
 using offline_lc_minimal::DefaultConfig;
 using offline_lc_minimal::LoadConfigFile;
+using offline_lc_minimal::factor::HorizontalPositionFactor;
 using offline_lc_minimal::factor::VerticalRtkPreintegrationFeedbackFactor;
 
 template <typename Function>
@@ -108,7 +110,7 @@ VerticalRtkPreintegrationFeedbackFactor MakeFactor(
     gain_scale,
     2.0,
     3.0,
-    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(1e-3, 1e-3, 1e-4)));
+    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4(1e-3, 1e-3, 1e-2, 1e-4)));
 }
 
 void TestVerticalFeedbackRequiresGnss() {
@@ -166,6 +168,54 @@ void TestReserveVerticalVelocityInterfaceIsAccepted() {
   ExpectTrue(config.enable_vertical_rtk_preintegration_feedback, "vertical RTK feedback should remain enabled");
 }
 
+void TestVerticalFeedbackMinIntervalLoads() {
+  const auto config_path = WriteTempConfig(
+    MakeVerticalFeedbackConfigPrefix() + "vertical_rtk_feedback_min_interval_s=2.5\n",
+    "vertical_rtk_feedback_min_interval.cfg");
+  const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
+  std::filesystem::remove(config_path);
+  ExpectNear(
+    config.vertical_rtk_feedback_min_interval_s,
+    2.5,
+    1e-12,
+    "vertical RTK feedback minimum interval should load");
+}
+
+void TestVerticalFeedbackRejectsNegativeMinInterval() {
+  const auto config_path = WriteTempConfig(
+    MakeVerticalFeedbackConfigPrefix() + "vertical_rtk_feedback_min_interval_s=-0.1\n",
+    "vertical_rtk_feedback_negative_min_interval.cfg");
+  bool threw = false;
+  try {
+    [[maybe_unused]] const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  std::filesystem::remove(config_path);
+  ExpectTrue(threw, "vertical RTK feedback should reject a negative minimum interval");
+}
+
+void TestHorizontalPositionFactorIgnoresVerticalTranslation() {
+  const HorizontalPositionFactor factor(
+    1,
+    gtsam::Point2(1.0, 2.0),
+    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector2(0.1, 0.2)));
+  const gtsam::Pose3 pose(
+    gtsam::Rot3::RzRyRx(0.2, -0.1, 0.05),
+    gtsam::Point3(1.1, 1.8, 9.5));
+  gtsam::Matrix jacobian;
+  const gtsam::Vector residual = factor.evaluateError(pose, jacobian);
+  ExpectNear(residual[0], 0.1, 1e-12, "horizontal factor should use east translation");
+  ExpectNear(residual[1], -0.2, 1e-12, "horizontal factor should use north translation");
+  ExpectTrue(jacobian.rows() == 2 && jacobian.cols() == 6, "horizontal factor Jacobian shape should be 2x6");
+  const auto numerical_jacobian =
+    gtsam::numericalDerivative11<gtsam::Vector, gtsam::Pose3>(
+      [&](const gtsam::Pose3 &value) { return factor.evaluateError(value); },
+      pose,
+      1e-6);
+  ExpectMatrixNear(jacobian, numerical_jacobian, 5e-5, "horizontal factor Jacobian should match numerical derivative");
+}
+
 void TestPureYawLeavesRollPitchFeedbackResidualZero() {
   const auto measurements = MakeZeroPreintegratedMeasurements();
   const auto factor = MakeFactor(measurements, 1.0, 0.0);
@@ -199,7 +249,22 @@ void TestGainScaleAmplifiesAttitudeAndBiasTargets() {
 
   ExpectNear(high_gain_residual[0], 2.0 * low_gain_residual[0], 1e-9, "gain scale should double roll residual");
   ExpectNear(high_gain_residual[1], 2.0 * low_gain_residual[1], 1e-9, "gain scale should double pitch residual");
-  ExpectNear(high_gain_residual[2], 2.0 * low_gain_residual[2], 1e-9, "gain scale should double baz target");
+  ExpectNear(high_gain_residual[2], 2.0 * low_gain_residual[2], 1e-9, "gain scale should double dp_z residual");
+  ExpectNear(high_gain_residual[3], 2.0 * low_gain_residual[3], 1e-9, "gain scale should double baz target");
+}
+
+void TestVerticalResidualFeedsDpZRow() {
+  const auto measurements = MakeZeroPreintegratedMeasurements();
+  const auto factor = MakeFactor(measurements, 1.5, 0.2);
+  const gtsam::Vector residual = factor.evaluateError(
+    gtsam::Pose3(),
+    gtsam::Vector3::Zero(),
+    gtsam::imuBias::ConstantBias(),
+    gtsam::Pose3(),
+    gtsam::Vector3::Zero(),
+    gtsam::imuBias::ConstantBias(),
+    gtsam::Vector3::Zero());
+  ExpectNear(residual[2], 0.3, 1e-9, "vertical residual should drive the dp_z row");
 }
 
 void TestJacobianMatchesNumericalDerivative() {
@@ -306,8 +371,12 @@ int main() {
     RunTest("TestVerticalFeedbackRequiresVerticalGmBiasProcess", TestVerticalFeedbackRequiresVerticalGmBiasProcess);
     RunTest("TestVerticalFeedbackRejectsSegmentFeedbackCompatibility", TestVerticalFeedbackRejectsSegmentFeedbackCompatibility);
     RunTest("TestReserveVerticalVelocityInterfaceIsAccepted", TestReserveVerticalVelocityInterfaceIsAccepted);
+    RunTest("TestVerticalFeedbackMinIntervalLoads", TestVerticalFeedbackMinIntervalLoads);
+    RunTest("TestVerticalFeedbackRejectsNegativeMinInterval", TestVerticalFeedbackRejectsNegativeMinInterval);
+    RunTest("TestHorizontalPositionFactorIgnoresVerticalTranslation", TestHorizontalPositionFactorIgnoresVerticalTranslation);
     RunTest("TestPureYawLeavesRollPitchFeedbackResidualZero", TestPureYawLeavesRollPitchFeedbackResidualZero);
     RunTest("TestGainScaleAmplifiesAttitudeAndBiasTargets", TestGainScaleAmplifiesAttitudeAndBiasTargets);
+    RunTest("TestVerticalResidualFeedsDpZRow", TestVerticalResidualFeedsDpZRow);
     RunTest("TestJacobianMatchesNumericalDerivative", TestJacobianMatchesNumericalDerivative);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
