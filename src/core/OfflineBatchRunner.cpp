@@ -265,6 +265,11 @@ double ComputeHorizontalNis(const Eigen::Vector3d &residual_enu_m, const Eigen::
          residual_enu_m.y() * residual_enu_m.y() / variances.y();
 }
 
+double ComputeVerticalNis(const double residual_u_m, const double sigma_u_m) {
+  const double variance = std::max(sigma_u_m * sigma_u_m, 1e-12);
+  return residual_u_m * residual_u_m / variance;
+}
+
 double InverseNormalCdf(const double probability) {
   if (probability <= 0.0 || probability >= 1.0) {
     throw std::runtime_error("inverse normal CDF requires probability in (0, 1)");
@@ -309,6 +314,11 @@ double InverseNormalCdf(const double probability) {
   const double r = q * q;
   return (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q /
          (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1.0);
+}
+
+double ChiSquareQuantile1D(const double confidence) {
+  const double z = InverseNormalCdf(0.5 * (1.0 + confidence));
+  return z * z;
 }
 
 double ChiSquareQuantile3D(const double confidence) {
@@ -1904,9 +1914,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     (collect_error_diagnostics || collect_segment_error_diagnostics ||
      config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone ||
      config_.enable_vertical_rtk_preintegration_feedback);
+  const bool use_vertical_rtk_1d_nis_gate = config_.enable_vertical_rtk_preintegration_feedback;
   const double gnss_nis_threshold =
     config_.gnss_consistency_gate_mode == GnssConsistencyGateMode::kNis
       ? ChiSquareQuantile3D(config_.gnss_nis_confidence)
+      : std::numeric_limits<double>::quiet_NaN();
+  const double vertical_gate_nis_threshold =
+    use_vertical_rtk_1d_nis_gate
+      ? ChiSquareQuantile1D(config_.gnss_nis_confidence)
       : std::numeric_limits<double>::quiet_NaN();
   const gtsam::SharedNoiseModel vertical_rtk_feedback_noise_model =
     config_.enable_vertical_rtk_preintegration_feedback
@@ -1984,7 +1999,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       }
       const Eigen::Vector3d base_sigma_m = ClampGnssSigma(gnss_sample);
       Eigen::Vector3d sigma_m = base_sigma_m;
-      if (config_.early_gnss_relaxation_duration_s > 0.0 &&
+      if (!use_vertical_rtk_1d_nis_gate &&
+          config_.early_gnss_relaxation_duration_s > 0.0 &&
           elapsed_s < config_.early_gnss_relaxation_duration_s) {
         const double alpha = 1.0 - (elapsed_s / config_.early_gnss_relaxation_duration_s);
         sigma_m *= 1.0 + alpha * (config_.early_gnss_relaxation_scale - 1.0);
@@ -2004,68 +2020,57 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       if (collect_gnss_consistency) {
         if (prefit_pose.has_value()) {
           consistency_record.prefit_residual_enu_m = ComputePositionResidualEnu(*prefit_pose, record.measurement_enu_m);
-          const double full_prefit_nis = ComputeNis(consistency_record.prefit_residual_enu_m, consistency_base_sigma_m);
-          consistency_record.prefit_nis = full_prefit_nis;
-          consistency_record.covariance_scale_e = ComputeConsistencyScale(
-            config_.gnss_consistency_gate_mode,
-            full_prefit_nis,
-            gnss_nis_threshold,
-            config_.gnss_consistency_relaxed_threshold_ratio,
-            config_.gnss_consistency_max_scale_horizontal);
-          consistency_record.covariance_scale_n = ComputeConsistencyScale(
-            config_.gnss_consistency_gate_mode,
-            full_prefit_nis,
-            gnss_nis_threshold,
-            config_.gnss_consistency_relaxed_threshold_ratio,
-            config_.gnss_consistency_max_scale_horizontal);
-          consistency_record.covariance_scale_u = ComputeConsistencyScale(
-            config_.gnss_consistency_gate_mode,
-            full_prefit_nis,
-            gnss_nis_threshold,
-            config_.gnss_consistency_relaxed_threshold_ratio,
-            config_.gnss_consistency_max_scale_up);
-          consistency_record.covariance_scale =
-            (consistency_record.covariance_scale_e + consistency_record.covariance_scale_n +
-             consistency_record.covariance_scale_u) /
-            3.0;
-          sigma_m.x() *= consistency_record.covariance_scale_e;
-          sigma_m.y() *= consistency_record.covariance_scale_n;
-          sigma_m.z() *= consistency_record.covariance_scale_u;
+          if (use_vertical_rtk_1d_nis_gate) {
+            consistency_record.prefit_nis = ComputeVerticalNis(
+              consistency_record.prefit_residual_enu_m.z(),
+              consistency_base_sigma_m.z());
+          } else {
+            const double full_prefit_nis = ComputeNis(consistency_record.prefit_residual_enu_m, consistency_base_sigma_m);
+            consistency_record.prefit_nis = full_prefit_nis;
+            consistency_record.covariance_scale_e = ComputeConsistencyScale(
+              config_.gnss_consistency_gate_mode,
+              full_prefit_nis,
+              gnss_nis_threshold,
+              config_.gnss_consistency_relaxed_threshold_ratio,
+              config_.gnss_consistency_max_scale_horizontal);
+            consistency_record.covariance_scale_n = ComputeConsistencyScale(
+              config_.gnss_consistency_gate_mode,
+              full_prefit_nis,
+              gnss_nis_threshold,
+              config_.gnss_consistency_relaxed_threshold_ratio,
+              config_.gnss_consistency_max_scale_horizontal);
+            consistency_record.covariance_scale_u = ComputeConsistencyScale(
+              config_.gnss_consistency_gate_mode,
+              full_prefit_nis,
+              gnss_nis_threshold,
+              config_.gnss_consistency_relaxed_threshold_ratio,
+              config_.gnss_consistency_max_scale_up);
+            consistency_record.covariance_scale =
+              (consistency_record.covariance_scale_e + consistency_record.covariance_scale_n +
+               consistency_record.covariance_scale_u) /
+              3.0;
+            sigma_m.x() *= consistency_record.covariance_scale_e;
+            sigma_m.y() *= consistency_record.covariance_scale_n;
+            sigma_m.z() *= consistency_record.covariance_scale_u;
+          }
         }
       }
       consistency_record.effective_sigma_u_m = sigma_m.z();
-      if (config_.enable_vertical_rtk_preintegration_feedback &&
+      if (use_vertical_rtk_1d_nis_gate &&
           std::isfinite(consistency_record.prefit_residual_enu_m.z()) &&
-          std::isfinite(consistency_record.effective_sigma_u_m)) {
+          std::isfinite(consistency_base_sigma_m.z())) {
+        // Keep the vertical RTK gate on the raw 1D height NIS path only.
+        consistency_record.effective_sigma_u_m = consistency_base_sigma_m.z();
         consistency_record.vertical_gate_threshold_m =
-          config_.vertical_rtk_gate_sigma_multiple * consistency_record.effective_sigma_u_m;
+          std::sqrt(vertical_gate_nis_threshold) * consistency_record.effective_sigma_u_m;
+        const double vertical_prefit_nis = ComputeVerticalNis(
+          consistency_record.prefit_residual_enu_m.z(),
+          consistency_record.effective_sigma_u_m);
+        consistency_record.prefit_nis = vertical_prefit_nis;
         const bool inside_gate =
-          std::abs(consistency_record.prefit_residual_enu_m.z()) <= consistency_record.vertical_gate_threshold_m;
+          vertical_prefit_nis <= vertical_gate_nis_threshold;
         consistency_record.vertical_gate_inside = inside_gate ? 1.0 : 0.0;
-        if (inside_gate && prefit_pose.has_value()) {
-          const double horizontal_prefit_nis = ComputeHorizontalNis(
-            consistency_record.prefit_residual_enu_m,
-            Eigen::Vector2d(consistency_base_sigma_m.x(), consistency_base_sigma_m.y()));
-          consistency_record.prefit_nis = horizontal_prefit_nis;
-          consistency_record.covariance_scale_e = ComputeConsistencyScale(
-            config_.gnss_consistency_gate_mode,
-            horizontal_prefit_nis,
-            gnss_nis_threshold,
-            config_.gnss_consistency_relaxed_threshold_ratio,
-            config_.gnss_consistency_max_scale_horizontal);
-          consistency_record.covariance_scale_n = ComputeConsistencyScale(
-            config_.gnss_consistency_gate_mode,
-            horizontal_prefit_nis,
-            gnss_nis_threshold,
-            config_.gnss_consistency_relaxed_threshold_ratio,
-            config_.gnss_consistency_max_scale_horizontal);
-          consistency_record.covariance_scale =
-            (consistency_record.covariance_scale_e + consistency_record.covariance_scale_n +
-             consistency_record.covariance_scale_u) /
-            3.0;
-          sigma_m.x() = consistency_base_sigma_m.x() * consistency_record.covariance_scale_e;
-          sigma_m.y() = consistency_base_sigma_m.y() * consistency_record.covariance_scale_n;
-        }
+        sigma_m = consistency_base_sigma_m;
         sigma_m.z() *= inside_gate
                          ? config_.vertical_rtk_inside_gate_sigma_scale
                          : config_.vertical_rtk_outside_gate_sigma_scale;
