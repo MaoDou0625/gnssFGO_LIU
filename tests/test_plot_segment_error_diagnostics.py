@@ -37,6 +37,10 @@ class PlotSegmentErrorDiagnosticsTests(unittest.TestCase):
                 "mean_prefit_nis": 1.0,
                 "mean_postfit_nis": 1.0,
                 "mean_covariance_scale": 1.0,
+                "segment_vertical_rtk_residual_m": 0.2,
+                "segment_target_baz_mps2": -0.3,
+                "segment_feedback_attitude_scale": 1.5,
+                "segment_vertical_gate_inside": 1.0,
             },
             {
                 "mid_time_s": 1.0,
@@ -58,13 +62,21 @@ class PlotSegmentErrorDiagnosticsTests(unittest.TestCase):
                 "mean_prefit_nis": 1.0,
                 "mean_postfit_nis": 1.0,
                 "mean_covariance_scale": 1.0,
+                "segment_vertical_rtk_residual_m": -0.1,
+                "segment_target_baz_mps2": 0.4,
+                "segment_feedback_attitude_scale": 3.0,
+                "segment_vertical_gate_inside": 0.0,
             },
         ]
 
         stats = plot_segment_error_diagnostics.summarize(rows)
-        target = next(row for row in stats if row["group"] == "dtheta" and row["component"] == "x")
-        self.assertAlmostEqual(float(target["range"]), 0.2, places=9)
-        self.assertAlmostEqual(float(target["end_minus_start"]), 0.2, places=9)
+        dtheta_target = next(row for row in stats if row["group"] == "dtheta" and row["component"] == "x")
+        self.assertAlmostEqual(float(dtheta_target["range"]), 0.2, places=9)
+        self.assertAlmostEqual(float(dtheta_target["end_minus_start"]), 0.2, places=9)
+        vertical_target = next(
+            row for row in stats if row["group"] == "vertical_feedback" and row["component"] == "target baz"
+        )
+        self.assertAlmostEqual(float(vertical_target["range"]), 0.7, places=9)
 
     def test_filter_dynamic_rows_discards_static_prefix_segments(self) -> None:
         rows = [
@@ -107,6 +119,51 @@ class PlotSegmentErrorDiagnosticsTests(unittest.TestCase):
             )
             dynamic_start_time_s = plot_segment_error_diagnostics.read_dynamic_start_time(trajectory_path)
             self.assertAlmostEqual(dynamic_start_time_s, 5801.597, places=9)
+
+    def test_read_rows_accepts_optional_vertical_feedback_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = pathlib.Path(temp_dir) / "segment_error_diagnostics.csv"
+            csv_path.write_text(
+                ",".join(
+                    [
+                        "segment_index",
+                        "start_time_s",
+                        "end_time_s",
+                        "dtheta_x_rad",
+                        "dtheta_y_rad",
+                        "dtheta_z_rad",
+                        "dv_x_mps",
+                        "dv_y_mps",
+                        "dv_z_mps",
+                        "dp_x_m",
+                        "dp_y_m",
+                        "dp_z_m",
+                        "dbg_x_radps",
+                        "dbg_y_radps",
+                        "dbg_z_radps",
+                        "dba_x_mps2",
+                        "dba_y_mps2",
+                        "dba_z_mps2",
+                        "gnss_factor_count",
+                        "mean_prefit_nis",
+                        "mean_postfit_nis",
+                        "mean_covariance_scale",
+                        "segment_vertical_rtk_residual_m",
+                        "segment_vertical_gate_inside",
+                        "segment_target_baz_mps2",
+                        "segment_feedback_attitude_scale",
+                    ]
+                )
+                + "\n"
+                + "0,1.0,1.1,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1,1.0,1.0,1.0,0.03,1.0,-0.02,2.0\n",
+                encoding="utf-8",
+            )
+
+            rows = plot_segment_error_diagnostics.read_rows(csv_path)
+            self.assertAlmostEqual(rows[0]["segment_vertical_rtk_residual_m"], 0.03, places=9)
+            self.assertAlmostEqual(rows[0]["segment_vertical_gate_inside"], 1.0, places=9)
+            self.assertAlmostEqual(rows[0]["segment_target_baz_mps2"], -0.02, places=9)
+            self.assertAlmostEqual(rows[0]["segment_feedback_attitude_scale"], 2.0, places=9)
 
 
 if __name__ == "__main__":

@@ -325,6 +325,10 @@ struct SegmentErrorDiagnostic {
   double mean_prefit_nis = std::numeric_limits<double>::quiet_NaN();
   double mean_postfit_nis = std::numeric_limits<double>::quiet_NaN();
   double mean_covariance_scale = std::numeric_limits<double>::quiet_NaN();
+  double segment_vertical_rtk_residual_m = std::numeric_limits<double>::quiet_NaN();
+  double segment_vertical_gate_inside = std::numeric_limits<double>::quiet_NaN();
+  double segment_target_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double segment_feedback_attitude_scale = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct GnssConsistencyRecord {
@@ -340,6 +344,11 @@ struct GnssConsistencyRecord {
   double sigma_n_m = std::numeric_limits<double>::quiet_NaN();
   double sigma_u_m = std::numeric_limits<double>::quiet_NaN();
   double effective_sigma_u_m = std::numeric_limits<double>::quiet_NaN();
+  double vertical_gate_threshold_m = std::numeric_limits<double>::quiet_NaN();
+  double vertical_gate_inside = std::numeric_limits<double>::quiet_NaN();
+  double vertical_sigma_u_used_m = std::numeric_limits<double>::quiet_NaN();
+  double vertical_feedback_target_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double vertical_feedback_attitude_scale = std::numeric_limits<double>::quiet_NaN();
   double vertical_reference_up_m = std::numeric_limits<double>::quiet_NaN();
   double covariance_scale = 1.0;
   double covariance_scale_e = 1.0;
@@ -409,6 +418,8 @@ struct RunSummary {
   double gnss_nis_median = std::numeric_limits<double>::quiet_NaN();
   double gnss_nis_p95 = std::numeric_limits<double>::quiet_NaN();
   double axis_2sigma_pass_rate = std::numeric_limits<double>::quiet_NaN();
+  std::size_t vertical_gate_inside_count = 0;
+  std::size_t vertical_gate_outside_count = 0;
   double feedback_forward_up_slope_10s = std::numeric_limits<double>::quiet_NaN();
   double feedback_forward_up_slope_30s = std::numeric_limits<double>::quiet_NaN();
   double feedback_forward_horizontal_slope_10s = std::numeric_limits<double>::quiet_NaN();
@@ -418,6 +429,9 @@ struct RunSummary {
   double optimized_first30s_mean_roll_rad = std::numeric_limits<double>::quiet_NaN();
   double optimized_first30s_mean_pitch_rad = std::numeric_limits<double>::quiet_NaN();
   double optimized_first30s_mean_yaw_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first30s_std_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first30s_std_pitch_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first30s_std_roll_rad = std::numeric_limits<double>::quiet_NaN();
   double optimized_first30s_up_total_variation_m = std::numeric_limits<double>::quiet_NaN();
   double optimized_first30s_vz_total_variation_mps = std::numeric_limits<double>::quiet_NaN();
   double forward_first30s_up_total_variation_m = std::numeric_limits<double>::quiet_NaN();
@@ -472,6 +486,8 @@ struct RunSummary {
         << "gnss_nis_median=" << gnss_nis_median << '\n'
         << "gnss_nis_p95=" << gnss_nis_p95 << '\n'
         << "axis_2sigma_pass_rate=" << axis_2sigma_pass_rate << '\n'
+        << "vertical_gate_inside_count=" << vertical_gate_inside_count << '\n'
+        << "vertical_gate_outside_count=" << vertical_gate_outside_count << '\n'
         << "feedback_forward_up_slope_10s=" << feedback_forward_up_slope_10s << '\n'
         << "feedback_forward_up_slope_30s=" << feedback_forward_up_slope_30s << '\n'
         << "feedback_forward_horizontal_slope_10s=" << feedback_forward_horizontal_slope_10s << '\n'
@@ -481,6 +497,9 @@ struct RunSummary {
         << "optimized_first30s_mean_roll_rad=" << optimized_first30s_mean_roll_rad << '\n'
         << "optimized_first30s_mean_pitch_rad=" << optimized_first30s_mean_pitch_rad << '\n'
         << "optimized_first30s_mean_yaw_rad=" << optimized_first30s_mean_yaw_rad << '\n'
+        << "optimized_first30s_std_baz_mps2=" << optimized_first30s_std_baz_mps2 << '\n'
+        << "optimized_first30s_std_pitch_rad=" << optimized_first30s_std_pitch_rad << '\n'
+        << "optimized_first30s_std_roll_rad=" << optimized_first30s_std_roll_rad << '\n'
         << "optimized_first30s_up_total_variation_m=" << optimized_first30s_up_total_variation_m << '\n'
         << "optimized_first30s_vz_total_variation_mps=" << optimized_first30s_vz_total_variation_mps << '\n'
         << "forward_first30s_up_total_variation_m=" << forward_first30s_up_total_variation_m << '\n'

@@ -221,6 +221,28 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_acc_bias_tau_s = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_acc_bias_process_noise_scale") {
     config.vertical_acc_bias_process_noise_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_rtk_preintegration_feedback") {
+    config.enable_vertical_rtk_preintegration_feedback = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_rtk_gate_sigma_multiple") {
+    config.vertical_rtk_gate_sigma_multiple = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_rtk_inside_gate_sigma_scale") {
+    config.vertical_rtk_inside_gate_sigma_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_rtk_outside_gate_sigma_scale") {
+    config.vertical_rtk_outside_gate_sigma_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_rtk_inside_feedback_gain_scale") {
+    config.vertical_rtk_inside_feedback_gain_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_rtk_outside_feedback_gain_scale") {
+    config.vertical_rtk_outside_feedback_gain_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_rtk_feedback_bias_gain") {
+    config.vertical_rtk_feedback_bias_gain = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_rtk_feedback_attitude_gain") {
+    config.vertical_rtk_feedback_attitude_gain = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_rtk_feedback_sigma_baz_mps2") {
+    config.vertical_rtk_feedback_sigma_baz_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_rtk_feedback_sigma_attitude_rad") {
+    config.vertical_rtk_feedback_sigma_attitude_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "reserve_vertical_velocity_feedback_interface") {
+    config.reserve_vertical_velocity_feedback_interface = ParseBool(normalized_value);
   } else if (
     normalized_key == "enable_reweighted_combined_imu_factor" ||
     normalized_key == "enable_imu_relative_attitude_factor") {
@@ -496,6 +518,24 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
       throw std::runtime_error(
         "enable_vertical_acc_bias_gm_process is incompatible with enable_segment_local_error_feedback");
     }
+    if (config.enable_vertical_rtk_preintegration_feedback && !config.enable_gnss) {
+      throw std::runtime_error("enable_vertical_rtk_preintegration_feedback requires enable_gnss");
+    }
+    if (config.enable_vertical_rtk_preintegration_feedback && !config.enable_global_acc_bias) {
+      throw std::runtime_error("enable_vertical_rtk_preintegration_feedback requires enable_global_acc_bias");
+    }
+    if (config.enable_vertical_rtk_preintegration_feedback && !config.enable_vertical_acc_bias_gm_process) {
+      throw std::runtime_error(
+        "enable_vertical_rtk_preintegration_feedback requires enable_vertical_acc_bias_gm_process");
+    }
+    if (config.enable_vertical_rtk_preintegration_feedback && config.enable_segment_error_feedback) {
+      throw std::runtime_error(
+        "enable_vertical_rtk_preintegration_feedback is incompatible with enable_segment_error_feedback");
+    }
+    if (config.enable_vertical_rtk_preintegration_feedback && config.enable_segment_local_error_feedback) {
+      throw std::runtime_error(
+        "enable_vertical_rtk_preintegration_feedback is incompatible with enable_segment_local_error_feedback");
+    }
     if (config.enable_segment_local_error_feedback && !config.enable_segment_error_feedback) {
       throw std::runtime_error(
         "enable_segment_local_error_feedback requires enable_segment_error_feedback");
@@ -506,6 +546,23 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     }
     if (config.segment_feedback_acc_sigma_mps2 <= 0.0 || config.segment_feedback_gyro_sigma_radps <= 0.0) {
       throw std::runtime_error("segment_feedback sigmas must be positive");
+    }
+    if (config.vertical_rtk_gate_sigma_multiple <= 0.0) {
+      throw std::runtime_error("vertical_rtk_gate_sigma_multiple must be positive");
+    }
+    if (config.vertical_rtk_inside_gate_sigma_scale <= 0.0 || config.vertical_rtk_outside_gate_sigma_scale <= 0.0) {
+      throw std::runtime_error("vertical RTK gate sigma scales must be positive");
+    }
+    if (config.vertical_rtk_inside_feedback_gain_scale < 0.0 ||
+        config.vertical_rtk_outside_feedback_gain_scale < 0.0) {
+      throw std::runtime_error("vertical RTK feedback gain scales must be non-negative");
+    }
+    if (config.vertical_rtk_feedback_bias_gain < 0.0 || config.vertical_rtk_feedback_attitude_gain < 0.0) {
+      throw std::runtime_error("vertical RTK feedback gains must be non-negative");
+    }
+    if (config.vertical_rtk_feedback_sigma_baz_mps2 <= 0.0 ||
+        config.vertical_rtk_feedback_sigma_attitude_rad <= 0.0) {
+      throw std::runtime_error("vertical RTK feedback sigmas must be positive");
     }
     if (config.static_alignment_duration_s < 0.0) {
       throw std::runtime_error("static_alignment_duration_s must be non-negative");
@@ -682,6 +739,24 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     throw std::runtime_error(
       "enable_vertical_acc_bias_gm_process is incompatible with enable_segment_local_error_feedback");
   }
+  if (config.enable_vertical_rtk_preintegration_feedback && !config.enable_gnss) {
+    throw std::runtime_error("enable_vertical_rtk_preintegration_feedback requires enable_gnss");
+  }
+  if (config.enable_vertical_rtk_preintegration_feedback && !config.enable_global_acc_bias) {
+    throw std::runtime_error("enable_vertical_rtk_preintegration_feedback requires enable_global_acc_bias");
+  }
+  if (config.enable_vertical_rtk_preintegration_feedback && !config.enable_vertical_acc_bias_gm_process) {
+    throw std::runtime_error(
+      "enable_vertical_rtk_preintegration_feedback requires enable_vertical_acc_bias_gm_process");
+  }
+  if (config.enable_vertical_rtk_preintegration_feedback && config.enable_segment_error_feedback) {
+    throw std::runtime_error(
+      "enable_vertical_rtk_preintegration_feedback is incompatible with enable_segment_error_feedback");
+  }
+  if (config.enable_vertical_rtk_preintegration_feedback && config.enable_segment_local_error_feedback) {
+    throw std::runtime_error(
+      "enable_vertical_rtk_preintegration_feedback is incompatible with enable_segment_local_error_feedback");
+  }
   if (config.enable_segment_local_error_feedback && !config.enable_segment_error_feedback) {
     throw std::runtime_error(
       "enable_segment_local_error_feedback requires enable_segment_error_feedback");
@@ -692,6 +767,23 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
   }
   if (config.segment_feedback_acc_sigma_mps2 <= 0.0 || config.segment_feedback_gyro_sigma_radps <= 0.0) {
     throw std::runtime_error("segment_feedback sigmas must be positive");
+  }
+  if (config.vertical_rtk_gate_sigma_multiple <= 0.0) {
+    throw std::runtime_error("vertical_rtk_gate_sigma_multiple must be positive");
+  }
+  if (config.vertical_rtk_inside_gate_sigma_scale <= 0.0 || config.vertical_rtk_outside_gate_sigma_scale <= 0.0) {
+    throw std::runtime_error("vertical RTK gate sigma scales must be positive");
+  }
+  if (config.vertical_rtk_inside_feedback_gain_scale < 0.0 ||
+      config.vertical_rtk_outside_feedback_gain_scale < 0.0) {
+    throw std::runtime_error("vertical RTK feedback gain scales must be non-negative");
+  }
+  if (config.vertical_rtk_feedback_bias_gain < 0.0 || config.vertical_rtk_feedback_attitude_gain < 0.0) {
+    throw std::runtime_error("vertical RTK feedback gains must be non-negative");
+  }
+  if (config.vertical_rtk_feedback_sigma_baz_mps2 <= 0.0 ||
+      config.vertical_rtk_feedback_sigma_attitude_rad <= 0.0) {
+    throw std::runtime_error("vertical RTK feedback sigmas must be positive");
   }
   if (config.static_alignment_duration_s < 0.0) {
     throw std::runtime_error("static_alignment_duration_s must be non-negative");
@@ -769,6 +861,19 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << '\n'
       << "vertical_acc_bias_tau_s=" << config.vertical_acc_bias_tau_s << '\n'
       << "vertical_acc_bias_process_noise_scale=" << config.vertical_acc_bias_process_noise_scale << '\n'
+      << "enable_vertical_rtk_preintegration_feedback="
+      << (config.enable_vertical_rtk_preintegration_feedback ? "true" : "false") << '\n'
+      << "vertical_rtk_gate_sigma_multiple=" << config.vertical_rtk_gate_sigma_multiple << '\n'
+      << "vertical_rtk_inside_gate_sigma_scale=" << config.vertical_rtk_inside_gate_sigma_scale << '\n'
+      << "vertical_rtk_outside_gate_sigma_scale=" << config.vertical_rtk_outside_gate_sigma_scale << '\n'
+      << "vertical_rtk_inside_feedback_gain_scale=" << config.vertical_rtk_inside_feedback_gain_scale << '\n'
+      << "vertical_rtk_outside_feedback_gain_scale=" << config.vertical_rtk_outside_feedback_gain_scale << '\n'
+      << "vertical_rtk_feedback_bias_gain=" << config.vertical_rtk_feedback_bias_gain << '\n'
+      << "vertical_rtk_feedback_attitude_gain=" << config.vertical_rtk_feedback_attitude_gain << '\n'
+      << "vertical_rtk_feedback_sigma_baz_mps2=" << config.vertical_rtk_feedback_sigma_baz_mps2 << '\n'
+      << "vertical_rtk_feedback_sigma_attitude_rad=" << config.vertical_rtk_feedback_sigma_attitude_rad << '\n'
+      << "reserve_vertical_velocity_feedback_interface="
+      << (config.reserve_vertical_velocity_feedback_interface ? "true" : "false") << '\n'
       << "enable_reweighted_combined_imu_factor="
       << (config.enable_reweighted_combined_imu_factor ? "true" : "false") << '\n'
       << "reweighted_combined_imu_attitude_sigma_rad=" << config.reweighted_combined_imu_attitude_sigma_rad << '\n'

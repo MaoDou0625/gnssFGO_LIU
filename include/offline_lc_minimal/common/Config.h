@@ -44,6 +44,17 @@ struct OfflineRunnerConfig {
   bool enable_vertical_acc_bias_gm_process = false;
   double vertical_acc_bias_tau_s = 100.0;
   double vertical_acc_bias_process_noise_scale = 1.0;
+  bool enable_vertical_rtk_preintegration_feedback = false;
+  double vertical_rtk_gate_sigma_multiple = 2.0;
+  double vertical_rtk_inside_gate_sigma_scale = 2.0;
+  double vertical_rtk_outside_gate_sigma_scale = 1.0;
+  double vertical_rtk_inside_feedback_gain_scale = 1.0;
+  double vertical_rtk_outside_feedback_gain_scale = 1.0;
+  double vertical_rtk_feedback_bias_gain = 1e-4;
+  double vertical_rtk_feedback_attitude_gain = 1e-3;
+  double vertical_rtk_feedback_sigma_baz_mps2 = 10.0;
+  double vertical_rtk_feedback_sigma_attitude_rad = 1.0;
+  bool reserve_vertical_velocity_feedback_interface = false;
   bool enable_reweighted_combined_imu_factor = false;
   double reweighted_combined_imu_attitude_sigma_rad = 1e-3;
   double reweighted_combined_imu_specific_force_sigma_mps2 = 0.0;

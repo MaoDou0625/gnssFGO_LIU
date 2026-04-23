@@ -1,0 +1,317 @@
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <stdexcept>
+#include <functional>
+
+#include <gtsam/base/numericalDerivative.h>
+#include <gtsam/navigation/CombinedImuFactor.h>
+#include <gtsam/navigation/ImuFactor.h>
+
+#include "offline_lc_minimal/common/Config.h"
+#include "offline_lc_minimal/factor/VerticalRtkPreintegrationFeedbackFactor.h"
+
+namespace {
+
+using offline_lc_minimal::DefaultConfig;
+using offline_lc_minimal::LoadConfigFile;
+using offline_lc_minimal::factor::VerticalRtkPreintegrationFeedbackFactor;
+
+template <typename Function>
+void RunTest(const std::string &name, Function &&function) {
+  try {
+    function();
+  } catch (const std::exception &exception) {
+    throw std::runtime_error(name + ": " + exception.what());
+  }
+}
+
+void ExpectTrue(const bool condition, const std::string &message) {
+  if (!condition) {
+    throw std::runtime_error(message);
+  }
+}
+
+void ExpectNear(const double actual, const double expected, const double tolerance, const std::string &message) {
+  if (std::abs(actual - expected) > tolerance) {
+    throw std::runtime_error(
+      message + ": actual=" + std::to_string(actual) + ", expected=" + std::to_string(expected));
+  }
+}
+
+void ExpectMatrixNear(
+  const gtsam::Matrix &actual,
+  const gtsam::Matrix &expected,
+  const double tolerance,
+  const std::string &message) {
+  if (actual.rows() != expected.rows() || actual.cols() != expected.cols()) {
+    throw std::runtime_error(message + ": matrix shape mismatch");
+  }
+  const double max_error = (actual - expected).cwiseAbs().maxCoeff();
+  if (max_error > tolerance) {
+    throw std::runtime_error(message + ": max_error=" + std::to_string(max_error));
+  }
+}
+
+std::filesystem::path WriteTempConfig(const std::string &contents, const std::string &filename) {
+  const std::filesystem::path path = std::filesystem::temp_directory_path() / filename;
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to create temp config");
+  }
+  stream << contents;
+  return path;
+}
+
+std::string MakeVerticalFeedbackConfigPrefix() {
+  return std::string()
+         + "enable_gnss=true\n"
+         + "enable_global_acc_bias=true\n"
+         + "enable_vertical_acc_bias_gm_process=true\n"
+         + "enable_vertical_rtk_preintegration_feedback=true\n";
+}
+
+gtsam::PreintegratedImuMeasurements MakeZeroPreintegratedMeasurements() {
+  auto params = gtsam::PreintegrationCombinedParams::MakeSharedU(9.81);
+  params->accelerometerCovariance = 1e-4 * gtsam::I_3x3;
+  params->gyroscopeCovariance = 1e-6 * gtsam::I_3x3;
+  params->integrationCovariance = 1e-8 * gtsam::I_3x3;
+  params->biasAccCovariance = 1e-10 * gtsam::I_3x3;
+  params->biasOmegaCovariance = 1e-12 * gtsam::I_3x3;
+  params->biasAccOmegaInt = gtsam::Matrix66::Zero();
+
+  gtsam::imuBias::ConstantBias bias;
+  gtsam::PreintegratedImuMeasurements measurements(params, bias);
+  for (int sample_index = 0; sample_index < 5; ++sample_index) {
+    measurements.integrateMeasurement(gtsam::Vector3(0.0, 0.0, 9.81), gtsam::Vector3::Zero(), 0.01);
+  }
+  return measurements;
+}
+
+VerticalRtkPreintegrationFeedbackFactor MakeFactor(
+  const gtsam::PreintegratedImuMeasurements &measurements,
+  const double gain_scale,
+  const double vertical_residual_m) {
+  return VerticalRtkPreintegrationFeedbackFactor(
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    measurements,
+    0.8,
+    0.1,
+    vertical_residual_m,
+    gain_scale,
+    2.0,
+    3.0,
+    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(1e-3, 1e-3, 1e-4)));
+}
+
+void TestVerticalFeedbackRequiresGnss() {
+  const auto config_path = WriteTempConfig(
+    MakeVerticalFeedbackConfigPrefix() + "enable_gnss=false\n",
+    "vertical_rtk_feedback_requires_gnss.cfg");
+  bool threw = false;
+  try {
+    [[maybe_unused]] const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  std::filesystem::remove(config_path);
+  ExpectTrue(threw, "vertical RTK feedback should require GNSS");
+}
+
+void TestVerticalFeedbackRequiresVerticalGmBiasProcess() {
+  const auto config_path = WriteTempConfig(
+    "enable_gnss=true\n"
+    "enable_global_acc_bias=true\n"
+    "enable_vertical_rtk_preintegration_feedback=true\n"
+    "enable_vertical_acc_bias_gm_process=false\n",
+    "vertical_rtk_feedback_requires_vertical_gm.cfg");
+  bool threw = false;
+  try {
+    [[maybe_unused]] const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  std::filesystem::remove(config_path);
+  ExpectTrue(threw, "vertical RTK feedback should require the vertical GM bias process");
+}
+
+void TestVerticalFeedbackRejectsSegmentFeedbackCompatibility() {
+  const auto config_path = WriteTempConfig(
+    MakeVerticalFeedbackConfigPrefix() + "enable_segment_error_feedback=true\n",
+    "vertical_rtk_feedback_segment_conflict.cfg");
+  bool threw = false;
+  try {
+    [[maybe_unused]] const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  std::filesystem::remove(config_path);
+  ExpectTrue(threw, "vertical RTK feedback should reject segment feedback mode");
+}
+
+void TestReserveVerticalVelocityInterfaceIsAccepted() {
+  const auto config_path = WriteTempConfig(
+    MakeVerticalFeedbackConfigPrefix() + "reserve_vertical_velocity_feedback_interface=true\n",
+    "vertical_rtk_feedback_reserved_velocity.cfg");
+  const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
+  std::filesystem::remove(config_path);
+  ExpectTrue(config.reserve_vertical_velocity_feedback_interface, "reserved velocity interface flag should load");
+  ExpectTrue(config.enable_vertical_rtk_preintegration_feedback, "vertical RTK feedback should remain enabled");
+}
+
+void TestPureYawLeavesRollPitchFeedbackResidualZero() {
+  const auto measurements = MakeZeroPreintegratedMeasurements();
+  const auto factor = MakeFactor(measurements, 1.0, 0.0);
+  const gtsam::Pose3 pose_i;
+  const gtsam::Pose3 pose_j(
+    gtsam::Rot3::Yaw(0.15),
+    gtsam::Point3(0.0, 0.0, 0.0));
+  const gtsam::Vector3 velocity = gtsam::Vector3::Zero();
+  const gtsam::imuBias::ConstantBias bias;
+  const gtsam::Vector residual =
+    factor.evaluateError(pose_i, velocity, bias, pose_j, velocity, bias, gtsam::Vector3::Zero());
+  ExpectNear(residual[0], 0.0, 1e-9, "pure yaw should not affect roll feedback residual");
+  ExpectNear(residual[1], 0.0, 1e-9, "pure yaw should not affect pitch feedback residual");
+}
+
+void TestGainScaleAmplifiesAttitudeAndBiasTargets() {
+  const auto measurements = MakeZeroPreintegratedMeasurements();
+  const auto low_gain_factor = MakeFactor(measurements, 1.0, 0.3);
+  const auto high_gain_factor = MakeFactor(measurements, 2.0, 0.3);
+  const gtsam::Pose3 pose_i;
+  const gtsam::Pose3 pose_j(
+    gtsam::Rot3::RzRyRx(0.0, -0.03, 0.02),
+    gtsam::Point3(0.0, 0.0, 0.0));
+  const gtsam::Vector3 velocity = gtsam::Vector3::Zero();
+  const gtsam::imuBias::ConstantBias bias;
+
+  const gtsam::Vector low_gain_residual =
+    low_gain_factor.evaluateError(pose_i, velocity, bias, pose_j, velocity, bias, gtsam::Vector3::Zero());
+  const gtsam::Vector high_gain_residual =
+    high_gain_factor.evaluateError(pose_i, velocity, bias, pose_j, velocity, bias, gtsam::Vector3::Zero());
+
+  ExpectNear(high_gain_residual[0], 2.0 * low_gain_residual[0], 1e-9, "gain scale should double roll residual");
+  ExpectNear(high_gain_residual[1], 2.0 * low_gain_residual[1], 1e-9, "gain scale should double pitch residual");
+  ExpectNear(high_gain_residual[2], 2.0 * low_gain_residual[2], 1e-9, "gain scale should double baz target");
+}
+
+void TestJacobianMatchesNumericalDerivative() {
+  const auto measurements = MakeZeroPreintegratedMeasurements();
+  const auto factor = MakeFactor(measurements, 1.5, -0.2);
+  const gtsam::Pose3 pose_i(
+    gtsam::Rot3::RzRyRx(0.01, -0.02, 0.03),
+    gtsam::Point3(0.2, -0.1, 0.05));
+  const gtsam::Vector3 vel_i(0.1, -0.2, 0.3);
+  const gtsam::imuBias::ConstantBias bias_i(
+    gtsam::Vector3(0.01, -0.02, 0.03),
+    gtsam::Vector3(0.001, -0.002, 0.003));
+  const gtsam::Pose3 pose_j(
+    gtsam::Rot3::RzRyRx(-0.01, 0.015, -0.02),
+    gtsam::Point3(0.25, -0.12, 0.06));
+  const gtsam::Vector3 vel_j(-0.05, 0.04, -0.03);
+  const gtsam::imuBias::ConstantBias bias_j(
+    gtsam::Vector3(0.005, -0.015, 0.025),
+    gtsam::Vector3(0.0, 0.0, 0.0));
+  const gtsam::Vector3 global_acc_bias(0.002, -0.003, 0.004);
+
+  gtsam::Matrix h1;
+  gtsam::Matrix h2;
+  gtsam::Matrix h3;
+  gtsam::Matrix h4;
+  gtsam::Matrix h5;
+  gtsam::Matrix h6;
+  gtsam::Matrix h7;
+  [[maybe_unused]] const gtsam::Vector residual =
+    factor.evaluateError(pose_i, vel_i, bias_i, pose_j, vel_j, bias_j, global_acc_bias, h1, h2, h3, h4, h5, h6, h7);
+
+  const std::function<gtsam::Vector(const gtsam::Pose3 &)> error_pose_i =
+    [&](const gtsam::Pose3 &value) {
+      return factor.evaluateError(value, vel_i, bias_i, pose_j, vel_j, bias_j, global_acc_bias);
+    };
+  const std::function<gtsam::Vector(const gtsam::Vector3 &)> error_vel_i =
+    [&](const gtsam::Vector3 &value) {
+      return factor.evaluateError(pose_i, value, bias_i, pose_j, vel_j, bias_j, global_acc_bias);
+    };
+  const std::function<gtsam::Vector(const gtsam::imuBias::ConstantBias &)> error_bias_i =
+    [&](const gtsam::imuBias::ConstantBias &value) {
+      return factor.evaluateError(pose_i, vel_i, value, pose_j, vel_j, bias_j, global_acc_bias);
+    };
+  const std::function<gtsam::Vector(const gtsam::Pose3 &)> error_pose_j =
+    [&](const gtsam::Pose3 &value) {
+      return factor.evaluateError(pose_i, vel_i, bias_i, value, vel_j, bias_j, global_acc_bias);
+    };
+  const std::function<gtsam::Vector(const gtsam::Vector3 &)> error_vel_j =
+    [&](const gtsam::Vector3 &value) {
+      return factor.evaluateError(pose_i, vel_i, bias_i, pose_j, value, bias_j, global_acc_bias);
+    };
+  const std::function<gtsam::Vector(const gtsam::imuBias::ConstantBias &)> error_bias_j =
+    [&](const gtsam::imuBias::ConstantBias &value) {
+      return factor.evaluateError(pose_i, vel_i, bias_i, pose_j, vel_j, value, global_acc_bias);
+    };
+  const std::function<gtsam::Vector(const gtsam::Vector3 &)> error_global_acc_bias =
+    [&](const gtsam::Vector3 &value) {
+      return factor.evaluateError(pose_i, vel_i, bias_i, pose_j, vel_j, bias_j, value);
+    };
+
+  const auto num_h1 = gtsam::numericalDerivative11<gtsam::Vector, gtsam::Pose3>(
+    error_pose_i,
+    pose_i,
+    1e-6);
+  const auto num_h2 = gtsam::numericalDerivative11<gtsam::Vector, gtsam::Vector3>(
+    error_vel_i,
+    vel_i,
+    1e-6);
+  const auto num_h3 = gtsam::numericalDerivative11<gtsam::Vector, gtsam::imuBias::ConstantBias>(
+    error_bias_i,
+    bias_i,
+    1e-6);
+  const auto num_h4 = gtsam::numericalDerivative11<gtsam::Vector, gtsam::Pose3>(
+    error_pose_j,
+    pose_j,
+    1e-6);
+  const auto num_h5 = gtsam::numericalDerivative11<gtsam::Vector, gtsam::Vector3>(
+    error_vel_j,
+    vel_j,
+    1e-6);
+  const auto num_h6 = gtsam::numericalDerivative11<gtsam::Vector, gtsam::imuBias::ConstantBias>(
+    error_bias_j,
+    bias_j,
+    1e-6);
+  const auto num_h7 = gtsam::numericalDerivative11<gtsam::Vector, gtsam::Vector3>(
+    error_global_acc_bias,
+    global_acc_bias,
+    1e-6);
+
+  ExpectMatrixNear(h1, num_h1, 5e-5, "pose_i Jacobian should match numerical derivative");
+  ExpectMatrixNear(h2, num_h2, 5e-5, "vel_i Jacobian should match numerical derivative");
+  ExpectMatrixNear(h3, num_h3, 5e-5, "bias_i Jacobian should match numerical derivative");
+  ExpectMatrixNear(h4, num_h4, 5e-5, "pose_j Jacobian should match numerical derivative");
+  ExpectMatrixNear(h5, num_h5, 5e-5, "vel_j Jacobian should match numerical derivative");
+  ExpectMatrixNear(h6, num_h6, 5e-5, "bias_j Jacobian should match numerical derivative");
+  ExpectMatrixNear(h7, num_h7, 5e-5, "global_acc_bias Jacobian should match numerical derivative");
+}
+
+}  // namespace
+
+int main() {
+  try {
+    RunTest("TestVerticalFeedbackRequiresGnss", TestVerticalFeedbackRequiresGnss);
+    RunTest("TestVerticalFeedbackRequiresVerticalGmBiasProcess", TestVerticalFeedbackRequiresVerticalGmBiasProcess);
+    RunTest("TestVerticalFeedbackRejectsSegmentFeedbackCompatibility", TestVerticalFeedbackRejectsSegmentFeedbackCompatibility);
+    RunTest("TestReserveVerticalVelocityInterfaceIsAccepted", TestReserveVerticalVelocityInterfaceIsAccepted);
+    RunTest("TestPureYawLeavesRollPitchFeedbackResidualZero", TestPureYawLeavesRollPitchFeedbackResidualZero);
+    RunTest("TestGainScaleAmplifiesAttitudeAndBiasTargets", TestGainScaleAmplifiesAttitudeAndBiasTargets);
+    RunTest("TestJacobianMatchesNumericalDerivative", TestJacobianMatchesNumericalDerivative);
+  } catch (const std::exception &exception) {
+    std::cerr << exception.what() << '\n';
+    return EXIT_FAILURE;
+  }
+  return EXIT_SUCCESS;
+}

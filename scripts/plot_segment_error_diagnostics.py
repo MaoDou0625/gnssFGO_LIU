@@ -29,6 +29,12 @@ COMPONENT_LABELS = {"x": "x", "y": "y", "z": "z"}
 COLORS = {"x": "#1f77b4", "y": "#ff7f0e", "z": "#2ca02c"}
 TIME_EPSILON_S = 1e-9
 DTHETA_COLUMNS = {"dtheta_x_rad", "dtheta_y_rad", "dtheta_z_rad"}
+VERTICAL_FEEDBACK_SERIES = [
+    ("segment_vertical_rtk_residual_m", "vertical residual", "#17becf"),
+    ("segment_target_baz_mps2", "target baz", "#9467bd"),
+    ("segment_feedback_attitude_scale", "attitude scale", "#8c564b"),
+]
+VERTICAL_GATE_COLUMN = "segment_vertical_gate_inside"
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,6 +53,13 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def parse_optional_float(raw_row: dict[str, str], key: str) -> float:
+    value = raw_row.get(key, "")
+    if value == "":
+        return math.nan
+    return float(value)
+
+
 def read_rows(path: Path) -> list[dict[str, float]]:
     with path.open("r", encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file)
@@ -61,10 +74,13 @@ def read_rows(path: Path) -> list[dict[str, float]]:
                 "mean_prefit_nis": float(raw["mean_prefit_nis"]),
                 "mean_postfit_nis": float(raw["mean_postfit_nis"]),
                 "mean_covariance_scale": float(raw["mean_covariance_scale"]),
+                VERTICAL_GATE_COLUMN: parse_optional_float(raw, VERTICAL_GATE_COLUMN),
             }
             for _, _, columns in GROUPS:
                 for column in columns:
                     row[column] = float(raw[column])
+            for column, _, _ in VERTICAL_FEEDBACK_SERIES:
+                row[column] = parse_optional_float(raw, column)
             rows.append(row)
     if not rows:
         raise ValueError(f"No rows found in {path}")
@@ -114,6 +130,10 @@ def total_variation(values: list[float]) -> float:
     return sum(abs(values[index + 1] - values[index]) for index in range(len(values) - 1))
 
 
+def has_finite_values(rows: list[dict[str, float]], columns: list[str]) -> bool:
+    return any(math.isfinite(row[column]) for row in rows for column in columns)
+
+
 def summarize(rows: list[dict[str, float]]) -> list[dict[str, float | str]]:
     stats: list[dict[str, float | str]] = []
     for group_name, _, columns in GROUPS:
@@ -133,6 +153,38 @@ def summarize(rows: list[dict[str, float]]) -> list[dict[str, float | str]]:
                     "total_variation": total_variation(values),
                 }
             )
+    for column, component, _ in VERTICAL_FEEDBACK_SERIES:
+        finite_values = [row[column] for row in rows if math.isfinite(row[column])]
+        if not finite_values:
+            continue
+        stats.append(
+            {
+                "group": "vertical_feedback",
+                "component": component,
+                "min": min(finite_values),
+                "max": max(finite_values),
+                "range": max(finite_values) - min(finite_values),
+                "mean": statistics.mean(finite_values),
+                "std": statistics.pstdev(finite_values),
+                "end_minus_start": finite_values[-1] - finite_values[0],
+                "total_variation": total_variation(finite_values),
+            }
+        )
+    gate_values = [row[VERTICAL_GATE_COLUMN] for row in rows if math.isfinite(row[VERTICAL_GATE_COLUMN])]
+    if gate_values:
+        stats.append(
+            {
+                "group": "vertical_feedback",
+                "component": "gate_inside",
+                "min": min(gate_values),
+                "max": max(gate_values),
+                "range": max(gate_values) - min(gate_values),
+                "mean": statistics.mean(gate_values),
+                "std": statistics.pstdev(gate_values),
+                "end_minus_start": gate_values[-1] - gate_values[0],
+                "total_variation": total_variation(gate_values),
+            }
+        )
     return stats
 
 
@@ -172,10 +224,16 @@ def make_plot(
         xlabel = "Time since dynamic start [s]"
     times = [row["mid_time_s"] - time0 for row in rows]
 
-    fig, axes = plt.subplots(len(GROUPS) + 1, 1, figsize=(16, 15), sharex=True, constrained_layout=True)
+    has_vertical_feedback = has_finite_values(
+        rows,
+        [column for column, _, _ in VERTICAL_FEEDBACK_SERIES] + [VERTICAL_GATE_COLUMN],
+    )
+    axis_count = len(GROUPS) + 1 + (1 if has_vertical_feedback else 0)
+    fig, axes = plt.subplots(axis_count, 1, figsize=(16, 3 * axis_count), sharex=True, constrained_layout=True)
     fig.suptitle(title, fontsize=16)
 
-    for axis, (group_name, ylabel, columns) in zip(axes[:-1], GROUPS):
+    axis_offset = 0
+    for axis, (group_name, ylabel, columns) in zip(axes[: len(GROUPS)], GROUPS):
         for column in columns:
             component = column.split("_")[1]
             axis.plot(
@@ -189,8 +247,42 @@ def make_plot(
         axis.set_title(group_name)
         axis.grid(True, alpha=0.3)
         axis.legend(loc="upper right")
+        axis_offset += 1
 
-    nis_axis = axes[-1]
+    if has_vertical_feedback:
+        feedback_axis = axes[axis_offset]
+        legend_handles = []
+        legend_labels = []
+        for column, label, color in VERTICAL_FEEDBACK_SERIES:
+            values = [row[column] for row in rows]
+            if not any(math.isfinite(value) for value in values):
+                continue
+            (line,) = feedback_axis.plot(times, values, label=label, color=color, linewidth=1.1)
+            legend_handles.append(line)
+            legend_labels.append(label)
+        feedback_axis.set_ylabel("Vertical Feedback")
+        feedback_axis.set_title("Vertical RTK feedback by segment")
+        feedback_axis.grid(True, alpha=0.3)
+        gate_values = [row[VERTICAL_GATE_COLUMN] for row in rows]
+        if any(math.isfinite(value) for value in gate_values):
+            gate_axis = feedback_axis.twinx()
+            (gate_line,) = gate_axis.step(
+                times,
+                gate_values,
+                where="mid",
+                color="#7f7f7f",
+                linewidth=1.0,
+                label="gate inside",
+            )
+            gate_axis.set_ylabel("Gate")
+            gate_axis.set_ylim(-0.1, 1.1)
+            legend_handles.append(gate_line)
+            legend_labels.append("gate inside")
+        if legend_handles:
+            feedback_axis.legend(legend_handles, legend_labels, loc="upper right")
+        axis_offset += 1
+
+    nis_axis = axes[axis_offset]
     nis_axis.plot(times, [row["mean_prefit_nis"] for row in rows], color="#d62728", linewidth=1.0, label="prefit NIS")
     nis_axis.plot(times, [row["mean_postfit_nis"] for row in rows], color="#9467bd", linewidth=1.0, label="postfit NIS")
     nis_axis.plot(

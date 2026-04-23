@@ -26,30 +26,37 @@ struct ScalarSeriesStats {
 
 ScalarSeriesStats ComputeScalarSeriesStats(const std::vector<double> &values) {
   ScalarSeriesStats stats;
-  if (values.empty()) {
+  std::vector<double> finite_values;
+  finite_values.reserve(values.size());
+  for (const double value : values) {
+    if (std::isfinite(value)) {
+      finite_values.push_back(value);
+    }
+  }
+  if (finite_values.empty()) {
     return stats;
   }
 
-  const auto [min_it, max_it] = std::minmax_element(values.begin(), values.end());
+  const auto [min_it, max_it] = std::minmax_element(finite_values.begin(), finite_values.end());
   stats.range = *max_it - *min_it;
-  stats.mean = std::accumulate(values.begin(), values.end(), 0.0) / static_cast<double>(values.size());
-  if (values.size() > 1U) {
+  stats.mean = std::accumulate(finite_values.begin(), finite_values.end(), 0.0) / static_cast<double>(finite_values.size());
+  if (finite_values.size() > 1U) {
     double variance = 0.0;
     double total_variation = 0.0;
-    for (std::size_t index = 0; index < values.size(); ++index) {
-      const double centered = values[index] - stats.mean;
+    for (std::size_t index = 0; index < finite_values.size(); ++index) {
+      const double centered = finite_values[index] - stats.mean;
       variance += centered * centered;
       if (index > 0U) {
-        total_variation += std::abs(values[index] - values[index - 1U]);
+        total_variation += std::abs(finite_values[index] - finite_values[index - 1U]);
       }
     }
-    stats.stddev = std::sqrt(variance / static_cast<double>(values.size()));
+    stats.stddev = std::sqrt(variance / static_cast<double>(finite_values.size()));
     stats.total_variation = total_variation;
   } else {
     stats.stddev = 0.0;
     stats.total_variation = 0.0;
   }
-  stats.end_minus_start = values.back() - values.front();
+  stats.end_minus_start = finite_values.back() - finite_values.front();
   return stats;
 }
 
@@ -165,7 +172,9 @@ void WriteSegmentErrorCsv(const std::filesystem::path &path, const std::vector<S
   stream
     << "segment_index,start_time_s,end_time_s,dtheta_x_rad,dtheta_y_rad,dtheta_z_rad,dv_x_mps,dv_y_mps,dv_z_mps,"
        "dp_x_m,dp_y_m,dp_z_m,dbg_x_radps,dbg_y_radps,dbg_z_radps,dba_x_mps2,dba_y_mps2,dba_z_mps2,"
-       "gnss_factor_count,mean_prefit_nis,mean_postfit_nis,mean_covariance_scale\n";
+       "gnss_factor_count,mean_prefit_nis,mean_postfit_nis,mean_covariance_scale,"
+       "segment_vertical_rtk_residual_m,segment_vertical_gate_inside,segment_target_baz_mps2,"
+       "segment_feedback_attitude_scale\n";
   for (const auto &row : rows) {
     stream << row.segment_index << ','
            << row.start_time_s << ','
@@ -188,7 +197,11 @@ void WriteSegmentErrorCsv(const std::filesystem::path &path, const std::vector<S
            << row.gnss_factor_count << ','
            << row.mean_prefit_nis << ','
            << row.mean_postfit_nis << ','
-           << row.mean_covariance_scale << '\n';
+           << row.mean_covariance_scale << ','
+           << row.segment_vertical_rtk_residual_m << ','
+           << row.segment_vertical_gate_inside << ','
+           << row.segment_target_baz_mps2 << ','
+           << row.segment_feedback_attitude_scale << '\n';
   }
 }
 
@@ -200,7 +213,7 @@ std::string BuildSegmentErrorSummaryText(const std::vector<SegmentErrorDiagnosti
     return stream.str();
   }
 
-  const std::array<std::pair<std::string, std::function<double(const SegmentErrorDiagnostic &)>>, 15> series = {{
+  const std::vector<std::pair<std::string, std::function<double(const SegmentErrorDiagnostic &)>>> series = {
     {"dtheta_x_rad", [](const SegmentErrorDiagnostic &row) { return row.dtheta_rad.x(); }},
     {"dtheta_y_rad", [](const SegmentErrorDiagnostic &row) { return row.dtheta_rad.y(); }},
     {"dtheta_z_rad", [](const SegmentErrorDiagnostic &row) { return row.dtheta_rad.z(); }},
@@ -216,7 +229,19 @@ std::string BuildSegmentErrorSummaryText(const std::vector<SegmentErrorDiagnosti
     {"dba_x_mps2", [](const SegmentErrorDiagnostic &row) { return row.dba_mps2.x(); }},
     {"dba_y_mps2", [](const SegmentErrorDiagnostic &row) { return row.dba_mps2.y(); }},
     {"dba_z_mps2", [](const SegmentErrorDiagnostic &row) { return row.dba_mps2.z(); }},
-  }};
+    {"segment_vertical_rtk_residual_m", [](const SegmentErrorDiagnostic &row) {
+      return row.segment_vertical_rtk_residual_m;
+    }},
+    {"segment_vertical_gate_inside", [](const SegmentErrorDiagnostic &row) {
+      return row.segment_vertical_gate_inside;
+    }},
+    {"segment_target_baz_mps2", [](const SegmentErrorDiagnostic &row) {
+      return row.segment_target_baz_mps2;
+    }},
+    {"segment_feedback_attitude_scale", [](const SegmentErrorDiagnostic &row) {
+      return row.segment_feedback_attitude_scale;
+    }},
+  };
 
   stream << "segment_error_count=" << rows.size() << '\n';
   for (const auto &[label, accessor] : series) {
@@ -245,7 +270,9 @@ void WriteGnssConsistencyCsv(
   stream << std::setprecision(17);
   stream
     << "sample_index,raw_time_s,corrected_time_s,factor_used,fix_type,sync_status,raw_sigma_h_m,"
-       "sigma_e_m,sigma_n_m,sigma_u_m,effective_sigma_u_m,vertical_reference_up_m,vertical_reference_used,"
+       "sigma_e_m,sigma_n_m,sigma_u_m,effective_sigma_u_m,vertical_gate_threshold_m,vertical_gate_inside,"
+       "vertical_sigma_u_used_m,vertical_feedback_target_baz_mps2,vertical_feedback_attitude_scale,"
+       "vertical_reference_up_m,vertical_reference_used,"
        "covariance_scale,covariance_scale_e,covariance_scale_n,covariance_scale_u,"
        "prefit_residual_e_m,prefit_residual_n_m,prefit_residual_u_m,postfit_residual_e_m,"
        "postfit_residual_n_m,postfit_residual_u_m,prefit_nis,postfit_nis\n";
@@ -261,6 +288,11 @@ void WriteGnssConsistencyCsv(
            << row.sigma_n_m << ','
            << row.sigma_u_m << ','
            << row.effective_sigma_u_m << ','
+           << row.vertical_gate_threshold_m << ','
+           << row.vertical_gate_inside << ','
+           << row.vertical_sigma_u_used_m << ','
+           << row.vertical_feedback_target_baz_mps2 << ','
+           << row.vertical_feedback_attitude_scale << ','
            << row.vertical_reference_up_m << ','
            << (row.vertical_reference_used ? 1 : 0) << ','
            << row.covariance_scale << ','

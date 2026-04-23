@@ -112,7 +112,16 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     tests/reweighted_combined_imu_factor_test.cpp
   )
 
+  add_executable(vertical_rtk_preintegration_feedback_test
+    tests/vertical_rtk_preintegration_feedback_test.cpp
+  )
+
   target_link_libraries(reweighted_combined_imu_factor_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(vertical_rtk_preintegration_feedback_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -120,6 +129,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   if(OFFLINE_LC_MINIMAL_RUNTIME_RPATH)
     set_target_properties(
       reweighted_combined_imu_factor_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      vertical_rtk_preintegration_feedback_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -134,10 +149,21 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
         $<TARGET_FILE:reweighted_combined_imu_factor_test>
     )
+    add_test(
+      NAME vertical_rtk_preintegration_feedback_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:vertical_rtk_preintegration_feedback_test>
+    )
   else()
     add_test(
       NAME reweighted_combined_imu_factor_test
       COMMAND $<TARGET_FILE:reweighted_combined_imu_factor_test>
+    )
+    add_test(
+      NAME vertical_rtk_preintegration_feedback_test
+      COMMAND $<TARGET_FILE:vertical_rtk_preintegration_feedback_test>
     )
   endif()
 endif()

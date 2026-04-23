@@ -37,6 +37,7 @@
 #include "offline_lc_minimal/factor/StaticSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/StaticAttitudeDriftFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasGmTransitionFactor.h"
+#include "offline_lc_minimal/factor/VerticalRtkPreintegrationFeedbackFactor.h"
 #include "offline_lc_minimal/factor/GPInterpolatedGPSFactor.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
 
@@ -69,9 +70,17 @@ struct SegmentGnssStatsAccumulator {
   double prefit_nis_sum = 0.0;
   double postfit_nis_sum = 0.0;
   double covariance_scale_sum = 0.0;
+  double vertical_rtk_residual_sum = 0.0;
+  double vertical_gate_inside_sum = 0.0;
+  double target_baz_sum = 0.0;
+  double feedback_attitude_scale_sum = 0.0;
   std::size_t prefit_nis_count = 0;
   std::size_t postfit_nis_count = 0;
   std::size_t covariance_scale_count = 0;
+  std::size_t vertical_rtk_residual_count = 0;
+  std::size_t vertical_gate_inside_count = 0;
+  std::size_t target_baz_count = 0;
+  std::size_t feedback_attitude_scale_count = 0;
 };
 
 Eigen::Vector3d Rot3ToYpr(const gtsam::Rot3 &rotation) {
@@ -327,6 +336,59 @@ double ComputeTotalVariation(const std::vector<double> &values) {
   return total_variation;
 }
 
+double ComputePopulationStdDev(const std::vector<double> &values) {
+  if (values.empty()) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  const double mean = std::accumulate(values.begin(), values.end(), 0.0) / static_cast<double>(values.size());
+  double variance = 0.0;
+  for (const double value : values) {
+    const double centered = value - mean;
+    variance += centered * centered;
+  }
+  return std::sqrt(variance / static_cast<double>(values.size()));
+}
+
+bool IsSynchronizedStatus(const StateMeasSyncStatus status) {
+  return status == StateMeasSyncStatus::kSynchronizedI || status == StateMeasSyncStatus::kSynchronizedJ;
+}
+
+std::optional<std::size_t> ResolveSegmentIndexForRecord(const GnssFactorRecord &record) {
+  if (IsSynchronizedStatus(record.sync_status) && record.synchronized_state_index > 0U) {
+    return record.synchronized_state_index - 1U;
+  }
+  if (record.sync_status == StateMeasSyncStatus::kInterpolated) {
+    return record.state_index_i;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t> ResolveVerticalFeedbackAnchorState(
+  const GnssFactorRecord &record,
+  const std::size_t dynamic_start_index) {
+  if (IsSynchronizedStatus(record.sync_status)) {
+    if (record.synchronized_state_index < dynamic_start_index) {
+      return std::nullopt;
+    }
+    return record.synchronized_state_index;
+  }
+  if (record.sync_status == StateMeasSyncStatus::kInterpolated &&
+      record.state_index_j > record.state_index_i) {
+    if (record.state_index_j < dynamic_start_index) {
+      return std::nullopt;
+    }
+    return record.state_index_j;
+  }
+  return std::nullopt;
+}
+
+gtsam::SharedNoiseModel MakeVerticalRtkFeedbackNoiseModel(const OfflineRunnerConfig &config) {
+  return gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(
+    config.vertical_rtk_feedback_sigma_attitude_rad,
+    config.vertical_rtk_feedback_sigma_attitude_rad,
+    config.vertical_rtk_feedback_sigma_baz_mps2));
+}
+
 ForwardDriftSummary ComputeFeedbackForwardDriftSummary(
   const std::vector<ImuSample> &imu_samples,
   const gtsam::Pose3 &start_pose,
@@ -520,6 +582,9 @@ void AccumulateInitialDynamicConsistencyMetrics(
       std::accumulate(pitch_values.begin(), pitch_values.end(), 0.0) / static_cast<double>(pitch_values.size());
     run_summary.optimized_first30s_mean_yaw_rad =
       std::accumulate(yaw_values.begin(), yaw_values.end(), 0.0) / static_cast<double>(yaw_values.size());
+    run_summary.optimized_first30s_std_baz_mps2 = ComputePopulationStdDev(baz_values);
+    run_summary.optimized_first30s_std_pitch_rad = ComputePopulationStdDev(pitch_values);
+    run_summary.optimized_first30s_std_roll_rad = ComputePopulationStdDev(roll_values);
     run_summary.optimized_first30s_up_total_variation_m = ComputeTotalVariation(up_values);
     run_summary.optimized_first30s_vz_total_variation_mps = ComputeTotalVariation(vz_values);
   }
@@ -565,14 +630,7 @@ std::vector<SegmentErrorDiagnostic> BuildSegmentErrorDiagnostics(
       continue;
     }
 
-    std::optional<std::size_t> segment_index;
-    if ((record.sync_status == StateMeasSyncStatus::kSynchronizedI ||
-         record.sync_status == StateMeasSyncStatus::kSynchronizedJ) &&
-        record.synchronized_state_index > 0U) {
-      segment_index = record.synchronized_state_index - 1U;
-    } else if (record.sync_status == StateMeasSyncStatus::kInterpolated) {
-      segment_index = record.state_index_i;
-    }
+    const auto segment_index = ResolveSegmentIndexForRecord(record);
     if (!segment_index.has_value()) {
       continue;
     }
@@ -592,6 +650,22 @@ std::vector<SegmentErrorDiagnostic> BuildSegmentErrorDiagnostics(
       if (std::isfinite(consistency_record.covariance_scale)) {
         accumulator.covariance_scale_sum += consistency_record.covariance_scale;
         ++accumulator.covariance_scale_count;
+      }
+      if (std::isfinite(consistency_record.prefit_residual_enu_m.z())) {
+        accumulator.vertical_rtk_residual_sum += consistency_record.prefit_residual_enu_m.z();
+        ++accumulator.vertical_rtk_residual_count;
+      }
+      if (std::isfinite(consistency_record.vertical_gate_inside)) {
+        accumulator.vertical_gate_inside_sum += consistency_record.vertical_gate_inside;
+        ++accumulator.vertical_gate_inside_count;
+      }
+      if (std::isfinite(consistency_record.vertical_feedback_target_baz_mps2)) {
+        accumulator.target_baz_sum += consistency_record.vertical_feedback_target_baz_mps2;
+        ++accumulator.target_baz_count;
+      }
+      if (std::isfinite(consistency_record.vertical_feedback_attitude_scale)) {
+        accumulator.feedback_attitude_scale_sum += consistency_record.vertical_feedback_attitude_scale;
+        ++accumulator.feedback_attitude_scale_count;
       }
     }
   }
@@ -642,6 +716,22 @@ std::vector<SegmentErrorDiagnostic> BuildSegmentErrorDiagnostics(
       diagnostic.mean_covariance_scale =
         stats.covariance_scale_count > 0U
           ? stats.covariance_scale_sum / static_cast<double>(stats.covariance_scale_count)
+          : std::numeric_limits<double>::quiet_NaN();
+      diagnostic.segment_vertical_rtk_residual_m =
+        stats.vertical_rtk_residual_count > 0U
+          ? stats.vertical_rtk_residual_sum / static_cast<double>(stats.vertical_rtk_residual_count)
+          : std::numeric_limits<double>::quiet_NaN();
+      diagnostic.segment_vertical_gate_inside =
+        stats.vertical_gate_inside_count > 0U
+          ? stats.vertical_gate_inside_sum / static_cast<double>(stats.vertical_gate_inside_count)
+          : std::numeric_limits<double>::quiet_NaN();
+      diagnostic.segment_target_baz_mps2 =
+        stats.target_baz_count > 0U
+          ? stats.target_baz_sum / static_cast<double>(stats.target_baz_count)
+          : std::numeric_limits<double>::quiet_NaN();
+      diagnostic.segment_feedback_attitude_scale =
+        stats.feedback_attitude_scale_count > 0U
+          ? stats.feedback_attitude_scale_sum / static_cast<double>(stats.feedback_attitude_scale_count)
           : std::numeric_limits<double>::quiet_NaN();
     }
 
@@ -1390,11 +1480,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   }
   const bool collect_error_diagnostics = config_.write_error_diagnostics;
   const bool collect_segment_error_diagnostics =
-    config_.write_segment_error_diagnostics || config_.enable_segment_error_feedback;
+    config_.write_segment_error_diagnostics ||
+    config_.enable_segment_error_feedback ||
+    config_.enable_vertical_rtk_preintegration_feedback;
   const bool collect_reference_states =
     collect_error_diagnostics ||
     collect_segment_error_diagnostics ||
-    config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone;
+    config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone ||
+    config_.enable_vertical_rtk_preintegration_feedback;
   run_result.run_summary.error_state_count = 0;
 
   const auto imu_params = gtsam::PreintegrationCombinedParams::MakeSharedU(config_.gravity_mps2);
@@ -1741,15 +1834,21 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   const bool collect_gnss_consistency =
     config_.enable_gnss &&
     (collect_error_diagnostics || collect_segment_error_diagnostics ||
-     config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone);
+     config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone ||
+     config_.enable_vertical_rtk_preintegration_feedback);
   const double gnss_nis_threshold =
     config_.gnss_consistency_gate_mode == GnssConsistencyGateMode::kNis
       ? ChiSquareQuantile3D(config_.gnss_nis_confidence)
       : std::numeric_limits<double>::quiet_NaN();
+  const gtsam::SharedNoiseModel vertical_rtk_feedback_noise_model =
+    config_.enable_vertical_rtk_preintegration_feedback
+      ? MakeVerticalRtkFeedbackNoiseModel(config_)
+      : gtsam::SharedNoiseModel{};
 
   if (config_.enable_gnss) {
     const gp::GPWNOJInterpolator base_interpolator(
       gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(kInterpolatorQcVariance)));
+    std::optional<std::size_t> previous_vertical_feedback_anchor_state;
 
     for (std::size_t sample_index = 0; sample_index < dataset.gnss_samples.size(); ++sample_index) {
       if (sample_index <= navigation_start_index) {
@@ -1825,42 +1924,59 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       consistency_record.sigma_e_m = sigma_m.x();
       consistency_record.sigma_n_m = sigma_m.y();
       consistency_record.sigma_u_m = sigma_m.z();
+      std::optional<gtsam::Pose3> prefit_pose;
+      if (sync_result.status == StateMeasSyncStatus::kInterpolated) {
+        prefit_pose = InterpolateReferenceState(reference_node_states, record.corrected_time_s).pose;
+      } else if (IsSynchronizedStatus(sync_result.status)) {
+        const std::size_t prefit_state_index =
+          sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i : sync_result.key_index_j;
+        prefit_pose = reference_node_states[prefit_state_index].pose;
+      }
       if (collect_gnss_consistency) {
-        const gtsam::Pose3 prefit_pose =
-          sync_result.status == StateMeasSyncStatus::kInterpolated
-            ? InterpolateReferenceState(reference_node_states, record.corrected_time_s).pose
-            : reference_node_states[
-                sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i : sync_result.key_index_j]
-                .pose;
-        consistency_record.prefit_residual_enu_m = ComputePositionResidualEnu(prefit_pose, record.measurement_enu_m);
-        consistency_record.prefit_nis = ComputeNis(consistency_record.prefit_residual_enu_m, sigma_m);
-        consistency_record.covariance_scale_e = ComputeConsistencyScale(
-          config_.gnss_consistency_gate_mode,
-          consistency_record.prefit_nis,
-          gnss_nis_threshold,
-          config_.gnss_consistency_relaxed_threshold_ratio,
-          config_.gnss_consistency_max_scale_horizontal);
-        consistency_record.covariance_scale_n = ComputeConsistencyScale(
-          config_.gnss_consistency_gate_mode,
-          consistency_record.prefit_nis,
-          gnss_nis_threshold,
-          config_.gnss_consistency_relaxed_threshold_ratio,
-          config_.gnss_consistency_max_scale_horizontal);
-        consistency_record.covariance_scale_u = ComputeConsistencyScale(
-          config_.gnss_consistency_gate_mode,
-          consistency_record.prefit_nis,
-          gnss_nis_threshold,
-          config_.gnss_consistency_relaxed_threshold_ratio,
-          config_.gnss_consistency_max_scale_up);
-        consistency_record.covariance_scale =
-          (consistency_record.covariance_scale_e + consistency_record.covariance_scale_n +
-           consistency_record.covariance_scale_u) /
-          3.0;
-        sigma_m.x() *= consistency_record.covariance_scale_e;
-        sigma_m.y() *= consistency_record.covariance_scale_n;
-        sigma_m.z() *= consistency_record.covariance_scale_u;
+        if (prefit_pose.has_value()) {
+          consistency_record.prefit_residual_enu_m = ComputePositionResidualEnu(*prefit_pose, record.measurement_enu_m);
+          consistency_record.prefit_nis = ComputeNis(consistency_record.prefit_residual_enu_m, sigma_m);
+          consistency_record.covariance_scale_e = ComputeConsistencyScale(
+            config_.gnss_consistency_gate_mode,
+            consistency_record.prefit_nis,
+            gnss_nis_threshold,
+            config_.gnss_consistency_relaxed_threshold_ratio,
+            config_.gnss_consistency_max_scale_horizontal);
+          consistency_record.covariance_scale_n = ComputeConsistencyScale(
+            config_.gnss_consistency_gate_mode,
+            consistency_record.prefit_nis,
+            gnss_nis_threshold,
+            config_.gnss_consistency_relaxed_threshold_ratio,
+            config_.gnss_consistency_max_scale_horizontal);
+          consistency_record.covariance_scale_u = ComputeConsistencyScale(
+            config_.gnss_consistency_gate_mode,
+            consistency_record.prefit_nis,
+            gnss_nis_threshold,
+            config_.gnss_consistency_relaxed_threshold_ratio,
+            config_.gnss_consistency_max_scale_up);
+          consistency_record.covariance_scale =
+            (consistency_record.covariance_scale_e + consistency_record.covariance_scale_n +
+             consistency_record.covariance_scale_u) /
+            3.0;
+          sigma_m.x() *= consistency_record.covariance_scale_e;
+          sigma_m.y() *= consistency_record.covariance_scale_n;
+          sigma_m.z() *= consistency_record.covariance_scale_u;
+        }
       }
       consistency_record.effective_sigma_u_m = sigma_m.z();
+      if (config_.enable_vertical_rtk_preintegration_feedback &&
+          std::isfinite(consistency_record.prefit_residual_enu_m.z()) &&
+          std::isfinite(consistency_record.effective_sigma_u_m)) {
+        consistency_record.vertical_gate_threshold_m =
+          config_.vertical_rtk_gate_sigma_multiple * consistency_record.effective_sigma_u_m;
+        const bool inside_gate =
+          std::abs(consistency_record.prefit_residual_enu_m.z()) <= consistency_record.vertical_gate_threshold_m;
+        consistency_record.vertical_gate_inside = inside_gate ? 1.0 : 0.0;
+        sigma_m.z() *= inside_gate
+                         ? config_.vertical_rtk_inside_gate_sigma_scale
+                         : config_.vertical_rtk_outside_gate_sigma_scale;
+      }
+      consistency_record.vertical_sigma_u_used_m = sigma_m.z();
       const auto noise_model = MakeGnssNoiseModel(config_, sigma_m);
 
       switch (sync_result.status) {
@@ -1941,6 +2057,64 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         default:
           ++run_result.run_summary.gnss_dropped_count;
           break;
+      }
+
+      if (config_.enable_vertical_rtk_preintegration_feedback &&
+          record.factor_used &&
+          std::isfinite(consistency_record.vertical_gate_inside)) {
+        if (consistency_record.vertical_gate_inside >= 0.5) {
+          ++run_result.run_summary.vertical_gate_inside_count;
+        } else {
+          ++run_result.run_summary.vertical_gate_outside_count;
+        }
+
+        const auto feedback_anchor_state =
+          ResolveVerticalFeedbackAnchorState(record, graph_timeline.dynamic_start_index);
+        if (feedback_anchor_state.has_value()) {
+          if (previous_vertical_feedback_anchor_state.has_value() &&
+              *feedback_anchor_state > *previous_vertical_feedback_anchor_state) {
+            const std::size_t state_index_i = *previous_vertical_feedback_anchor_state;
+            const std::size_t state_index_j = *feedback_anchor_state;
+            const double segment_start_time_s = state_timestamps[state_index_i];
+            const double segment_end_time_s = state_timestamps[state_index_j];
+            const double delta_time_s = std::max(segment_end_time_s - segment_start_time_s, 1e-6);
+            const double feedback_gain_scale =
+              consistency_record.vertical_gate_inside >= 0.5
+                ? config_.vertical_rtk_inside_feedback_gain_scale
+                : config_.vertical_rtk_outside_feedback_gain_scale;
+            const auto imu_window = IntegrateImuWindow(
+              dataset.imu_samples,
+              segment_start_time_s,
+              segment_end_time_s,
+              imu_params,
+              reference_node_states[state_index_i].bias);
+            const double target_baz_mps2 =
+              -feedback_gain_scale * config_.vertical_rtk_feedback_bias_gain *
+              consistency_record.prefit_residual_enu_m.z() /
+              (delta_time_s * delta_time_s);
+            const double feedback_attitude_scale =
+              feedback_gain_scale * config_.vertical_rtk_feedback_attitude_gain;
+            graph.add(factor::VerticalRtkPreintegrationFeedbackFactor(
+              X(state_index_i),
+              V(state_index_i),
+              B(state_index_i),
+              X(state_index_j),
+              V(state_index_j),
+              B(state_index_j),
+              global_acc_bias_key,
+              imu_window.preintegrated_imu_measurements,
+              ComputeBiasDecay(delta_time_s, config_.vertical_acc_bias_tau_s),
+              delta_time_s,
+              consistency_record.prefit_residual_enu_m.z(),
+              feedback_gain_scale,
+              config_.vertical_rtk_feedback_bias_gain,
+              config_.vertical_rtk_feedback_attitude_gain,
+              vertical_rtk_feedback_noise_model));
+            consistency_record.vertical_feedback_target_baz_mps2 = target_baz_mps2;
+            consistency_record.vertical_feedback_attitude_scale = feedback_attitude_scale;
+          }
+          previous_vertical_feedback_anchor_state = *feedback_anchor_state;
+        }
       }
 
       consistency_record.factor_used = record.factor_used;
@@ -2081,7 +2255,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           const Eigen::Vector3d scaled_sigma_m(
             consistency_record->sigma_e_m * consistency_record->covariance_scale_e,
             consistency_record->sigma_n_m * consistency_record->covariance_scale_n,
-            consistency_record->sigma_u_m * consistency_record->covariance_scale_u);
+            consistency_record->vertical_sigma_u_used_m);
           consistency_record->postfit_nis = ComputeNis(residual_enu_m, scaled_sigma_m);
         }
         if (record.synchronized_state_index < trajectory_row_index_by_state.size() &&
@@ -2110,7 +2284,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           const Eigen::Vector3d scaled_sigma_m(
             consistency_record->sigma_e_m * consistency_record->covariance_scale_e,
             consistency_record->sigma_n_m * consistency_record->covariance_scale_n,
-            consistency_record->sigma_u_m * consistency_record->covariance_scale_u);
+            consistency_record->vertical_sigma_u_used_m);
           consistency_record->postfit_nis = ComputeNis(residual_enu_m, scaled_sigma_m);
         }
         if (record.state_index_i < trajectory_row_index_by_state.size() &&
@@ -2142,7 +2316,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         const Eigen::Vector3d scaled_sigma_m(
           record.sigma_e_m * record.covariance_scale_e,
           record.sigma_n_m * record.covariance_scale_n,
-          record.sigma_u_m * record.covariance_scale_u);
+          record.vertical_sigma_u_used_m);
         for (int axis = 0; axis < 3; ++axis) {
           if (!std::isfinite(scaled_sigma_m[axis]) || scaled_sigma_m[axis] <= 0.0 ||
               !std::isfinite(record.postfit_residual_enu_m[axis])) {
