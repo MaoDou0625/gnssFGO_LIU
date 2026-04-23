@@ -75,8 +75,29 @@ def filter_valid_rtk_speed_rows(rows: list[dict[str, float | bool | str]]) -> li
     return valid_rows
 
 
-def compute_delta_up(rows: list[dict[str, float]], key: str = "up_m") -> list[float]:
-    up0 = rows[0][key]
+def filter_rows_from_time(
+    rows: list[dict[str, float]],
+    start_time_s: float,
+) -> list[dict[str, float]]:
+    return [row for row in rows if row["time_s"] + TIME_EPSILON_S >= start_time_s]
+
+
+def compute_delta_up(
+    rows: list[dict[str, float]],
+    key: str = "up_m",
+    reference_time_s: float | None = None,
+) -> list[float]:
+    if not rows:
+        return []
+
+    if reference_time_s is None:
+        up0 = rows[0][key]
+    else:
+        reference_index = find_nearest_index(
+            [row["time_s"] for row in rows],
+            reference_time_s,
+        )
+        up0 = rows[reference_index][key]
     return [row[key] - up0 for row in rows]
 
 
@@ -99,8 +120,17 @@ def write_csv(
     rtk_rows: list[dict[str, float]],
     rtk_speed_rows: list[dict[str, float]],
 ) -> None:
+    reference_time_s = trajectory_rows[0]["time_s"]
     rtk_times = [row["time_s"] for row in rtk_rows]
     rtk_speed_times = [row["time_s"] for row in rtk_speed_rows]
+    optimized_delta_up = compute_delta_up(
+        trajectory_rows,
+        reference_time_s=reference_time_s,
+    )
+    rtk_delta_up = compute_delta_up(
+        rtk_rows,
+        reference_time_s=reference_time_s,
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as file:
         writer = csv.writer(file)
@@ -117,15 +147,14 @@ def write_csv(
                 "rtk_vz_mps",
             ]
         )
-        rtk_delta_up = compute_delta_up(rtk_rows)
-        for row in trajectory_rows:
+        for row_index, row in enumerate(trajectory_rows):
             rtk_index = find_nearest_index(rtk_times, row["time_s"])
             rtk_speed_index = find_nearest_index(rtk_speed_times, row["time_s"])
             writer.writerow(
                 [
                     row["time_s"],
                     row["up_m"],
-                    row["up_m"] - trajectory_rows[0]["up_m"],
+                    optimized_delta_up[row_index],
                     row["vz_mps"],
                     rtk_rows[rtk_index]["time_s"],
                     rtk_rows[rtk_index]["up_m"],
@@ -144,6 +173,8 @@ def make_plot(
     title: str,
 ) -> None:
     t0 = trajectory_rows[0]["time_s"]
+    rtk_rows_from_start = filter_rows_from_time(rtk_rows, t0)
+    rtk_speed_rows_from_start = filter_rows_from_time(rtk_speed_rows, t0)
 
     def relative_time(rows: list[dict[str, float]]) -> list[float]:
         return [row["time_s"] - t0 for row in rows]
@@ -152,26 +183,27 @@ def make_plot(
     fig.suptitle(title, fontsize=16)
 
     axes[0].plot(relative_time(trajectory_rows), [row["up_m"] for row in trajectory_rows], color="#1f77b4", linewidth=1.1, label="optimized")
-    axes[0].plot(relative_time(rtk_rows), [row["up_m"] for row in rtk_rows], color="#ff7f0e", linewidth=0.9, alpha=0.9, label="RTKFIX")
+    axes[0].plot(relative_time(rtk_rows_from_start), [row["up_m"] for row in rtk_rows_from_start], color="#ff7f0e", linewidth=0.9, alpha=0.9, label="RTKFIX")
     axes[0].set_ylabel("Up [m]")
     axes[0].set_title("Absolute up position")
     axes[0].grid(True, alpha=0.3)
     axes[0].legend(loc="upper right")
 
-    axes[1].plot(relative_time(trajectory_rows), compute_delta_up(trajectory_rows), color="#1f77b4", linewidth=1.1, label="optimized")
-    axes[1].plot(relative_time(rtk_rows), compute_delta_up(rtk_rows), color="#ff7f0e", linewidth=0.9, alpha=0.9, label="RTKFIX")
+    axes[1].plot(relative_time(trajectory_rows), compute_delta_up(trajectory_rows, reference_time_s=t0), color="#1f77b4", linewidth=1.1, label="optimized")
+    axes[1].plot(relative_time(rtk_rows_from_start), compute_delta_up(rtk_rows_from_start, reference_time_s=t0), color="#ff7f0e", linewidth=0.9, alpha=0.9, label="RTKFIX")
     axes[1].set_ylabel("Delta Up [m]")
     axes[1].set_title("Relative up position")
     axes[1].grid(True, alpha=0.3)
     axes[1].legend(loc="upper right")
 
     axes[2].plot(relative_time(trajectory_rows), [row["vz_mps"] for row in trajectory_rows], color="#1f77b4", linewidth=1.1, label="optimized")
-    axes[2].plot(relative_time(rtk_speed_rows), [row["vz_mps"] for row in rtk_speed_rows], color="#ff7f0e", linewidth=0.9, alpha=0.9, label="RTKFIX diff")
+    axes[2].plot(relative_time(rtk_speed_rows_from_start), [row["vz_mps"] for row in rtk_speed_rows_from_start], color="#ff7f0e", linewidth=0.9, alpha=0.9, label="RTKFIX diff")
     axes[2].set_ylabel("Vz [m/s]")
     axes[2].set_title("Vertical velocity")
     axes[2].set_xlabel("Time since navigation start [s]")
     axes[2].grid(True, alpha=0.3)
     axes[2].legend(loc="upper right")
+    axes[2].set_xlim(left=0.0)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=180)
@@ -190,19 +222,25 @@ def main() -> int:
     )
 
     trajectory_rows = read_trajectory_rows(trajectory_path)
+    navigation_start_time_s = trajectory_rows[0]["time_s"]
     origin_lat_rad, origin_lon_rad, origin_h_m = plot_speed_vs_rtk.choose_origin(gnss_path, trajectory_path)
     rtk_rows = plot_speed_vs_rtk.read_rtkfix_rows(gnss_path, origin_lat_rad, origin_lon_rad, origin_h_m)
     rtk_speed_rows = filter_valid_rtk_speed_rows(
         plot_speed_vs_rtk.build_rtk_speed_rows(rtk_rows, args.speed_window_s)
     )
+    rtk_rows_from_start = filter_rows_from_time(rtk_rows, navigation_start_time_s)
+    rtk_speed_rows_from_start = filter_rows_from_time(rtk_speed_rows, navigation_start_time_s)
 
     make_plot(trajectory_rows, rtk_rows, rtk_speed_rows, output_path, args.title)
     write_csv(csv_output_path, trajectory_rows, rtk_rows, rtk_speed_rows)
 
     optimized_stats = compute_vertical_stats(trajectory_rows)
-    rtk_stats = compute_vertical_stats(rtk_rows, include_velocity=False)
+    rtk_stats = compute_vertical_stats(
+        rtk_rows_from_start,
+        include_velocity=False,
+    )
     rtk_speed_stats = compute_vertical_stats(
-        [{"time_s": row["time_s"], "up_m": 0.0, "vz_mps": row["vz_mps"]} for row in rtk_speed_rows]
+        [{"time_s": row["time_s"], "up_m": 0.0, "vz_mps": row["vz_mps"]} for row in rtk_speed_rows_from_start]
     )
     print(f"plot_saved={output_path}")
     print(f"csv_saved={csv_output_path}")

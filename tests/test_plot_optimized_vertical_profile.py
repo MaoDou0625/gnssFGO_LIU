@@ -22,6 +22,23 @@ class PlotOptimizedVerticalProfileTests(unittest.TestCase):
         self.assertAlmostEqual(delta_up[1], 0.2, places=9)
         self.assertAlmostEqual(delta_up[2], -0.1, places=9)
 
+    def test_compute_delta_up_can_anchor_to_navigation_start_time(self) -> None:
+        rows = [
+            {"time_s": -100.0, "up_m": 10.0, "vz_mps": 0.0},
+            {"time_s": -50.0, "up_m": 10.4, "vz_mps": 0.0},
+            {"time_s": 0.0, "up_m": 10.2, "vz_mps": 0.0},
+            {"time_s": 1.0, "up_m": 10.5, "vz_mps": 0.1},
+        ]
+
+        delta_up = plot_optimized_vertical_profile.compute_delta_up(
+            rows,
+            reference_time_s=0.0,
+        )
+        self.assertAlmostEqual(delta_up[0], -0.2, places=9)
+        self.assertAlmostEqual(delta_up[1], 0.2, places=9)
+        self.assertAlmostEqual(delta_up[2], 0.0, places=9)
+        self.assertAlmostEqual(delta_up[3], 0.3, places=9)
+
     def test_compute_vertical_stats_captures_spread(self) -> None:
         rows = [
             {"time_s": 0.0, "up_m": 1.0, "vz_mps": 0.0},
@@ -41,6 +58,22 @@ class PlotOptimizedVerticalProfileTests(unittest.TestCase):
 
         filtered = plot_optimized_vertical_profile.filter_valid_rtk_speed_rows(rows)
         self.assertEqual(filtered, [{"time_s": 1.0, "vz_mps": -0.5}])
+
+    def test_filter_rows_from_time_discards_pre_navigation_samples(self) -> None:
+        rows = [
+            {"time_s": -1.0, "up_m": 10.0, "vz_mps": 0.0},
+            {"time_s": 0.0, "up_m": 10.1, "vz_mps": 0.0},
+            {"time_s": 1.0, "up_m": 10.2, "vz_mps": 0.1},
+        ]
+
+        filtered = plot_optimized_vertical_profile.filter_rows_from_time(rows, 0.0)
+        self.assertEqual(
+            filtered,
+            [
+                {"time_s": 0.0, "up_m": 10.1, "vz_mps": 0.0},
+                {"time_s": 1.0, "up_m": 10.2, "vz_mps": 0.1},
+            ],
+        )
 
 
 if __name__ == "__main__":
