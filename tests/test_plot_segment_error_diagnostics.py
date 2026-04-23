@@ -1,5 +1,6 @@
 import importlib.util
 import pathlib
+import tempfile
 import unittest
 
 
@@ -63,6 +64,32 @@ class PlotSegmentErrorDiagnosticsTests(unittest.TestCase):
         target = next(row for row in stats if row["group"] == "dtheta" and row["component"] == "x")
         self.assertAlmostEqual(float(target["range"]), 0.2, places=9)
         self.assertAlmostEqual(float(target["end_minus_start"]), 0.2, places=9)
+
+    def test_filter_dynamic_rows_discards_static_prefix_segments(self) -> None:
+        rows = [
+            {"start_time_s": 0.0, "mid_time_s": 0.25},
+            {"start_time_s": 0.5, "mid_time_s": 0.75},
+            {"start_time_s": 1.0, "mid_time_s": 1.025},
+            {"start_time_s": 1.05, "mid_time_s": 1.075},
+        ]
+
+        filtered = plot_segment_error_diagnostics.filter_dynamic_rows(rows, 1.0)
+        self.assertEqual(filtered, rows[2:])
+
+    def test_resolve_trajectory_path_defaults_to_sibling_file(self) -> None:
+        segment_error_path = pathlib.Path("/tmp/demo/segment_error_diagnostics.csv")
+        resolved = plot_segment_error_diagnostics.resolve_trajectory_path(segment_error_path, "")
+        self.assertEqual(resolved, pathlib.Path("/tmp/demo/trajectory.csv"))
+
+    def test_read_dynamic_start_time_reads_first_trajectory_row(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trajectory_path = pathlib.Path(temp_dir) / "trajectory.csv"
+            trajectory_path.write_text(
+                "time_s,east_m\n5801.597,0.0\n5801.647,0.1\n",
+                encoding="utf-8",
+            )
+            dynamic_start_time_s = plot_segment_error_diagnostics.read_dynamic_start_time(trajectory_path)
+            self.assertAlmostEqual(dynamic_start_time_s, 5801.597, places=9)
 
 
 if __name__ == "__main__":

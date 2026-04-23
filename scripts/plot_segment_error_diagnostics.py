@@ -26,6 +26,7 @@ GROUPS = [
 
 COMPONENT_LABELS = {"x": "x", "y": "y", "z": "z"}
 COLORS = {"x": "#1f77b4", "y": "#ff7f0e", "z": "#2ca02c"}
+TIME_EPSILON_S = 1e-9
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,6 +34,11 @@ def parse_args() -> argparse.Namespace:
         description="Plot segment-local estimated error diagnostics and print summary stats."
     )
     parser.add_argument("--segment-error", required=True, help="Path to segment_error_diagnostics.csv")
+    parser.add_argument(
+        "--trajectory",
+        default="",
+        help="Optional path to trajectory.csv. Defaults to the sibling file next to segment_error_diagnostics.csv.",
+    )
     parser.add_argument("--output", required=True, help="Output image path")
     parser.add_argument("--csv-output", default="", help="Optional summary CSV output path")
     parser.add_argument("--title", default="Segment-local estimated error diagnostics", help="Figure title")
@@ -61,6 +67,34 @@ def read_rows(path: Path) -> list[dict[str, float]]:
     if not rows:
         raise ValueError(f"No rows found in {path}")
     rows.sort(key=lambda row: row["mid_time_s"])
+    return rows
+
+
+def resolve_trajectory_path(segment_error_path: Path, trajectory_argument: str) -> Path:
+    if trajectory_argument:
+        return Path(trajectory_argument)
+    return segment_error_path.with_name("trajectory.csv")
+
+
+def read_dynamic_start_time(path: Path) -> float | None:
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        for raw in reader:
+            return float(raw["time_s"])
+    return None
+
+
+def filter_dynamic_rows(
+    rows: list[dict[str, float]],
+    dynamic_start_time_s: float | None,
+) -> list[dict[str, float]]:
+    if dynamic_start_time_s is None:
+        return rows
+    filtered = [row for row in rows if row["start_time_s"] + TIME_EPSILON_S >= dynamic_start_time_s]
+    if filtered:
+        return filtered
     return rows
 
 
@@ -112,8 +146,18 @@ def write_summary_csv(path: Path, stats: list[dict[str, float | str]]) -> None:
             writer.writerow(row)
 
 
-def make_plot(rows: list[dict[str, float]], output_path: Path, title: str) -> None:
-    time0 = rows[0]["mid_time_s"]
+def make_plot(
+    rows: list[dict[str, float]],
+    output_path: Path,
+    title: str,
+    dynamic_start_time_s: float | None,
+) -> None:
+    if dynamic_start_time_s is None:
+        time0 = rows[0]["mid_time_s"]
+        xlabel = "Time since first segment [s]"
+    else:
+        time0 = dynamic_start_time_s
+        xlabel = "Time since dynamic start [s]"
     times = [row["mid_time_s"] - time0 for row in rows]
 
     fig, axes = plt.subplots(len(GROUPS) + 1, 1, figsize=(16, 15), sharex=True, constrained_layout=True)
@@ -146,9 +190,11 @@ def make_plot(rows: list[dict[str, float]], output_path: Path, title: str) -> No
     )
     nis_axis.set_ylabel("Consistency")
     nis_axis.set_title("GNSS consistency by segment")
-    nis_axis.set_xlabel("Time since first segment [s]")
+    nis_axis.set_xlabel(xlabel)
     nis_axis.grid(True, alpha=0.3)
     nis_axis.legend(loc="upper right")
+    if dynamic_start_time_s is not None:
+        nis_axis.set_xlim(left=0.0)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=180)
@@ -177,12 +223,17 @@ def main() -> int:
     )
 
     rows = read_rows(segment_error_path)
+    trajectory_path = resolve_trajectory_path(segment_error_path, args.trajectory)
+    dynamic_start_time_s = read_dynamic_start_time(trajectory_path)
+    rows = filter_dynamic_rows(rows, dynamic_start_time_s)
     stats = summarize(rows)
-    make_plot(rows, output_path, args.title)
+    make_plot(rows, output_path, args.title, dynamic_start_time_s)
     write_summary_csv(csv_output_path, stats)
 
     print(f"plot_saved={output_path}")
     print(f"csv_saved={csv_output_path}")
+    if dynamic_start_time_s is not None:
+        print(f"dynamic_start_time_s={dynamic_start_time_s}")
     print_stats(stats)
     return 0
 
