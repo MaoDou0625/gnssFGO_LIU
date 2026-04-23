@@ -11,6 +11,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
+#include "offline_lc_minimal/factor/StaticVerticalSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/VerticalRtkPreintegrationFeedbackFactor.h"
 
 namespace {
@@ -18,6 +19,7 @@ namespace {
 using offline_lc_minimal::DefaultConfig;
 using offline_lc_minimal::LoadConfigFile;
 using offline_lc_minimal::factor::HorizontalPositionFactor;
+using offline_lc_minimal::factor::StaticVerticalSpecificForceFactor;
 using offline_lc_minimal::factor::VerticalRtkPreintegrationFeedbackFactor;
 
 template <typename Function>
@@ -158,6 +160,38 @@ void TestVerticalFeedbackRejectsSegmentFeedbackCompatibility() {
   ExpectTrue(threw, "vertical RTK feedback should reject segment feedback mode");
 }
 
+void TestInitialStaticVerticalSpecificForceLoads() {
+  const auto config_path = WriteTempConfig(
+    "static_alignment_duration_s=100.0\n"
+    "enable_initial_static_vertical_specific_force=true\n"
+    "initial_static_vertical_specific_force_sigma_mps2=0.0125\n",
+    "initial_static_vertical_specific_force_loads.cfg");
+  const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
+  std::filesystem::remove(config_path);
+  ExpectTrue(
+    config.enable_initial_static_vertical_specific_force,
+    "vertical static specific-force flag should load");
+  ExpectNear(
+    config.initial_static_vertical_specific_force_sigma_mps2,
+    0.0125,
+    1e-12,
+    "vertical static specific-force sigma should load");
+}
+
+void TestInitialStaticVerticalSpecificForceRequiresStaticAlignment() {
+  const auto config_path = WriteTempConfig(
+    "enable_initial_static_vertical_specific_force=true\n",
+    "initial_static_vertical_specific_force_requires_alignment.cfg");
+  bool threw = false;
+  try {
+    [[maybe_unused]] const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  std::filesystem::remove(config_path);
+  ExpectTrue(threw, "vertical static specific-force should require a positive static alignment duration");
+}
+
 void TestReserveVerticalVelocityInterfaceIsAccepted() {
   const auto config_path = WriteTempConfig(
     MakeVerticalFeedbackConfigPrefix() + "reserve_vertical_velocity_feedback_interface=true\n",
@@ -214,6 +248,78 @@ void TestHorizontalPositionFactorIgnoresVerticalTranslation() {
       pose,
       1e-6);
   ExpectMatrixNear(jacobian, numerical_jacobian, 5e-5, "horizontal factor Jacobian should match numerical derivative");
+}
+
+StaticVerticalSpecificForceFactor MakeStaticVerticalSpecificForceFactor(
+  const double measured_acc_z_mps2,
+  const Eigen::Vector3d &gravity_enu = Eigen::Vector3d(0.0, 0.0, 9.81)) {
+  return StaticVerticalSpecificForceFactor(
+    1,
+    2,
+    measured_acc_z_mps2,
+    gravity_enu,
+    gtsam::noiseModel::Isotropic::Sigma(1, 1e-2));
+}
+
+void TestStaticVerticalSpecificForceResidualNearZeroWhenBiasMatches() {
+  const auto factor = MakeStaticVerticalSpecificForceFactor(9.81 + 0.02);
+  const gtsam::Pose3 pose;
+  const gtsam::imuBias::ConstantBias bias(gtsam::Vector3(0.0, 0.0, 0.02), gtsam::Vector3::Zero());
+  const gtsam::Vector residual = factor.evaluateError(pose, bias);
+  ExpectNear(residual[0], 0.0, 1e-9, "matching ba_z should zero the static vertical residual");
+}
+
+void TestStaticVerticalSpecificForceRespondsLinearlyToBaz() {
+  const auto factor = MakeStaticVerticalSpecificForceFactor(9.81);
+  const gtsam::Pose3 pose;
+  const gtsam::imuBias::ConstantBias low_bias(gtsam::Vector3(0.0, 0.0, -0.01), gtsam::Vector3::Zero());
+  const gtsam::imuBias::ConstantBias high_bias(gtsam::Vector3(0.0, 0.0, 0.03), gtsam::Vector3::Zero());
+  const gtsam::Vector residual_low = factor.evaluateError(pose, low_bias);
+  const gtsam::Vector residual_high = factor.evaluateError(pose, high_bias);
+  ExpectNear(
+    residual_high[0] - residual_low[0],
+    0.04,
+    1e-9,
+    "static vertical residual should vary linearly with ba_z");
+}
+
+void TestStaticVerticalSpecificForceIgnoresYawButRespondsToRollPitch() {
+  const auto factor = MakeStaticVerticalSpecificForceFactor(9.81);
+  const gtsam::imuBias::ConstantBias bias;
+  const gtsam::Pose3 yaw_only(gtsam::Rot3::Yaw(0.3), gtsam::Point3(0.0, 0.0, 0.0));
+  const gtsam::Pose3 roll_pitch(gtsam::Rot3::RzRyRx(0.0, 0.03, -0.02), gtsam::Point3(0.0, 0.0, 0.0));
+  const gtsam::Vector yaw_residual = factor.evaluateError(yaw_only, bias);
+  const gtsam::Vector roll_pitch_residual = factor.evaluateError(roll_pitch, bias);
+  ExpectNear(yaw_residual[0], 0.0, 1e-9, "pure yaw should not change static vertical residual");
+  ExpectTrue(
+    std::abs(roll_pitch_residual[0]) > 1e-3,
+    "roll or pitch should change the static vertical residual");
+}
+
+void TestStaticVerticalSpecificForceJacobianMatchesNumericalDerivative() {
+  const auto factor = MakeStaticVerticalSpecificForceFactor(9.81 + 0.015);
+  const gtsam::Pose3 pose(gtsam::Rot3::RzRyRx(0.1, -0.05, 0.02), gtsam::Point3(0.1, -0.2, 0.3));
+  const gtsam::imuBias::ConstantBias bias(
+    gtsam::Vector3(0.01, -0.02, 0.015),
+    gtsam::Vector3(0.001, -0.002, 0.003));
+
+  gtsam::Matrix h_pose;
+  gtsam::Matrix h_bias;
+  [[maybe_unused]] const gtsam::Vector residual = factor.evaluateError(pose, bias, h_pose, h_bias);
+
+  const auto numerical_pose =
+    gtsam::numericalDerivative11<gtsam::Vector, gtsam::Pose3>(
+      [&](const gtsam::Pose3 &value) { return factor.evaluateError(value, bias); },
+      pose,
+      1e-6);
+  const auto numerical_bias =
+    gtsam::numericalDerivative11<gtsam::Vector, gtsam::imuBias::ConstantBias>(
+      [&](const gtsam::imuBias::ConstantBias &value) { return factor.evaluateError(pose, value); },
+      bias,
+      1e-6);
+
+  ExpectMatrixNear(h_pose, numerical_pose, 5e-5, "static vertical pose Jacobian should match numerical derivative");
+  ExpectMatrixNear(h_bias, numerical_bias, 5e-5, "static vertical bias Jacobian should match numerical derivative");
 }
 
 void TestPureYawLeavesRollPitchFeedbackResidualZero() {
@@ -370,10 +476,26 @@ int main() {
     RunTest("TestVerticalFeedbackRequiresGnss", TestVerticalFeedbackRequiresGnss);
     RunTest("TestVerticalFeedbackRequiresVerticalGmBiasProcess", TestVerticalFeedbackRequiresVerticalGmBiasProcess);
     RunTest("TestVerticalFeedbackRejectsSegmentFeedbackCompatibility", TestVerticalFeedbackRejectsSegmentFeedbackCompatibility);
+    RunTest("TestInitialStaticVerticalSpecificForceLoads", TestInitialStaticVerticalSpecificForceLoads);
+    RunTest(
+      "TestInitialStaticVerticalSpecificForceRequiresStaticAlignment",
+      TestInitialStaticVerticalSpecificForceRequiresStaticAlignment);
     RunTest("TestReserveVerticalVelocityInterfaceIsAccepted", TestReserveVerticalVelocityInterfaceIsAccepted);
     RunTest("TestVerticalFeedbackMinIntervalLoads", TestVerticalFeedbackMinIntervalLoads);
     RunTest("TestVerticalFeedbackRejectsNegativeMinInterval", TestVerticalFeedbackRejectsNegativeMinInterval);
     RunTest("TestHorizontalPositionFactorIgnoresVerticalTranslation", TestHorizontalPositionFactorIgnoresVerticalTranslation);
+    RunTest(
+      "TestStaticVerticalSpecificForceResidualNearZeroWhenBiasMatches",
+      TestStaticVerticalSpecificForceResidualNearZeroWhenBiasMatches);
+    RunTest(
+      "TestStaticVerticalSpecificForceRespondsLinearlyToBaz",
+      TestStaticVerticalSpecificForceRespondsLinearlyToBaz);
+    RunTest(
+      "TestStaticVerticalSpecificForceIgnoresYawButRespondsToRollPitch",
+      TestStaticVerticalSpecificForceIgnoresYawButRespondsToRollPitch);
+    RunTest(
+      "TestStaticVerticalSpecificForceJacobianMatchesNumericalDerivative",
+      TestStaticVerticalSpecificForceJacobianMatchesNumericalDerivative);
     RunTest("TestPureYawLeavesRollPitchFeedbackResidualZero", TestPureYawLeavesRollPitchFeedbackResidualZero);
     RunTest("TestGainScaleAmplifiesAttitudeAndBiasTargets", TestGainScaleAmplifiesAttitudeAndBiasTargets);
     RunTest("TestVerticalResidualFeedsDpZRow", TestVerticalResidualFeedsDpZRow);

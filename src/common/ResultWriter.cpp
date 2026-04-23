@@ -326,8 +326,9 @@ void WriteInitialDynamicConsistencyCsv(
   }
   stream << std::setprecision(17);
   stream
-    << "time_s,relative_time_s,up_m,vz_mps,yaw_rad,pitch_rad,roll_rad,baz_mps2,bgz_radps,static_baz_mps2,"
-       "static_bgz_radps\n";
+    << "time_s,relative_time_s,up_m,vz_mps,yaw_rad,pitch_rad,roll_rad,baz_mps2,bgz_radps,initial_baz_mps2,"
+       "initial_bgz_radps,static_baz_mps2,static_bgz_radps,optimized_last_static_baz_mps2,"
+       "optimized_last_static_bgz_radps,optimized_first_dynamic_baz_mps2,optimized_first_dynamic_bgz_radps\n";
 
   const double start_time_s = rows.front().time_s;
   for (const auto &row : rows) {
@@ -343,8 +344,14 @@ void WriteInitialDynamicConsistencyCsv(
            << row.ypr_rad.z() << ','
            << row.bias_acc.z() << ','
            << row.bias_gyro.z() << ','
+           << run_summary.initial_baz_mps2 << ','
+           << run_summary.initial_bgz_radps << ','
            << run_summary.static_baz_mps2 << ','
-           << run_summary.static_bgz_radps << '\n';
+           << run_summary.static_bgz_radps << ','
+           << run_summary.optimized_last_static_baz_mps2 << ','
+           << run_summary.optimized_last_static_bgz_radps << ','
+           << run_summary.optimized_first_dynamic_baz_mps2 << ','
+           << run_summary.optimized_first_dynamic_bgz_radps << '\n';
   }
 }
 
@@ -370,6 +377,12 @@ void ResultWriter::WriteOutputs(
     result.run_summary);
   if (!result.initial_static_trajectory.empty()) {
     WriteTrajectoryCsv(output_path / "initial_static_trajectory.csv", result.initial_static_trajectory, geo_reference);
+  }
+  if (!result.optimized_static_terminal_forward_trajectory.empty()) {
+    WriteTrajectoryCsv(
+      output_path / "optimized_static_terminal_forward_trajectory.csv",
+      result.optimized_static_terminal_forward_trajectory,
+      geo_reference);
   }
   if (!result.reference_node_trajectory.empty()) {
     WriteReferenceNodeCsv(output_path / "reference_node_trajectory.csv", result.reference_node_trajectory, geo_reference);

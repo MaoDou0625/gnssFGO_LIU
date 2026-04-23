@@ -410,8 +410,14 @@ struct RunSummary {
   double static_specific_force_window_std_y_mps2 = 0.0;
   double static_specific_force_window_std_z_mps2 = 0.0;
   double static_specific_force_window_rms_xyz_mps2 = 0.0;
+  double initial_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double initial_bgz_radps = std::numeric_limits<double>::quiet_NaN();
   double static_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
   double static_bgz_radps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_last_static_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double optimized_last_static_bgz_radps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first_dynamic_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first_dynamic_bgz_radps = std::numeric_limits<double>::quiet_NaN();
   double initial_static_horizontal_drift_max_m = 0.0;
   double initial_static_up_drift_max_m = 0.0;
   double initial_static_3d_drift_max_m = 0.0;
@@ -437,6 +443,8 @@ struct RunSummary {
   double optimized_first30s_vz_total_variation_mps = std::numeric_limits<double>::quiet_NaN();
   double forward_first30s_up_total_variation_m = std::numeric_limits<double>::quiet_NaN();
   double forward_first30s_vz_total_variation_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_static_terminal_forward20s_up_total_variation_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_static_terminal_forward20s_vz_total_variation_mps = std::numeric_limits<double>::quiet_NaN();
   double initial_error = 0.0;
   double final_error = 0.0;
   double origin_lat_rad = 0.0;
@@ -478,8 +486,14 @@ struct RunSummary {
         << "static_specific_force_window_std_y_mps2=" << static_specific_force_window_std_y_mps2 << '\n'
         << "static_specific_force_window_std_z_mps2=" << static_specific_force_window_std_z_mps2 << '\n'
         << "static_specific_force_window_rms_xyz_mps2=" << static_specific_force_window_rms_xyz_mps2 << '\n'
+        << "initial_baz_mps2=" << initial_baz_mps2 << '\n'
+        << "initial_bgz_radps=" << initial_bgz_radps << '\n'
         << "static_baz_mps2=" << static_baz_mps2 << '\n'
         << "static_bgz_radps=" << static_bgz_radps << '\n'
+        << "optimized_last_static_baz_mps2=" << optimized_last_static_baz_mps2 << '\n'
+        << "optimized_last_static_bgz_radps=" << optimized_last_static_bgz_radps << '\n'
+        << "optimized_first_dynamic_baz_mps2=" << optimized_first_dynamic_baz_mps2 << '\n'
+        << "optimized_first_dynamic_bgz_radps=" << optimized_first_dynamic_bgz_radps << '\n'
         << "initial_static_horizontal_drift_max_m=" << initial_static_horizontal_drift_max_m << '\n'
         << "initial_static_up_drift_max_m=" << initial_static_up_drift_max_m << '\n'
         << "initial_static_3d_drift_max_m=" << initial_static_3d_drift_max_m << '\n'
@@ -505,6 +519,10 @@ struct RunSummary {
         << "optimized_first30s_vz_total_variation_mps=" << optimized_first30s_vz_total_variation_mps << '\n'
         << "forward_first30s_up_total_variation_m=" << forward_first30s_up_total_variation_m << '\n'
         << "forward_first30s_vz_total_variation_mps=" << forward_first30s_vz_total_variation_mps << '\n'
+        << "optimized_static_terminal_forward20s_up_total_variation_m="
+        << optimized_static_terminal_forward20s_up_total_variation_m << '\n'
+        << "optimized_static_terminal_forward20s_vz_total_variation_mps="
+        << optimized_static_terminal_forward20s_vz_total_variation_mps << '\n'
         << "initial_error=" << initial_error << '\n'
         << "final_error=" << final_error << '\n'
         << "origin_lat_rad=" << origin_lat_rad << '\n'
@@ -522,6 +540,7 @@ struct OfflineRunResult {
   DataSummary data_summary;
   RunSummary run_summary;
   std::vector<TrajectoryRow> initial_static_trajectory;
+  std::vector<TrajectoryRow> optimized_static_terminal_forward_trajectory;
   std::vector<ReferenceNodeRow> reference_node_trajectory;
   std::vector<ErrorStateRow> error_state_trajectory;
   std::vector<SegmentErrorDiagnostic> segment_error_diagnostics;

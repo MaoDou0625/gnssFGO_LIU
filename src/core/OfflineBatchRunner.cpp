@@ -38,6 +38,7 @@
 #include "offline_lc_minimal/factor/SegmentBiasFeedbackFactor.h"
 #include "offline_lc_minimal/factor/StaticZeroAngularRateFactor.h"
 #include "offline_lc_minimal/factor/StaticSpecificForceFactor.h"
+#include "offline_lc_minimal/factor/StaticVerticalSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/StaticAttitudeDriftFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasGmTransitionFactor.h"
 #include "offline_lc_minimal/factor/VerticalRtkPreintegrationFeedbackFactor.h"
@@ -386,11 +387,6 @@ struct ForwardDriftSummary {
   double horizontal_slope_30s = std::numeric_limits<double>::quiet_NaN();
 };
 
-struct WindowVariationSummary {
-  double up_total_variation_m = std::numeric_limits<double>::quiet_NaN();
-  double vz_total_variation_mps = std::numeric_limits<double>::quiet_NaN();
-};
-
 double ComputeTotalVariation(const std::vector<double> &values) {
   if (values.size() < 2U) {
     return 0.0;
@@ -530,7 +526,7 @@ ForwardDriftSummary ComputeFeedbackForwardDriftSummary(
   return summary;
 }
 
-WindowVariationSummary ComputeForwardWindowVariationSummary(
+std::vector<TrajectoryRow> BuildForwardTrajectoryRows(
   const std::vector<ImuSample> &imu_samples,
   const gtsam::Pose3 &start_pose,
   const gtsam::Vector3 &start_velocity,
@@ -538,13 +534,13 @@ WindowVariationSummary ComputeForwardWindowVariationSummary(
   const double start_time_s,
   const double duration_s,
   const double gravity_mps2) {
-  WindowVariationSummary summary;
+  std::vector<TrajectoryRow> rows;
   if (imu_samples.size() < 2U || duration_s <= 0.0) {
-    return summary;
+    return rows;
   }
 
   const double end_time_s = start_time_s + duration_s;
-  Eigen::Matrix3d current_rotation = start_pose.rotation().matrix();
+  gtsam::Rot3 current_rotation = start_pose.rotation();
   Eigen::Vector3d current_position(
     start_pose.translation().x(),
     start_pose.translation().y(),
@@ -554,11 +550,19 @@ WindowVariationSummary ComputeForwardWindowVariationSummary(
   const Eigen::Vector3d bias_gyro = bias.gyroscope();
   const Eigen::Vector3d gravity_enu(0.0, 0.0, gravity_mps2);
 
-  std::vector<double> up_values;
-  std::vector<double> vz_values;
-  up_values.push_back(current_position.z());
-  vz_values.push_back(current_velocity.z());
+  auto append_row = [&](const double time_s, const Eigen::Vector3d &omega_radps) {
+    TrajectoryRow row;
+    row.time_s = time_s;
+    row.enu_position_m = current_position;
+    row.enu_velocity_mps = current_velocity;
+    row.ypr_rad = Rot3ToYpr(current_rotation);
+    row.omega_radps = omega_radps;
+    row.bias_acc = bias_acc;
+    row.bias_gyro = bias_gyro;
+    rows.push_back(row);
+  };
 
+  append_row(start_time_s, Eigen::Vector3d::Zero());
   for (std::size_t imu_index = 0; imu_index + 1U < imu_samples.size(); ++imu_index) {
     const auto &current_sample = imu_samples[imu_index];
     const auto &next_sample = imu_samples[imu_index + 1U];
@@ -571,50 +575,72 @@ WindowVariationSummary ComputeForwardWindowVariationSummary(
     const double delta_time_s = interval_end_s - interval_start_s;
     const Eigen::Vector3d corrected_gyro = current_sample.gyro_radps - bias_gyro;
     const Eigen::Vector3d corrected_acc = current_sample.accel_mps2 - bias_acc;
-    const Eigen::Vector3d nav_specific_force = current_rotation * corrected_acc;
+    const Eigen::Vector3d nav_specific_force = current_rotation.matrix() * corrected_acc;
     const Eigen::Vector3d nav_acc = nav_specific_force - gravity_enu;
 
     current_position += current_velocity * delta_time_s + 0.5 * nav_acc * delta_time_s * delta_time_s;
     current_velocity += nav_acc * delta_time_s;
-
-    const gtsam::Rot3 delta_rotation = gtsam::Rot3::Expmap(
-      gtsam::Vector3(
+    current_rotation =
+      current_rotation.compose(gtsam::Rot3::Expmap(gtsam::Vector3(
         corrected_gyro.x() * delta_time_s,
         corrected_gyro.y() * delta_time_s,
-        corrected_gyro.z() * delta_time_s));
-    current_rotation *= delta_rotation.matrix();
+        corrected_gyro.z() * delta_time_s)));
 
-    up_values.push_back(current_position.z());
-    vz_values.push_back(current_velocity.z());
-
+    append_row(interval_end_s, corrected_gyro);
     if (interval_end_s >= end_time_s - kTimeEpsilonS) {
       break;
     }
   }
 
-  if (!up_values.empty()) {
-    summary.up_total_variation_m = ComputeTotalVariation(up_values);
+  return rows;
+}
+
+void AccumulateForwardTrajectoryVariationSummary(
+  const std::vector<TrajectoryRow> &rows,
+  double &up_total_variation_m,
+  double &vz_total_variation_mps) {
+  if (rows.empty()) {
+    return;
   }
-  if (!vz_values.empty()) {
-    summary.vz_total_variation_mps = ComputeTotalVariation(vz_values);
+
+  std::vector<double> up_values;
+  std::vector<double> vz_values;
+  up_values.reserve(rows.size());
+  vz_values.reserve(rows.size());
+  for (const auto &row : rows) {
+    up_values.push_back(row.enu_position_m.z());
+    vz_values.push_back(row.enu_velocity_mps.z());
   }
-  return summary;
+  up_total_variation_m = ComputeTotalVariation(up_values);
+  vz_total_variation_mps = ComputeTotalVariation(vz_values);
 }
 
 void AccumulateInitialDynamicConsistencyMetrics(
   const std::vector<TrajectoryRow> &trajectory_rows,
-  const gtsam::imuBias::ConstantBias &static_bias,
-  const gtsam::Pose3 &static_orientation_with_dynamic_origin,
-  const std::vector<ImuSample> &imu_samples,
-  const double gravity_mps2,
+  const gtsam::imuBias::ConstantBias &initial_bias,
+  const std::optional<TrajectoryRow> &optimized_last_static_row,
+  const std::vector<TrajectoryRow> &optimized_static_terminal_forward_rows,
   RunSummary &run_summary) {
-  run_summary.static_baz_mps2 = static_bias.accelerometer().z();
-  run_summary.static_bgz_radps = static_bias.gyroscope().z();
+  run_summary.initial_baz_mps2 = initial_bias.accelerometer().z();
+  run_summary.initial_bgz_radps = initial_bias.gyroscope().z();
+
+  if (optimized_last_static_row.has_value()) {
+    run_summary.static_baz_mps2 = optimized_last_static_row->bias_acc.z();
+    run_summary.static_bgz_radps = optimized_last_static_row->bias_gyro.z();
+    run_summary.optimized_last_static_baz_mps2 = optimized_last_static_row->bias_acc.z();
+    run_summary.optimized_last_static_bgz_radps = optimized_last_static_row->bias_gyro.z();
+  }
 
   if (trajectory_rows.empty()) {
+    AccumulateForwardTrajectoryVariationSummary(
+      optimized_static_terminal_forward_rows,
+      run_summary.optimized_static_terminal_forward20s_up_total_variation_m,
+      run_summary.optimized_static_terminal_forward20s_vz_total_variation_mps);
     return;
   }
 
+  run_summary.optimized_first_dynamic_baz_mps2 = trajectory_rows.front().bias_acc.z();
+  run_summary.optimized_first_dynamic_bgz_radps = trajectory_rows.front().bias_gyro.z();
   const double start_time_s = trajectory_rows.front().time_s;
   const double end_time_s = start_time_s + 30.0;
   std::vector<double> baz_values;
@@ -655,27 +681,10 @@ void AccumulateInitialDynamicConsistencyMetrics(
     run_summary.optimized_first30s_up_total_variation_m = ComputeTotalVariation(up_values);
     run_summary.optimized_first30s_vz_total_variation_mps = ComputeTotalVariation(vz_values);
   }
-
-  const auto &first_row = trajectory_rows.front();
-  const gtsam::Pose3 forward_start_pose(
-    static_orientation_with_dynamic_origin.rotation(),
-    gtsam::Point3(
-      first_row.enu_position_m.x(),
-      first_row.enu_position_m.y(),
-      first_row.enu_position_m.z()));
-  const WindowVariationSummary forward_summary = ComputeForwardWindowVariationSummary(
-    imu_samples,
-    forward_start_pose,
-    gtsam::Vector3(
-      first_row.enu_velocity_mps.x(),
-      first_row.enu_velocity_mps.y(),
-      first_row.enu_velocity_mps.z()),
-    static_bias,
-    start_time_s,
-    30.0,
-    gravity_mps2);
-  run_summary.forward_first30s_up_total_variation_m = forward_summary.up_total_variation_m;
-  run_summary.forward_first30s_vz_total_variation_mps = forward_summary.vz_total_variation_mps;
+  AccumulateForwardTrajectoryVariationSummary(
+    optimized_static_terminal_forward_rows,
+    run_summary.optimized_static_terminal_forward20s_up_total_variation_m,
+    run_summary.optimized_static_terminal_forward20s_vz_total_variation_mps);
 }
 
 std::vector<SegmentErrorDiagnostic> BuildSegmentErrorDiagnostics(
@@ -1473,7 +1482,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   OfflineRunResult run_result;
   run_result.data_summary = dataset.summary;
   run_result.run_summary.gnss_enabled = config_.enable_gnss;
-  run_result.run_summary.initial_static_constraints_enabled = config_.enable_initial_static_zupt_zaru;
+  run_result.run_summary.initial_static_constraints_enabled =
+    config_.enable_initial_static_zupt_zaru ||
+    config_.enable_initial_static_zero_specific_force ||
+    config_.enable_initial_static_vertical_specific_force;
   run_result.run_summary.initial_static_subgraph_enabled = config_.enable_initial_static_subgraph;
 
   const std::size_t origin_index = FindOriginIndex(dataset.gnss_samples, dataset.imu_samples);
@@ -1889,6 +1901,21 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           imu_window.mean_acc_mps2,
           Eigen::Vector3d(0.0, 0.0, config_.gravity_mps2),
           gtsam::noiseModel::Isotropic::Sigma(3, static_specific_force_sigma)));
+      }
+      if (config_.enable_initial_static_vertical_specific_force && initial_static_constraint_data.valid) {
+        double static_vertical_specific_force_sigma =
+          config_.initial_static_vertical_specific_force_sigma_mps2;
+        if (imu_window.imu_segments > 0U && initial_static_constraint_data.window_summary.sample_count > 0U) {
+          static_vertical_specific_force_sigma *= std::sqrt(
+            static_cast<double>(initial_static_constraint_data.window_summary.sample_count) /
+            static_cast<double>(imu_window.imu_segments));
+        }
+        graph.add(factor::StaticVerticalSpecificForceFactor(
+          X(state_index),
+          B(state_index),
+          imu_window.mean_acc_mps2.z(),
+          Eigen::Vector3d(0.0, 0.0, config_.gravity_mps2),
+          gtsam::noiseModel::Isotropic::Sigma(1, static_vertical_specific_force_sigma)));
       }
       graph.add(factor::StaticAttitudeDriftFactor(
         X(state_index - 1U),
@@ -2308,6 +2335,18 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.run_summary.feedback_forward_up_slope_30s = drift_summary.up_slope_30s;
     run_result.run_summary.feedback_forward_horizontal_slope_10s = drift_summary.horizontal_slope_10s;
     run_result.run_summary.feedback_forward_horizontal_slope_30s = drift_summary.horizontal_slope_30s;
+    const auto first_dynamic_forward_rows = BuildForwardTrajectoryRows(
+      dataset.imu_samples,
+      first_dynamic_pose,
+      first_dynamic_velocity,
+      first_dynamic_bias,
+      state_timestamps[first_dynamic_index],
+      30.0,
+      config_.gravity_mps2);
+    AccumulateForwardTrajectoryVariationSummary(
+      first_dynamic_forward_rows,
+      run_result.run_summary.forward_first30s_up_total_variation_m,
+      run_result.run_summary.forward_first30s_vz_total_variation_mps);
   }
 
   for (std::size_t index = 0; index < run_result.trajectory.size(); ++index) {
@@ -2325,14 +2364,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     row.bias_acc = bias.accelerometer();
     row.bias_gyro = bias.gyroscope();
   }
-
-  AccumulateInitialDynamicConsistencyMetrics(
-    run_result.trajectory,
-    initial_bias,
-    initial_pose_world,
-    dataset.imu_samples,
-    config_.gravity_mps2,
-    run_result.run_summary);
 
   run_result.initial_static_trajectory.clear();
   if (graph_timeline.initial_static_state_count > 0U) {
@@ -2354,6 +2385,32 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     }
   }
   run_result.run_summary.initial_static_trajectory_count = run_result.initial_static_trajectory.size();
+  run_result.optimized_static_terminal_forward_trajectory.clear();
+  std::optional<TrajectoryRow> optimized_last_static_row;
+  if (!run_result.initial_static_trajectory.empty()) {
+    const std::size_t static_terminal_graph_index = graph_timeline.initial_static_state_count - 1U;
+    const auto static_terminal_pose = optimized_values.at<gtsam::Pose3>(X(static_terminal_graph_index));
+    const auto static_terminal_velocity = optimized_values.at<gtsam::Vector3>(V(static_terminal_graph_index));
+    const auto static_terminal_bias =
+      optimized_values.at<gtsam::imuBias::ConstantBias>(B(static_terminal_graph_index));
+    optimized_last_static_row = run_result.initial_static_trajectory.back();
+    const auto &row = *optimized_last_static_row;
+    run_result.optimized_static_terminal_forward_trajectory = BuildForwardTrajectoryRows(
+      dataset.imu_samples,
+      static_terminal_pose,
+      static_terminal_velocity,
+      static_terminal_bias,
+      row.time_s,
+      20.0,
+      config_.gravity_mps2);
+  }
+
+  AccumulateInitialDynamicConsistencyMetrics(
+    run_result.trajectory,
+    initial_bias,
+    optimized_last_static_row,
+    run_result.optimized_static_terminal_forward_trajectory,
+    run_result.run_summary);
 
   if (config_.write_imu_rate_avp) {
     std::vector<OptimizedNodeState> optimized_node_states;

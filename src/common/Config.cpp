@@ -324,8 +324,12 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.initial_static_zaru_sigma_radps = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_initial_static_zero_specific_force") {
     config.enable_initial_static_zero_specific_force = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_initial_static_vertical_specific_force") {
+    config.enable_initial_static_vertical_specific_force = ParseBool(normalized_value);
   } else if (normalized_key == "initial_static_specific_force_sigma_mps2") {
     config.initial_static_specific_force_sigma_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "initial_static_vertical_specific_force_sigma_mps2") {
+    config.initial_static_vertical_specific_force_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_initial_static_subgraph") {
     config.enable_initial_static_subgraph = ParseBool(normalized_value);
   } else if (normalized_key == "initial_static_state_frequency_hz") {
@@ -593,6 +597,9 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     if (config.initial_static_specific_force_sigma_mps2 <= 0.0) {
       throw std::runtime_error("initial_static_specific_force_sigma_mps2 must be positive");
     }
+    if (config.initial_static_vertical_specific_force_sigma_mps2 <= 0.0) {
+      throw std::runtime_error("initial_static_vertical_specific_force_sigma_mps2 must be positive");
+    }
     if (config.initial_static_state_frequency_hz <= 0.0) {
       throw std::runtime_error("initial_static_state_frequency_hz must be positive");
     }
@@ -604,6 +611,10 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     }
     if (config.enable_initial_static_zero_specific_force && config.static_alignment_duration_s <= 0.0) {
       throw std::runtime_error("enable_initial_static_zero_specific_force requires static_alignment_duration_s > 0");
+    }
+    if (config.enable_initial_static_vertical_specific_force && config.static_alignment_duration_s <= 0.0) {
+      throw std::runtime_error(
+        "enable_initial_static_vertical_specific_force requires static_alignment_duration_s > 0");
     }
     if (config.enable_initial_static_subgraph && config.static_alignment_duration_s <= 0.0) {
       throw std::runtime_error("enable_initial_static_subgraph requires static_alignment_duration_s > 0");
@@ -818,6 +829,9 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
   if (config.initial_static_specific_force_sigma_mps2 <= 0.0) {
     throw std::runtime_error("initial_static_specific_force_sigma_mps2 must be positive");
   }
+  if (config.initial_static_vertical_specific_force_sigma_mps2 <= 0.0) {
+    throw std::runtime_error("initial_static_vertical_specific_force_sigma_mps2 must be positive");
+  }
   if (config.initial_static_state_frequency_hz <= 0.0) {
     throw std::runtime_error("initial_static_state_frequency_hz must be positive");
   }
@@ -829,6 +843,9 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
   }
   if (config.enable_initial_static_zero_specific_force && config.static_alignment_duration_s <= 0.0) {
     throw std::runtime_error("enable_initial_static_zero_specific_force requires static_alignment_duration_s > 0");
+  }
+  if (config.enable_initial_static_vertical_specific_force && config.static_alignment_duration_s <= 0.0) {
+    throw std::runtime_error("enable_initial_static_vertical_specific_force requires static_alignment_duration_s > 0");
   }
   if (config.enable_initial_static_subgraph && config.static_alignment_duration_s <= 0.0) {
     throw std::runtime_error("enable_initial_static_subgraph requires static_alignment_duration_s > 0");
@@ -930,7 +947,11 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "initial_static_zaru_sigma_radps=" << config.initial_static_zaru_sigma_radps << '\n'
       << "enable_initial_static_zero_specific_force="
       << (config.enable_initial_static_zero_specific_force ? "true" : "false") << '\n'
+      << "enable_initial_static_vertical_specific_force="
+      << (config.enable_initial_static_vertical_specific_force ? "true" : "false") << '\n'
       << "initial_static_specific_force_sigma_mps2=" << config.initial_static_specific_force_sigma_mps2 << '\n'
+      << "initial_static_vertical_specific_force_sigma_mps2="
+      << config.initial_static_vertical_specific_force_sigma_mps2 << '\n'
       << "enable_initial_static_subgraph=" << (config.enable_initial_static_subgraph ? "true" : "false") << '\n'
       << "initial_static_state_frequency_hz=" << config.initial_static_state_frequency_hz << '\n'
       << "initial_static_attitude_drift_sigma_rad=" << config.initial_static_attitude_drift_sigma_rad << '\n'
