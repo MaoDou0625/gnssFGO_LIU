@@ -12,6 +12,7 @@
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalSpecificForceFactor.h"
+#include "offline_lc_minimal/factor/VerticalInsidePoseFactor.h"
 #include "offline_lc_minimal/factor/VerticalRtkPreintegrationFeedbackFactor.h"
 
 namespace {
@@ -20,6 +21,7 @@ using offline_lc_minimal::DefaultConfig;
 using offline_lc_minimal::LoadConfigFile;
 using offline_lc_minimal::factor::HorizontalPositionFactor;
 using offline_lc_minimal::factor::StaticVerticalSpecificForceFactor;
+using offline_lc_minimal::factor::VerticalInsidePoseFactor;
 using offline_lc_minimal::factor::VerticalRtkPreintegrationFeedbackFactor;
 
 template <typename Function>
@@ -469,6 +471,59 @@ void TestJacobianMatchesNumericalDerivative() {
   ExpectMatrixNear(h7, num_h7, 5e-5, "global_acc_bias Jacobian should match numerical derivative");
 }
 
+void TestVerticalInsidePoseFactorTracksRollPitchAndUpOnly() {
+  const VerticalInsidePoseFactor factor(
+    1,
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(0.0, -0.02, 0.01), gtsam::Point3(1.0, 2.0, 3.0)),
+    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(1e-3, 1e-3, 1e-2)));
+  const gtsam::Pose3 pose(
+    gtsam::Rot3::RzRyRx(0.15, -0.015, 0.03),
+    gtsam::Point3(4.0, 5.0, 3.25));
+  const gtsam::Vector residual = factor.evaluateError(pose);
+  ExpectNear(residual[2], 0.25, 1e-9, "vertical inside factor should use only up translation");
+  ExpectTrue(std::abs(residual[0]) > 1e-6, "roll residual should be active");
+  ExpectTrue(std::abs(residual[1]) > 1e-6, "pitch residual should be active");
+}
+
+void TestVerticalInsidePoseFactorIgnoresYawAndHorizontalTranslation() {
+  const gtsam::Pose3 reference_pose(
+    gtsam::Rot3::Yaw(0.0).compose(gtsam::Rot3::Pitch(0.01)).compose(gtsam::Rot3::Roll(-0.02)),
+    gtsam::Point3(1.0, 2.0, 3.0));
+  const VerticalInsidePoseFactor factor(
+    1,
+    reference_pose,
+    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(1e-3, 1e-3, 1e-2)));
+  const gtsam::Pose3 pose(
+    gtsam::Rot3::Yaw(0.25).compose(gtsam::Rot3::Pitch(0.01)).compose(gtsam::Rot3::Roll(-0.02)),
+    gtsam::Point3(10.0, -4.0, 3.0));
+  const gtsam::Vector residual = factor.evaluateError(pose);
+  ExpectNear(residual[0], 0.0, 1e-9, "pure yaw should not affect roll residual");
+  ExpectNear(residual[1], 0.0, 1e-9, "pure yaw should not affect pitch residual");
+  ExpectNear(residual[2], 0.0, 1e-9, "horizontal translation should not affect vertical residual");
+}
+
+void TestVerticalInsidePoseFactorJacobianMatchesNumericalDerivative() {
+  const VerticalInsidePoseFactor factor(
+    1,
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(-0.03, 0.02, -0.01), gtsam::Point3(0.5, -0.2, 1.0)),
+    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(1e-3, 1e-3, 1e-2)));
+  const gtsam::Pose3 pose(
+    gtsam::Rot3::RzRyRx(0.04, -0.015, 0.02),
+    gtsam::Point3(0.3, 0.7, 1.25));
+  gtsam::Matrix jacobian;
+  [[maybe_unused]] const gtsam::Vector residual = factor.evaluateError(pose, jacobian);
+  const auto numerical_jacobian =
+    gtsam::numericalDerivative11<gtsam::Vector3, gtsam::Pose3>(
+      [&](const gtsam::Pose3 &value) { return factor.evaluateError(value); },
+      pose,
+      1e-6);
+  ExpectMatrixNear(
+    jacobian,
+    numerical_jacobian,
+    5e-5,
+    "vertical inside pose Jacobian should match numerical derivative");
+}
+
 }  // namespace
 
 int main() {
@@ -500,6 +555,15 @@ int main() {
     RunTest("TestGainScaleAmplifiesAttitudeAndBiasTargets", TestGainScaleAmplifiesAttitudeAndBiasTargets);
     RunTest("TestVerticalResidualFeedsDpZRow", TestVerticalResidualFeedsDpZRow);
     RunTest("TestJacobianMatchesNumericalDerivative", TestJacobianMatchesNumericalDerivative);
+    RunTest(
+      "TestVerticalInsidePoseFactorTracksRollPitchAndUpOnly",
+      TestVerticalInsidePoseFactorTracksRollPitchAndUpOnly);
+    RunTest(
+      "TestVerticalInsidePoseFactorIgnoresYawAndHorizontalTranslation",
+      TestVerticalInsidePoseFactorIgnoresYawAndHorizontalTranslation);
+    RunTest(
+      "TestVerticalInsidePoseFactorJacobianMatchesNumericalDerivative",
+      TestVerticalInsidePoseFactorJacobianMatchesNumericalDerivative);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return EXIT_FAILURE;
