@@ -1078,6 +1078,7 @@ struct VerticalLocalRecoveryResult {
   double local_postfit_u_m = std::numeric_limits<double>::quiet_NaN();
   double required_up_anchor_correction_m = std::numeric_limits<double>::quiet_NaN();
   double delta_vz_applied_mps = std::numeric_limits<double>::quiet_NaN();
+  double delta_up_anchor_applied_m = std::numeric_limits<double>::quiet_NaN();
   double delta_roll_applied_rad = std::numeric_limits<double>::quiet_NaN();
   double delta_pitch_applied_rad = std::numeric_limits<double>::quiet_NaN();
   double delta_baz_applied_mps2 = std::numeric_limits<double>::quiet_NaN();
@@ -1102,6 +1103,19 @@ ReferenceNodeState ApplyVerticalAnchorCorrections(
       anchor_state.bias.accelerometer().y(),
       optimized_anchor_bias.accelerometer().z()),
     anchor_state.bias.gyroscope());
+  return corrected_anchor_state;
+}
+
+ReferenceNodeState ApplyVerticalUpAnchorCorrection(
+  const ReferenceNodeState &anchor_state,
+  const double delta_up_anchor_m) {
+  ReferenceNodeState corrected_anchor_state = anchor_state;
+  corrected_anchor_state.pose = gtsam::Pose3(
+    anchor_state.pose.rotation(),
+    gtsam::Point3(
+      anchor_state.pose.translation().x(),
+      anchor_state.pose.translation().y(),
+      anchor_state.pose.translation().z() + delta_up_anchor_m));
   return corrected_anchor_state;
 }
 
@@ -2637,12 +2651,50 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     consistency_record.required_up_anchor_correction_m =
                       recovery_result->required_up_anchor_correction_m;
                     consistency_record.delta_vz_applied_mps = recovery_result->delta_vz_applied_mps;
+                    consistency_record.delta_up_anchor_applied_m = recovery_result->delta_up_anchor_applied_m;
                     consistency_record.delta_roll_applied_rad = recovery_result->delta_roll_applied_rad;
                     consistency_record.delta_pitch_applied_rad = recovery_result->delta_pitch_applied_rad;
                     consistency_record.delta_baz_applied_mps2 = recovery_result->delta_baz_applied_mps2;
                     inside_gate =
                       ComputeVerticalNis(local_postfit_residual_enu_m.z(), consistency_base_sigma_m.z()) <=
                       vertical_gate_nis_threshold;
+                    if (!inside_gate &&
+                        std::isfinite(recovery_result->required_up_anchor_correction_m) &&
+                        std::abs(recovery_result->required_up_anchor_correction_m) > 0.0) {
+                      const auto corrected_anchor_state = ApplyVerticalUpAnchorCorrection(
+                        recovery_result->recovered_anchor_state,
+                        recovery_result->required_up_anchor_correction_m);
+                      iteration.gate_reference_states[recovery_anchor_state_index] = corrected_anchor_state;
+                      UpsertReferenceStateInitialValues(
+                        recovery_anchor_state_index,
+                        corrected_anchor_state,
+                        &sequential_initial_values);
+                      sequential_reference_valid_until_index = recovery_anchor_state_index;
+                      EnsureReferenceStatesValidUntil(
+                        state_timestamps,
+                        dataset.imu_samples,
+                        imu_params,
+                        &iteration.gate_reference_states,
+                        &sequential_reference_valid_until_index,
+                        required_prefit_index,
+                        &sequential_initial_values);
+
+                      const ReferenceNodeState corrected_postfit_reference_state =
+                        sync_result.status == StateMeasSyncStatus::kInterpolated
+                          ? InterpolateReferenceState(iteration.gate_reference_states, record.corrected_time_s)
+                          : iteration.gate_reference_states[required_prefit_index];
+                      const Eigen::Vector3d corrected_postfit_residual_enu_m =
+                        ComputePositionResidualEnu(corrected_postfit_reference_state.pose, record.measurement_enu_m);
+                      consistency_record.prefit_residual_u_after_local_recovery_m =
+                        corrected_postfit_residual_enu_m.z();
+                      consistency_record.local_postfit_residual_u_m =
+                        corrected_postfit_residual_enu_m.z();
+                      consistency_record.delta_up_anchor_applied_m =
+                        recovery_result->required_up_anchor_correction_m;
+                      inside_gate =
+                        ComputeVerticalNis(corrected_postfit_residual_enu_m.z(), consistency_base_sigma_m.z()) <=
+                        vertical_gate_nis_threshold;
+                    }
                     if (inside_gate) {
                       break;
                     }
