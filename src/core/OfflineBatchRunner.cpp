@@ -138,6 +138,10 @@ Eigen::Vector3d Rot3ToYpr(const gtsam::Rot3 &rotation) {
   return Eigen::Vector3d(ypr.x(), ypr.y(), ypr.z());
 }
 
+double WrapAngleRad(const double angle_rad) {
+  return std::atan2(std::sin(angle_rad), std::cos(angle_rad));
+}
+
 ReferenceNodeState MakeReferenceNodeState(
   const double time_s,
   const gtsam::NavState &nav_state,
@@ -3086,6 +3090,72 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         axis_total_count > 0U
           ? static_cast<double>(axis_pass_count) / static_cast<double>(axis_total_count)
           : std::numeric_limits<double>::quiet_NaN();
+    }
+
+    run_result.vertical_state_corrections.clear();
+    run_result.vertical_state_corrections.reserve(run_result.gnss_factor_records.size());
+    for (std::size_t record_index = 0; record_index < run_result.gnss_factor_records.size(); ++record_index) {
+      const auto &record = run_result.gnss_factor_records[record_index];
+      if (!record.factor_used) {
+        continue;
+      }
+
+      std::optional<std::size_t> correction_state_index;
+      if (record.sync_status == StateMeasSyncStatus::kSynchronizedI ||
+          record.sync_status == StateMeasSyncStatus::kSynchronizedJ) {
+        correction_state_index = record.synchronized_state_index;
+      } else if (record.sync_status == StateMeasSyncStatus::kInterpolated) {
+        correction_state_index = record.state_index_j;
+      }
+      if (!correction_state_index.has_value() || *correction_state_index >= state_timestamps.size()) {
+        continue;
+      }
+
+      VerticalStateCorrectionRow row;
+      row.sample_index = record.sample_index;
+      row.raw_time_s = record.raw_time_s;
+      row.corrected_time_s = record.corrected_time_s;
+      row.sync_status = record.sync_status;
+      row.state_index = *correction_state_index;
+      row.state_time_s = state_timestamps[*correction_state_index];
+      row.factor_used = record.factor_used;
+      row.measurement_up_m = record.measurement_enu_m.z();
+
+      if (collect_gnss_consistency && record_index < run_result.gnss_consistency_records.size()) {
+        const auto &consistency_record = run_result.gnss_consistency_records[record_index];
+        row.vertical_gate_inside = consistency_record.vertical_gate_inside;
+        row.vertical_direct_position_factor_used = consistency_record.vertical_direct_position_factor_used;
+        row.prefit_residual_u_m = consistency_record.prefit_residual_enu_m.z();
+        row.postfit_residual_u_m = consistency_record.postfit_residual_enu_m.z();
+      }
+
+      const auto optimized_pose = optimized_values.at<gtsam::Pose3>(X(*correction_state_index));
+      const auto optimized_velocity = optimized_values.at<gtsam::Vector3>(V(*correction_state_index));
+      const auto optimized_bias = optimized_values.at<gtsam::imuBias::ConstantBias>(B(*correction_state_index));
+      const Eigen::Vector3d optimized_ypr = Rot3ToYpr(optimized_pose.rotation());
+      row.optimized_up_m = optimized_pose.translation().z();
+      row.optimized_vz_mps = optimized_velocity.z();
+      row.optimized_pitch_rad = optimized_ypr.y();
+      row.optimized_roll_rad = optimized_ypr.z();
+      row.optimized_baz_mps2 = optimized_bias.accelerometer().z();
+
+      if (*correction_state_index < final_iteration_result.gate_reference_states.size()) {
+        const auto &reference_state = final_iteration_result.gate_reference_states[*correction_state_index];
+        const Eigen::Vector3d reference_ypr = Rot3ToYpr(reference_state.pose.rotation());
+        row.reference_available = true;
+        row.reference_up_m = reference_state.pose.translation().z();
+        row.reference_vz_mps = reference_state.velocity.z();
+        row.reference_pitch_rad = reference_ypr.y();
+        row.reference_roll_rad = reference_ypr.z();
+        row.reference_baz_mps2 = reference_state.bias.accelerometer().z();
+        row.delta_up_m = row.optimized_up_m - row.reference_up_m;
+        row.delta_vz_mps = row.optimized_vz_mps - row.reference_vz_mps;
+        row.delta_pitch_rad = WrapAngleRad(row.optimized_pitch_rad - row.reference_pitch_rad);
+        row.delta_roll_rad = WrapAngleRad(row.optimized_roll_rad - row.reference_roll_rad);
+        row.delta_baz_mps2 = row.optimized_baz_mps2 - row.reference_baz_mps2;
+      }
+
+      run_result.vertical_state_corrections.push_back(row);
     }
   }
 

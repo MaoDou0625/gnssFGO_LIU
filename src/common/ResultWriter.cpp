@@ -312,6 +312,53 @@ void WriteGnssConsistencyCsv(
   }
 }
 
+void WriteVerticalStateCorrectionCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalStateCorrectionRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "sample_index,raw_time_s,corrected_time_s,sync_status,state_index,state_time_s,factor_used,"
+       "reference_available,vertical_gate_inside,vertical_direct_position_factor_used,measurement_up_m,"
+       "reference_up_m,optimized_up_m,delta_up_m,reference_vz_mps,optimized_vz_mps,delta_vz_mps,"
+       "reference_pitch_rad,optimized_pitch_rad,delta_pitch_rad,reference_roll_rad,optimized_roll_rad,"
+       "delta_roll_rad,reference_baz_mps2,optimized_baz_mps2,delta_baz_mps2,prefit_residual_u_m,"
+       "postfit_residual_u_m\n";
+  for (const auto &row : rows) {
+    stream << row.sample_index << ','
+           << row.raw_time_s << ','
+           << row.corrected_time_s << ','
+           << ToString(row.sync_status) << ','
+           << row.state_index << ','
+           << row.state_time_s << ','
+           << (row.factor_used ? 1 : 0) << ','
+           << (row.reference_available ? 1 : 0) << ','
+           << row.vertical_gate_inside << ','
+           << (row.vertical_direct_position_factor_used ? 1 : 0) << ','
+           << row.measurement_up_m << ','
+           << row.reference_up_m << ','
+           << row.optimized_up_m << ','
+           << row.delta_up_m << ','
+           << row.reference_vz_mps << ','
+           << row.optimized_vz_mps << ','
+           << row.delta_vz_mps << ','
+           << row.reference_pitch_rad << ','
+           << row.optimized_pitch_rad << ','
+           << row.delta_pitch_rad << ','
+           << row.reference_roll_rad << ','
+           << row.optimized_roll_rad << ','
+           << row.delta_roll_rad << ','
+           << row.reference_baz_mps2 << ','
+           << row.optimized_baz_mps2 << ','
+           << row.delta_baz_mps2 << ','
+           << row.prefit_residual_u_m << ','
+           << row.postfit_residual_u_m << '\n';
+  }
+}
+
 void WriteInitialDynamicConsistencyCsv(
   const std::filesystem::path &path,
   const std::vector<TrajectoryRow> &rows,
@@ -398,6 +445,11 @@ void ResultWriter::WriteOutputs(
   }
   if (!result.gnss_consistency_records.empty()) {
     WriteGnssConsistencyCsv(output_path / "gnss_consistency.csv", result.gnss_consistency_records);
+  }
+  if (!result.vertical_state_corrections.empty()) {
+    WriteVerticalStateCorrectionCsv(
+      output_path / "vertical_state_corrections.csv",
+      result.vertical_state_corrections);
   }
 
   if (!result.imu_rate_avp.empty()) {

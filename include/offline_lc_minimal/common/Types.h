@@ -361,6 +361,37 @@ struct GnssConsistencyRecord {
   double postfit_nis = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct VerticalStateCorrectionRow {
+  std::size_t sample_index = 0;
+  double raw_time_s = std::numeric_limits<double>::quiet_NaN();
+  double corrected_time_s = std::numeric_limits<double>::quiet_NaN();
+  StateMeasSyncStatus sync_status = StateMeasSyncStatus::kDropped;
+  std::size_t state_index = 0;
+  double state_time_s = std::numeric_limits<double>::quiet_NaN();
+  bool factor_used = false;
+  bool reference_available = false;
+  double vertical_gate_inside = std::numeric_limits<double>::quiet_NaN();
+  bool vertical_direct_position_factor_used = false;
+  double measurement_up_m = std::numeric_limits<double>::quiet_NaN();
+  double reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_up_m = std::numeric_limits<double>::quiet_NaN();
+  double delta_up_m = std::numeric_limits<double>::quiet_NaN();
+  double reference_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double reference_pitch_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_pitch_rad = std::numeric_limits<double>::quiet_NaN();
+  double delta_pitch_rad = std::numeric_limits<double>::quiet_NaN();
+  double reference_roll_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_roll_rad = std::numeric_limits<double>::quiet_NaN();
+  double delta_roll_rad = std::numeric_limits<double>::quiet_NaN();
+  double reference_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double optimized_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double delta_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double prefit_residual_u_m = std::numeric_limits<double>::quiet_NaN();
+  double postfit_residual_u_m = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct ImuRateAvpRow {
   double time_s = 0.0;
   Eigen::Vector3d enu_position_m = Eigen::Vector3d::Zero();
@@ -549,6 +580,7 @@ struct OfflineRunResult {
   std::vector<ImuRateIntervalDiagnostic> imu_rate_interval_diagnostics;
   std::vector<GnssFactorRecord> gnss_factor_records;
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
+  std::vector<VerticalStateCorrectionRow> vertical_state_corrections;
 };
 
 }  // namespace offline_lc_minimal
