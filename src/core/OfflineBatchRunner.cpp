@@ -237,6 +237,95 @@ ReferenceNodeState InterpolateReferenceState(
   return interpolated;
 }
 
+void ShiftReferenceStateUp(
+  ReferenceNodeState &reference_state,
+  const double delta_up_m) {
+  reference_state.pose = gtsam::Pose3(
+    reference_state.pose.rotation(),
+    gtsam::Point3(
+      reference_state.pose.translation().x(),
+      reference_state.pose.translation().y(),
+      reference_state.pose.translation().z() + delta_up_m));
+}
+
+void RepropagateReferenceStatesFrom(
+  std::vector<ReferenceNodeState> &reference_states,
+  const std::vector<double> &state_timestamps,
+  const std::vector<ImuSample> &imu_samples,
+  const boost::shared_ptr<gtsam::PreintegrationCombinedParams> &imu_params,
+  const bool use_segment_error_feedback,
+  const std::size_t start_state_index) {
+  if (reference_states.empty() || start_state_index >= reference_states.size()) {
+    return;
+  }
+
+  gtsam::NavState previous_nav_state(
+    reference_states[start_state_index].pose,
+    reference_states[start_state_index].velocity);
+  gtsam::imuBias::ConstantBias previous_bias = reference_states[start_state_index].bias;
+  double previous_time_s = reference_states[start_state_index].time_s;
+
+  for (std::size_t state_index = start_state_index + 1U; state_index < reference_states.size(); ++state_index) {
+    const double current_time_s = state_timestamps[state_index];
+    const auto imu_window =
+      IntegrateImuWindow(imu_samples, previous_time_s, current_time_s, imu_params, previous_bias);
+    const gtsam::NavState predicted_state =
+      use_segment_error_feedback
+        ? imu_window.preintegrated_imu_measurements.predict(previous_nav_state, previous_bias)
+        : imu_window.preintegrated_measurements.predict(previous_nav_state, previous_bias);
+    reference_states[state_index] = MakeReferenceNodeState(
+      current_time_s,
+      predicted_state,
+      previous_bias,
+      imu_window.end_gyro_radps);
+    previous_nav_state = predicted_state;
+    previous_time_s = current_time_s;
+  }
+}
+
+void ApplyVerticalGateCorrectionToReferenceStates(
+  const GnssFactorRecord &record,
+  const double delta_up_m,
+  const std::vector<double> &state_timestamps,
+  const std::vector<ImuSample> &imu_samples,
+  const boost::shared_ptr<gtsam::PreintegrationCombinedParams> &imu_params,
+  const bool use_segment_error_feedback,
+  std::vector<ReferenceNodeState> &reference_states) {
+  if (!std::isfinite(delta_up_m) || reference_states.empty()) {
+    return;
+  }
+
+  if (record.sync_status == StateMeasSyncStatus::kSynchronizedI ||
+      record.sync_status == StateMeasSyncStatus::kSynchronizedJ) {
+    if (record.synchronized_state_index >= reference_states.size()) {
+      return;
+    }
+    ShiftReferenceStateUp(reference_states[record.synchronized_state_index], delta_up_m);
+    RepropagateReferenceStatesFrom(
+      reference_states,
+      state_timestamps,
+      imu_samples,
+      imu_params,
+      use_segment_error_feedback,
+      record.synchronized_state_index);
+    return;
+  }
+
+  if (record.sync_status == StateMeasSyncStatus::kInterpolated &&
+      record.state_index_j > record.state_index_i &&
+      record.state_index_j < reference_states.size()) {
+    ShiftReferenceStateUp(reference_states[record.state_index_i], delta_up_m);
+    ShiftReferenceStateUp(reference_states[record.state_index_j], delta_up_m);
+    RepropagateReferenceStatesFrom(
+      reference_states,
+      state_timestamps,
+      imu_samples,
+      imu_params,
+      use_segment_error_feedback,
+      record.state_index_i);
+  }
+}
+
 Eigen::Vector3d ComputePositionResidualEnu(
   const gtsam::Pose3 &pose,
   const Eigen::Vector3d &measurement_enu_m) {
@@ -1954,6 +2043,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     config_.enable_vertical_rtk_preintegration_feedback
       ? MakeVerticalRtkFeedbackNoiseModel(config_)
       : gtsam::SharedNoiseModel{};
+  std::vector<ReferenceNodeState> gate_reference_node_states =
+    use_vertical_rtk_1d_nis_gate ? reference_node_states : std::vector<ReferenceNodeState>{};
 
   if (config_.enable_gnss) {
     const gp::GPWNOJInterpolator base_interpolator(
@@ -2037,12 +2128,16 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       consistency_record.sigma_u_m = sigma_m.z();
       const Eigen::Vector3d consistency_base_sigma_m = sigma_m;
       std::optional<gtsam::Pose3> prefit_pose;
+      const auto &prefit_reference_states =
+        use_vertical_rtk_1d_nis_gate && !gate_reference_node_states.empty()
+          ? gate_reference_node_states
+          : reference_node_states;
       if (sync_result.status == StateMeasSyncStatus::kInterpolated) {
-        prefit_pose = InterpolateReferenceState(reference_node_states, record.corrected_time_s).pose;
+        prefit_pose = InterpolateReferenceState(prefit_reference_states, record.corrected_time_s).pose;
       } else if (IsSynchronizedStatus(sync_result.status)) {
         const std::size_t prefit_state_index =
           sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i : sync_result.key_index_j;
-        prefit_pose = reference_node_states[prefit_state_index].pose;
+        prefit_pose = prefit_reference_states[prefit_state_index].pose;
       }
       if (collect_gnss_consistency) {
         if (prefit_pose.has_value()) {
@@ -2296,6 +2391,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
             }
           }
         }
+      }
+
+      if (use_vertical_rtk_1d_nis_gate &&
+          record.factor_used &&
+          consistency_record.vertical_gate_inside < 0.5 &&
+          std::isfinite(consistency_record.prefit_residual_enu_m.z())) {
+        ApplyVerticalGateCorrectionToReferenceStates(
+          record,
+          -consistency_record.prefit_residual_enu_m.z(),
+          state_timestamps,
+          dataset.imu_samples,
+          imu_params,
+          config_.enable_segment_error_feedback,
+          gate_reference_node_states);
       }
 
       consistency_record.factor_used = record.factor_used;
