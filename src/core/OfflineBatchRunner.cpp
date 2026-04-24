@@ -2469,6 +2469,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                 ? ComputePositionResidualEnu(*prefit_pose, record.measurement_enu_m)
                 : Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
             consistency_record.prefit_residual_enu_m = prefit_residual_enu_m;
+            if (std::isfinite(prefit_residual_enu_m.z())) {
+              if (!std::isfinite(consistency_record.prefit_residual_u_before_local_recovery_m)) {
+                consistency_record.prefit_residual_u_before_local_recovery_m = prefit_residual_enu_m.z();
+              }
+              consistency_record.prefit_residual_u_after_local_recovery_m = prefit_residual_enu_m.z();
+            }
             if (prefit_pose.has_value()) {
               if (use_vertical_rtk_1d_nis_gate) {
                 consistency_record.prefit_nis = ComputeVerticalNis(prefit_residual_enu_m.z(), consistency_base_sigma_m.z());

@@ -355,6 +355,8 @@ struct GnssConsistencyRecord {
   double covariance_scale_e = 1.0;
   double covariance_scale_n = 1.0;
   double covariance_scale_u = 1.0;
+  double prefit_residual_u_before_local_recovery_m = std::numeric_limits<double>::quiet_NaN();
+  double prefit_residual_u_after_local_recovery_m = std::numeric_limits<double>::quiet_NaN();
   Eigen::Vector3d prefit_residual_enu_m = Eigen::Vector3d::Zero();
   Eigen::Vector3d postfit_residual_enu_m = Eigen::Vector3d::Zero();
   double prefit_nis = std::numeric_limits<double>::quiet_NaN();

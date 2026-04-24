@@ -275,6 +275,7 @@ void WriteGnssConsistencyCsv(
        "vertical_feedback_target_baz_mps2,vertical_feedback_attitude_scale,"
        "vertical_reference_up_m,vertical_reference_used,"
        "covariance_scale,covariance_scale_e,covariance_scale_n,covariance_scale_u,"
+       "prefit_residual_u_before_local_recovery_m,prefit_residual_u_after_local_recovery_m,"
        "prefit_residual_e_m,prefit_residual_n_m,prefit_residual_u_m,postfit_residual_e_m,"
        "postfit_residual_n_m,postfit_residual_u_m,prefit_nis,postfit_nis\n";
   for (const auto &row : rows) {
@@ -301,6 +302,8 @@ void WriteGnssConsistencyCsv(
            << row.covariance_scale_e << ','
            << row.covariance_scale_n << ','
            << row.covariance_scale_u << ','
+           << row.prefit_residual_u_before_local_recovery_m << ','
+           << row.prefit_residual_u_after_local_recovery_m << ','
            << row.prefit_residual_enu_m.x() << ','
            << row.prefit_residual_enu_m.y() << ','
            << row.prefit_residual_enu_m.z() << ','
