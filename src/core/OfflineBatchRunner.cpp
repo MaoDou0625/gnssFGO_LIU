@@ -239,6 +239,23 @@ ReferenceNodeState InterpolateReferenceState(
   return interpolated;
 }
 
+std::vector<ReferenceNodeState> BuildReferenceStatesFromOptimizedValues(
+  const std::vector<double> &state_timestamps,
+  const gtsam::Values &optimized_values) {
+  std::vector<ReferenceNodeState> states;
+  states.reserve(state_timestamps.size());
+  for (std::size_t state_index = 0; state_index < state_timestamps.size(); ++state_index) {
+    states.push_back(MakeReferenceNodeState(
+      state_timestamps[state_index],
+      gtsam::NavState(
+        optimized_values.at<gtsam::Pose3>(X(state_index)),
+        optimized_values.at<gtsam::Vector3>(V(state_index))),
+      optimized_values.at<gtsam::imuBias::ConstantBias>(B(state_index)),
+      optimized_values.at<gtsam::Vector3>(W(state_index))));
+  }
+  return states;
+}
+
 Eigen::Vector3d ComputePositionResidualEnu(
   const gtsam::Pose3 &pose,
   const Eigen::Vector3d &measurement_enu_m);
@@ -2287,6 +2304,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   optimizer_params.lambdaInitial = config_.lm_lambda_initial;
   optimizer_params.setVerbosity(config_.verbose ? "ERROR" : "SILENT");
   optimizer_params.setVerbosityLM(config_.verbose ? "TRYLAMBDA" : "SILENT");
+  gtsam::Values gate_seed_values = base_initial_values;
+  std::vector<ReferenceNodeState> gate_seed_reference_states = reference_node_states;
+  if (use_vertical_rtk_1d_nis_gate) {
+    gtsam::LevenbergMarquardtOptimizer seed_optimizer(base_graph, base_initial_values, optimizer_params);
+    gate_seed_values = seed_optimizer.optimize();
+    gate_seed_reference_states = BuildReferenceStatesFromOptimizedValues(state_timestamps, gate_seed_values);
+  }
   struct VerticalGateIterationResult {
     gtsam::Values optimized_values;
     std::vector<GnssFactorRecord> gnss_factor_records;
@@ -2796,7 +2820,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     };
 
   VerticalGateIterationResult final_iteration_result =
-    run_vertical_gate_iteration(reference_node_states, base_initial_values);
+    run_vertical_gate_iteration(gate_seed_reference_states, gate_seed_values);
 
   run_result.run_summary = final_iteration_result.run_summary;
   run_result.gnss_factor_records = std::move(final_iteration_result.gnss_factor_records);
