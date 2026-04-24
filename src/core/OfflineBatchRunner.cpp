@@ -9,6 +9,7 @@
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <gtsam/base/numericalDerivative.h>
@@ -260,22 +261,30 @@ bool VerticalGateWouldBeInsideCurrentState(const GnssConsistencyRecord &record) 
          std::abs(record.postfit_residual_enu_m.z()) <= record.vertical_gate_threshold_m;
 }
 
-bool VerticalGateClassificationConverged(const std::vector<GnssConsistencyRecord> &records) {
-  bool saw_comparable_record = false;
+std::unordered_set<std::size_t> BuildForcedVerticalOutsideSamples(
+  const std::vector<GnssConsistencyRecord> &records) {
+  std::unordered_set<std::size_t> forced_outside_samples;
+  bool recovery_active = false;
   for (const auto &record : records) {
-    if (!record.factor_used || !std::isfinite(record.vertical_gate_inside)) {
+    if (!record.factor_used || !std::isfinite(record.vertical_gate_threshold_m) ||
+        !std::isfinite(record.postfit_residual_enu_m.z())) {
       continue;
     }
-    if (!std::isfinite(record.vertical_gate_threshold_m) || !std::isfinite(record.postfit_residual_enu_m.z())) {
+    const bool final_inside = VerticalGateWouldBeInsideCurrentState(record);
+    if (recovery_active) {
+      if (final_inside) {
+        recovery_active = false;
+      } else {
+        forced_outside_samples.insert(record.sample_index);
+      }
       continue;
     }
-    saw_comparable_record = true;
-    const bool current_inside = record.vertical_gate_inside >= 0.5;
-    if (current_inside != VerticalGateWouldBeInsideCurrentState(record)) {
-      return false;
+    if (!final_inside) {
+      forced_outside_samples.insert(record.sample_index);
+      recovery_active = true;
     }
   }
-  return saw_comparable_record;
+  return forced_outside_samples;
 }
 
 Eigen::Vector3d ComputePositionResidualEnu(
@@ -2122,7 +2131,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
 
   const auto run_vertical_gate_iteration =
     [&](const std::vector<ReferenceNodeState> &gate_reference_states,
-        const gtsam::Values &optimizer_initial_values) -> VerticalGateIterationResult {
+        const gtsam::Values &optimizer_initial_values,
+        const std::unordered_set<std::size_t> &forced_vertical_outside_samples) -> VerticalGateIterationResult {
       VerticalGateIterationResult iteration;
       iteration.run_summary = base_run_summary;
       iteration.run_summary.gnss_factor_count = 0;
@@ -2284,8 +2294,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
               consistency_record.prefit_residual_enu_m.z(),
               consistency_record.effective_sigma_u_m);
             consistency_record.prefit_nis = vertical_prefit_nis;
+            const bool forced_outside =
+              forced_vertical_outside_samples.find(sample_index) != forced_vertical_outside_samples.end();
             const bool inside_gate =
-              vertical_prefit_nis <= vertical_gate_nis_threshold;
+              !forced_outside && vertical_prefit_nis <= vertical_gate_nis_threshold;
             consistency_record.vertical_gate_inside = inside_gate ? 1.0 : 0.0;
             sigma_m = consistency_base_sigma_m;
             sigma_m.z() *= inside_gate
@@ -2513,19 +2525,24 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   VerticalGateIterationResult final_iteration_result;
   std::vector<ReferenceNodeState> current_gate_reference_states = reference_node_states;
   gtsam::Values current_optimizer_initial_values = base_initial_values;
+  std::unordered_set<std::size_t> forced_vertical_outside_samples;
   const std::size_t vertical_gate_max_iterations = use_vertical_rtk_1d_nis_gate ? 4U : 1U;
   for (std::size_t iteration_index = 0; iteration_index < vertical_gate_max_iterations; ++iteration_index) {
     final_iteration_result = run_vertical_gate_iteration(
       current_gate_reference_states,
-      current_optimizer_initial_values);
+      current_optimizer_initial_values,
+      forced_vertical_outside_samples);
+    const auto next_forced_vertical_outside_samples =
+      BuildForcedVerticalOutsideSamples(final_iteration_result.gnss_consistency_records);
     if (!use_vertical_rtk_1d_nis_gate ||
-        iteration_index + 1U >= vertical_gate_max_iterations ||
-        VerticalGateClassificationConverged(final_iteration_result.gnss_consistency_records)) {
+        next_forced_vertical_outside_samples.empty() ||
+        iteration_index + 1U >= vertical_gate_max_iterations) {
       break;
     }
     current_gate_reference_states =
       BuildReferenceStatesFromOptimizedValues(state_timestamps, final_iteration_result.optimized_values);
     current_optimizer_initial_values = final_iteration_result.optimized_values;
+    forced_vertical_outside_samples = next_forced_vertical_outside_samples;
   }
 
   run_result.run_summary = final_iteration_result.run_summary;
