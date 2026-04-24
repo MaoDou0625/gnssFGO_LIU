@@ -483,6 +483,7 @@ struct RunSummary {
   double origin_h_m = 0.0;
   double alignment_start_time_s = 0.0;
   double navigation_start_time_s = 0.0;
+  double dynamic_start_time_s = 0.0;
   double static_alignment_duration_s = 0.0;
   std::string yaw_source = "fallback";
 
@@ -561,6 +562,7 @@ struct RunSummary {
         << "origin_h_m=" << origin_h_m << '\n'
         << "alignment_start_time_s=" << alignment_start_time_s << '\n'
         << "navigation_start_time_s=" << navigation_start_time_s << '\n'
+        << "dynamic_start_time_s=" << dynamic_start_time_s << '\n'
         << "static_alignment_duration_s=" << static_alignment_duration_s << '\n'
         << "yaw_source=" << yaw_source << '\n';
     return oss.str();

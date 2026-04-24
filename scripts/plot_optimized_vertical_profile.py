@@ -82,6 +82,26 @@ def filter_rows_from_time(
     return [row for row in rows if row["time_s"] + TIME_EPSILON_S >= start_time_s]
 
 
+def read_key_value_file(path: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    if not path.exists():
+        return result
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        result[key.strip()] = value.strip()
+    return result
+
+
+def resolve_dynamic_start_time(trajectory_path: Path) -> float | None:
+    summary_values = read_key_value_file(trajectory_path.with_name("summary.txt"))
+    dynamic_start_raw = summary_values.get("dynamic_start_time_s", "")
+    if dynamic_start_raw:
+        return float(dynamic_start_raw)
+    return None
+
+
 def compute_delta_up(
     rows: list[dict[str, float]],
     key: str = "up_m",
@@ -221,7 +241,13 @@ def main() -> int:
         else output_path.with_name(output_path.stem + ".csv")
     )
 
-    trajectory_rows = read_trajectory_rows(trajectory_path)
+    trajectory_rows_all = read_trajectory_rows(trajectory_path)
+    dynamic_start_time_s = resolve_dynamic_start_time(trajectory_path)
+    trajectory_rows = (
+        filter_rows_from_time(trajectory_rows_all, dynamic_start_time_s)
+        if dynamic_start_time_s is not None
+        else trajectory_rows_all
+    )
     navigation_start_time_s = trajectory_rows[0]["time_s"]
     origin_lat_rad, origin_lon_rad, origin_h_m = plot_speed_vs_rtk.choose_origin(gnss_path, trajectory_path)
     rtk_rows = plot_speed_vs_rtk.read_rtkfix_rows(gnss_path, origin_lat_rad, origin_lon_rad, origin_h_m)

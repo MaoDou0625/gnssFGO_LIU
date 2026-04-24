@@ -1853,8 +1853,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
 
   const std::vector<std::size_t> initialization_candidate_indices =
     CollectInitializationCandidateIndices(dataset.gnss_samples, dataset.imu_samples);
-  const double start_time_s = CorrectedGnssTime(navigation_start_sample);
-  run_result.run_summary.navigation_start_time_s = start_time_s;
+  const double dynamic_start_time_s = CorrectedGnssTime(navigation_start_sample);
+  run_result.run_summary.navigation_start_time_s = alignment_start_time_s;
+  run_result.run_summary.dynamic_start_time_s = dynamic_start_time_s;
   const InitialPoseEstimate initial_pose =
     TrajectoryInitializer::Estimate(
       dataset.imu_samples,
@@ -1862,7 +1863,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       navigation_start_index,
       alignment_start_time_s,
       alignment_end_time_s,
-      start_time_s,
+      dynamic_start_time_s,
       geo_reference.EarthRateEnu(),
       initialization_candidate_indices,
       config_);
@@ -1895,14 +1896,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       end_time_s = std::max(end_time_s, corrected_time_s);
     }
   }
-  if (!std::isfinite(end_time_s) || end_time_s <= start_time_s) {
+  if (!std::isfinite(end_time_s) || end_time_s <= dynamic_start_time_s) {
     throw std::runtime_error("failed to find a valid offline processing time range");
   }
 
   const GraphTimeline graph_timeline = BuildGraphTimeline(
     alignment_start_time_s,
     alignment_end_time_s,
-    start_time_s,
+    dynamic_start_time_s,
     end_time_s,
     config_);
   const std::vector<double> &state_timestamps = graph_timeline.timestamps_s;
@@ -2053,7 +2054,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   gtsam::imuBias::ConstantBias previous_bias = initial_bias;
   double previous_time_s = state_timestamps.front();
   std::vector<std::optional<std::size_t>> trajectory_row_index_by_state(state_timestamps.size(), std::nullopt);
-  run_result.trajectory.reserve(state_timestamps.size() - graph_timeline.dynamic_start_index);
+  run_result.trajectory.reserve(state_timestamps.size());
   const auto graph_state_to_trajectory_row = [&](const std::size_t state_index) -> long long {
     if (state_index >= trajectory_row_index_by_state.size()) {
       return -1;
@@ -2069,9 +2070,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         const gtsam::imuBias::ConstantBias &bias,
         const gtsam::Vector3 &omega,
         const double time_s) {
-      if (state_index < graph_timeline.dynamic_start_index) {
-        return;
-      }
       TrajectoryRow row;
       row.time_s = time_s;
       row.enu_position_m =
@@ -2084,9 +2082,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       trajectory_row_index_by_state[state_index] = run_result.trajectory.size();
       run_result.trajectory.push_back(row);
     };
-  if (graph_timeline.dynamic_start_index == 0U) {
-    append_trajectory_row(0U, previous_nav_state, initial_bias, initial_omega, state_timestamps.front());
-  }
+  append_trajectory_row(0U, previous_nav_state, initial_bias, initial_omega, state_timestamps.front());
 
   for (std::size_t state_index = 1; state_index < state_timestamps.size(); ++state_index) {
     const double current_time_s = state_timestamps[state_index];
@@ -2416,7 +2412,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
             record.synchronized_trajectory_row_index = graph_state_to_trajectory_row(record.synchronized_state_index);
           }
 
-          const double elapsed_s = record.corrected_time_s - start_time_s;
+          const double elapsed_s = record.corrected_time_s - dynamic_start_time_s;
           if (config_.enable_gnss_vertical_drift_model && sample_index < gnss_vertical_reference_up_by_sample.size()) {
             const double vertical_reference_up_m = gnss_vertical_reference_up_by_sample[sample_index];
             if (std::isfinite(vertical_reference_up_m)) {
@@ -2872,7 +2868,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   }
 
   for (std::size_t index = 0; index < run_result.trajectory.size(); ++index) {
-    const std::size_t graph_index = graph_timeline.dynamic_start_index + index;
+    const std::size_t graph_index = index;
     const auto pose = optimized_values.at<gtsam::Pose3>(X(graph_index));
     const auto velocity = optimized_values.at<gtsam::Vector3>(V(graph_index));
     const auto bias = optimized_values.at<gtsam::imuBias::ConstantBias>(B(graph_index));
@@ -2927,8 +2923,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       config_.gravity_mps2);
   }
 
+  std::vector<TrajectoryRow> dynamic_trajectory_rows;
+  if (graph_timeline.dynamic_start_index < run_result.trajectory.size()) {
+    dynamic_trajectory_rows.assign(
+      run_result.trajectory.begin() + static_cast<std::ptrdiff_t>(graph_timeline.dynamic_start_index),
+      run_result.trajectory.end());
+  }
   AccumulateInitialDynamicConsistencyMetrics(
-    run_result.trajectory,
+    dynamic_trajectory_rows,
     initial_bias,
     optimized_last_static_row,
     run_result.optimized_static_terminal_forward_trajectory,

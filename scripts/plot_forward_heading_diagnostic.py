@@ -194,13 +194,16 @@ def read_nav_heading_rows(path: Path) -> list[dict[str, float]]:
     return rows
 
 
-def read_first_trajectory_state(path: Path) -> dict[str, float]:
+def read_first_trajectory_state(path: Path, start_time_s: float | None = None) -> dict[str, float]:
     with path.open("r", encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file)
-        try:
-            raw = next(reader)
-        except StopIteration as exc:
-            raise ValueError(f"No trajectory rows found in {path}") from exc
+        raw = None
+        for candidate in reader:
+            if start_time_s is None or safe_float(candidate["time_s"]) + TIME_EPSILON_S >= start_time_s:
+                raw = candidate
+                break
+        if raw is None:
+            raise ValueError(f"No trajectory rows found in {path} at or after {start_time_s}")
 
     return {
         "time_s": safe_float(raw["time_s"]),
@@ -236,6 +239,13 @@ def read_imu_rows(path: Path) -> list[dict[str, float]]:
             )
     if not rows:
         raise ValueError(f"No IMU rows found in {path}")
+    return rows
+
+
+def filter_rows_from_time(rows: list[dict[str, float]], start_time_s: float) -> list[dict[str, float]]:
+    filtered = [row for row in rows if row["time_s"] + TIME_EPSILON_S >= start_time_s]
+    if filtered:
+        return filtered
     return rows
 
 
@@ -941,8 +951,9 @@ def main() -> int:
 
     summary = read_summary(summary_path)
     config = read_config(config_path)
-    optimized_first_state = read_first_trajectory_state(trajectory_path)
-    optimized_rows = read_nav_heading_rows(trajectory_path)
+    dynamic_start_time_s = summary.get("dynamic_start_time_s", summary["navigation_start_time_s"])
+    optimized_first_state = read_first_trajectory_state(trajectory_path, dynamic_start_time_s)
+    optimized_rows = filter_rows_from_time(read_nav_heading_rows(trajectory_path), dynamic_start_time_s)
     imu_rows = read_imu_rows(imu_path)
 
     origin_lat_rad = summary["origin_lat_rad"]
@@ -953,9 +964,9 @@ def main() -> int:
     alignment_end_time_s = (
         alignment_start_time_s + static_alignment_duration_s
         if static_alignment_duration_s > 0.0
-        else summary["navigation_start_time_s"]
+        else summary.get("dynamic_start_time_s", summary["navigation_start_time_s"])
     )
-    navigation_start_time_s = summary["navigation_start_time_s"]
+    navigation_start_time_s = dynamic_start_time_s
     end_time_s = optimized_rows[-1]["time_s"]
 
     initial_world_from_body, initial_acc_bias, initial_gyro_bias, stationary_count = estimate_initial_alignment(

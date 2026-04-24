@@ -402,6 +402,25 @@ void WriteInitialDynamicConsistencyCsv(
   }
 }
 
+std::vector<TrajectoryRow> FilterDynamicTrajectoryRows(
+  const std::vector<TrajectoryRow> &rows,
+  const double dynamic_start_time_s) {
+  if (!std::isfinite(dynamic_start_time_s)) {
+    return rows;
+  }
+
+  auto it = std::find_if(
+    rows.begin(),
+    rows.end(),
+    [dynamic_start_time_s](const TrajectoryRow &row) {
+      return row.time_s + 1e-9 >= dynamic_start_time_s;
+    });
+  if (it == rows.end()) {
+    return rows;
+  }
+  return std::vector<TrajectoryRow>(it, rows.end());
+}
+
 }  // namespace
 
 void ResultWriter::WriteOutputs(
@@ -418,9 +437,11 @@ void ResultWriter::WriteOutputs(
   WriteTextFile(output_path / "config_snapshot.cfg", ConfigToString(config));
 
   WriteTrajectoryCsv(output_path / "trajectory.csv", result.trajectory, geo_reference);
+  const std::vector<TrajectoryRow> dynamic_trajectory_rows =
+    FilterDynamicTrajectoryRows(result.trajectory, result.run_summary.dynamic_start_time_s);
   WriteInitialDynamicConsistencyCsv(
     output_path / "initial_dynamic_consistency.csv",
-    result.trajectory,
+    dynamic_trajectory_rows,
     result.run_summary);
   if (!result.initial_static_trajectory.empty()) {
     WriteTrajectoryCsv(output_path / "initial_static_trajectory.csv", result.initial_static_trajectory, geo_reference);

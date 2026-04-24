@@ -94,7 +94,23 @@ def resolve_trajectory_path(segment_error_path: Path, trajectory_argument: str) 
     return segment_error_path.with_name("trajectory.csv")
 
 
+def read_key_value_file(path: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    if not path.exists():
+        return result
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        result[key.strip()] = value.strip()
+    return result
+
+
 def read_dynamic_start_time(path: Path) -> float | None:
+    summary_values = read_key_value_file(path.with_name("summary.txt"))
+    dynamic_start_raw = summary_values.get("dynamic_start_time_s", "")
+    if dynamic_start_raw:
+        return float(dynamic_start_raw)
     if not path.exists():
         return None
     with path.open("r", encoding="utf-8", newline="") as file:

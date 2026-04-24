@@ -366,7 +366,6 @@ def main() -> int:
     summary = heading_diagnostic.read_summary(summary_path)
     config = heading_diagnostic.read_config(config_path)
     optimized_rows_all = read_trajectory_rows(trajectory_path)
-    optimized_first_state = optimized_rows_all[0]
     imu_rows = heading_diagnostic.read_imu_rows(imu_path)
 
     origin_lat_rad = summary["origin_lat_rad"]
@@ -377,8 +376,11 @@ def main() -> int:
     alignment_end_time_s = (
         alignment_start_time_s + static_alignment_duration_s
         if static_alignment_duration_s > 0.0
-        else summary["navigation_start_time_s"]
+        else summary.get("dynamic_start_time_s", summary["navigation_start_time_s"])
     )
+    dynamic_start_time_s = summary.get("dynamic_start_time_s", summary["navigation_start_time_s"])
+    optimized_rows_dynamic = heading_diagnostic.filter_rows_from_time(optimized_rows_all, dynamic_start_time_s)
+    optimized_first_state = optimized_rows_dynamic[0]
     start_time_s = optimized_first_state["time_s"]
     end_time_s = min(start_time_s + args.duration_s, optimized_rows_all[-1]["time_s"])
 
@@ -451,7 +453,7 @@ def main() -> int:
         initial_velocity_enu_mps=initial_velocity_enu_mps,
         gravity_mps2=float(config["gravity_mps2"]),
     )
-    optimized_rows = [row for row in optimized_rows_all if row["time_s"] <= end_time_s + TIME_EPSILON_S]
+    optimized_rows = filter_rows_by_time_window(optimized_rows_dynamic, start_time_s, end_time_s)
     if gnss_path:
         rtk_rows_all = heading_diagnostic.read_rtkfix_rows(
             gnss_path,

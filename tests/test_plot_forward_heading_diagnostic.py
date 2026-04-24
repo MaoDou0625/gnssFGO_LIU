@@ -1,6 +1,7 @@
 import importlib.util
 import math
 import pathlib
+import tempfile
 import unittest
 
 
@@ -162,6 +163,21 @@ class PlotForwardHeadingDiagnosticTests(unittest.TestCase):
 
         self.assertFalse(heading_rows[1]["valid_heading"])
         self.assertEqual(heading_rows[1]["invalid_reason"], "large_gap")
+
+    def test_read_first_trajectory_state_can_skip_static_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trajectory_path = pathlib.Path(temp_dir) / "trajectory.csv"
+            trajectory_path.write_text(
+                "time_s,yaw_rad,pitch_rad,roll_rad,bax,bay,baz,bgx,bgy,bgz\n"
+                "5701.4,0,0,0,1,2,3,4,5,6\n"
+                "5801.6,0.1,0.2,0.3,7,8,9,10,11,12\n",
+                encoding="utf-8",
+            )
+
+            row = plot_forward_heading_diagnostic.read_first_trajectory_state(trajectory_path, 5801.6)
+            self.assertAlmostEqual(row["time_s"], 5801.6, places=9)
+            self.assertAlmostEqual(row["baz"], 9.0, places=9)
+            self.assertAlmostEqual(row["bgz"], 12.0, places=9)
 
 
 if __name__ == "__main__":

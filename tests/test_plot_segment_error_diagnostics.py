@@ -120,6 +120,24 @@ class PlotSegmentErrorDiagnosticsTests(unittest.TestCase):
             dynamic_start_time_s = plot_segment_error_diagnostics.read_dynamic_start_time(trajectory_path)
             self.assertAlmostEqual(dynamic_start_time_s, 5801.597, places=9)
 
+    def test_read_dynamic_start_time_prefers_summary_field(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = pathlib.Path(temp_dir)
+            trajectory_path = temp_path / "trajectory.csv"
+            summary_path = temp_path / "summary.txt"
+            trajectory_path.write_text(
+                "time_s,east_m\n5701.400,0.0\n5801.597,0.1\n",
+                encoding="utf-8",
+            )
+            summary_path.write_text(
+                "navigation_start_time_s=5701.4\n"
+                "dynamic_start_time_s=5801.597\n",
+                encoding="utf-8",
+            )
+
+            dynamic_start_time_s = plot_segment_error_diagnostics.read_dynamic_start_time(trajectory_path)
+            self.assertAlmostEqual(dynamic_start_time_s, 5801.597, places=9)
+
     def test_read_rows_accepts_optional_vertical_feedback_columns(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             csv_path = pathlib.Path(temp_dir) / "segment_error_diagnostics.csv"
