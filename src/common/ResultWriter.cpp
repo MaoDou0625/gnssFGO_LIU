@@ -273,7 +273,11 @@ void WriteGnssConsistencyCsv(
        "sigma_e_m,sigma_n_m,sigma_u_m,effective_sigma_u_m,vertical_gate_threshold_m,vertical_gate_inside,"
        "vertical_sigma_u_used_m,vertical_direct_position_factor_used,"
        "vertical_feedback_target_baz_mps2,vertical_feedback_attitude_scale,"
-       "vertical_reference_up_m,vertical_reference_used,"
+       "vertical_reference_up_m,vertical_reference_used,local_prefit_residual_u_m,local_postfit_residual_u_m,"
+       "confirmed_inside_before_sample,recovery_anchor_state_index,nhc_jump_anchor_state_index,"
+       "nhc_body_vy_mps,nhc_body_vz_residual_mps,nhc_body_vy_threshold_mps,nhc_body_vz_threshold_mps,"
+       "delta_vz_applied_mps,delta_roll_applied_rad,delta_pitch_applied_rad,delta_baz_applied_mps2,"
+       "required_up_anchor_correction_m,"
        "covariance_scale,covariance_scale_e,covariance_scale_n,covariance_scale_u,"
        "prefit_residual_u_before_local_recovery_m,prefit_residual_u_after_local_recovery_m,"
        "prefit_residual_e_m,prefit_residual_n_m,prefit_residual_u_m,postfit_residual_e_m,"
@@ -298,6 +302,20 @@ void WriteGnssConsistencyCsv(
            << row.vertical_feedback_attitude_scale << ','
            << row.vertical_reference_up_m << ','
            << (row.vertical_reference_used ? 1 : 0) << ','
+           << row.local_prefit_residual_u_m << ','
+           << row.local_postfit_residual_u_m << ','
+           << row.confirmed_inside_before_sample << ','
+           << row.recovery_anchor_state_index << ','
+           << row.nhc_jump_anchor_state_index << ','
+           << row.nhc_body_vy_mps << ','
+           << row.nhc_body_vz_residual_mps << ','
+           << row.nhc_body_vy_threshold_mps << ','
+           << row.nhc_body_vz_threshold_mps << ','
+           << row.delta_vz_applied_mps << ','
+           << row.delta_roll_applied_rad << ','
+           << row.delta_pitch_applied_rad << ','
+           << row.delta_baz_applied_mps2 << ','
+           << row.required_up_anchor_correction_m << ','
            << row.covariance_scale << ','
            << row.covariance_scale_e << ','
            << row.covariance_scale_n << ','

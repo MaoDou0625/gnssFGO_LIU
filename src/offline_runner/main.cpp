@@ -28,6 +28,7 @@ void PrintUsage() {
 int main(int argc, char **argv) {
   using namespace offline_lc_minimal;
 
+  OfflineRunnerConfig config = DefaultConfig();
   try {
     std::string config_path;
     std::string imu_override;
@@ -59,7 +60,6 @@ int main(int argc, char **argv) {
       }
     }
 
-    OfflineRunnerConfig config = DefaultConfig();
     if (!config_path.empty()) {
       config = LoadConfigFile(config_path, config);
     }
@@ -202,6 +202,19 @@ int main(int argc, char **argv) {
               << result.run_summary.ToMultilineString()
               << result.data_summary.ToMultilineString();
     return 0;
+  } catch (const OfflineRunFailure &failure) {
+    try {
+      const auto &partial_result = failure.partial_result();
+      const GeoReference geo_reference(
+        partial_result.run_summary.origin_lat_rad,
+        partial_result.run_summary.origin_lon_rad,
+        partial_result.run_summary.origin_h_m);
+      ResultWriter::WriteOutputs(config.output_dir, config, partial_result, geo_reference);
+    } catch (const std::exception &write_exception) {
+      std::cerr << "failed to write partial outputs: " << write_exception.what() << '\n';
+    }
+    std::cerr << "offline_lc_runner failed: " << failure.what() << '\n';
+    return 1;
   } catch (const std::exception &exception) {
     std::cerr << "offline_lc_runner failed: " << exception.what() << '\n';
     return 1;

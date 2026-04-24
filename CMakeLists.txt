@@ -57,6 +57,7 @@ add_library(offline_lc_minimal_lib
   src/core/ImuIntegrationUtils.cpp
   src/core/ImuRateAvpReconstructor.cpp
   src/core/StaticImuAlignment.cpp
+  src/core/SequentialNhcJumpDetector.cpp
   src/core/TrajectoryInitializer.cpp
   src/core/OfflineBatchRunner.cpp
 )

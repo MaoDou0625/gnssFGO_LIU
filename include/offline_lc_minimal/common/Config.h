@@ -56,6 +56,15 @@ struct OfflineRunnerConfig {
   double vertical_rtk_feedback_sigma_baz_mps2 = 10.0;
   double vertical_rtk_feedback_sigma_attitude_rad = 1.0;
   double vertical_rtk_feedback_min_interval_s = 1.0;
+  int vertical_local_recovery_max_iterations = 4;
+  bool enable_nhc_jump_reference = false;
+  double nhc_history_half_life_s = 10.0;
+  double nhc_history_max_age_s = 60.0;
+  double nhc_body_vy_min_threshold_mps = 0.03;
+  double nhc_body_vz_min_threshold_mps = 0.003;
+  double nhc_body_vy_percentile_scale = 1.3;
+  double nhc_body_vz_percentile_scale = 3.0;
+  double nhc_jump_min_separation_s = 0.5;
   bool reserve_vertical_velocity_feedback_interface = false;
   bool enable_reweighted_combined_imu_factor = false;
   double reweighted_combined_imu_attitude_sigma_rad = 1e-3;

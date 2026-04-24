@@ -10,18 +10,21 @@
 #include <gtsam/navigation/ImuFactor.h>
 
 #include "offline_lc_minimal/common/Config.h"
+#include "offline_lc_minimal/core/SequentialNhcJumpDetector.h"
 #include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalSpecificForceFactor.h"
-#include "offline_lc_minimal/factor/VerticalInsidePoseFactor.h"
+#include "offline_lc_minimal/factor/VerticalInsideKinematicFactor.h"
 #include "offline_lc_minimal/factor/VerticalRtkPreintegrationFeedbackFactor.h"
 
 namespace {
 
 using offline_lc_minimal::DefaultConfig;
 using offline_lc_minimal::LoadConfigFile;
+using offline_lc_minimal::ReferenceNodeState;
+using offline_lc_minimal::SequentialNhcJumpDetector;
 using offline_lc_minimal::factor::HorizontalPositionFactor;
 using offline_lc_minimal::factor::StaticVerticalSpecificForceFactor;
-using offline_lc_minimal::factor::VerticalInsidePoseFactor;
+using offline_lc_minimal::factor::VerticalInsideKinematicFactor;
 using offline_lc_minimal::factor::VerticalRtkPreintegrationFeedbackFactor;
 
 template <typename Function>
@@ -115,6 +118,19 @@ VerticalRtkPreintegrationFeedbackFactor MakeFactor(
     2.0,
     3.0,
     gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4(1e-3, 1e-3, 1e-2, 1e-4)));
+}
+
+ReferenceNodeState MakeReferenceNodeState(
+  const double time_s,
+  const gtsam::Pose3 &pose,
+  const gtsam::Vector3 &velocity,
+  const gtsam::imuBias::ConstantBias &bias = gtsam::imuBias::ConstantBias()) {
+  ReferenceNodeState state;
+  state.time_s = time_s;
+  state.pose = pose;
+  state.velocity = velocity;
+  state.bias = bias;
+  return state;
 }
 
 void TestVerticalFeedbackRequiresGnss() {
@@ -229,6 +245,62 @@ void TestVerticalFeedbackRejectsNegativeMinInterval() {
   }
   std::filesystem::remove(config_path);
   ExpectTrue(threw, "vertical RTK feedback should reject a negative minimum interval");
+}
+
+void TestSequentialRecoveryConfigLoads() {
+  const auto config_path = WriteTempConfig(
+    MakeVerticalFeedbackConfigPrefix()
+    + "vertical_local_recovery_max_iterations=6\n"
+      "enable_nhc_jump_reference=true\n"
+      "nhc_history_half_life_s=12.0\n"
+      "nhc_history_max_age_s=45.0\n"
+      "nhc_body_vy_min_threshold_mps=0.04\n"
+      "nhc_body_vz_min_threshold_mps=0.004\n"
+      "nhc_body_vy_percentile_scale=1.6\n"
+      "nhc_body_vz_percentile_scale=3.5\n"
+      "nhc_jump_min_separation_s=1.25\n",
+    "vertical_rtk_sequential_recovery_loads.cfg");
+  const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
+  std::filesystem::remove(config_path);
+  ExpectNear(config.vertical_local_recovery_max_iterations, 6, 0.0, "local recovery iteration count should load");
+  ExpectTrue(config.enable_nhc_jump_reference, "NHC jump reference flag should load");
+  ExpectNear(config.nhc_history_half_life_s, 12.0, 1e-12, "NHC half-life should load");
+  ExpectNear(config.nhc_history_max_age_s, 45.0, 1e-12, "NHC max age should load");
+  ExpectNear(config.nhc_body_vy_min_threshold_mps, 0.04, 1e-12, "NHC vy threshold floor should load");
+  ExpectNear(config.nhc_body_vz_min_threshold_mps, 0.004, 1e-12, "NHC vz threshold floor should load");
+  ExpectNear(config.nhc_body_vy_percentile_scale, 1.6, 1e-12, "NHC vy percentile scale should load");
+  ExpectNear(config.nhc_body_vz_percentile_scale, 3.5, 1e-12, "NHC vz percentile scale should load");
+  ExpectNear(config.nhc_jump_min_separation_s, 1.25, 1e-12, "NHC jump separation should load");
+}
+
+void TestSequentialRecoveryRejectsNonPositiveIterationCount() {
+  const auto config_path = WriteTempConfig(
+    MakeVerticalFeedbackConfigPrefix() + "vertical_local_recovery_max_iterations=0\n",
+    "vertical_rtk_sequential_recovery_iterations_invalid.cfg");
+  bool threw = false;
+  try {
+    [[maybe_unused]] const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  std::filesystem::remove(config_path);
+  ExpectTrue(threw, "sequential recovery should reject non-positive local iteration count");
+}
+
+void TestSequentialRecoveryRejectsInvalidNhcHistoryWindow() {
+  const auto config_path = WriteTempConfig(
+    MakeVerticalFeedbackConfigPrefix()
+    + "nhc_history_half_life_s=20.0\n"
+      "nhc_history_max_age_s=10.0\n",
+    "vertical_rtk_invalid_nhc_history.cfg");
+  bool threw = false;
+  try {
+    [[maybe_unused]] const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  std::filesystem::remove(config_path);
+  ExpectTrue(threw, "sequential recovery should reject NHC max age shorter than its half-life");
 }
 
 void TestHorizontalPositionFactorIgnoresVerticalTranslation() {
@@ -471,57 +543,145 @@ void TestJacobianMatchesNumericalDerivative() {
   ExpectMatrixNear(h7, num_h7, 5e-5, "global_acc_bias Jacobian should match numerical derivative");
 }
 
-void TestVerticalInsidePoseFactorTracksRollPitchAndUpOnly() {
-  const VerticalInsidePoseFactor factor(
+void TestVerticalInsideKinematicFactorTracksPitchRollVzAndBaz() {
+  const VerticalInsideKinematicFactor factor(
     1,
+    2,
+    3,
     gtsam::Pose3(gtsam::Rot3::RzRyRx(0.0, -0.02, 0.01), gtsam::Point3(1.0, 2.0, 3.0)),
-    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(1e-3, 1e-3, 1e-2)));
+    gtsam::Vector3(0.1, -0.2, 0.3),
+    gtsam::imuBias::ConstantBias(gtsam::Vector3(0.0, 0.0, 0.02), gtsam::Vector3::Zero()),
+    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4(1e-3, 1e-3, 1e-2, 1e-3)));
   const gtsam::Pose3 pose(
     gtsam::Rot3::RzRyRx(0.15, -0.015, 0.03),
-    gtsam::Point3(4.0, 5.0, 3.25));
-  const gtsam::Vector residual = factor.evaluateError(pose);
-  ExpectNear(residual[2], 0.25, 1e-9, "vertical inside factor should use only up translation");
+    gtsam::Point3(4.0, 5.0, 30.0));
+  const gtsam::Vector3 velocity(-1.0, 2.0, 0.55);
+  const gtsam::imuBias::ConstantBias bias(gtsam::Vector3(0.3, -0.4, 0.07), gtsam::Vector3::Zero());
+  const gtsam::Vector residual = factor.evaluateError(pose, velocity, bias);
   ExpectTrue(std::abs(residual[0]) > 1e-6, "roll residual should be active");
   ExpectTrue(std::abs(residual[1]) > 1e-6, "pitch residual should be active");
+  ExpectNear(residual[2], 0.25, 1e-9, "vertical inside kinematic factor should track vz");
+  ExpectNear(residual[3], 0.05, 1e-9, "vertical inside kinematic factor should track ba_z");
 }
 
-void TestVerticalInsidePoseFactorIgnoresYawAndHorizontalTranslation() {
+void TestVerticalInsideKinematicFactorIgnoresYawHorizontalTranslationAndXyBias() {
   const gtsam::Pose3 reference_pose(
     gtsam::Rot3::Yaw(0.0).compose(gtsam::Rot3::Pitch(0.01)).compose(gtsam::Rot3::Roll(-0.02)),
     gtsam::Point3(1.0, 2.0, 3.0));
-  const VerticalInsidePoseFactor factor(
+  const VerticalInsideKinematicFactor factor(
     1,
+    2,
+    3,
     reference_pose,
-    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(1e-3, 1e-3, 1e-2)));
+    gtsam::Vector3(0.2, -0.1, 0.3),
+    gtsam::imuBias::ConstantBias(gtsam::Vector3(0.01, -0.02, 0.03), gtsam::Vector3::Zero()),
+    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4(1e-3, 1e-3, 1e-2, 1e-3)));
   const gtsam::Pose3 pose(
     gtsam::Rot3::Yaw(0.25).compose(gtsam::Rot3::Pitch(0.01)).compose(gtsam::Rot3::Roll(-0.02)),
-    gtsam::Point3(10.0, -4.0, 3.0));
-  const gtsam::Vector residual = factor.evaluateError(pose);
+    gtsam::Point3(10.0, -4.0, 999.0));
+  const gtsam::Vector3 velocity(-3.0, 4.0, 0.3);
+  const gtsam::imuBias::ConstantBias bias(gtsam::Vector3(0.4, -0.5, 0.03), gtsam::Vector3::Zero());
+  const gtsam::Vector residual = factor.evaluateError(pose, velocity, bias);
   ExpectNear(residual[0], 0.0, 1e-9, "pure yaw should not affect roll residual");
   ExpectNear(residual[1], 0.0, 1e-9, "pure yaw should not affect pitch residual");
-  ExpectNear(residual[2], 0.0, 1e-9, "horizontal translation should not affect vertical residual");
+  ExpectNear(residual[2], 0.0, 1e-9, "matching vz should zero the vz residual");
+  ExpectNear(residual[3], 0.0, 1e-9, "xy bias changes should not affect ba_z residual");
 }
 
-void TestVerticalInsidePoseFactorJacobianMatchesNumericalDerivative() {
-  const VerticalInsidePoseFactor factor(
+void TestVerticalInsideKinematicFactorJacobianMatchesNumericalDerivative() {
+  const VerticalInsideKinematicFactor factor(
     1,
+    2,
+    3,
     gtsam::Pose3(gtsam::Rot3::RzRyRx(-0.03, 0.02, -0.01), gtsam::Point3(0.5, -0.2, 1.0)),
-    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(1e-3, 1e-3, 1e-2)));
+    gtsam::Vector3(0.1, 0.2, -0.3),
+    gtsam::imuBias::ConstantBias(gtsam::Vector3(0.01, -0.02, 0.03), gtsam::Vector3::Zero()),
+    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4(1e-3, 1e-3, 1e-2, 1e-3)));
   const gtsam::Pose3 pose(
     gtsam::Rot3::RzRyRx(0.04, -0.015, 0.02),
     gtsam::Point3(0.3, 0.7, 1.25));
-  gtsam::Matrix jacobian;
-  [[maybe_unused]] const gtsam::Vector residual = factor.evaluateError(pose, jacobian);
-  const auto numerical_jacobian =
-    gtsam::numericalDerivative11<gtsam::Vector3, gtsam::Pose3>(
-      [&](const gtsam::Pose3 &value) { return factor.evaluateError(value); },
+  const gtsam::Vector3 velocity(0.2, -0.1, 0.4);
+  const gtsam::imuBias::ConstantBias bias(gtsam::Vector3(0.02, -0.03, 0.05), gtsam::Vector3(0.0, 0.0, 0.0));
+  gtsam::Matrix h1;
+  gtsam::Matrix h2;
+  gtsam::Matrix h3;
+  [[maybe_unused]] const gtsam::Vector residual = factor.evaluateError(pose, velocity, bias, h1, h2, h3);
+  const auto numerical_h1 =
+    gtsam::numericalDerivative31<gtsam::Vector4, gtsam::Pose3, gtsam::Vector3, gtsam::imuBias::ConstantBias>(
+      [&](const gtsam::Pose3 &value, const gtsam::Vector3 &v, const gtsam::imuBias::ConstantBias &b) {
+        return factor.evaluateError(value, v, b);
+      },
       pose,
+      velocity,
+      bias,
       1e-6);
-  ExpectMatrixNear(
-    jacobian,
-    numerical_jacobian,
-    5e-5,
-    "vertical inside pose Jacobian should match numerical derivative");
+  const auto numerical_h2 =
+    gtsam::numericalDerivative32<gtsam::Vector4, gtsam::Pose3, gtsam::Vector3, gtsam::imuBias::ConstantBias>(
+      [&](const gtsam::Pose3 &p, const gtsam::Vector3 &value, const gtsam::imuBias::ConstantBias &b) {
+        return factor.evaluateError(p, value, b);
+      },
+      pose,
+      velocity,
+      bias,
+      1e-6);
+  const auto numerical_h3 =
+    gtsam::numericalDerivative33<gtsam::Vector4, gtsam::Pose3, gtsam::Vector3, gtsam::imuBias::ConstantBias>(
+      [&](const gtsam::Pose3 &p, const gtsam::Vector3 &v, const gtsam::imuBias::ConstantBias &value) {
+        return factor.evaluateError(p, v, value);
+      },
+      pose,
+      velocity,
+      bias,
+      1e-6);
+  ExpectMatrixNear(h1, numerical_h1, 5e-5, "vertical inside kinematic pose Jacobian should match numerical derivative");
+  ExpectMatrixNear(h2, numerical_h2, 5e-5, "vertical inside kinematic velocity Jacobian should match numerical derivative");
+  ExpectMatrixNear(h3, numerical_h3, 5e-5, "vertical inside kinematic bias Jacobian should match numerical derivative");
+}
+
+void TestNhcThresholdBootstrapRespectsMinimumFloors() {
+  auto config = DefaultConfig();
+  config.enable_nhc_jump_reference = true;
+  SequentialNhcJumpDetector detector(config);
+  std::vector<ReferenceNodeState> states{
+    MakeReferenceNodeState(0.0, gtsam::Pose3(), gtsam::Vector3(0.001, 0.002, 0.0005)),
+    MakeReferenceNodeState(1.0, gtsam::Pose3(), gtsam::Vector3(-0.001, -0.002, 0.0002)),
+    MakeReferenceNodeState(2.0, gtsam::Pose3(), gtsam::Vector3(0.002, 0.001, -0.0003)),
+  };
+  detector.SeedWithConfirmedStates(states, 0U, states.size() - 1U);
+  const auto thresholds = detector.CurrentThresholds(2.0);
+  ExpectNear(
+    thresholds.body_vy_threshold_mps,
+    config.nhc_body_vy_min_threshold_mps,
+    1e-12,
+    "NHC vy threshold should respect the configured floor");
+  ExpectNear(
+    thresholds.body_vz_threshold_mps,
+    config.nhc_body_vz_min_threshold_mps,
+    1e-12,
+    "NHC vz threshold should respect the configured floor");
+}
+
+void TestNhcJumpAnchorFindsFirstThresholdCrossing() {
+  auto config = DefaultConfig();
+  config.enable_nhc_jump_reference = true;
+  config.nhc_jump_min_separation_s = 0.5;
+  SequentialNhcJumpDetector detector(config);
+  std::vector<ReferenceNodeState> states{
+    MakeReferenceNodeState(0.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.0)),
+    MakeReferenceNodeState(1.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.0)),
+    MakeReferenceNodeState(2.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.0)),
+    MakeReferenceNodeState(3.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.05, 0.0)),
+    MakeReferenceNodeState(4.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.06, 0.0)),
+    MakeReferenceNodeState(5.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.06, 0.0)),
+  };
+  detector.SeedWithConfirmedStates(states, 0U, 2U);
+  const auto jump_anchor = detector.FindJumpAnchor(states, 2U, 5U);
+  ExpectTrue(jump_anchor.has_value(), "NHC jump detector should find an anchor when body velocity exceeds the threshold");
+  ExpectNear(
+    static_cast<double>(*jump_anchor),
+    3.0,
+    0.0,
+    "NHC jump detector should return the earliest threshold crossing");
 }
 
 }  // namespace
@@ -538,6 +698,13 @@ int main() {
     RunTest("TestReserveVerticalVelocityInterfaceIsAccepted", TestReserveVerticalVelocityInterfaceIsAccepted);
     RunTest("TestVerticalFeedbackMinIntervalLoads", TestVerticalFeedbackMinIntervalLoads);
     RunTest("TestVerticalFeedbackRejectsNegativeMinInterval", TestVerticalFeedbackRejectsNegativeMinInterval);
+    RunTest("TestSequentialRecoveryConfigLoads", TestSequentialRecoveryConfigLoads);
+    RunTest(
+      "TestSequentialRecoveryRejectsNonPositiveIterationCount",
+      TestSequentialRecoveryRejectsNonPositiveIterationCount);
+    RunTest(
+      "TestSequentialRecoveryRejectsInvalidNhcHistoryWindow",
+      TestSequentialRecoveryRejectsInvalidNhcHistoryWindow);
     RunTest("TestHorizontalPositionFactorIgnoresVerticalTranslation", TestHorizontalPositionFactorIgnoresVerticalTranslation);
     RunTest(
       "TestStaticVerticalSpecificForceResidualNearZeroWhenBiasMatches",
@@ -556,14 +723,18 @@ int main() {
     RunTest("TestVerticalResidualFeedsDpZRow", TestVerticalResidualFeedsDpZRow);
     RunTest("TestJacobianMatchesNumericalDerivative", TestJacobianMatchesNumericalDerivative);
     RunTest(
-      "TestVerticalInsidePoseFactorTracksRollPitchAndUpOnly",
-      TestVerticalInsidePoseFactorTracksRollPitchAndUpOnly);
+      "TestVerticalInsideKinematicFactorTracksPitchRollVzAndBaz",
+      TestVerticalInsideKinematicFactorTracksPitchRollVzAndBaz);
     RunTest(
-      "TestVerticalInsidePoseFactorIgnoresYawAndHorizontalTranslation",
-      TestVerticalInsidePoseFactorIgnoresYawAndHorizontalTranslation);
+      "TestVerticalInsideKinematicFactorIgnoresYawHorizontalTranslationAndXyBias",
+      TestVerticalInsideKinematicFactorIgnoresYawHorizontalTranslationAndXyBias);
     RunTest(
-      "TestVerticalInsidePoseFactorJacobianMatchesNumericalDerivative",
-      TestVerticalInsidePoseFactorJacobianMatchesNumericalDerivative);
+      "TestVerticalInsideKinematicFactorJacobianMatchesNumericalDerivative",
+      TestVerticalInsideKinematicFactorJacobianMatchesNumericalDerivative);
+    RunTest(
+      "TestNhcThresholdBootstrapRespectsMinimumFloors",
+      TestNhcThresholdBootstrapRespectsMinimumFloors);
+    RunTest("TestNhcJumpAnchorFindsFirstThresholdCrossing", TestNhcJumpAnchorFindsFirstThresholdCrossing);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return EXIT_FAILURE;

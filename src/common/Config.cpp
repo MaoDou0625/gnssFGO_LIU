@@ -245,6 +245,24 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_rtk_feedback_sigma_attitude_rad = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_rtk_feedback_min_interval_s") {
     config.vertical_rtk_feedback_min_interval_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_local_recovery_max_iterations") {
+    config.vertical_local_recovery_max_iterations = ParseInt(normalized_value);
+  } else if (normalized_key == "enable_nhc_jump_reference") {
+    config.enable_nhc_jump_reference = ParseBool(normalized_value);
+  } else if (normalized_key == "nhc_history_half_life_s") {
+    config.nhc_history_half_life_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "nhc_history_max_age_s") {
+    config.nhc_history_max_age_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "nhc_body_vy_min_threshold_mps") {
+    config.nhc_body_vy_min_threshold_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "nhc_body_vz_min_threshold_mps") {
+    config.nhc_body_vz_min_threshold_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "nhc_body_vy_percentile_scale") {
+    config.nhc_body_vy_percentile_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "nhc_body_vz_percentile_scale") {
+    config.nhc_body_vz_percentile_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "nhc_jump_min_separation_s") {
+    config.nhc_jump_min_separation_s = ParseDouble(normalized_value);
   } else if (normalized_key == "reserve_vertical_velocity_feedback_interface") {
     config.reserve_vertical_velocity_feedback_interface = ParseBool(normalized_value);
   } else if (
@@ -576,6 +594,24 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     if (config.vertical_rtk_feedback_min_interval_s < 0.0) {
       throw std::runtime_error("vertical_rtk_feedback_min_interval_s must be non-negative");
     }
+    if (config.vertical_local_recovery_max_iterations <= 0) {
+      throw std::runtime_error("vertical_local_recovery_max_iterations must be positive");
+    }
+    if (config.nhc_history_half_life_s <= 0.0 || config.nhc_history_max_age_s <= 0.0) {
+      throw std::runtime_error("NHC history windows must be positive");
+    }
+    if (config.nhc_history_max_age_s < config.nhc_history_half_life_s) {
+      throw std::runtime_error("nhc_history_max_age_s must be >= nhc_history_half_life_s");
+    }
+    if (config.nhc_body_vy_min_threshold_mps <= 0.0 || config.nhc_body_vz_min_threshold_mps <= 0.0) {
+      throw std::runtime_error("NHC minimum body-velocity thresholds must be positive");
+    }
+    if (config.nhc_body_vy_percentile_scale < 1.0 || config.nhc_body_vz_percentile_scale < 1.0) {
+      throw std::runtime_error("NHC percentile scales must be >= 1");
+    }
+    if (config.nhc_jump_min_separation_s < 0.0) {
+      throw std::runtime_error("nhc_jump_min_separation_s must be non-negative");
+    }
     if (config.static_alignment_duration_s < 0.0) {
       throw std::runtime_error("static_alignment_duration_s must be non-negative");
     }
@@ -808,6 +844,24 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
   if (config.vertical_rtk_feedback_min_interval_s < 0.0) {
     throw std::runtime_error("vertical_rtk_feedback_min_interval_s must be non-negative");
   }
+  if (config.vertical_local_recovery_max_iterations <= 0) {
+    throw std::runtime_error("vertical_local_recovery_max_iterations must be positive");
+  }
+  if (config.nhc_history_half_life_s <= 0.0 || config.nhc_history_max_age_s <= 0.0) {
+    throw std::runtime_error("NHC history windows must be positive");
+  }
+  if (config.nhc_history_max_age_s < config.nhc_history_half_life_s) {
+    throw std::runtime_error("nhc_history_max_age_s must be >= nhc_history_half_life_s");
+  }
+  if (config.nhc_body_vy_min_threshold_mps <= 0.0 || config.nhc_body_vz_min_threshold_mps <= 0.0) {
+    throw std::runtime_error("NHC minimum body-velocity thresholds must be positive");
+  }
+  if (config.nhc_body_vy_percentile_scale < 1.0 || config.nhc_body_vz_percentile_scale < 1.0) {
+    throw std::runtime_error("NHC percentile scales must be >= 1");
+  }
+  if (config.nhc_jump_min_separation_s < 0.0) {
+    throw std::runtime_error("nhc_jump_min_separation_s must be non-negative");
+  }
   if (config.static_alignment_duration_s < 0.0) {
     throw std::runtime_error("static_alignment_duration_s must be non-negative");
   }
@@ -903,6 +957,15 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "vertical_rtk_feedback_sigma_baz_mps2=" << config.vertical_rtk_feedback_sigma_baz_mps2 << '\n'
       << "vertical_rtk_feedback_sigma_attitude_rad=" << config.vertical_rtk_feedback_sigma_attitude_rad << '\n'
       << "vertical_rtk_feedback_min_interval_s=" << config.vertical_rtk_feedback_min_interval_s << '\n'
+      << "vertical_local_recovery_max_iterations=" << config.vertical_local_recovery_max_iterations << '\n'
+      << "enable_nhc_jump_reference=" << (config.enable_nhc_jump_reference ? "true" : "false") << '\n'
+      << "nhc_history_half_life_s=" << config.nhc_history_half_life_s << '\n'
+      << "nhc_history_max_age_s=" << config.nhc_history_max_age_s << '\n'
+      << "nhc_body_vy_min_threshold_mps=" << config.nhc_body_vy_min_threshold_mps << '\n'
+      << "nhc_body_vz_min_threshold_mps=" << config.nhc_body_vz_min_threshold_mps << '\n'
+      << "nhc_body_vy_percentile_scale=" << config.nhc_body_vy_percentile_scale << '\n'
+      << "nhc_body_vz_percentile_scale=" << config.nhc_body_vz_percentile_scale << '\n'
+      << "nhc_jump_min_separation_s=" << config.nhc_jump_min_separation_s << '\n'
       << "reserve_vertical_velocity_feedback_interface="
       << (config.reserve_vertical_velocity_feedback_interface ? "true" : "false") << '\n'
       << "enable_reweighted_combined_imu_factor="

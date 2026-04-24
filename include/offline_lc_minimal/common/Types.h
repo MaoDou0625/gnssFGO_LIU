@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -351,6 +352,20 @@ struct GnssConsistencyRecord {
   double vertical_feedback_target_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
   double vertical_feedback_attitude_scale = std::numeric_limits<double>::quiet_NaN();
   double vertical_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double local_prefit_residual_u_m = std::numeric_limits<double>::quiet_NaN();
+  double local_postfit_residual_u_m = std::numeric_limits<double>::quiet_NaN();
+  double confirmed_inside_before_sample = std::numeric_limits<double>::quiet_NaN();
+  long long recovery_anchor_state_index = -1;
+  long long nhc_jump_anchor_state_index = -1;
+  double nhc_body_vy_mps = std::numeric_limits<double>::quiet_NaN();
+  double nhc_body_vz_residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double nhc_body_vy_threshold_mps = std::numeric_limits<double>::quiet_NaN();
+  double nhc_body_vz_threshold_mps = std::numeric_limits<double>::quiet_NaN();
+  double delta_vz_applied_mps = std::numeric_limits<double>::quiet_NaN();
+  double delta_roll_applied_rad = std::numeric_limits<double>::quiet_NaN();
+  double delta_pitch_applied_rad = std::numeric_limits<double>::quiet_NaN();
+  double delta_baz_applied_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double required_up_anchor_correction_m = std::numeric_limits<double>::quiet_NaN();
   double covariance_scale = 1.0;
   double covariance_scale_e = 1.0;
   double covariance_scale_n = 1.0;
@@ -585,6 +600,18 @@ struct OfflineRunResult {
   std::vector<GnssFactorRecord> gnss_factor_records;
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
   std::vector<VerticalStateCorrectionRow> vertical_state_corrections;
+};
+
+class OfflineRunFailure : public std::runtime_error {
+ public:
+  OfflineRunFailure(std::string message, OfflineRunResult partial_result)
+      : std::runtime_error(std::move(message)),
+        partial_result_(std::move(partial_result)) {}
+
+  [[nodiscard]] const OfflineRunResult &partial_result() const { return partial_result_; }
+
+ private:
+  OfflineRunResult partial_result_;
 };
 
 }  // namespace offline_lc_minimal
