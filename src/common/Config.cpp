@@ -247,6 +247,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_rtk_feedback_min_interval_s = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_local_recovery_max_iterations") {
     config.vertical_local_recovery_max_iterations = ParseInt(normalized_value);
+  } else if (normalized_key == "vertical_local_recovery_max_attitude_delta_rad") {
+    config.vertical_local_recovery_max_attitude_delta_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_local_recovery_max_baz_delta_mps2") {
+    config.vertical_local_recovery_max_baz_delta_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_global_vz_window_s") {
     config.vertical_global_vz_window_s = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_global_vz_smooth_window_s") {
@@ -641,6 +645,10 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     if (config.vertical_local_recovery_max_iterations <= 0) {
       throw std::runtime_error("vertical_local_recovery_max_iterations must be positive");
     }
+    if (config.vertical_local_recovery_max_attitude_delta_rad <= 0.0 ||
+        config.vertical_local_recovery_max_baz_delta_mps2 <= 0.0) {
+      throw std::runtime_error("vertical local recovery slow-variable limits must be positive");
+    }
     if (config.vertical_global_vz_window_s <= 0.0 || config.vertical_global_vz_smooth_window_s <= 0.0) {
       throw std::runtime_error("vertical global vz windows must be positive");
     }
@@ -940,6 +948,10 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
   if (config.vertical_local_recovery_max_iterations <= 0) {
     throw std::runtime_error("vertical_local_recovery_max_iterations must be positive");
   }
+  if (config.vertical_local_recovery_max_attitude_delta_rad <= 0.0 ||
+      config.vertical_local_recovery_max_baz_delta_mps2 <= 0.0) {
+    throw std::runtime_error("vertical local recovery slow-variable limits must be positive");
+  }
   if (config.vertical_global_vz_window_s <= 0.0 || config.vertical_global_vz_smooth_window_s <= 0.0) {
     throw std::runtime_error("vertical global vz windows must be positive");
   }
@@ -1100,6 +1112,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "vertical_rtk_feedback_sigma_attitude_rad=" << config.vertical_rtk_feedback_sigma_attitude_rad << '\n'
       << "vertical_rtk_feedback_min_interval_s=" << config.vertical_rtk_feedback_min_interval_s << '\n'
       << "vertical_local_recovery_max_iterations=" << config.vertical_local_recovery_max_iterations << '\n'
+      << "vertical_local_recovery_max_attitude_delta_rad="
+      << config.vertical_local_recovery_max_attitude_delta_rad << '\n'
+      << "vertical_local_recovery_max_baz_delta_mps2="
+      << config.vertical_local_recovery_max_baz_delta_mps2 << '\n'
       << "vertical_global_vz_window_s=" << config.vertical_global_vz_window_s << '\n'
       << "vertical_global_vz_smooth_window_s=" << config.vertical_global_vz_smooth_window_s << '\n'
       << "vertical_jump_candidate_min_separation_s=" << config.vertical_jump_candidate_min_separation_s << '\n'

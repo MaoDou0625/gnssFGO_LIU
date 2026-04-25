@@ -57,6 +57,8 @@ struct OfflineRunnerConfig {
   double vertical_rtk_feedback_sigma_attitude_rad = 1.0;
   double vertical_rtk_feedback_min_interval_s = 1.0;
   int vertical_local_recovery_max_iterations = 4;
+  double vertical_local_recovery_max_attitude_delta_rad = 1e-2;
+  double vertical_local_recovery_max_baz_delta_mps2 = 1e-2;
   double vertical_global_vz_window_s = 1.0;
   double vertical_global_vz_smooth_window_s = 1.0;
   double vertical_jump_candidate_min_separation_s = 1.0;

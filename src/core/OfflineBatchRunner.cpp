@@ -1261,12 +1261,29 @@ ReferenceNodeState ApplyVerticalAnchorCorrections(
   const ReferenceNodeState &anchor_state,
   const gtsam::Pose3 &optimized_anchor_pose,
   const gtsam::Vector3 &optimized_anchor_velocity,
-  const gtsam::imuBias::ConstantBias &optimized_anchor_bias) {
+  const gtsam::imuBias::ConstantBias &optimized_anchor_bias,
+  const double max_attitude_delta_rad,
+  const double max_baz_delta_mps2) {
   ReferenceNodeState corrected_anchor_state = anchor_state;
   const Eigen::Vector3d anchor_ypr = Rot3ToYpr(anchor_state.pose.rotation());
   const Eigen::Vector3d optimized_ypr = Rot3ToYpr(optimized_anchor_pose.rotation());
+  const double bounded_delta_pitch_rad = std::clamp(
+    WrapAngleRad(optimized_ypr.y() - anchor_ypr.y()),
+    -max_attitude_delta_rad,
+    max_attitude_delta_rad);
+  const double bounded_delta_roll_rad = std::clamp(
+    WrapAngleRad(optimized_ypr.z() - anchor_ypr.z()),
+    -max_attitude_delta_rad,
+    max_attitude_delta_rad);
+  const double bounded_delta_baz_mps2 = std::clamp(
+    optimized_anchor_bias.accelerometer().z() - anchor_state.bias.accelerometer().z(),
+    -max_baz_delta_mps2,
+    max_baz_delta_mps2);
   corrected_anchor_state.pose = gtsam::Pose3(
-    gtsam::Rot3::Ypr(anchor_ypr.x(), optimized_ypr.y(), optimized_ypr.z()),
+    gtsam::Rot3::Ypr(
+      anchor_ypr.x(),
+      anchor_ypr.y() + bounded_delta_pitch_rad,
+      anchor_ypr.z() + bounded_delta_roll_rad),
     anchor_state.pose.translation());
   corrected_anchor_state.velocity =
     gtsam::Vector3(anchor_state.velocity.x(), anchor_state.velocity.y(), optimized_anchor_velocity.z());
@@ -1274,7 +1291,7 @@ ReferenceNodeState ApplyVerticalAnchorCorrections(
     gtsam::Vector3(
       anchor_state.bias.accelerometer().x(),
       anchor_state.bias.accelerometer().y(),
-      optimized_anchor_bias.accelerometer().z()),
+      anchor_state.bias.accelerometer().z() + bounded_delta_baz_mps2),
     anchor_state.bias.gyroscope());
   return corrected_anchor_state;
 }
@@ -1449,7 +1466,9 @@ std::optional<VerticalLocalRecoveryResult> RecoverVerticalReferenceStateLocally(
     start_state,
     optimized_anchor_pose,
     optimized_anchor_velocity,
-    optimized_anchor_bias);
+    optimized_anchor_bias,
+    config.vertical_local_recovery_max_attitude_delta_rad,
+    config.vertical_local_recovery_max_baz_delta_mps2);
   auto propagate_end_state = [&](const ReferenceNodeState &anchor_state) {
     return imu_window.preintegrated_imu_measurements.predict(
       gtsam::NavState(anchor_state.pose, anchor_state.velocity),
