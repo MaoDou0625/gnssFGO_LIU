@@ -2396,6 +2396,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     gtsam::Values optimized_values;
     std::vector<GnssFactorRecord> gnss_factor_records;
     std::vector<GnssConsistencyRecord> gnss_consistency_records;
+    std::vector<VerticalLocalRecoveryIterationRow> vertical_local_recovery_iterations;
     std::vector<TrajectoryRow> trajectory;
     std::vector<ReferenceNodeState> gate_reference_states;
     RunSummary run_summary;
@@ -2603,6 +2604,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   }
                   consistency_record.recovery_anchor_state_index =
                     static_cast<long long>(recovery_anchor_state_index);
+                  double iteration_prefit_u_m = prefit_residual_enu_m.z();
+                  long long pure_delta_up_anchor_start_iteration = -1;
 
                   for (int local_recovery_iteration = 0;
                        local_recovery_iteration < config_.vertical_local_recovery_max_iterations;
@@ -2655,12 +2658,18 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     consistency_record.delta_roll_applied_rad = recovery_result->delta_roll_applied_rad;
                     consistency_record.delta_pitch_applied_rad = recovery_result->delta_pitch_applied_rad;
                     consistency_record.delta_baz_applied_mps2 = recovery_result->delta_baz_applied_mps2;
-                    inside_gate =
+                    const bool inside_after_velocity_recovery =
                       ComputeVerticalNis(local_postfit_residual_enu_m.z(), consistency_base_sigma_m.z()) <=
                       vertical_gate_nis_threshold;
+                    inside_gate = inside_after_velocity_recovery;
+                    bool used_up_anchor_fallback = false;
+                    bool pure_delta_up_anchor_only = false;
+                    double final_iteration_postfit_u_m = local_postfit_residual_enu_m.z();
+                    double delta_up_anchor_applied_m = recovery_result->delta_up_anchor_applied_m;
                     if (!inside_gate &&
                         std::isfinite(recovery_result->required_up_anchor_correction_m) &&
                         std::abs(recovery_result->required_up_anchor_correction_m) > 0.0) {
+                      used_up_anchor_fallback = true;
                       const auto corrected_anchor_state = ApplyVerticalUpAnchorCorrection(
                         recovery_result->recovered_anchor_state,
                         recovery_result->required_up_anchor_correction_m);
@@ -2689,15 +2698,65 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         corrected_postfit_residual_enu_m.z();
                       consistency_record.local_postfit_residual_u_m =
                         corrected_postfit_residual_enu_m.z();
+                      final_iteration_postfit_u_m = corrected_postfit_residual_enu_m.z();
+                      delta_up_anchor_applied_m = recovery_result->required_up_anchor_correction_m;
                       consistency_record.delta_up_anchor_applied_m =
                         recovery_result->required_up_anchor_correction_m;
                       inside_gate =
                         ComputeVerticalNis(corrected_postfit_residual_enu_m.z(), consistency_base_sigma_m.z()) <=
                         vertical_gate_nis_threshold;
+                      pure_delta_up_anchor_only =
+                        std::abs(recovery_result->delta_vz_applied_mps) <= 1e-12 &&
+                        std::abs(recovery_result->delta_roll_applied_rad) <= 1e-12 &&
+                        std::abs(recovery_result->delta_pitch_applied_rad) <= 1e-12 &&
+                        std::abs(recovery_result->delta_baz_applied_mps2) <= 1e-12;
+                      if (pure_delta_up_anchor_only && pure_delta_up_anchor_start_iteration < 0) {
+                        pure_delta_up_anchor_start_iteration = static_cast<long long>(local_recovery_iteration + 1);
+                      }
                     }
+                    VerticalLocalRecoveryIterationRow iteration_row;
+                    iteration_row.sample_index = sample_index;
+                    iteration_row.corrected_time_s = record.corrected_time_s;
+                    iteration_row.recovery_anchor_state_index =
+                      static_cast<long long>(recovery_anchor_state_index);
+                    iteration_row.feedback_anchor_state_index =
+                      static_cast<long long>(*feedback_anchor_state);
+                    iteration_row.nhc_jump_anchor_state_index =
+                      nhc_jump_anchor_state.has_value() ? static_cast<long long>(*nhc_jump_anchor_state) : -1;
+                    iteration_row.iteration_index = static_cast<long long>(local_recovery_iteration + 1);
+                    iteration_row.prefit_u_before_iteration_m = iteration_prefit_u_m;
+                    iteration_row.postfit_u_after_velocity_recovery_m = local_postfit_residual_enu_m.z();
+                    iteration_row.postfit_u_after_iteration_m = final_iteration_postfit_u_m;
+                    iteration_row.delta_vz_applied_mps = recovery_result->delta_vz_applied_mps;
+                    iteration_row.delta_up_anchor_applied_m = delta_up_anchor_applied_m;
+                    iteration_row.delta_roll_applied_rad = recovery_result->delta_roll_applied_rad;
+                    iteration_row.delta_pitch_applied_rad = recovery_result->delta_pitch_applied_rad;
+                    iteration_row.delta_baz_applied_mps2 = recovery_result->delta_baz_applied_mps2;
+                    iteration_row.required_up_anchor_correction_m =
+                      recovery_result->required_up_anchor_correction_m;
+                    iteration_row.used_up_anchor_fallback = used_up_anchor_fallback;
+                    iteration_row.pure_delta_up_anchor_only = pure_delta_up_anchor_only;
+                    iteration_row.inside_after_velocity_recovery = inside_after_velocity_recovery;
+                    iteration_row.inside_after_iteration = inside_gate;
+                    iteration.vertical_local_recovery_iterations.push_back(iteration_row);
+                    iteration_prefit_u_m = final_iteration_postfit_u_m;
                     if (inside_gate) {
                       break;
                     }
+                  }
+                  consistency_record.local_recovery_iteration_count = 0;
+                  consistency_record.pure_delta_up_anchor_start_iteration = pure_delta_up_anchor_start_iteration;
+                  if (!iteration.vertical_local_recovery_iterations.empty()) {
+                    std::size_t count = 0;
+                    for (auto it = iteration.vertical_local_recovery_iterations.rbegin();
+                         it != iteration.vertical_local_recovery_iterations.rend();
+                         ++it) {
+                      if (it->sample_index != sample_index) {
+                        break;
+                      }
+                      ++count;
+                    }
+                    consistency_record.local_recovery_iteration_count = static_cast<long long>(count);
                   }
 
                   if (!inside_gate) {
@@ -2982,6 +3041,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary = final_iteration_result.run_summary;
   run_result.gnss_factor_records = std::move(final_iteration_result.gnss_factor_records);
   run_result.gnss_consistency_records = std::move(final_iteration_result.gnss_consistency_records);
+  run_result.vertical_local_recovery_iterations =
+    std::move(final_iteration_result.vertical_local_recovery_iterations);
   run_result.trajectory = std::move(final_iteration_result.trajectory);
   if (collect_reference_states) {
     run_result.reference_node_trajectory.clear();

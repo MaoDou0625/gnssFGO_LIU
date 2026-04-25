@@ -277,7 +277,7 @@ void WriteGnssConsistencyCsv(
        "confirmed_inside_before_sample,recovery_anchor_state_index,nhc_jump_anchor_state_index,"
        "nhc_body_vy_mps,nhc_body_vz_residual_mps,nhc_body_vy_threshold_mps,nhc_body_vz_threshold_mps,"
        "delta_vz_applied_mps,delta_up_anchor_applied_m,delta_roll_applied_rad,delta_pitch_applied_rad,delta_baz_applied_mps2,"
-       "required_up_anchor_correction_m,"
+       "required_up_anchor_correction_m,local_recovery_iteration_count,pure_delta_up_anchor_start_iteration,"
        "covariance_scale,covariance_scale_e,covariance_scale_n,covariance_scale_u,"
        "prefit_residual_u_before_local_recovery_m,prefit_residual_u_after_local_recovery_m,"
        "prefit_residual_e_m,prefit_residual_n_m,prefit_residual_u_m,postfit_residual_e_m,"
@@ -317,6 +317,8 @@ void WriteGnssConsistencyCsv(
            << row.delta_pitch_applied_rad << ','
            << row.delta_baz_applied_mps2 << ','
            << row.required_up_anchor_correction_m << ','
+           << row.local_recovery_iteration_count << ','
+           << row.pure_delta_up_anchor_start_iteration << ','
            << row.covariance_scale << ','
            << row.covariance_scale_e << ','
            << row.covariance_scale_n << ','
@@ -331,6 +333,44 @@ void WriteGnssConsistencyCsv(
            << row.postfit_residual_enu_m.z() << ','
            << row.prefit_nis << ','
            << row.postfit_nis << '\n';
+  }
+}
+
+void WriteVerticalLocalRecoveryIterationCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalLocalRecoveryIterationRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "sample_index,corrected_time_s,recovery_anchor_state_index,feedback_anchor_state_index,"
+       "nhc_jump_anchor_state_index,iteration_index,prefit_u_before_iteration_m,"
+       "postfit_u_after_velocity_recovery_m,postfit_u_after_iteration_m,delta_vz_applied_mps,"
+       "delta_up_anchor_applied_m,delta_roll_applied_rad,delta_pitch_applied_rad,delta_baz_applied_mps2,"
+       "required_up_anchor_correction_m,used_up_anchor_fallback,pure_delta_up_anchor_only,"
+       "inside_after_velocity_recovery,inside_after_iteration\n";
+  for (const auto &row : rows) {
+    stream << row.sample_index << ','
+           << row.corrected_time_s << ','
+           << row.recovery_anchor_state_index << ','
+           << row.feedback_anchor_state_index << ','
+           << row.nhc_jump_anchor_state_index << ','
+           << row.iteration_index << ','
+           << row.prefit_u_before_iteration_m << ','
+           << row.postfit_u_after_velocity_recovery_m << ','
+           << row.postfit_u_after_iteration_m << ','
+           << row.delta_vz_applied_mps << ','
+           << row.delta_up_anchor_applied_m << ','
+           << row.delta_roll_applied_rad << ','
+           << row.delta_pitch_applied_rad << ','
+           << row.delta_baz_applied_mps2 << ','
+           << row.required_up_anchor_correction_m << ','
+           << (row.used_up_anchor_fallback ? 1 : 0) << ','
+           << (row.pure_delta_up_anchor_only ? 1 : 0) << ','
+           << (row.inside_after_velocity_recovery ? 1 : 0) << ','
+           << (row.inside_after_iteration ? 1 : 0) << '\n';
   }
 }
 
@@ -488,6 +528,11 @@ void ResultWriter::WriteOutputs(
   }
   if (!result.gnss_consistency_records.empty()) {
     WriteGnssConsistencyCsv(output_path / "gnss_consistency.csv", result.gnss_consistency_records);
+  }
+  if (!result.vertical_local_recovery_iterations.empty()) {
+    WriteVerticalLocalRecoveryIterationCsv(
+      output_path / "vertical_local_recovery_iterations.csv",
+      result.vertical_local_recovery_iterations);
   }
   if (!result.vertical_state_corrections.empty()) {
     WriteVerticalStateCorrectionCsv(

@@ -367,6 +367,8 @@ struct GnssConsistencyRecord {
   double delta_pitch_applied_rad = std::numeric_limits<double>::quiet_NaN();
   double delta_baz_applied_mps2 = std::numeric_limits<double>::quiet_NaN();
   double required_up_anchor_correction_m = std::numeric_limits<double>::quiet_NaN();
+  long long local_recovery_iteration_count = 0;
+  long long pure_delta_up_anchor_start_iteration = -1;
   double covariance_scale = 1.0;
   double covariance_scale_e = 1.0;
   double covariance_scale_n = 1.0;
@@ -408,6 +410,28 @@ struct VerticalStateCorrectionRow {
   double delta_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
   double prefit_residual_u_m = std::numeric_limits<double>::quiet_NaN();
   double postfit_residual_u_m = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct VerticalLocalRecoveryIterationRow {
+  std::size_t sample_index = 0;
+  double corrected_time_s = std::numeric_limits<double>::quiet_NaN();
+  long long recovery_anchor_state_index = -1;
+  long long feedback_anchor_state_index = -1;
+  long long nhc_jump_anchor_state_index = -1;
+  long long iteration_index = 0;
+  double prefit_u_before_iteration_m = std::numeric_limits<double>::quiet_NaN();
+  double postfit_u_after_velocity_recovery_m = std::numeric_limits<double>::quiet_NaN();
+  double postfit_u_after_iteration_m = std::numeric_limits<double>::quiet_NaN();
+  double delta_vz_applied_mps = std::numeric_limits<double>::quiet_NaN();
+  double delta_up_anchor_applied_m = std::numeric_limits<double>::quiet_NaN();
+  double delta_roll_applied_rad = std::numeric_limits<double>::quiet_NaN();
+  double delta_pitch_applied_rad = std::numeric_limits<double>::quiet_NaN();
+  double delta_baz_applied_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double required_up_anchor_correction_m = std::numeric_limits<double>::quiet_NaN();
+  bool used_up_anchor_fallback = false;
+  bool pure_delta_up_anchor_only = false;
+  bool inside_after_velocity_recovery = false;
+  bool inside_after_iteration = false;
 };
 
 struct ImuRateAvpRow {
@@ -600,6 +624,7 @@ struct OfflineRunResult {
   std::vector<ImuRateIntervalDiagnostic> imu_rate_interval_diagnostics;
   std::vector<GnssFactorRecord> gnss_factor_records;
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
+  std::vector<VerticalLocalRecoveryIterationRow> vertical_local_recovery_iterations;
   std::vector<VerticalStateCorrectionRow> vertical_state_corrections;
 };
 
