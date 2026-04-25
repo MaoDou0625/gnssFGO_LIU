@@ -30,6 +30,15 @@ struct SparseVerticalJumpCandidate {
   bool nhc_supported = false;
 };
 
+struct SparseVerticalJumpWindowCandidate {
+  SparseVerticalJumpCandidate center_candidate;
+  std::size_t start_state_index = 0;
+  std::size_t center_state_index = 0;
+  std::size_t end_state_index = 0;
+  double duration_s = std::numeric_limits<double>::quiet_NaN();
+  std::size_t point_count = 0;
+};
+
 class SparseVerticalJumpPlanner {
  public:
   explicit SparseVerticalJumpPlanner(const OfflineRunnerConfig &config);
@@ -60,6 +69,13 @@ class SparseVerticalJumpPlanner {
     std::size_t end_index,
     const std::function<bool(std::size_t)> &nhc_support) const;
 
+  [[nodiscard]] std::vector<SparseVerticalJumpWindowCandidate> BuildWindowCandidates(
+    const std::vector<ReferenceNodeState> &reference_states,
+    const std::vector<VerticalVzReferenceSample> &vertical_vz_reference,
+    std::size_t start_index,
+    std::size_t end_index,
+    const std::function<bool(std::size_t)> &nhc_support) const;
+
  private:
   struct AcceptedMismatchJumpSample {
     std::size_t state_index = 0;
@@ -73,6 +89,12 @@ class SparseVerticalJumpPlanner {
     std::size_t start_index,
     std::size_t end_index);
   void PruneHistory(double evaluation_time_s);
+  [[nodiscard]] SparseVerticalJumpWindowCandidate BuildWindowAroundCandidate(
+    const std::vector<ReferenceNodeState> &reference_states,
+    const std::vector<VerticalVzReferenceSample> &vertical_vz_reference,
+    std::size_t segment_start_index,
+    std::size_t segment_end_index,
+    const SparseVerticalJumpCandidate &candidate) const;
 
   const OfflineRunnerConfig &config_;
   std::vector<AcceptedMismatchJumpSample> mismatch_jump_history_;

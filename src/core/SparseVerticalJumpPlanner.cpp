@@ -56,6 +56,52 @@ double Median(std::vector<double> values) {
   return values[middle];
 }
 
+bool HasValidVerticalReference(
+  const std::vector<VerticalVzReferenceSample> &vertical_vz_reference,
+  const std::size_t state_index) {
+  return state_index < vertical_vz_reference.size() &&
+         vertical_vz_reference[state_index].valid &&
+         std::isfinite(vertical_vz_reference[state_index].vz_ref_global_smoothed_mps);
+}
+
+double ComputeVzMismatch(
+  const std::vector<ReferenceNodeState> &reference_states,
+  const std::vector<VerticalVzReferenceSample> &vertical_vz_reference,
+  const std::size_t state_index) {
+  if (state_index >= reference_states.size() ||
+      !HasValidVerticalReference(vertical_vz_reference, state_index)) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  return reference_states[state_index].velocity.z() -
+         vertical_vz_reference[state_index].vz_ref_global_smoothed_mps;
+}
+
+double ComputeVzMismatchJump(
+  const std::vector<ReferenceNodeState> &reference_states,
+  const std::vector<VerticalVzReferenceSample> &vertical_vz_reference,
+  const std::size_t state_index) {
+  if (state_index == 0U) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  const double mismatch_mps = ComputeVzMismatch(reference_states, vertical_vz_reference, state_index);
+  const double previous_mismatch_mps =
+    ComputeVzMismatch(reference_states, vertical_vz_reference, state_index - 1U);
+  if (!std::isfinite(mismatch_mps) || !std::isfinite(previous_mismatch_mps)) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  return mismatch_mps - previous_mismatch_mps;
+}
+
+int SignOf(const double value) {
+  if (value > 0.0) {
+    return 1;
+  }
+  if (value < 0.0) {
+    return -1;
+  }
+  return 0;
+}
+
 struct RtkVerticalVelocitySample {
   double time_s = 0.0;
   double vz_mps = std::numeric_limits<double>::quiet_NaN();
@@ -375,6 +421,268 @@ std::vector<SparseVerticalJumpCandidate> SparseVerticalJumpPlanner::BuildCandida
     }
   }
   return selected_candidates;
+}
+
+SparseVerticalJumpWindowCandidate SparseVerticalJumpPlanner::BuildWindowAroundCandidate(
+  const std::vector<ReferenceNodeState> &reference_states,
+  const std::vector<VerticalVzReferenceSample> &vertical_vz_reference,
+  const std::size_t segment_start_index,
+  const std::size_t segment_end_index,
+  const SparseVerticalJumpCandidate &candidate) const {
+  SparseVerticalJumpWindowCandidate window;
+  window.center_candidate = candidate;
+  window.center_state_index = candidate.state_index;
+  window.start_state_index = candidate.state_index;
+  window.end_state_index = candidate.state_index;
+
+  if (reference_states.empty() || candidate.state_index >= reference_states.size()) {
+    return window;
+  }
+
+  const std::size_t lower_bound = std::min(segment_end_index, segment_start_index + 1U);
+  const std::size_t upper_bound = std::min(segment_end_index, reference_states.size() - 1U);
+  const int padding = std::max(config_.vertical_jump_window_default_padding_states, 0);
+  const std::size_t max_points =
+    static_cast<std::size_t>(std::max(config_.vertical_jump_window_max_points, 1));
+  const double max_duration_s = std::max(config_.vertical_jump_window_max_duration_s, 1e-6);
+  const double support_ratio = std::clamp(config_.vertical_jump_window_support_ratio, 0.0, 1.0);
+  const int center_sign = SignOf(candidate.vz_mismatch_jump_mps);
+
+  auto would_fit = [&](const std::size_t proposed_start, const std::size_t proposed_end) {
+    if (proposed_start < lower_bound || proposed_end > upper_bound || proposed_start > proposed_end) {
+      return false;
+    }
+    if (proposed_end - proposed_start + 1U > max_points) {
+      return false;
+    }
+    return reference_states[proposed_end].time_s - reference_states[proposed_start].time_s <=
+           max_duration_s + kTimeEpsilonS;
+  };
+  auto has_supporting_jump = [&](const std::size_t state_index) {
+    const double mismatch_jump_mps =
+      ComputeVzMismatchJump(reference_states, vertical_vz_reference, state_index);
+    if (!std::isfinite(mismatch_jump_mps) || SignOf(mismatch_jump_mps) != center_sign) {
+      return false;
+    }
+    const double threshold_mps = CurrentJumpStepThreshold(reference_states[state_index].time_s);
+    return std::abs(mismatch_jump_mps) >= support_ratio * threshold_mps;
+  };
+  auto include_left = [&]() {
+    if (window.start_state_index == lower_bound) {
+      return false;
+    }
+    const std::size_t proposed_start = window.start_state_index - 1U;
+    if (!would_fit(proposed_start, window.end_state_index)) {
+      return false;
+    }
+    window.start_state_index = proposed_start;
+    return true;
+  };
+  auto include_right = [&]() {
+    if (window.end_state_index >= upper_bound) {
+      return false;
+    }
+    const std::size_t proposed_end = window.end_state_index + 1U;
+    if (!would_fit(window.start_state_index, proposed_end)) {
+      return false;
+    }
+    window.end_state_index = proposed_end;
+    return true;
+  };
+
+  for (int count = 0; count < padding; ++count) {
+    (void)include_left();
+    (void)include_right();
+  }
+
+  bool expanded = true;
+  while (expanded) {
+    expanded = false;
+    if (window.start_state_index > lower_bound &&
+        has_supporting_jump(window.start_state_index - 1U) &&
+        include_left()) {
+      expanded = true;
+    }
+    if (window.end_state_index < upper_bound &&
+        has_supporting_jump(window.end_state_index + 1U) &&
+        include_right()) {
+      expanded = true;
+    }
+  }
+
+  window.duration_s =
+    reference_states[window.end_state_index].time_s - reference_states[window.start_state_index].time_s;
+  window.point_count = window.end_state_index - window.start_state_index + 1U;
+  return window;
+}
+
+std::vector<SparseVerticalJumpWindowCandidate> SparseVerticalJumpPlanner::BuildWindowCandidates(
+  const std::vector<ReferenceNodeState> &reference_states,
+  const std::vector<VerticalVzReferenceSample> &vertical_vz_reference,
+  const std::size_t start_index,
+  const std::size_t end_index,
+  const std::function<bool(std::size_t)> &nhc_support) const {
+  std::vector<SparseVerticalJumpCandidate> point_candidates =
+    BuildCandidates(reference_states, vertical_vz_reference, start_index, end_index, nhc_support);
+
+  const double support_ratio = std::clamp(config_.vertical_jump_window_support_ratio, 0.0, 1.0);
+  for (std::size_t state_index = std::max<std::size_t>(start_index + 1U, 1U);
+       state_index <= end_index && state_index < reference_states.size();
+       ++state_index) {
+    if (!nhc_support || !nhc_support(state_index)) {
+      continue;
+    }
+    const bool already_present =
+      std::any_of(
+        point_candidates.begin(),
+        point_candidates.end(),
+        [&](const SparseVerticalJumpCandidate &candidate) {
+          return candidate.state_index == state_index;
+        });
+    if (already_present) {
+      continue;
+    }
+    double mismatch_jump_mps =
+      ComputeVzMismatchJump(reference_states, vertical_vz_reference, state_index);
+    double mismatch_mps = ComputeVzMismatch(reference_states, vertical_vz_reference, state_index);
+    const bool has_reference_velocity = std::isfinite(mismatch_jump_mps) && std::isfinite(mismatch_mps);
+    if (!has_reference_velocity && state_index > 0U) {
+      mismatch_jump_mps =
+        reference_states[state_index].velocity.z() - reference_states[state_index - 1U].velocity.z();
+      mismatch_mps = reference_states[state_index].velocity.z();
+    }
+    const double threshold_mps = CurrentJumpStepThreshold(reference_states[state_index].time_s);
+    if (!std::isfinite(mismatch_jump_mps) || !std::isfinite(mismatch_mps) ||
+        std::abs(mismatch_jump_mps) <= 1e-9) {
+      continue;
+    }
+    SparseVerticalJumpCandidate candidate;
+    candidate.state_index = state_index;
+    candidate.time_s = reference_states[state_index].time_s;
+    candidate.vz_prefit_mps = reference_states[state_index].velocity.z();
+    candidate.vz_ref_global_smoothed_mps =
+      HasValidVerticalReference(vertical_vz_reference, state_index)
+        ? vertical_vz_reference[state_index].vz_ref_global_smoothed_mps
+        : std::numeric_limits<double>::quiet_NaN();
+    candidate.vz_mismatch_mps = mismatch_mps;
+    candidate.vz_mismatch_jump_mps = mismatch_jump_mps;
+    candidate.jump_step_threshold_mps = threshold_mps;
+    candidate.delta_vz_init_mps = -mismatch_jump_mps;
+    candidate.nhc_supported = true;
+    candidate.score = std::abs(mismatch_jump_mps) - support_ratio * threshold_mps +
+                      std::max(threshold_mps, 0.0);
+    point_candidates.push_back(candidate);
+  }
+
+  std::vector<SparseVerticalJumpWindowCandidate> windows;
+  windows.reserve(point_candidates.size());
+  for (const auto &candidate : point_candidates) {
+    windows.push_back(
+      BuildWindowAroundCandidate(reference_states, vertical_vz_reference, start_index, end_index, candidate));
+  }
+  if (windows.empty()) {
+    return windows;
+  }
+  const std::size_t max_points =
+    static_cast<std::size_t>(std::max(config_.vertical_jump_window_max_points, 1));
+  const double max_duration_s = std::max(config_.vertical_jump_window_max_duration_s, 1e-6);
+  auto refresh_window_span = [&](SparseVerticalJumpWindowCandidate *window) {
+    window->duration_s =
+      reference_states[window->end_state_index].time_s - reference_states[window->start_state_index].time_s;
+    window->point_count = window->end_state_index - window->start_state_index + 1U;
+  };
+  auto clamp_window_span = [&](SparseVerticalJumpWindowCandidate *window) {
+    if (window == nullptr) {
+      return;
+    }
+    while (window->start_state_index < window->end_state_index) {
+      refresh_window_span(window);
+      if (window->point_count <= max_points && window->duration_s <= max_duration_s + kTimeEpsilonS) {
+        break;
+      }
+      if (window->start_state_index >= window->center_state_index) {
+        --window->end_state_index;
+        continue;
+      }
+      if (window->end_state_index <= window->center_state_index) {
+        ++window->start_state_index;
+        continue;
+      }
+      const double left_span_s =
+        reference_states[window->center_state_index].time_s - reference_states[window->start_state_index].time_s;
+      const double right_span_s =
+        reference_states[window->end_state_index].time_s - reference_states[window->center_state_index].time_s;
+      if (right_span_s > left_span_s) {
+        --window->end_state_index;
+      } else {
+        ++window->start_state_index;
+      }
+    }
+    refresh_window_span(window);
+  };
+
+  std::sort(
+    windows.begin(),
+    windows.end(),
+    [](const SparseVerticalJumpWindowCandidate &left, const SparseVerticalJumpWindowCandidate &right) {
+      if (left.start_state_index == right.start_state_index) {
+        return left.end_state_index < right.end_state_index;
+      }
+      return left.start_state_index < right.start_state_index;
+    });
+
+  std::vector<SparseVerticalJumpWindowCandidate> merged_windows;
+  for (const auto &window : windows) {
+    if (merged_windows.empty() || window.start_state_index > merged_windows.back().end_state_index) {
+      merged_windows.push_back(window);
+      continue;
+    }
+    auto &merged = merged_windows.back();
+    merged.start_state_index = std::min(merged.start_state_index, window.start_state_index);
+    merged.end_state_index = std::max(merged.end_state_index, window.end_state_index);
+    if (window.center_candidate.score > merged.center_candidate.score) {
+      merged.center_candidate = window.center_candidate;
+      merged.center_state_index = window.center_state_index;
+    }
+    clamp_window_span(&merged);
+  }
+
+  std::sort(
+    merged_windows.begin(),
+    merged_windows.end(),
+    [](const SparseVerticalJumpWindowCandidate &left, const SparseVerticalJumpWindowCandidate &right) {
+      if (left.center_candidate.score == right.center_candidate.score) {
+        return left.center_candidate.time_s < right.center_candidate.time_s;
+      }
+      return left.center_candidate.score > right.center_candidate.score;
+    });
+
+  std::vector<SparseVerticalJumpWindowCandidate> selected_windows;
+  selected_windows.reserve(std::min<std::size_t>(
+    merged_windows.size(),
+    static_cast<std::size_t>(std::max(config_.vertical_jump_max_candidates_per_segment, 0))));
+  for (const auto &window : merged_windows) {
+    bool suppressed = false;
+    for (const auto &selected_window : selected_windows) {
+      const double time_distance_s =
+        std::abs(window.center_candidate.time_s - selected_window.center_candidate.time_s);
+      const bool overlaps = window.start_state_index <= selected_window.end_state_index &&
+                            selected_window.start_state_index <= window.end_state_index;
+      if (overlaps || time_distance_s < config_.vertical_jump_candidate_min_separation_s - kTimeEpsilonS) {
+        suppressed = true;
+        break;
+      }
+    }
+    if (suppressed) {
+      continue;
+    }
+    selected_windows.push_back(window);
+    if (selected_windows.size() >=
+        static_cast<std::size_t>(std::max(config_.vertical_jump_max_candidates_per_segment, 0))) {
+      break;
+    }
+  }
+  return selected_windows;
 }
 
 void SparseVerticalJumpPlanner::ObserveStateRange(

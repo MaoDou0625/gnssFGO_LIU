@@ -263,6 +263,22 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_jump_step_min_threshold_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_vz_prior_sigma_mps") {
     config.vertical_jump_vz_prior_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_window_default_padding_states") {
+    config.vertical_jump_window_default_padding_states = ParseInt(normalized_value);
+  } else if (normalized_key == "vertical_jump_window_support_ratio") {
+    config.vertical_jump_window_support_ratio = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_window_max_duration_s") {
+    config.vertical_jump_window_max_duration_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_window_max_points") {
+    config.vertical_jump_window_max_points = ParseInt(normalized_value);
+  } else if (normalized_key == "vertical_jump_window_tail_target_s") {
+    config.vertical_jump_window_tail_target_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_window_velocity_smoothness_weight") {
+    config.vertical_jump_window_velocity_smoothness_weight = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_window_height_integral_weight") {
+    config.vertical_jump_window_height_integral_weight = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_window_ref_weight") {
+    config.vertical_jump_window_ref_weight = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_nhc_jump_reference") {
     config.enable_nhc_jump_reference = ParseBool(normalized_value);
   } else if (normalized_key == "nhc_history_half_life_s") {
@@ -633,6 +649,22 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     if (config.vertical_jump_step_min_threshold_mps <= 0.0 || config.vertical_jump_vz_prior_sigma_mps <= 0.0) {
       throw std::runtime_error("vertical jump threshold and prior sigma must be positive");
     }
+    if (config.vertical_jump_window_default_padding_states < 0 ||
+        config.vertical_jump_window_max_points <= 0) {
+      throw std::runtime_error("vertical jump window padding must be non-negative and max points must be positive");
+    }
+    if (config.vertical_jump_window_support_ratio < 0.0 || config.vertical_jump_window_support_ratio > 1.0) {
+      throw std::runtime_error("vertical_jump_window_support_ratio must be in [0, 1]");
+    }
+    if (config.vertical_jump_window_max_duration_s <= 0.0 ||
+        config.vertical_jump_window_tail_target_s <= 0.0) {
+      throw std::runtime_error("vertical jump window duration and tail target must be positive");
+    }
+    if (config.vertical_jump_window_velocity_smoothness_weight < 0.0 ||
+        config.vertical_jump_window_height_integral_weight < 0.0 ||
+        config.vertical_jump_window_ref_weight < 0.0) {
+      throw std::runtime_error("vertical jump window objective weights must be non-negative");
+    }
     if (config.nhc_history_half_life_s <= 0.0 || config.nhc_history_max_age_s <= 0.0) {
       throw std::runtime_error("NHC history windows must be positive");
     }
@@ -903,6 +935,22 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
   if (config.vertical_jump_step_min_threshold_mps <= 0.0 || config.vertical_jump_vz_prior_sigma_mps <= 0.0) {
     throw std::runtime_error("vertical jump threshold and prior sigma must be positive");
   }
+  if (config.vertical_jump_window_default_padding_states < 0 ||
+      config.vertical_jump_window_max_points <= 0) {
+    throw std::runtime_error("vertical jump window padding must be non-negative and max points must be positive");
+  }
+  if (config.vertical_jump_window_support_ratio < 0.0 || config.vertical_jump_window_support_ratio > 1.0) {
+    throw std::runtime_error("vertical_jump_window_support_ratio must be in [0, 1]");
+  }
+  if (config.vertical_jump_window_max_duration_s <= 0.0 ||
+      config.vertical_jump_window_tail_target_s <= 0.0) {
+    throw std::runtime_error("vertical jump window duration and tail target must be positive");
+  }
+  if (config.vertical_jump_window_velocity_smoothness_weight < 0.0 ||
+      config.vertical_jump_window_height_integral_weight < 0.0 ||
+      config.vertical_jump_window_ref_weight < 0.0) {
+    throw std::runtime_error("vertical jump window objective weights must be non-negative");
+  }
   if (config.nhc_history_half_life_s <= 0.0 || config.nhc_history_max_age_s <= 0.0) {
     throw std::runtime_error("NHC history windows must be positive");
   }
@@ -1023,6 +1071,17 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "vertical_jump_hold_window_s=" << config.vertical_jump_hold_window_s << '\n'
       << "vertical_jump_step_min_threshold_mps=" << config.vertical_jump_step_min_threshold_mps << '\n'
       << "vertical_jump_vz_prior_sigma_mps=" << config.vertical_jump_vz_prior_sigma_mps << '\n'
+      << "vertical_jump_window_default_padding_states="
+      << config.vertical_jump_window_default_padding_states << '\n'
+      << "vertical_jump_window_support_ratio=" << config.vertical_jump_window_support_ratio << '\n'
+      << "vertical_jump_window_max_duration_s=" << config.vertical_jump_window_max_duration_s << '\n'
+      << "vertical_jump_window_max_points=" << config.vertical_jump_window_max_points << '\n'
+      << "vertical_jump_window_tail_target_s=" << config.vertical_jump_window_tail_target_s << '\n'
+      << "vertical_jump_window_velocity_smoothness_weight="
+      << config.vertical_jump_window_velocity_smoothness_weight << '\n'
+      << "vertical_jump_window_height_integral_weight="
+      << config.vertical_jump_window_height_integral_weight << '\n'
+      << "vertical_jump_window_ref_weight=" << config.vertical_jump_window_ref_weight << '\n'
       << "enable_nhc_jump_reference=" << (config.enable_nhc_jump_reference ? "true" : "false") << '\n'
       << "nhc_history_half_life_s=" << config.nhc_history_half_life_s << '\n'
       << "nhc_history_max_age_s=" << config.nhc_history_max_age_s << '\n'

@@ -262,6 +262,14 @@ void TestSequentialRecoveryConfigLoads() {
       "vertical_jump_hold_window_s=2.5\n"
       "vertical_jump_step_min_threshold_mps=0.07\n"
       "vertical_jump_vz_prior_sigma_mps=0.025\n"
+      "vertical_jump_window_default_padding_states=2\n"
+      "vertical_jump_window_support_ratio=0.45\n"
+      "vertical_jump_window_max_duration_s=0.4\n"
+      "vertical_jump_window_max_points=9\n"
+      "vertical_jump_window_tail_target_s=1.4\n"
+      "vertical_jump_window_velocity_smoothness_weight=12.0\n"
+      "vertical_jump_window_height_integral_weight=4.0\n"
+      "vertical_jump_window_ref_weight=1.5\n"
       "enable_nhc_jump_reference=true\n"
       "nhc_history_half_life_s=12.0\n"
       "nhc_history_max_age_s=45.0\n"
@@ -294,6 +302,26 @@ void TestSequentialRecoveryConfigLoads() {
   ExpectNear(config.vertical_jump_hold_window_s, 2.5, 1e-12, "jump hold window should load");
   ExpectNear(config.vertical_jump_step_min_threshold_mps, 0.07, 1e-12, "jump threshold floor should load");
   ExpectNear(config.vertical_jump_vz_prior_sigma_mps, 0.025, 1e-12, "jump vz prior sigma should load");
+  ExpectNear(
+    config.vertical_jump_window_default_padding_states,
+    2,
+    0.0,
+    "jump window default padding should load");
+  ExpectNear(config.vertical_jump_window_support_ratio, 0.45, 1e-12, "jump window support ratio should load");
+  ExpectNear(config.vertical_jump_window_max_duration_s, 0.4, 1e-12, "jump window max duration should load");
+  ExpectNear(config.vertical_jump_window_max_points, 9, 0.0, "jump window max points should load");
+  ExpectNear(config.vertical_jump_window_tail_target_s, 1.4, 1e-12, "jump window tail target should load");
+  ExpectNear(
+    config.vertical_jump_window_velocity_smoothness_weight,
+    12.0,
+    1e-12,
+    "jump window velocity smoothness weight should load");
+  ExpectNear(
+    config.vertical_jump_window_height_integral_weight,
+    4.0,
+    1e-12,
+    "jump window height integral weight should load");
+  ExpectNear(config.vertical_jump_window_ref_weight, 1.5, 1e-12, "jump window ref weight should load");
   ExpectTrue(config.enable_nhc_jump_reference, "NHC jump reference flag should load");
   ExpectNear(config.nhc_history_half_life_s, 12.0, 1e-12, "NHC half-life should load");
   ExpectNear(config.nhc_history_max_age_s, 45.0, 1e-12, "NHC max age should load");
@@ -798,6 +826,59 @@ void TestSparseVerticalJumpPlannerBuildsSinglePeakCandidate() {
   ExpectTrue(candidates.front().nhc_supported, "candidate should preserve NHC support bonus");
 }
 
+void TestSparseVerticalJumpPlannerBuildsWindowAroundPeakCandidate() {
+  auto config = DefaultConfig();
+  config.vertical_jump_step_min_threshold_mps = 0.05;
+  config.vertical_jump_candidate_min_separation_s = 1.0;
+  config.vertical_jump_max_candidates_per_segment = 5;
+  config.vertical_jump_window_default_padding_states = 1;
+  config.vertical_jump_window_max_duration_s = 0.35;
+  config.vertical_jump_window_max_points = 7;
+  SparseVerticalJumpPlanner planner(config);
+
+  std::vector<ReferenceNodeState> states{
+    MakeReferenceNodeState(0.00, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.00)),
+    MakeReferenceNodeState(0.05, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.00)),
+    MakeReferenceNodeState(0.10, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, -0.18)),
+    MakeReferenceNodeState(0.15, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, -0.19)),
+    MakeReferenceNodeState(0.20, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, -0.18)),
+    MakeReferenceNodeState(0.25, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, -0.18)),
+  };
+  std::vector<VerticalVzReferenceSample> reference(states.size());
+  for (std::size_t state_index = 0; state_index < states.size(); ++state_index) {
+    reference[state_index].time_s = states[state_index].time_s;
+    reference[state_index].valid = true;
+    reference[state_index].vz_ref_global_mps = 0.0;
+    reference[state_index].vz_ref_global_smoothed_mps = 0.0;
+  }
+
+  planner.SeedWithConfirmedStates(states, reference, 0U, 1U);
+  const auto windows = planner.BuildWindowCandidates(states, reference, 0U, 5U, [](const std::size_t state_index) {
+    return state_index == 2U;
+  });
+  ExpectNear(windows.size(), 1.0, 0.0, "planner should emit one sparse jump window");
+  ExpectNear(
+    static_cast<double>(windows.front().center_state_index),
+    2.0,
+    0.0,
+    "window center should point to jump peak");
+  ExpectNear(
+    static_cast<double>(windows.front().start_state_index),
+    1.0,
+    0.0,
+    "window should include the state before the peak");
+  ExpectNear(
+    static_cast<double>(windows.front().end_state_index),
+    3.0,
+    0.0,
+    "window should include the state after the peak");
+  ExpectNear(
+    static_cast<double>(windows.front().point_count),
+    3.0,
+    0.0,
+    "window point count should reflect the padded correction span");
+}
+
 }  // namespace
 
 int main() {
@@ -860,6 +941,9 @@ int main() {
     RunTest(
       "TestSparseVerticalJumpPlannerBuildsSinglePeakCandidate",
       TestSparseVerticalJumpPlannerBuildsSinglePeakCandidate);
+    RunTest(
+      "TestSparseVerticalJumpPlannerBuildsWindowAroundPeakCandidate",
+      TestSparseVerticalJumpPlannerBuildsWindowAroundPeakCandidate);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return EXIT_FAILURE;

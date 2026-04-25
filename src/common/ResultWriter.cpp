@@ -279,7 +279,11 @@ void WriteGnssConsistencyCsv(
        "nhc_body_vy_threshold_mps,nhc_body_vz_threshold_mps,"
        "delta_vz_applied_mps,delta_up_anchor_applied_m,delta_roll_applied_rad,delta_pitch_applied_rad,delta_baz_applied_mps2,"
        "vz_ref_global_smoothed_mps,vz_prefit_mps,vz_mismatch_mps,vz_mismatch_jump_mps,jump_candidate_score,"
-       "selected_jump_state_index,selected_jump_delta_vz_mps,recovery_mode,hold_window_passed,"
+       "selected_jump_state_index,selected_jump_delta_vz_mps,"
+       "selected_jump_window_start_state_index,selected_jump_window_center_state_index,"
+       "selected_jump_window_end_state_index,selected_jump_window_duration_s,selected_jump_window_point_count,"
+       "selected_jump_delta_vz_tail_mps,window_velocity_smooth_cost,window_height_integral_delta_m,"
+       "recovery_mode,hold_window_passed,"
        "required_up_anchor_correction_m,local_recovery_iteration_count,pure_delta_up_anchor_start_iteration,"
        "covariance_scale,covariance_scale_e,covariance_scale_n,covariance_scale_u,"
        "prefit_residual_u_before_local_recovery_m,prefit_residual_u_after_local_recovery_m,"
@@ -329,6 +333,14 @@ void WriteGnssConsistencyCsv(
            << row.jump_candidate_score << ','
            << row.selected_jump_state_index << ','
            << row.selected_jump_delta_vz_mps << ','
+           << row.selected_jump_window_start_state_index << ','
+           << row.selected_jump_window_center_state_index << ','
+           << row.selected_jump_window_end_state_index << ','
+           << row.selected_jump_window_duration_s << ','
+           << row.selected_jump_window_point_count << ','
+           << row.selected_jump_delta_vz_tail_mps << ','
+           << row.window_velocity_smooth_cost << ','
+           << row.window_height_integral_delta_m << ','
            << row.recovery_mode << ','
            << (row.hold_window_passed ? 1 : 0) << ','
            << row.required_up_anchor_correction_m << ','
@@ -365,7 +377,11 @@ void WriteVerticalLocalRecoveryIterationCsv(
        "postfit_u_after_velocity_recovery_m,postfit_u_after_iteration_m,delta_vz_applied_mps,"
        "delta_up_anchor_applied_m,delta_roll_applied_rad,delta_pitch_applied_rad,delta_baz_applied_mps2,"
        "required_up_anchor_correction_m,vz_ref_global_smoothed_mps,vz_prefit_mps,vz_mismatch_mps,vz_mismatch_jump_mps,"
-       "jump_candidate_score,selected_jump_state_index,selected_jump_delta_vz_mps,recovery_mode,hold_window_passed,"
+       "jump_candidate_score,selected_jump_state_index,selected_jump_delta_vz_mps,"
+       "selected_jump_window_start_state_index,selected_jump_window_center_state_index,"
+       "selected_jump_window_end_state_index,selected_jump_window_duration_s,selected_jump_window_point_count,"
+       "selected_jump_delta_vz_tail_mps,window_velocity_smooth_cost,window_height_integral_delta_m,"
+       "recovery_mode,hold_window_passed,"
        "used_up_anchor_fallback,pure_delta_up_anchor_only,"
        "inside_after_velocity_recovery,inside_after_iteration\n";
   for (const auto &row : rows) {
@@ -391,6 +407,14 @@ void WriteVerticalLocalRecoveryIterationCsv(
            << row.jump_candidate_score << ','
            << row.selected_jump_state_index << ','
            << row.selected_jump_delta_vz_mps << ','
+           << row.selected_jump_window_start_state_index << ','
+           << row.selected_jump_window_center_state_index << ','
+           << row.selected_jump_window_end_state_index << ','
+           << row.selected_jump_window_duration_s << ','
+           << row.selected_jump_window_point_count << ','
+           << row.selected_jump_delta_vz_tail_mps << ','
+           << row.window_velocity_smooth_cost << ','
+           << row.window_height_integral_delta_m << ','
            << row.recovery_mode << ','
            << (row.hold_window_passed ? 1 : 0) << ','
            << (row.used_up_anchor_fallback ? 1 : 0) << ','
