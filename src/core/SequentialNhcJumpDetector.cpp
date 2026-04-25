@@ -128,7 +128,6 @@ NhcStateEvaluation SequentialNhcJumpDetector::EvaluateState(
     std::isfinite(snapshot.body_vz_baseline_mps) ? snapshot.body_vz_baseline_mps : 0.0;
   evaluation.body_vz_residual_mps = evaluation.body_vz_mps - body_vz_baseline_mps;
   evaluation.exceeds_threshold =
-    std::abs(evaluation.body_vy_mps) > snapshot.body_vy_threshold_mps ||
     std::abs(evaluation.body_vz_residual_mps) > snapshot.body_vz_threshold_mps;
   return evaluation;
 }

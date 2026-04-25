@@ -661,7 +661,32 @@ void TestNhcThresholdBootstrapRespectsMinimumFloors() {
     "NHC vz threshold should respect the configured floor");
 }
 
-void TestNhcJumpAnchorFindsFirstThresholdCrossing() {
+void TestNhcJumpAnchorFindsFirstThresholdCrossingFromBodyVz() {
+  auto config = DefaultConfig();
+  config.enable_nhc_jump_reference = true;
+  config.nhc_jump_min_separation_s = 0.5;
+  SequentialNhcJumpDetector detector(config);
+  std::vector<ReferenceNodeState> states{
+    MakeReferenceNodeState(0.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.0)),
+    MakeReferenceNodeState(1.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.0)),
+    MakeReferenceNodeState(2.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.0)),
+    MakeReferenceNodeState(3.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.005)),
+    MakeReferenceNodeState(4.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.006)),
+    MakeReferenceNodeState(5.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.006)),
+  };
+  detector.SeedWithConfirmedStates(states, 0U, 2U);
+  const auto jump_anchor = detector.FindJumpAnchor(states, 2U, 5U);
+  ExpectTrue(
+    jump_anchor.has_value(),
+    "NHC jump detector should find an anchor when body vz exceeds the threshold");
+  ExpectNear(
+    static_cast<double>(*jump_anchor),
+    3.0,
+    0.0,
+    "NHC jump detector should return the earliest threshold crossing");
+}
+
+void TestNhcJumpAnchorIgnoresBodyVyOnlyCrossing() {
   auto config = DefaultConfig();
   config.enable_nhc_jump_reference = true;
   config.nhc_jump_min_separation_s = 0.5;
@@ -676,12 +701,9 @@ void TestNhcJumpAnchorFindsFirstThresholdCrossing() {
   };
   detector.SeedWithConfirmedStates(states, 0U, 2U);
   const auto jump_anchor = detector.FindJumpAnchor(states, 2U, 5U);
-  ExpectTrue(jump_anchor.has_value(), "NHC jump detector should find an anchor when body velocity exceeds the threshold");
-  ExpectNear(
-    static_cast<double>(*jump_anchor),
-    3.0,
-    0.0,
-    "NHC jump detector should return the earliest threshold crossing");
+  ExpectTrue(
+    !jump_anchor.has_value(),
+    "NHC jump detector should ignore body vy-only threshold crossings");
 }
 
 }  // namespace
@@ -734,7 +756,12 @@ int main() {
     RunTest(
       "TestNhcThresholdBootstrapRespectsMinimumFloors",
       TestNhcThresholdBootstrapRespectsMinimumFloors);
-    RunTest("TestNhcJumpAnchorFindsFirstThresholdCrossing", TestNhcJumpAnchorFindsFirstThresholdCrossing);
+    RunTest(
+      "TestNhcJumpAnchorFindsFirstThresholdCrossingFromBodyVz",
+      TestNhcJumpAnchorFindsFirstThresholdCrossingFromBodyVz);
+    RunTest(
+      "TestNhcJumpAnchorIgnoresBodyVyOnlyCrossing",
+      TestNhcJumpAnchorIgnoresBodyVyOnlyCrossing);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return EXIT_FAILURE;
