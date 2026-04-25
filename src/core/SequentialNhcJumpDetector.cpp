@@ -184,20 +184,19 @@ std::optional<std::size_t> SequentialNhcJumpDetector::FindRecentJumpAnchor(
     return std::nullopt;
   }
 
-  std::optional<DetectedJump> strongest_jump;
+  std::optional<DetectedJump> earliest_jump;
   for (const auto &jump : jump_history_) {
     if (jump.state_index < start_index || jump.state_index > end_index) {
       continue;
     }
-    if (!strongest_jump.has_value() ||
-        std::abs(jump.body_vz_jump_mps) > std::abs(strongest_jump->body_vz_jump_mps)) {
-      strongest_jump = jump;
+    if (!earliest_jump.has_value() || jump.time_s < earliest_jump->time_s) {
+      earliest_jump = jump;
     }
   }
-  if (!strongest_jump.has_value()) {
+  if (!earliest_jump.has_value()) {
     return std::nullopt;
   }
-  return strongest_jump->state_index;
+  return earliest_jump->state_index;
 }
 
 Eigen::Vector3d SequentialNhcJumpDetector::ComputeBodyVelocity(const ReferenceNodeState &state) const {
