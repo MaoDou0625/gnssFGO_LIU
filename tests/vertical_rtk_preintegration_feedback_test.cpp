@@ -717,6 +717,31 @@ void TestNhcJumpAnchorFindsFirstThresholdCrossingFromBodyVz() {
     "NHC jump detector should return the earliest threshold crossing");
 }
 
+void TestNhcJumpAnchorCachesConfirmedWindowCrossing() {
+  auto config = DefaultConfig();
+  config.enable_nhc_jump_reference = true;
+  config.nhc_jump_min_separation_s = 0.5;
+  SequentialNhcJumpDetector detector(config);
+  std::vector<ReferenceNodeState> states{
+    MakeReferenceNodeState(0.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.0)),
+    MakeReferenceNodeState(1.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.0)),
+    MakeReferenceNodeState(2.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.0)),
+    MakeReferenceNodeState(3.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, -0.20)),
+    MakeReferenceNodeState(4.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, -0.21)),
+  };
+  detector.SeedWithConfirmedStates(states, 0U, 2U);
+  detector.ObserveConfirmedWindow(states, 3U, 4U);
+  const auto jump_anchor = detector.FindRecentJumpAnchor(0U, 4U);
+  ExpectTrue(
+    jump_anchor.has_value(),
+    "NHC detector should cache jump anchors while confirmed windows are observed");
+  ExpectNear(
+    static_cast<double>(*jump_anchor),
+    3.0,
+    0.0,
+    "cached NHC jump anchor should point to the body vz jump state");
+}
+
 void TestNhcJumpAnchorIgnoresBodyVyOnlyCrossing() {
   auto config = DefaultConfig();
   config.enable_nhc_jump_reference = true;
@@ -826,6 +851,9 @@ int main() {
     RunTest(
       "TestNhcJumpAnchorFindsFirstThresholdCrossingFromBodyVz",
       TestNhcJumpAnchorFindsFirstThresholdCrossingFromBodyVz);
+    RunTest(
+      "TestNhcJumpAnchorCachesConfirmedWindowCrossing",
+      TestNhcJumpAnchorCachesConfirmedWindowCrossing);
     RunTest(
       "TestNhcJumpAnchorIgnoresBodyVyOnlyCrossing",
       TestNhcJumpAnchorIgnoresBodyVyOnlyCrossing);

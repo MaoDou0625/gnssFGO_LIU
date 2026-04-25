@@ -104,6 +104,9 @@ NhcThresholdSnapshot SequentialNhcJumpDetector::CurrentThresholds(const double e
   for (std::size_t sample_index = 1; sample_index < history_.size(); ++sample_index) {
     const auto &previous_sample = history_[sample_index - 1U];
     const auto &sample = history_[sample_index];
+    if (previous_sample.is_jump || sample.is_jump) {
+      continue;
+    }
     const double age_s = evaluation_time_s - sample.time_s;
     if (age_s < -1e-6 || age_s > config_.nhc_history_max_age_s) {
       continue;
@@ -167,11 +170,30 @@ std::optional<std::size_t> SequentialNhcJumpDetector::FindJumpAnchor(
   if (!first_crossing_index.has_value()) {
     return std::nullopt;
   }
-  const double separation_s = reference_states[end_index].time_s - reference_states[*first_crossing_index].time_s;
-  if (separation_s < config_.nhc_jump_min_separation_s) {
+  return first_crossing_index;
+}
+
+std::optional<std::size_t> SequentialNhcJumpDetector::FindRecentJumpAnchor(
+  const std::size_t start_index,
+  const std::size_t end_index) const {
+  if (!config_.enable_nhc_jump_reference || start_index > end_index || jump_history_.empty()) {
     return std::nullopt;
   }
-  return first_crossing_index;
+
+  std::optional<DetectedJump> strongest_jump;
+  for (const auto &jump : jump_history_) {
+    if (jump.state_index < start_index || jump.state_index > end_index) {
+      continue;
+    }
+    if (!strongest_jump.has_value() ||
+        std::abs(jump.body_vz_jump_mps) > std::abs(strongest_jump->body_vz_jump_mps)) {
+      strongest_jump = jump;
+    }
+  }
+  if (!strongest_jump.has_value()) {
+    return std::nullopt;
+  }
+  return strongest_jump->state_index;
 }
 
 Eigen::Vector3d SequentialNhcJumpDetector::ComputeBodyVelocity(const ReferenceNodeState &state) const {
@@ -215,11 +237,35 @@ double SequentialNhcJumpDetector::ComputeBodyVzBaseline(const double evaluation_
 
 void SequentialNhcJumpDetector::AppendState(const ReferenceNodeState &state, const std::size_t state_index) {
   const Eigen::Vector3d body_velocity = ComputeBodyVelocity(state);
+  bool is_jump = false;
+  if (config_.enable_nhc_jump_reference && !history_.empty()) {
+    const NhcThresholdSnapshot snapshot = CurrentThresholds(state.time_s);
+    const double body_vz_jump_mps = body_velocity.z() - history_.back().body_vz_mps;
+    if (std::isfinite(body_vz_jump_mps) && std::isfinite(snapshot.body_vz_threshold_mps) &&
+        std::abs(body_vz_jump_mps) > snapshot.body_vz_threshold_mps) {
+      is_jump = true;
+      DetectedJump jump{
+        .state_index = state_index,
+        .time_s = state.time_s,
+        .body_vz_jump_mps = body_vz_jump_mps,
+        .body_vz_threshold_mps = snapshot.body_vz_threshold_mps,
+      };
+      if (!jump_history_.empty() &&
+          state.time_s - jump_history_.back().time_s < config_.nhc_jump_min_separation_s) {
+        if (std::abs(body_vz_jump_mps) > std::abs(jump_history_.back().body_vz_jump_mps)) {
+          jump_history_.back() = jump;
+        }
+      } else {
+        jump_history_.push_back(jump);
+      }
+    }
+  }
   history_.push_back(AcceptedSample{
     .state_index = state_index,
     .time_s = state.time_s,
     .body_vy_mps = body_velocity.y(),
     .body_vz_mps = body_velocity.z(),
+    .is_jump = is_jump,
   });
 }
 
@@ -232,6 +278,15 @@ void SequentialNhcJumpDetector::PruneHistory(const double evaluation_time_s) {
       return evaluation_time_s - sample.time_s <= config_.nhc_history_max_age_s + 1e-6;
     });
   history_.erase(history_begin, retained_begin);
+
+  const auto jump_begin = jump_history_.begin();
+  const auto retained_jump_begin = std::find_if(
+    jump_begin,
+    jump_history_.end(),
+    [&](const DetectedJump &jump) {
+      return evaluation_time_s - jump.time_s <= config_.nhc_history_max_age_s + 1e-6;
+    });
+  jump_history_.erase(jump_begin, retained_jump_begin);
 }
 
 }  // namespace offline_lc_minimal

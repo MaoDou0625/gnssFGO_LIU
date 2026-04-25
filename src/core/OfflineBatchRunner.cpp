@@ -2850,14 +2850,29 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                 if (!inside_gate) {
                   std::size_t recovery_anchor_state_index =
                     confirmed_inside_state_index.value_or(graph_timeline.dynamic_start_index);
-                  const auto nhc_jump_anchor_state =
-                    nhc_jump_detector.FindJumpAnchor(
-                      iteration.gate_reference_states,
-                      recovery_anchor_state_index,
-                      *feedback_anchor_state);
+                  std::size_t nhc_search_start_state_index = recovery_anchor_state_index;
+                  const double nhc_search_start_time_s =
+                    record.corrected_time_s - std::max(config_.vertical_jump_hold_window_s, 1e-3);
+                  while (nhc_search_start_state_index > graph_timeline.dynamic_start_index &&
+                         state_timestamps[nhc_search_start_state_index] > nhc_search_start_time_s) {
+                    --nhc_search_start_state_index;
+                  }
+                  auto nhc_jump_anchor_state =
+                    nhc_jump_detector.FindRecentJumpAnchor(nhc_search_start_state_index, *feedback_anchor_state);
+                  if (!nhc_jump_anchor_state.has_value()) {
+                    nhc_jump_anchor_state =
+                      nhc_jump_detector.FindJumpAnchor(
+                        iteration.gate_reference_states,
+                        nhc_search_start_state_index,
+                        *feedback_anchor_state);
+                  }
                   if (nhc_jump_anchor_state.has_value()) {
                     consistency_record.nhc_jump_anchor_state_index =
                       static_cast<long long>(*nhc_jump_anchor_state);
+                    recovery_anchor_state_index =
+                      *nhc_jump_anchor_state > graph_timeline.dynamic_start_index
+                        ? *nhc_jump_anchor_state - 1U
+                        : *nhc_jump_anchor_state;
                   }
                   consistency_record.recovery_anchor_state_index =
                     static_cast<long long>(recovery_anchor_state_index);
@@ -2920,6 +2935,51 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       [&](const std::size_t state_index) {
                         return nhc_supported_state_indices.contains(state_index);
                       });
+                    if (nhc_jump_anchor_state.has_value() &&
+                        *nhc_jump_anchor_state > recovery_anchor_state_index &&
+                        *nhc_jump_anchor_state <= *feedback_anchor_state &&
+                        *nhc_jump_anchor_state < vertical_vz_reference_by_state.size() &&
+                        vertical_vz_reference_by_state[*nhc_jump_anchor_state].valid &&
+                        std::isfinite(
+                          vertical_vz_reference_by_state[*nhc_jump_anchor_state].vz_ref_global_smoothed_mps)) {
+                      const bool already_has_nhc_anchor =
+                        std::any_of(
+                          sparse_jump_candidates.begin(),
+                          sparse_jump_candidates.end(),
+                          [&](const SparseVerticalJumpCandidate &candidate) {
+                            return candidate.state_index == *nhc_jump_anchor_state;
+                          });
+                      if (!already_has_nhc_anchor) {
+                        SparseVerticalJumpCandidate nhc_candidate;
+                        nhc_candidate.state_index = *nhc_jump_anchor_state;
+                        nhc_candidate.time_s = iteration.gate_reference_states[*nhc_jump_anchor_state].time_s;
+                        nhc_candidate.vz_prefit_mps =
+                          iteration.gate_reference_states[*nhc_jump_anchor_state].velocity.z();
+                        nhc_candidate.vz_ref_global_smoothed_mps =
+                          vertical_vz_reference_by_state[*nhc_jump_anchor_state].vz_ref_global_smoothed_mps;
+                        nhc_candidate.vz_mismatch_mps =
+                          nhc_candidate.vz_prefit_mps - nhc_candidate.vz_ref_global_smoothed_mps;
+                        if (*nhc_jump_anchor_state > 0U &&
+                            *nhc_jump_anchor_state - 1U < vertical_vz_reference_by_state.size() &&
+                            vertical_vz_reference_by_state[*nhc_jump_anchor_state - 1U].valid &&
+                            std::isfinite(
+                              vertical_vz_reference_by_state[*nhc_jump_anchor_state - 1U].vz_ref_global_smoothed_mps)) {
+                          const double previous_mismatch_mps =
+                            iteration.gate_reference_states[*nhc_jump_anchor_state - 1U].velocity.z() -
+                            vertical_vz_reference_by_state[*nhc_jump_anchor_state - 1U].vz_ref_global_smoothed_mps;
+                          nhc_candidate.vz_mismatch_jump_mps =
+                            nhc_candidate.vz_mismatch_mps - previous_mismatch_mps;
+                        }
+                        nhc_candidate.jump_step_threshold_mps =
+                          iteration_sparse_jump_planner.CurrentJumpStepThreshold(nhc_candidate.time_s);
+                        nhc_candidate.delta_vz_init_mps = -nhc_candidate.vz_mismatch_jump_mps;
+                        nhc_candidate.nhc_supported = true;
+                        nhc_candidate.score =
+                          std::abs(nhc_candidate.vz_mismatch_jump_mps) +
+                          std::max(nhc_candidate.jump_step_threshold_mps, 0.0);
+                        sparse_jump_candidates.push_back(nhc_candidate);
+                      }
+                    }
                     sparse_jump_candidates.erase(
                       std::remove_if(
                         sparse_jump_candidates.begin(),

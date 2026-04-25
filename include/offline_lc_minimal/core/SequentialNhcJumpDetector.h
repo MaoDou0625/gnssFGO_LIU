@@ -55,12 +55,24 @@ class SequentialNhcJumpDetector {
     std::size_t start_index,
     std::size_t end_index) const;
 
+  [[nodiscard]] std::optional<std::size_t> FindRecentJumpAnchor(
+    std::size_t start_index,
+    std::size_t end_index) const;
+
  private:
   struct AcceptedSample {
     std::size_t state_index = 0;
     double time_s = 0.0;
     double body_vy_mps = 0.0;
     double body_vz_mps = 0.0;
+    bool is_jump = false;
+  };
+
+  struct DetectedJump {
+    std::size_t state_index = 0;
+    double time_s = 0.0;
+    double body_vz_jump_mps = 0.0;
+    double body_vz_threshold_mps = 0.0;
   };
 
   [[nodiscard]] Eigen::Vector3d ComputeBodyVelocity(const ReferenceNodeState &state) const;
@@ -75,6 +87,7 @@ class SequentialNhcJumpDetector {
 
   const OfflineRunnerConfig &config_;
   std::vector<AcceptedSample> history_;
+  std::vector<DetectedJump> jump_history_;
 };
 
 }  // namespace offline_lc_minimal
