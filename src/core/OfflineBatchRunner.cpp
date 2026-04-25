@@ -2827,6 +2827,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           graph_timeline.dynamic_start_index);
       }
       std::optional<std::size_t> confirmed_inside_state_index;
+      std::optional<std::size_t> history_reobserve_begin_state_index;
       bool vertical_initial_anchor_applied = false;
 
       const auto build_vertical_window_specs = [&](const std::size_t current_sample_index, const double window_s) {
@@ -3400,6 +3401,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     sequential_initial_values = std::move(best_initial_values);
                     sequential_reference_valid_until_index = best_valid_until_index;
                     inside_reference_states = iteration.gate_reference_states;
+                    history_reobserve_begin_state_index =
+                      history_reobserve_begin_state_index.has_value()
+                        ? std::min(*history_reobserve_begin_state_index, best_window->start_state_index)
+                        : std::optional<std::size_t>(best_window->start_state_index);
                     last_recovery_result = best_recovery_result;
                     last_velocity_recovery_postfit_u_m = best_hold_evaluation.current_local_postfit_u_m;
                     hold_window_passed = best_hold_evaluation.hold_window_passed;
@@ -3554,6 +3559,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         hold_window_end_state_index,
                         &sequential_initial_values);
                       inside_reference_states = iteration.gate_reference_states;
+                      history_reobserve_begin_state_index =
+                        history_reobserve_begin_state_index.has_value()
+                          ? std::min(*history_reobserve_begin_state_index, recovery_anchor_state_index)
+                          : std::optional<std::size_t>(recovery_anchor_state_index);
 
                       const auto drift_hold_evaluation = EvaluateVerticalHoldWindow(
                         iteration.gate_reference_states,
@@ -3955,8 +3964,17 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
               } else {
                 ++iteration.run_summary.vertical_gate_outside_count;
               }
-              const std::size_t observe_begin =
+              const std::size_t nominal_observe_begin =
                 confirmed_inside_state_index.has_value() ? *confirmed_inside_state_index + 1U : *feedback_anchor_state;
+              std::size_t observe_begin = nominal_observe_begin;
+              if (history_reobserve_begin_state_index.has_value()) {
+                const std::size_t reobserve_begin =
+                  std::min(*history_reobserve_begin_state_index, *feedback_anchor_state);
+                nhc_jump_detector.RewindFromStateIndex(reobserve_begin);
+                iteration_sparse_jump_planner.RewindFromStateIndex(reobserve_begin);
+                observe_begin = std::min(observe_begin, reobserve_begin);
+                history_reobserve_begin_state_index.reset();
+              }
               if (observe_begin <= *feedback_anchor_state) {
                 nhc_jump_detector.ObserveConfirmedWindow(
                   iteration.gate_reference_states,

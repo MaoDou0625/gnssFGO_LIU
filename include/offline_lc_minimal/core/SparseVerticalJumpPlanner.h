@@ -60,6 +60,8 @@ class SparseVerticalJumpPlanner {
     std::size_t start_index,
     std::size_t end_index);
 
+  void RewindFromStateIndex(std::size_t state_index);
+
   [[nodiscard]] double CurrentJumpStepThreshold(double evaluation_time_s) const;
 
   [[nodiscard]] std::vector<SparseVerticalJumpCandidate> BuildCandidates(

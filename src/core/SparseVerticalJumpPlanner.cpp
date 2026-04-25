@@ -296,6 +296,15 @@ void SparseVerticalJumpPlanner::ObserveConfirmedWindow(
   ObserveStateRange(reference_states, vertical_vz_reference, start_index, end_index);
 }
 
+void SparseVerticalJumpPlanner::RewindFromStateIndex(const std::size_t state_index) {
+  mismatch_jump_history_.erase(
+    std::remove_if(
+      mismatch_jump_history_.begin(),
+      mismatch_jump_history_.end(),
+      [&](const AcceptedMismatchJumpSample &sample) { return sample.state_index >= state_index; }),
+    mismatch_jump_history_.end());
+}
+
 double SparseVerticalJumpPlanner::CurrentJumpStepThreshold(const double evaluation_time_s) const {
   std::vector<std::pair<double, double>> weighted_abs_jump_values;
   weighted_abs_jump_values.reserve(mismatch_jump_history_.size());
@@ -697,6 +706,14 @@ void SparseVerticalJumpPlanner::ObserveStateRange(
   const std::size_t bounded_end = std::min(end_index, reference_states.size() - 1U);
   double previous_mismatch_mps = std::numeric_limits<double>::quiet_NaN();
   bool has_previous_mismatch = false;
+  if (start_index > 0U &&
+      vertical_vz_reference[start_index - 1U].valid &&
+      std::isfinite(vertical_vz_reference[start_index - 1U].vz_ref_global_smoothed_mps)) {
+    previous_mismatch_mps =
+      reference_states[start_index - 1U].velocity.z() -
+      vertical_vz_reference[start_index - 1U].vz_ref_global_smoothed_mps;
+    has_previous_mismatch = true;
+  }
   for (std::size_t state_index = start_index; state_index <= bounded_end; ++state_index) {
     if (!vertical_vz_reference[state_index].valid ||
         !std::isfinite(vertical_vz_reference[state_index].vz_ref_global_smoothed_mps)) {

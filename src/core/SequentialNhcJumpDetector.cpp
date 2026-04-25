@@ -80,6 +80,21 @@ void SequentialNhcJumpDetector::ObserveConfirmedWindow(
   PruneHistory(reference_states[bounded_end].time_s);
 }
 
+void SequentialNhcJumpDetector::RewindFromStateIndex(const std::size_t state_index) {
+  history_.erase(
+    std::remove_if(
+      history_.begin(),
+      history_.end(),
+      [&](const AcceptedSample &sample) { return sample.state_index >= state_index; }),
+    history_.end());
+  jump_history_.erase(
+    std::remove_if(
+      jump_history_.begin(),
+      jump_history_.end(),
+      [&](const DetectedJump &jump) { return jump.state_index >= state_index; }),
+    jump_history_.end());
+}
+
 NhcThresholdSnapshot SequentialNhcJumpDetector::CurrentThresholds(const double evaluation_time_s) const {
   NhcThresholdSnapshot snapshot;
   snapshot.body_vz_baseline_mps = ComputeBodyVzBaseline(evaluation_time_s);
