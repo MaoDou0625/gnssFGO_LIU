@@ -82,6 +82,7 @@ struct OfflineRunnerConfig {
   double nhc_history_max_age_s = 60.0;
   double nhc_body_vy_min_threshold_mps = 0.03;
   double nhc_body_vz_min_threshold_mps = 0.003;
+  double nhc_body_vz_max_threshold_mps = 0.0;
   double nhc_body_vy_percentile_scale = 1.3;
   double nhc_body_vz_percentile_scale = 3.0;
   double nhc_jump_min_separation_s = 0.5;

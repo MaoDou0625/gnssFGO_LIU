@@ -297,6 +297,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.nhc_body_vy_min_threshold_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "nhc_body_vz_min_threshold_mps") {
     config.nhc_body_vz_min_threshold_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "nhc_body_vz_max_threshold_mps") {
+    config.nhc_body_vz_max_threshold_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "nhc_body_vy_percentile_scale") {
     config.nhc_body_vy_percentile_scale = ParseDouble(normalized_value);
   } else if (normalized_key == "nhc_body_vz_percentile_scale") {
@@ -688,6 +690,10 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     if (config.nhc_body_vy_min_threshold_mps <= 0.0 || config.nhc_body_vz_min_threshold_mps <= 0.0) {
       throw std::runtime_error("NHC minimum body-velocity thresholds must be positive");
     }
+    if (config.nhc_body_vz_max_threshold_mps > 0.0 &&
+        config.nhc_body_vz_max_threshold_mps < config.nhc_body_vz_min_threshold_mps) {
+      throw std::runtime_error("nhc_body_vz_max_threshold_mps must be >= nhc_body_vz_min_threshold_mps when enabled");
+    }
     if (config.nhc_body_vy_percentile_scale < 1.0 || config.nhc_body_vz_percentile_scale < 1.0) {
       throw std::runtime_error("NHC percentile scales must be >= 1");
     }
@@ -980,6 +986,10 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
   if (config.nhc_body_vy_min_threshold_mps <= 0.0 || config.nhc_body_vz_min_threshold_mps <= 0.0) {
     throw std::runtime_error("NHC minimum body-velocity thresholds must be positive");
   }
+  if (config.nhc_body_vz_max_threshold_mps > 0.0 &&
+      config.nhc_body_vz_max_threshold_mps < config.nhc_body_vz_min_threshold_mps) {
+    throw std::runtime_error("nhc_body_vz_max_threshold_mps must be >= nhc_body_vz_min_threshold_mps when enabled");
+  }
   if (config.nhc_body_vy_percentile_scale < 1.0 || config.nhc_body_vz_percentile_scale < 1.0) {
     throw std::runtime_error("NHC percentile scales must be >= 1");
   }
@@ -1112,6 +1122,7 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "nhc_history_max_age_s=" << config.nhc_history_max_age_s << '\n'
       << "nhc_body_vy_min_threshold_mps=" << config.nhc_body_vy_min_threshold_mps << '\n'
       << "nhc_body_vz_min_threshold_mps=" << config.nhc_body_vz_min_threshold_mps << '\n'
+      << "nhc_body_vz_max_threshold_mps=" << config.nhc_body_vz_max_threshold_mps << '\n'
       << "nhc_body_vy_percentile_scale=" << config.nhc_body_vy_percentile_scale << '\n'
       << "nhc_body_vz_percentile_scale=" << config.nhc_body_vz_percentile_scale << '\n'
       << "nhc_jump_min_separation_s=" << config.nhc_jump_min_separation_s << '\n'

@@ -125,6 +125,10 @@ NhcThresholdSnapshot SequentialNhcJumpDetector::CurrentThresholds(const double e
     snapshot.body_vz_threshold_mps =
       std::max(config_.nhc_body_vz_min_threshold_mps, config_.nhc_body_vz_percentile_scale * weighted_abs_p99_vz);
   }
+  if (config_.nhc_body_vz_max_threshold_mps > 0.0) {
+    snapshot.body_vz_threshold_mps =
+      std::min(snapshot.body_vz_threshold_mps, config_.nhc_body_vz_max_threshold_mps);
+  }
   return snapshot;
 }
 

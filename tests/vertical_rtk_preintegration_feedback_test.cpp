@@ -279,6 +279,7 @@ void TestSequentialRecoveryConfigLoads() {
       "nhc_history_max_age_s=45.0\n"
       "nhc_body_vy_min_threshold_mps=0.04\n"
       "nhc_body_vz_min_threshold_mps=0.004\n"
+      "nhc_body_vz_max_threshold_mps=0.06\n"
       "nhc_body_vy_percentile_scale=1.6\n"
       "nhc_body_vz_percentile_scale=3.5\n"
       "nhc_jump_min_separation_s=1.25\n",
@@ -335,6 +336,7 @@ void TestSequentialRecoveryConfigLoads() {
   ExpectNear(config.nhc_history_max_age_s, 45.0, 1e-12, "NHC max age should load");
   ExpectNear(config.nhc_body_vy_min_threshold_mps, 0.04, 1e-12, "NHC vy threshold floor should load");
   ExpectNear(config.nhc_body_vz_min_threshold_mps, 0.004, 1e-12, "NHC vz threshold floor should load");
+  ExpectNear(config.nhc_body_vz_max_threshold_mps, 0.06, 1e-12, "NHC vz threshold cap should load");
   ExpectNear(config.nhc_body_vy_percentile_scale, 1.6, 1e-12, "NHC vy percentile scale should load");
   ExpectNear(config.nhc_body_vz_percentile_scale, 3.5, 1e-12, "NHC vz percentile scale should load");
   ExpectNear(config.nhc_jump_min_separation_s, 1.25, 1e-12, "NHC jump separation should load");
