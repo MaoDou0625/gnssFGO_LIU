@@ -358,6 +358,8 @@ struct GnssConsistencyRecord {
   long long recovery_anchor_state_index = -1;
   long long nhc_jump_anchor_state_index = -1;
   double nhc_body_vy_mps = std::numeric_limits<double>::quiet_NaN();
+  double nhc_body_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double nhc_body_vz_baseline_mps = std::numeric_limits<double>::quiet_NaN();
   double nhc_body_vz_residual_mps = std::numeric_limits<double>::quiet_NaN();
   double nhc_body_vy_threshold_mps = std::numeric_limits<double>::quiet_NaN();
   double nhc_body_vz_threshold_mps = std::numeric_limits<double>::quiet_NaN();

@@ -275,7 +275,8 @@ void WriteGnssConsistencyCsv(
        "vertical_feedback_target_baz_mps2,vertical_feedback_attitude_scale,"
        "vertical_reference_up_m,vertical_reference_used,local_prefit_residual_u_m,local_postfit_residual_u_m,"
        "confirmed_inside_before_sample,recovery_anchor_state_index,nhc_jump_anchor_state_index,"
-       "nhc_body_vy_mps,nhc_body_vz_residual_mps,nhc_body_vy_threshold_mps,nhc_body_vz_threshold_mps,"
+       "nhc_body_vy_mps,nhc_body_vz_mps,nhc_body_vz_baseline_mps,nhc_body_vz_residual_mps,"
+       "nhc_body_vy_threshold_mps,nhc_body_vz_threshold_mps,"
        "delta_vz_applied_mps,delta_up_anchor_applied_m,delta_roll_applied_rad,delta_pitch_applied_rad,delta_baz_applied_mps2,"
        "required_up_anchor_correction_m,local_recovery_iteration_count,pure_delta_up_anchor_start_iteration,"
        "covariance_scale,covariance_scale_e,covariance_scale_n,covariance_scale_u,"
@@ -308,6 +309,8 @@ void WriteGnssConsistencyCsv(
            << row.recovery_anchor_state_index << ','
            << row.nhc_jump_anchor_state_index << ','
            << row.nhc_body_vy_mps << ','
+           << row.nhc_body_vz_mps << ','
+           << row.nhc_body_vz_baseline_mps << ','
            << row.nhc_body_vz_residual_mps << ','
            << row.nhc_body_vy_threshold_mps << ','
            << row.nhc_body_vz_threshold_mps << ','

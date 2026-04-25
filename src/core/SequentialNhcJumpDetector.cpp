@@ -123,9 +123,10 @@ NhcStateEvaluation SequentialNhcJumpDetector::EvaluateState(
   const Eigen::Vector3d body_velocity = ComputeBodyVelocity(state);
   const NhcThresholdSnapshot snapshot = CurrentThresholds(evaluation_time_s);
   evaluation.body_vy_mps = body_velocity.y();
+  evaluation.body_vz_mps = body_velocity.z();
   const double body_vz_baseline_mps =
     std::isfinite(snapshot.body_vz_baseline_mps) ? snapshot.body_vz_baseline_mps : 0.0;
-  evaluation.body_vz_residual_mps = body_velocity.z() - body_vz_baseline_mps;
+  evaluation.body_vz_residual_mps = evaluation.body_vz_mps - body_vz_baseline_mps;
   evaluation.exceeds_threshold =
     std::abs(evaluation.body_vy_mps) > snapshot.body_vy_threshold_mps ||
     std::abs(evaluation.body_vz_residual_mps) > snapshot.body_vz_threshold_mps;

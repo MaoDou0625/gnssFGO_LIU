@@ -19,6 +19,7 @@ struct NhcThresholdSnapshot {
 
 struct NhcStateEvaluation {
   double body_vy_mps = std::numeric_limits<double>::quiet_NaN();
+  double body_vz_mps = std::numeric_limits<double>::quiet_NaN();
   double body_vz_residual_mps = std::numeric_limits<double>::quiet_NaN();
   bool exceeds_threshold = false;
 };

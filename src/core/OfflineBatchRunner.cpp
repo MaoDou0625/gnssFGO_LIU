@@ -2579,6 +2579,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
               const NhcStateEvaluation nhc_evaluation =
                 nhc_jump_detector.EvaluateState(prefit_reference_state, prefit_reference_state.time_s);
               consistency_record.nhc_body_vy_mps = nhc_evaluation.body_vy_mps;
+              consistency_record.nhc_body_vz_mps = nhc_evaluation.body_vz_mps;
+              consistency_record.nhc_body_vz_baseline_mps = nhc_thresholds.body_vz_baseline_mps;
               consistency_record.nhc_body_vz_residual_mps = nhc_evaluation.body_vz_residual_mps;
               consistency_record.nhc_body_vy_threshold_mps = nhc_thresholds.body_vy_threshold_mps;
               consistency_record.nhc_body_vz_threshold_mps = nhc_thresholds.body_vz_threshold_mps;
