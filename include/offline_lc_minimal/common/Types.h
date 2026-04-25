@@ -361,6 +361,7 @@ struct GnssConsistencyRecord {
   double nhc_body_vz_mps = std::numeric_limits<double>::quiet_NaN();
   double nhc_body_vz_baseline_mps = std::numeric_limits<double>::quiet_NaN();
   double nhc_body_vz_residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double nhc_body_vz_jump_mps = std::numeric_limits<double>::quiet_NaN();
   double nhc_body_vy_threshold_mps = std::numeric_limits<double>::quiet_NaN();
   double nhc_body_vz_threshold_mps = std::numeric_limits<double>::quiet_NaN();
   double delta_vz_applied_mps = std::numeric_limits<double>::quiet_NaN();

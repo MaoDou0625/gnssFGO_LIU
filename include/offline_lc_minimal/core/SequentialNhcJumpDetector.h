@@ -21,6 +21,7 @@ struct NhcStateEvaluation {
   double body_vy_mps = std::numeric_limits<double>::quiet_NaN();
   double body_vz_mps = std::numeric_limits<double>::quiet_NaN();
   double body_vz_residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double body_vz_jump_mps = std::numeric_limits<double>::quiet_NaN();
   bool exceeds_threshold = false;
 };
 
@@ -44,6 +45,11 @@ class SequentialNhcJumpDetector {
     const ReferenceNodeState &state,
     double evaluation_time_s) const;
 
+  [[nodiscard]] NhcStateEvaluation EvaluateTransition(
+    const ReferenceNodeState &previous_state,
+    const ReferenceNodeState &state,
+    double evaluation_time_s) const;
+
   [[nodiscard]] std::optional<std::size_t> FindJumpAnchor(
     const std::vector<ReferenceNodeState> &reference_states,
     std::size_t start_index,
@@ -58,6 +64,11 @@ class SequentialNhcJumpDetector {
   };
 
   [[nodiscard]] Eigen::Vector3d ComputeBodyVelocity(const ReferenceNodeState &state) const;
+  [[nodiscard]] NhcStateEvaluation EvaluateWithPreviousBodyVz(
+    double body_vy_mps,
+    double body_vz_mps,
+    double previous_body_vz_mps,
+    double evaluation_time_s) const;
   [[nodiscard]] double ComputeBodyVzBaseline(double evaluation_time_s) const;
   void AppendState(const ReferenceNodeState &state, std::size_t state_index);
   void PruneHistory(double evaluation_time_s);

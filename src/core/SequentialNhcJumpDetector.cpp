@@ -90,9 +90,9 @@ NhcThresholdSnapshot SequentialNhcJumpDetector::CurrentThresholds(const double e
   }
 
   std::vector<std::pair<double, double>> weighted_abs_vy;
-  std::vector<std::pair<double, double>> weighted_abs_vz_residual;
+  std::vector<std::pair<double, double>> weighted_abs_vz_jump;
   weighted_abs_vy.reserve(history_.size());
-  weighted_abs_vz_residual.reserve(history_.size());
+  weighted_abs_vz_jump.reserve(history_.size());
   for (const auto &sample : history_) {
     const double age_s = evaluation_time_s - sample.time_s;
     if (age_s < -1e-6 || age_s > config_.nhc_history_max_age_s) {
@@ -100,11 +100,20 @@ NhcThresholdSnapshot SequentialNhcJumpDetector::CurrentThresholds(const double e
     }
     const double weight = std::exp(-std::max(age_s, 0.0) / std::max(config_.nhc_history_half_life_s, 1e-6));
     weighted_abs_vy.emplace_back(std::abs(sample.body_vy_mps), weight);
-    weighted_abs_vz_residual.emplace_back(std::abs(sample.body_vz_mps - snapshot.body_vz_baseline_mps), weight);
+  }
+  for (std::size_t sample_index = 1; sample_index < history_.size(); ++sample_index) {
+    const auto &previous_sample = history_[sample_index - 1U];
+    const auto &sample = history_[sample_index];
+    const double age_s = evaluation_time_s - sample.time_s;
+    if (age_s < -1e-6 || age_s > config_.nhc_history_max_age_s) {
+      continue;
+    }
+    const double weight = std::exp(-std::max(age_s, 0.0) / std::max(config_.nhc_history_half_life_s, 1e-6));
+    weighted_abs_vz_jump.emplace_back(std::abs(sample.body_vz_mps - previous_sample.body_vz_mps), weight);
   }
 
   const double weighted_abs_p99_vy = WeightedAbsPercentile(weighted_abs_vy, 0.99);
-  const double weighted_abs_p99_vz = WeightedAbsPercentile(weighted_abs_vz_residual, 0.99);
+  const double weighted_abs_p99_vz = WeightedAbsPercentile(weighted_abs_vz_jump, 0.99);
   if (std::isfinite(weighted_abs_p99_vy)) {
     snapshot.body_vy_threshold_mps =
       std::max(config_.nhc_body_vy_min_threshold_mps, config_.nhc_body_vy_percentile_scale * weighted_abs_p99_vy);
@@ -119,17 +128,22 @@ NhcThresholdSnapshot SequentialNhcJumpDetector::CurrentThresholds(const double e
 NhcStateEvaluation SequentialNhcJumpDetector::EvaluateState(
   const ReferenceNodeState &state,
   const double evaluation_time_s) const {
-  NhcStateEvaluation evaluation;
   const Eigen::Vector3d body_velocity = ComputeBodyVelocity(state);
-  const NhcThresholdSnapshot snapshot = CurrentThresholds(evaluation_time_s);
-  evaluation.body_vy_mps = body_velocity.y();
-  evaluation.body_vz_mps = body_velocity.z();
-  const double body_vz_baseline_mps =
-    std::isfinite(snapshot.body_vz_baseline_mps) ? snapshot.body_vz_baseline_mps : 0.0;
-  evaluation.body_vz_residual_mps = evaluation.body_vz_mps - body_vz_baseline_mps;
-  evaluation.exceeds_threshold =
-    std::abs(evaluation.body_vz_residual_mps) > snapshot.body_vz_threshold_mps;
-  return evaluation;
+  const double previous_body_vz_mps = history_.empty() ? body_velocity.z() : history_.back().body_vz_mps;
+  return EvaluateWithPreviousBodyVz(body_velocity.y(), body_velocity.z(), previous_body_vz_mps, evaluation_time_s);
+}
+
+NhcStateEvaluation SequentialNhcJumpDetector::EvaluateTransition(
+  const ReferenceNodeState &previous_state,
+  const ReferenceNodeState &state,
+  const double evaluation_time_s) const {
+  const Eigen::Vector3d previous_body_velocity = ComputeBodyVelocity(previous_state);
+  const Eigen::Vector3d body_velocity = ComputeBodyVelocity(state);
+  return EvaluateWithPreviousBodyVz(
+    body_velocity.y(),
+    body_velocity.z(),
+    previous_body_velocity.z(),
+    evaluation_time_s);
 }
 
 std::optional<std::size_t> SequentialNhcJumpDetector::FindJumpAnchor(
@@ -142,14 +156,13 @@ std::optional<std::size_t> SequentialNhcJumpDetector::FindJumpAnchor(
   }
 
   std::optional<std::size_t> first_crossing_index;
-  bool previous_exceeded = false;
   for (std::size_t state_index = start_index + 1U; state_index <= end_index; ++state_index) {
-    const NhcStateEvaluation evaluation = EvaluateState(reference_states[state_index], reference_states[state_index].time_s);
-    if (evaluation.exceeds_threshold && !previous_exceeded) {
+    const NhcStateEvaluation evaluation =
+      EvaluateTransition(reference_states[state_index - 1U], reference_states[state_index], reference_states[state_index].time_s);
+    if (evaluation.exceeds_threshold) {
       first_crossing_index = state_index;
       break;
     }
-    previous_exceeded = evaluation.exceeds_threshold;
   }
   if (!first_crossing_index.has_value()) {
     return std::nullopt;
@@ -164,6 +177,24 @@ std::optional<std::size_t> SequentialNhcJumpDetector::FindJumpAnchor(
 Eigen::Vector3d SequentialNhcJumpDetector::ComputeBodyVelocity(const ReferenceNodeState &state) const {
   const Eigen::Vector3d nav_velocity(state.velocity.x(), state.velocity.y(), state.velocity.z());
   return state.pose.rotation().matrix().transpose() * nav_velocity;
+}
+
+NhcStateEvaluation SequentialNhcJumpDetector::EvaluateWithPreviousBodyVz(
+  const double body_vy_mps,
+  const double body_vz_mps,
+  const double previous_body_vz_mps,
+  const double evaluation_time_s) const {
+  NhcStateEvaluation evaluation;
+  const NhcThresholdSnapshot snapshot = CurrentThresholds(evaluation_time_s);
+  evaluation.body_vy_mps = body_vy_mps;
+  evaluation.body_vz_mps = body_vz_mps;
+  const double body_vz_baseline_mps =
+    std::isfinite(snapshot.body_vz_baseline_mps) ? snapshot.body_vz_baseline_mps : 0.0;
+  evaluation.body_vz_residual_mps = evaluation.body_vz_mps - body_vz_baseline_mps;
+  evaluation.body_vz_jump_mps = evaluation.body_vz_mps - previous_body_vz_mps;
+  evaluation.exceeds_threshold =
+    std::abs(evaluation.body_vz_jump_mps) > snapshot.body_vz_threshold_mps;
+  return evaluation;
 }
 
 double SequentialNhcJumpDetector::ComputeBodyVzBaseline(const double evaluation_time_s) const {

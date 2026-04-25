@@ -2576,12 +2576,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
               consistency_record.prefit_nis = ComputeVerticalNis(prefit_residual_enu_m.z(), consistency_base_sigma_m.z());
 
               const NhcThresholdSnapshot nhc_thresholds = nhc_jump_detector.CurrentThresholds(prefit_reference_state.time_s);
+              const ReferenceNodeState nhc_previous_reference_state =
+                required_prefit_index > propagation_anchor_index
+                  ? iteration.gate_reference_states[required_prefit_index - 1U]
+                  : prefit_reference_state;
               const NhcStateEvaluation nhc_evaluation =
-                nhc_jump_detector.EvaluateState(prefit_reference_state, prefit_reference_state.time_s);
+                nhc_jump_detector.EvaluateTransition(
+                  nhc_previous_reference_state,
+                  prefit_reference_state,
+                  prefit_reference_state.time_s);
               consistency_record.nhc_body_vy_mps = nhc_evaluation.body_vy_mps;
               consistency_record.nhc_body_vz_mps = nhc_evaluation.body_vz_mps;
               consistency_record.nhc_body_vz_baseline_mps = nhc_thresholds.body_vz_baseline_mps;
               consistency_record.nhc_body_vz_residual_mps = nhc_evaluation.body_vz_residual_mps;
+              consistency_record.nhc_body_vz_jump_mps = nhc_evaluation.body_vz_jump_mps;
               consistency_record.nhc_body_vy_threshold_mps = nhc_thresholds.body_vy_threshold_mps;
               consistency_record.nhc_body_vz_threshold_mps = nhc_thresholds.body_vz_threshold_mps;
 
