@@ -11,6 +11,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/core/SequentialNhcJumpDetector.h"
+#include "offline_lc_minimal/core/SparseVerticalJumpPlanner.h"
 #include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/VerticalInsideKinematicFactor.h"
@@ -22,6 +23,8 @@ using offline_lc_minimal::DefaultConfig;
 using offline_lc_minimal::LoadConfigFile;
 using offline_lc_minimal::ReferenceNodeState;
 using offline_lc_minimal::SequentialNhcJumpDetector;
+using offline_lc_minimal::SparseVerticalJumpPlanner;
+using offline_lc_minimal::VerticalVzReferenceSample;
 using offline_lc_minimal::factor::HorizontalPositionFactor;
 using offline_lc_minimal::factor::StaticVerticalSpecificForceFactor;
 using offline_lc_minimal::factor::VerticalInsideKinematicFactor;
@@ -251,6 +254,14 @@ void TestSequentialRecoveryConfigLoads() {
   const auto config_path = WriteTempConfig(
     MakeVerticalFeedbackConfigPrefix()
     + "vertical_local_recovery_max_iterations=6\n"
+      "vertical_global_vz_window_s=1.5\n"
+      "vertical_global_vz_smooth_window_s=1.2\n"
+      "vertical_jump_candidate_min_separation_s=1.1\n"
+      "vertical_jump_max_candidates_per_segment=7\n"
+      "vertical_jump_max_selected_points_per_segment=2\n"
+      "vertical_jump_hold_window_s=2.5\n"
+      "vertical_jump_step_min_threshold_mps=0.07\n"
+      "vertical_jump_vz_prior_sigma_mps=0.025\n"
       "enable_nhc_jump_reference=true\n"
       "nhc_history_half_life_s=12.0\n"
       "nhc_history_max_age_s=45.0\n"
@@ -263,6 +274,26 @@ void TestSequentialRecoveryConfigLoads() {
   const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
   std::filesystem::remove(config_path);
   ExpectNear(config.vertical_local_recovery_max_iterations, 6, 0.0, "local recovery iteration count should load");
+  ExpectNear(config.vertical_global_vz_window_s, 1.5, 1e-12, "global vz diff window should load");
+  ExpectNear(config.vertical_global_vz_smooth_window_s, 1.2, 1e-12, "global vz smooth window should load");
+  ExpectNear(
+    config.vertical_jump_candidate_min_separation_s,
+    1.1,
+    1e-12,
+    "jump candidate minimum separation should load");
+  ExpectNear(
+    config.vertical_jump_max_candidates_per_segment,
+    7,
+    0.0,
+    "jump candidate cap should load");
+  ExpectNear(
+    config.vertical_jump_max_selected_points_per_segment,
+    2,
+    0.0,
+    "jump selected-point cap should load");
+  ExpectNear(config.vertical_jump_hold_window_s, 2.5, 1e-12, "jump hold window should load");
+  ExpectNear(config.vertical_jump_step_min_threshold_mps, 0.07, 1e-12, "jump threshold floor should load");
+  ExpectNear(config.vertical_jump_vz_prior_sigma_mps, 0.025, 1e-12, "jump vz prior sigma should load");
   ExpectTrue(config.enable_nhc_jump_reference, "NHC jump reference flag should load");
   ExpectNear(config.nhc_history_half_life_s, 12.0, 1e-12, "NHC half-life should load");
   ExpectNear(config.nhc_history_max_age_s, 45.0, 1e-12, "NHC max age should load");
@@ -706,6 +737,42 @@ void TestNhcJumpAnchorIgnoresBodyVyOnlyCrossing() {
     "NHC jump detector should ignore body vy-only threshold crossings");
 }
 
+void TestSparseVerticalJumpPlannerBuildsSinglePeakCandidate() {
+  auto config = DefaultConfig();
+  config.vertical_jump_step_min_threshold_mps = 0.05;
+  config.vertical_jump_candidate_min_separation_s = 1.0;
+  config.vertical_jump_max_candidates_per_segment = 5;
+  SparseVerticalJumpPlanner planner(config);
+
+  std::vector<ReferenceNodeState> states{
+    MakeReferenceNodeState(0.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.00)),
+    MakeReferenceNodeState(1.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.00)),
+    MakeReferenceNodeState(2.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.12)),
+    MakeReferenceNodeState(3.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.13)),
+    MakeReferenceNodeState(4.0, gtsam::Pose3(), gtsam::Vector3(0.0, 0.0, 0.131)),
+  };
+  std::vector<VerticalVzReferenceSample> reference(states.size());
+  for (std::size_t state_index = 0; state_index < states.size(); ++state_index) {
+    reference[state_index].time_s = states[state_index].time_s;
+    reference[state_index].valid = true;
+    reference[state_index].vz_ref_global_mps = 0.0;
+    reference[state_index].vz_ref_global_smoothed_mps = 0.0;
+  }
+
+  planner.SeedWithConfirmedStates(states, reference, 0U, 1U);
+  const auto candidates = planner.BuildCandidates(states, reference, 0U, 4U, [](const std::size_t state_index) {
+    return state_index == 2U;
+  });
+  ExpectNear(candidates.size(), 1.0, 0.0, "planner should emit one sparse jump candidate");
+  ExpectNear(static_cast<double>(candidates.front().state_index), 2.0, 0.0, "candidate should point to jump peak");
+  ExpectNear(
+    candidates.front().delta_vz_init_mps,
+    -0.12,
+    1e-12,
+    "candidate delta vz should oppose the mismatch jump");
+  ExpectTrue(candidates.front().nhc_supported, "candidate should preserve NHC support bonus");
+}
+
 }  // namespace
 
 int main() {
@@ -762,6 +829,9 @@ int main() {
     RunTest(
       "TestNhcJumpAnchorIgnoresBodyVyOnlyCrossing",
       TestNhcJumpAnchorIgnoresBodyVyOnlyCrossing);
+    RunTest(
+      "TestSparseVerticalJumpPlannerBuildsSinglePeakCandidate",
+      TestSparseVerticalJumpPlannerBuildsSinglePeakCandidate);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return EXIT_FAILURE;
