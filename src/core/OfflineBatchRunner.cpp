@@ -89,6 +89,14 @@ struct VerticalHoldWindowEvaluation {
   double max_up_from_vz_error_m = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct VerticalFutureTrendEvaluation {
+  bool valid = false;
+  std::size_t fix_count = 0;
+  double residual_mean_m = std::numeric_limits<double>::quiet_NaN();
+  double residual_slope_mps = std::numeric_limits<double>::quiet_NaN();
+  double cost = 0.0;
+};
+
 struct SegmentGnssStatsAccumulator {
   std::size_t gnss_factor_count = 0;
   double prefit_nis_sum = 0.0;
@@ -484,6 +492,68 @@ VerticalHoldWindowEvaluation EvaluateVerticalHoldWindow(
     ComputeUpFromVzConsistencyError(reference_states, up_anchor_state_index, max_reference_state_index);
   evaluation.hold_window_passed =
     evaluation.current_inside && all_inside && evaluation.max_up_from_vz_error_m <= 0.03;
+  return evaluation;
+}
+
+VerticalFutureTrendEvaluation EvaluateVerticalFutureTrend(
+  const std::vector<ReferenceNodeState> &reference_states,
+  const std::vector<VerticalHoldWindowSpec> &future_trend_specs,
+  const int minimum_fix_count,
+  const double mean_weight,
+  const double slope_weight) {
+  VerticalFutureTrendEvaluation evaluation;
+  evaluation.cost = 0.0;
+  if (future_trend_specs.empty() || reference_states.empty() ||
+      minimum_fix_count <= 0 || (mean_weight <= 0.0 && slope_weight <= 0.0)) {
+    return evaluation;
+  }
+
+  std::vector<double> times_s;
+  std::vector<double> residuals_m;
+  times_s.reserve(future_trend_specs.size());
+  residuals_m.reserve(future_trend_specs.size());
+  for (const auto &spec : future_trend_specs) {
+    const ReferenceNodeState state = ResolveReferenceStateForHoldWindowSpec(reference_states, spec);
+    const Eigen::Vector3d residual_enu_m = ComputePositionResidualEnu(state.pose, spec.measurement_enu_m);
+    if (!std::isfinite(spec.corrected_time_s) || !std::isfinite(residual_enu_m.z())) {
+      continue;
+    }
+    times_s.push_back(spec.corrected_time_s);
+    residuals_m.push_back(residual_enu_m.z());
+  }
+  evaluation.fix_count = residuals_m.size();
+  if (residuals_m.size() < static_cast<std::size_t>(minimum_fix_count)) {
+    return evaluation;
+  }
+
+  const double time_origin_s = times_s.front();
+  double time_sum_s = 0.0;
+  double residual_sum_m = 0.0;
+  for (std::size_t sample_index = 0; sample_index < residuals_m.size(); ++sample_index) {
+    time_sum_s += times_s[sample_index] - time_origin_s;
+    residual_sum_m += residuals_m[sample_index];
+  }
+  const double inv_count = 1.0 / static_cast<double>(residuals_m.size());
+  const double mean_time_s = time_sum_s * inv_count;
+  const double mean_residual_m = residual_sum_m * inv_count;
+
+  double time_variance_sum = 0.0;
+  double covariance_sum = 0.0;
+  for (std::size_t sample_index = 0; sample_index < residuals_m.size(); ++sample_index) {
+    const double centered_time_s = times_s[sample_index] - time_origin_s - mean_time_s;
+    const double centered_residual_m = residuals_m[sample_index] - mean_residual_m;
+    time_variance_sum += centered_time_s * centered_time_s;
+    covariance_sum += centered_time_s * centered_residual_m;
+  }
+
+  const double slope_mps =
+    time_variance_sum > 1e-12 ? covariance_sum / time_variance_sum : 0.0;
+  evaluation.valid = true;
+  evaluation.residual_mean_m = mean_residual_m;
+  evaluation.residual_slope_mps = slope_mps;
+  evaluation.cost =
+    mean_weight * mean_residual_m * mean_residual_m +
+    slope_weight * slope_mps * slope_mps;
   return evaluation;
 }
 
@@ -1179,6 +1249,10 @@ struct VerticalLocalRecoveryResult {
   double selected_jump_delta_vz_tail_mps = std::numeric_limits<double>::quiet_NaN();
   double window_velocity_smooth_cost = std::numeric_limits<double>::quiet_NaN();
   double window_height_integral_delta_m = std::numeric_limits<double>::quiet_NaN();
+  double future_trend_residual_mean_m = std::numeric_limits<double>::quiet_NaN();
+  double future_trend_residual_slope_mps = std::numeric_limits<double>::quiet_NaN();
+  double future_trend_cost = std::numeric_limits<double>::quiet_NaN();
+  long long future_trend_fix_count = 0;
   std::string recovery_mode = "NONE";
   bool hold_window_passed = false;
 };
@@ -2755,10 +2829,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       std::optional<std::size_t> confirmed_inside_state_index;
       bool vertical_initial_anchor_applied = false;
 
-      const auto build_hold_window_specs = [&](const std::size_t current_sample_index) {
+      const auto build_vertical_window_specs = [&](const std::size_t current_sample_index, const double window_s) {
         std::vector<VerticalHoldWindowSpec> specs;
-        const double hold_window_end_time_s =
-          CorrectedGnssTime(dataset.gnss_samples[current_sample_index]) + config_.vertical_jump_hold_window_s;
+        if (window_s <= 0.0) {
+          return specs;
+        }
+        const double window_end_time_s =
+          CorrectedGnssTime(dataset.gnss_samples[current_sample_index]) + window_s;
         for (std::size_t future_sample_index = current_sample_index; future_sample_index < dataset.gnss_samples.size();
              ++future_sample_index) {
           if (future_sample_index <= navigation_start_index) {
@@ -2766,7 +2843,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           }
           const auto &future_sample = dataset.gnss_samples[future_sample_index];
           const double corrected_time_s = CorrectedGnssTime(future_sample);
-          if (corrected_time_s > hold_window_end_time_s + kTimeEpsilonS) {
+          if (corrected_time_s > window_end_time_s + kTimeEpsilonS) {
             break;
           }
           if (!PassesGnssQualityFilters(future_sample) || !future_sample.has_enu_position ||
@@ -2798,6 +2875,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           });
         }
         return specs;
+      };
+      const auto build_hold_window_specs = [&](const std::size_t current_sample_index) {
+        return build_vertical_window_specs(current_sample_index, config_.vertical_jump_hold_window_s);
+      };
+      const auto build_future_trend_specs = [&](const std::size_t current_sample_index) {
+        return build_vertical_window_specs(current_sample_index, config_.vertical_jump_future_trend_window_s);
       };
 
       const auto compute_vz_reference_rms = [&](
@@ -3035,6 +3118,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   consistency_record.recovery_anchor_state_index =
                     static_cast<long long>(recovery_anchor_state_index);
                   const auto hold_window_specs = build_hold_window_specs(sample_index);
+                  const auto future_trend_specs = build_future_trend_specs(sample_index);
                   const std::size_t hold_window_end_state_index =
                     hold_window_specs.empty()
                       ? *feedback_anchor_state
@@ -3045,6 +3129,18 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                             return left.reference_state_index < right.reference_state_index;
                           })
                           ->reference_state_index;
+                  const std::size_t future_trend_end_state_index =
+                    future_trend_specs.empty()
+                      ? hold_window_end_state_index
+                      : std::max_element(
+                          future_trend_specs.begin(),
+                          future_trend_specs.end(),
+                          [](const VerticalHoldWindowSpec &left, const VerticalHoldWindowSpec &right) {
+                            return left.reference_state_index < right.reference_state_index;
+                          })
+                          ->reference_state_index;
+                  const std::size_t recovery_scoring_end_state_index =
+                    std::max(hold_window_end_state_index, future_trend_end_state_index);
                   const double local_gate_threshold_m =
                     std::sqrt(vertical_gate_nis_threshold) * consistency_base_sigma_m.z();
                   constexpr double kRecoveredGateToleranceM = 0.005;
@@ -3088,21 +3184,38 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                        jump_selection_index < config_.vertical_jump_max_selected_points_per_segment &&
                        !inside_gate;
                        ++jump_selection_index) {
+                    auto current_scoring_reference_states = iteration.gate_reference_states;
+                    std::size_t current_scoring_valid_until_index = sequential_reference_valid_until_index;
+                    EnsureReferenceStatesValidUntil(
+                      state_timestamps,
+                      dataset.imu_samples,
+                      imu_params,
+                      &current_scoring_reference_states,
+                      &current_scoring_valid_until_index,
+                      recovery_scoring_end_state_index,
+                      nullptr);
                     const auto current_hold_evaluation = EvaluateVerticalHoldWindow(
-                      iteration.gate_reference_states,
+                      current_scoring_reference_states,
                       hold_window_specs,
                       recovery_anchor_state_index,
                       vertical_gate_nis_threshold);
                     const double current_vz_reference_rms = compute_vz_reference_rms(
-                      iteration.gate_reference_states,
+                      current_scoring_reference_states,
                       recovery_anchor_state_index,
                       hold_window_end_state_index);
+                    const auto current_future_trend_evaluation = EvaluateVerticalFutureTrend(
+                      current_scoring_reference_states,
+                      future_trend_specs,
+                      config_.vertical_jump_future_trend_min_fix_count,
+                      config_.vertical_jump_future_trend_mean_weight,
+                      config_.vertical_jump_future_trend_slope_weight);
                     const double current_objective =
                       current_hold_evaluation.gate_excess_cost +
                       config_.vertical_jump_window_ref_weight *
                         (std::isfinite(current_vz_reference_rms)
                            ? current_vz_reference_rms * current_vz_reference_rms
                            : 0.0) +
+                      current_future_trend_evaluation.cost +
                       0.02 * static_cast<double>(selected_jump_window_center_indices.size());
 
                     auto sparse_jump_windows = iteration_sparse_jump_planner.BuildWindowCandidates(
@@ -3181,7 +3294,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         imu_params,
                         &candidate_reference_states,
                         &candidate_valid_until_index,
-                        hold_window_end_state_index,
+                        recovery_scoring_end_state_index,
                         &candidate_initial_values);
 
                       const auto candidate_hold_evaluation = EvaluateVerticalHoldWindow(
@@ -3193,6 +3306,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         candidate_reference_states,
                         window_correction->end_state_index,
                         hold_window_end_state_index);
+                      const auto candidate_future_trend_evaluation = EvaluateVerticalFutureTrend(
+                        candidate_reference_states,
+                        future_trend_specs,
+                        config_.vertical_jump_future_trend_min_fix_count,
+                        config_.vertical_jump_future_trend_mean_weight,
+                        config_.vertical_jump_future_trend_slope_weight);
                       const double candidate_objective =
                         candidate_hold_evaluation.gate_excess_cost +
                         (candidate_hold_evaluation.hold_window_passed ? 0.0 : 1.0) +
@@ -3205,6 +3324,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         config_.vertical_jump_window_height_integral_weight *
                           window_correction->height_integral_delta_m *
                           window_correction->height_integral_delta_m +
+                        candidate_future_trend_evaluation.cost +
                         0.02 * static_cast<double>(selected_jump_window_center_indices.size() + 1U);
                       if (!std::isfinite(candidate_objective) || candidate_objective >= best_objective) {
                         continue;
@@ -3242,6 +3362,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         window_correction->velocity_smooth_cost;
                       scored_result.window_height_integral_delta_m =
                         window_correction->height_integral_delta_m;
+                      scored_result.future_trend_residual_mean_m =
+                        candidate_future_trend_evaluation.residual_mean_m;
+                      scored_result.future_trend_residual_slope_mps =
+                        candidate_future_trend_evaluation.residual_slope_mps;
+                      scored_result.future_trend_cost = candidate_future_trend_evaluation.cost;
+                      scored_result.future_trend_fix_count =
+                        static_cast<long long>(candidate_future_trend_evaluation.fix_count);
                       scored_result.recovery_mode = "SPARSE_WINDOW";
                       scored_result.hold_window_passed = candidate_hold_evaluation.hold_window_passed;
                       best_objective = candidate_objective;
@@ -3314,6 +3441,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       best_recovery_result->window_velocity_smooth_cost;
                     consistency_record.window_height_integral_delta_m =
                       best_recovery_result->window_height_integral_delta_m;
+                    consistency_record.future_trend_residual_mean_m =
+                      best_recovery_result->future_trend_residual_mean_m;
+                    consistency_record.future_trend_residual_slope_mps =
+                      best_recovery_result->future_trend_residual_slope_mps;
+                    consistency_record.future_trend_cost = best_recovery_result->future_trend_cost;
+                    consistency_record.future_trend_fix_count = best_recovery_result->future_trend_fix_count;
                     consistency_record.recovery_mode = "SPARSE_WINDOW";
                     consistency_record.hold_window_passed = hold_window_passed;
 
@@ -3366,6 +3499,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       best_recovery_result->window_velocity_smooth_cost;
                     iteration_row.window_height_integral_delta_m =
                       best_recovery_result->window_height_integral_delta_m;
+                    iteration_row.future_trend_residual_mean_m =
+                      best_recovery_result->future_trend_residual_mean_m;
+                    iteration_row.future_trend_residual_slope_mps =
+                      best_recovery_result->future_trend_residual_slope_mps;
+                    iteration_row.future_trend_cost = best_recovery_result->future_trend_cost;
+                    iteration_row.future_trend_fix_count = best_recovery_result->future_trend_fix_count;
                     iteration_row.recovery_mode = "SPARSE_WINDOW";
                     iteration_row.hold_window_passed = hold_window_passed;
                     iteration_row.used_up_anchor_fallback = false;

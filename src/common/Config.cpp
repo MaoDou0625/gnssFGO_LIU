@@ -279,6 +279,14 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_jump_window_height_integral_weight = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_window_ref_weight") {
     config.vertical_jump_window_ref_weight = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_future_trend_window_s") {
+    config.vertical_jump_future_trend_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_future_trend_min_fix_count") {
+    config.vertical_jump_future_trend_min_fix_count = ParseInt(normalized_value);
+  } else if (normalized_key == "vertical_jump_future_trend_mean_weight") {
+    config.vertical_jump_future_trend_mean_weight = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_future_trend_slope_weight") {
+    config.vertical_jump_future_trend_slope_weight = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_nhc_jump_reference") {
     config.enable_nhc_jump_reference = ParseBool(normalized_value);
   } else if (normalized_key == "nhc_history_half_life_s") {
@@ -665,6 +673,12 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
         config.vertical_jump_window_ref_weight < 0.0) {
       throw std::runtime_error("vertical jump window objective weights must be non-negative");
     }
+    if (config.vertical_jump_future_trend_window_s < 0.0 ||
+        config.vertical_jump_future_trend_min_fix_count < 0 ||
+        config.vertical_jump_future_trend_mean_weight < 0.0 ||
+        config.vertical_jump_future_trend_slope_weight < 0.0) {
+      throw std::runtime_error("vertical jump future trend settings must be non-negative");
+    }
     if (config.nhc_history_half_life_s <= 0.0 || config.nhc_history_max_age_s <= 0.0) {
       throw std::runtime_error("NHC history windows must be positive");
     }
@@ -951,6 +965,12 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
       config.vertical_jump_window_ref_weight < 0.0) {
     throw std::runtime_error("vertical jump window objective weights must be non-negative");
   }
+  if (config.vertical_jump_future_trend_window_s < 0.0 ||
+      config.vertical_jump_future_trend_min_fix_count < 0 ||
+      config.vertical_jump_future_trend_mean_weight < 0.0 ||
+      config.vertical_jump_future_trend_slope_weight < 0.0) {
+    throw std::runtime_error("vertical jump future trend settings must be non-negative");
+  }
   if (config.nhc_history_half_life_s <= 0.0 || config.nhc_history_max_age_s <= 0.0) {
     throw std::runtime_error("NHC history windows must be positive");
   }
@@ -1082,6 +1102,11 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "vertical_jump_window_height_integral_weight="
       << config.vertical_jump_window_height_integral_weight << '\n'
       << "vertical_jump_window_ref_weight=" << config.vertical_jump_window_ref_weight << '\n'
+      << "vertical_jump_future_trend_window_s=" << config.vertical_jump_future_trend_window_s << '\n'
+      << "vertical_jump_future_trend_min_fix_count="
+      << config.vertical_jump_future_trend_min_fix_count << '\n'
+      << "vertical_jump_future_trend_mean_weight=" << config.vertical_jump_future_trend_mean_weight << '\n'
+      << "vertical_jump_future_trend_slope_weight=" << config.vertical_jump_future_trend_slope_weight << '\n'
       << "enable_nhc_jump_reference=" << (config.enable_nhc_jump_reference ? "true" : "false") << '\n'
       << "nhc_history_half_life_s=" << config.nhc_history_half_life_s << '\n'
       << "nhc_history_max_age_s=" << config.nhc_history_max_age_s << '\n'

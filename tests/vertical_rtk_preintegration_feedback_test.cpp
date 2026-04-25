@@ -270,6 +270,10 @@ void TestSequentialRecoveryConfigLoads() {
       "vertical_jump_window_velocity_smoothness_weight=12.0\n"
       "vertical_jump_window_height_integral_weight=4.0\n"
       "vertical_jump_window_ref_weight=1.5\n"
+      "vertical_jump_future_trend_window_s=18.0\n"
+      "vertical_jump_future_trend_min_fix_count=6\n"
+      "vertical_jump_future_trend_mean_weight=0.8\n"
+      "vertical_jump_future_trend_slope_weight=120.0\n"
       "enable_nhc_jump_reference=true\n"
       "nhc_history_half_life_s=12.0\n"
       "nhc_history_max_age_s=45.0\n"
@@ -322,6 +326,10 @@ void TestSequentialRecoveryConfigLoads() {
     1e-12,
     "jump window height integral weight should load");
   ExpectNear(config.vertical_jump_window_ref_weight, 1.5, 1e-12, "jump window ref weight should load");
+  ExpectNear(config.vertical_jump_future_trend_window_s, 18.0, 1e-12, "future trend window should load");
+  ExpectNear(config.vertical_jump_future_trend_min_fix_count, 6, 0.0, "future trend minimum fix count should load");
+  ExpectNear(config.vertical_jump_future_trend_mean_weight, 0.8, 1e-12, "future trend mean weight should load");
+  ExpectNear(config.vertical_jump_future_trend_slope_weight, 120.0, 1e-12, "future trend slope weight should load");
   ExpectTrue(config.enable_nhc_jump_reference, "NHC jump reference flag should load");
   ExpectNear(config.nhc_history_half_life_s, 12.0, 1e-12, "NHC half-life should load");
   ExpectNear(config.nhc_history_max_age_s, 45.0, 1e-12, "NHC max age should load");

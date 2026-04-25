@@ -283,6 +283,7 @@ void WriteGnssConsistencyCsv(
        "selected_jump_window_start_state_index,selected_jump_window_center_state_index,"
        "selected_jump_window_end_state_index,selected_jump_window_duration_s,selected_jump_window_point_count,"
        "selected_jump_delta_vz_tail_mps,window_velocity_smooth_cost,window_height_integral_delta_m,"
+       "future_trend_residual_mean_m,future_trend_residual_slope_mps,future_trend_cost,future_trend_fix_count,"
        "recovery_mode,hold_window_passed,"
        "required_up_anchor_correction_m,local_recovery_iteration_count,pure_delta_up_anchor_start_iteration,"
        "covariance_scale,covariance_scale_e,covariance_scale_n,covariance_scale_u,"
@@ -341,6 +342,10 @@ void WriteGnssConsistencyCsv(
            << row.selected_jump_delta_vz_tail_mps << ','
            << row.window_velocity_smooth_cost << ','
            << row.window_height_integral_delta_m << ','
+           << row.future_trend_residual_mean_m << ','
+           << row.future_trend_residual_slope_mps << ','
+           << row.future_trend_cost << ','
+           << row.future_trend_fix_count << ','
            << row.recovery_mode << ','
            << (row.hold_window_passed ? 1 : 0) << ','
            << row.required_up_anchor_correction_m << ','
@@ -381,6 +386,7 @@ void WriteVerticalLocalRecoveryIterationCsv(
        "selected_jump_window_start_state_index,selected_jump_window_center_state_index,"
        "selected_jump_window_end_state_index,selected_jump_window_duration_s,selected_jump_window_point_count,"
        "selected_jump_delta_vz_tail_mps,window_velocity_smooth_cost,window_height_integral_delta_m,"
+       "future_trend_residual_mean_m,future_trend_residual_slope_mps,future_trend_cost,future_trend_fix_count,"
        "recovery_mode,hold_window_passed,"
        "used_up_anchor_fallback,pure_delta_up_anchor_only,"
        "inside_after_velocity_recovery,inside_after_iteration\n";
@@ -415,6 +421,10 @@ void WriteVerticalLocalRecoveryIterationCsv(
            << row.selected_jump_delta_vz_tail_mps << ','
            << row.window_velocity_smooth_cost << ','
            << row.window_height_integral_delta_m << ','
+           << row.future_trend_residual_mean_m << ','
+           << row.future_trend_residual_slope_mps << ','
+           << row.future_trend_cost << ','
+           << row.future_trend_fix_count << ','
            << row.recovery_mode << ','
            << (row.hold_window_passed ? 1 : 0) << ','
            << (row.used_up_anchor_fallback ? 1 : 0) << ','

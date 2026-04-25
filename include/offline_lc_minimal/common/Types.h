@@ -385,6 +385,10 @@ struct GnssConsistencyRecord {
   double selected_jump_delta_vz_tail_mps = std::numeric_limits<double>::quiet_NaN();
   double window_velocity_smooth_cost = std::numeric_limits<double>::quiet_NaN();
   double window_height_integral_delta_m = std::numeric_limits<double>::quiet_NaN();
+  double future_trend_residual_mean_m = std::numeric_limits<double>::quiet_NaN();
+  double future_trend_residual_slope_mps = std::numeric_limits<double>::quiet_NaN();
+  double future_trend_cost = std::numeric_limits<double>::quiet_NaN();
+  long long future_trend_fix_count = 0;
   std::string recovery_mode = "NONE";
   bool hold_window_passed = false;
   long long local_recovery_iteration_count = 0;
@@ -463,6 +467,10 @@ struct VerticalLocalRecoveryIterationRow {
   double selected_jump_delta_vz_tail_mps = std::numeric_limits<double>::quiet_NaN();
   double window_velocity_smooth_cost = std::numeric_limits<double>::quiet_NaN();
   double window_height_integral_delta_m = std::numeric_limits<double>::quiet_NaN();
+  double future_trend_residual_mean_m = std::numeric_limits<double>::quiet_NaN();
+  double future_trend_residual_slope_mps = std::numeric_limits<double>::quiet_NaN();
+  double future_trend_cost = std::numeric_limits<double>::quiet_NaN();
+  long long future_trend_fix_count = 0;
   std::string recovery_mode = "NONE";
   bool hold_window_passed = false;
   bool used_up_anchor_fallback = false;
