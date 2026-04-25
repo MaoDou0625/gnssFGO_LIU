@@ -1268,25 +1268,40 @@ std::optional<VerticalLocalRecoveryResult> RecoverVerticalReferenceStateLocally(
     optimized_anchor_pose,
     optimized_anchor_velocity,
     optimized_anchor_bias);
-  const gtsam::NavState propagated_end_state =
-    imu_window.preintegrated_imu_measurements.predict(
-      gtsam::NavState(recovered_anchor_state.pose, recovered_anchor_state.velocity),
-      recovered_anchor_state.bias);
-  const Eigen::Vector3d propagated_residual_enu_m =
+  auto propagate_end_state = [&](const ReferenceNodeState &anchor_state) {
+    return imu_window.preintegrated_imu_measurements.predict(
+      gtsam::NavState(anchor_state.pose, anchor_state.velocity),
+      anchor_state.bias);
+  };
+  ReferenceNodeState corrected_anchor_state = recovered_anchor_state;
+  gtsam::NavState propagated_end_state = propagate_end_state(corrected_anchor_state);
+  Eigen::Vector3d propagated_residual_enu_m =
     ComputePositionResidualEnu(propagated_end_state.pose(), measurement_enu_m);
+  double required_up_anchor_correction_m =
+    ComputeRequiredUpAnchorCorrectionM(propagated_end_state.pose(), measurement_enu_m);
+  if (std::isfinite(required_up_anchor_correction_m) &&
+      std::abs(required_up_anchor_correction_m) > 0.0) {
+    corrected_anchor_state.velocity = gtsam::Vector3(
+      corrected_anchor_state.velocity.x(),
+      corrected_anchor_state.velocity.y(),
+      corrected_anchor_state.velocity.z() + required_up_anchor_correction_m / delta_time_s);
+    propagated_end_state = propagate_end_state(corrected_anchor_state);
+    propagated_residual_enu_m = ComputePositionResidualEnu(propagated_end_state.pose(), measurement_enu_m);
+    required_up_anchor_correction_m =
+      ComputeRequiredUpAnchorCorrectionM(propagated_end_state.pose(), measurement_enu_m);
+  }
 
   VerticalLocalRecoveryResult result;
-  result.recovered_anchor_state = recovered_anchor_state;
+  result.recovered_anchor_state = corrected_anchor_state;
   result.local_postfit_u_m = propagated_residual_enu_m.z();
-  result.required_up_anchor_correction_m =
-    ComputeRequiredUpAnchorCorrectionM(propagated_end_state.pose(), measurement_enu_m);
-  result.delta_vz_applied_mps = recovered_anchor_state.velocity.z() - start_state.velocity.z();
+  result.required_up_anchor_correction_m = required_up_anchor_correction_m;
+  result.delta_vz_applied_mps = corrected_anchor_state.velocity.z() - start_state.velocity.z();
   const Eigen::Vector3d start_ypr = Rot3ToYpr(start_state.pose.rotation());
-  const Eigen::Vector3d recovered_ypr = Rot3ToYpr(recovered_anchor_state.pose.rotation());
+  const Eigen::Vector3d recovered_ypr = Rot3ToYpr(corrected_anchor_state.pose.rotation());
   result.delta_pitch_applied_rad = WrapAngleRad(recovered_ypr.y() - start_ypr.y());
   result.delta_roll_applied_rad = WrapAngleRad(recovered_ypr.z() - start_ypr.z());
   result.delta_baz_applied_mps2 =
-    recovered_anchor_state.bias.accelerometer().z() - start_state.bias.accelerometer().z();
+    corrected_anchor_state.bias.accelerometer().z() - start_state.bias.accelerometer().z();
   return result;
 }
 
@@ -2616,10 +2631,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     static_cast<long long>(recovery_anchor_state_index);
                   double iteration_prefit_u_m = prefit_residual_enu_m.z();
                   long long pure_delta_up_anchor_start_iteration = -1;
+                  int velocity_recovery_attempt_count = 0;
+                  std::optional<VerticalLocalRecoveryResult> last_recovery_result;
+                  double last_velocity_recovery_postfit_u_m = std::numeric_limits<double>::quiet_NaN();
 
                   for (int local_recovery_iteration = 0;
                        local_recovery_iteration < config_.vertical_local_recovery_max_iterations;
                        ++local_recovery_iteration) {
+                    ++velocity_recovery_attempt_count;
                     const auto recovery_result = RecoverVerticalReferenceStateLocally(
                       config_,
                       imu_params,
@@ -2636,6 +2655,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         "failed to recover local vertical window at sample " + std::to_string(sample_index);
                       break;
                     }
+                    last_recovery_result = recovery_result;
 
                     iteration.gate_reference_states[recovery_anchor_state_index] =
                       recovery_result->recovered_anchor_state;
@@ -2659,12 +2679,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         : iteration.gate_reference_states[required_prefit_index];
                     const Eigen::Vector3d local_postfit_residual_enu_m =
                       ComputePositionResidualEnu(local_postfit_reference_state.pose, record.measurement_enu_m);
+                    last_velocity_recovery_postfit_u_m = local_postfit_residual_enu_m.z();
                     consistency_record.prefit_residual_u_after_local_recovery_m = local_postfit_residual_enu_m.z();
                     consistency_record.local_postfit_residual_u_m = local_postfit_residual_enu_m.z();
                     consistency_record.required_up_anchor_correction_m =
                       recovery_result->required_up_anchor_correction_m;
                     consistency_record.delta_vz_applied_mps = recovery_result->delta_vz_applied_mps;
-                    consistency_record.delta_up_anchor_applied_m = recovery_result->delta_up_anchor_applied_m;
+                    consistency_record.delta_up_anchor_applied_m = std::numeric_limits<double>::quiet_NaN();
                     consistency_record.delta_roll_applied_rad = recovery_result->delta_roll_applied_rad;
                     consistency_record.delta_pitch_applied_rad = recovery_result->delta_pitch_applied_rad;
                     consistency_record.delta_baz_applied_mps2 = recovery_result->delta_baz_applied_mps2;
@@ -2672,58 +2693,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       ComputeVerticalNis(local_postfit_residual_enu_m.z(), consistency_base_sigma_m.z()) <=
                       vertical_gate_nis_threshold;
                     inside_gate = inside_after_velocity_recovery;
-                    bool used_up_anchor_fallback = false;
-                    bool pure_delta_up_anchor_only = false;
-                    double final_iteration_postfit_u_m = local_postfit_residual_enu_m.z();
-                    double delta_up_anchor_applied_m = recovery_result->delta_up_anchor_applied_m;
-                    if (!inside_gate &&
-                        std::isfinite(recovery_result->required_up_anchor_correction_m) &&
-                        std::abs(recovery_result->required_up_anchor_correction_m) > 0.0) {
-                      used_up_anchor_fallback = true;
-                      const auto corrected_anchor_state = ApplyVerticalUpAnchorCorrection(
-                        recovery_result->recovered_anchor_state,
-                        recovery_result->required_up_anchor_correction_m);
-                      iteration.gate_reference_states[recovery_anchor_state_index] = corrected_anchor_state;
-                      UpsertReferenceStateInitialValues(
-                        recovery_anchor_state_index,
-                        corrected_anchor_state,
-                        &sequential_initial_values);
-                      sequential_reference_valid_until_index = recovery_anchor_state_index;
-                      EnsureReferenceStatesValidUntil(
-                        state_timestamps,
-                        dataset.imu_samples,
-                        imu_params,
-                        &iteration.gate_reference_states,
-                        &sequential_reference_valid_until_index,
-                        required_prefit_index,
-                        &sequential_initial_values);
-
-                      const ReferenceNodeState corrected_postfit_reference_state =
-                        sync_result.status == StateMeasSyncStatus::kInterpolated
-                          ? InterpolateReferenceState(iteration.gate_reference_states, record.corrected_time_s)
-                          : iteration.gate_reference_states[required_prefit_index];
-                      const Eigen::Vector3d corrected_postfit_residual_enu_m =
-                        ComputePositionResidualEnu(corrected_postfit_reference_state.pose, record.measurement_enu_m);
-                      consistency_record.prefit_residual_u_after_local_recovery_m =
-                        corrected_postfit_residual_enu_m.z();
-                      consistency_record.local_postfit_residual_u_m =
-                        corrected_postfit_residual_enu_m.z();
-                      final_iteration_postfit_u_m = corrected_postfit_residual_enu_m.z();
-                      delta_up_anchor_applied_m = recovery_result->required_up_anchor_correction_m;
-                      consistency_record.delta_up_anchor_applied_m =
-                        recovery_result->required_up_anchor_correction_m;
-                      inside_gate =
-                        ComputeVerticalNis(corrected_postfit_residual_enu_m.z(), consistency_base_sigma_m.z()) <=
-                        vertical_gate_nis_threshold;
-                      pure_delta_up_anchor_only =
-                        std::abs(recovery_result->delta_vz_applied_mps) <= 1e-12 &&
-                        std::abs(recovery_result->delta_roll_applied_rad) <= 1e-12 &&
-                        std::abs(recovery_result->delta_pitch_applied_rad) <= 1e-12 &&
-                        std::abs(recovery_result->delta_baz_applied_mps2) <= 1e-12;
-                      if (pure_delta_up_anchor_only && pure_delta_up_anchor_start_iteration < 0) {
-                        pure_delta_up_anchor_start_iteration = static_cast<long long>(local_recovery_iteration + 1);
-                      }
-                    }
                     VerticalLocalRecoveryIterationRow iteration_row;
                     iteration_row.sample_index = sample_index;
                     iteration_row.corrected_time_s = record.corrected_time_s;
@@ -2736,38 +2705,96 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     iteration_row.iteration_index = static_cast<long long>(local_recovery_iteration + 1);
                     iteration_row.prefit_u_before_iteration_m = iteration_prefit_u_m;
                     iteration_row.postfit_u_after_velocity_recovery_m = local_postfit_residual_enu_m.z();
-                    iteration_row.postfit_u_after_iteration_m = final_iteration_postfit_u_m;
+                    iteration_row.postfit_u_after_iteration_m = local_postfit_residual_enu_m.z();
                     iteration_row.delta_vz_applied_mps = recovery_result->delta_vz_applied_mps;
-                    iteration_row.delta_up_anchor_applied_m = delta_up_anchor_applied_m;
+                    iteration_row.delta_up_anchor_applied_m = std::numeric_limits<double>::quiet_NaN();
                     iteration_row.delta_roll_applied_rad = recovery_result->delta_roll_applied_rad;
                     iteration_row.delta_pitch_applied_rad = recovery_result->delta_pitch_applied_rad;
                     iteration_row.delta_baz_applied_mps2 = recovery_result->delta_baz_applied_mps2;
                     iteration_row.required_up_anchor_correction_m =
                       recovery_result->required_up_anchor_correction_m;
-                    iteration_row.used_up_anchor_fallback = used_up_anchor_fallback;
-                    iteration_row.pure_delta_up_anchor_only = pure_delta_up_anchor_only;
+                    iteration_row.used_up_anchor_fallback = false;
+                    iteration_row.pure_delta_up_anchor_only = false;
                     iteration_row.inside_after_velocity_recovery = inside_after_velocity_recovery;
                     iteration_row.inside_after_iteration = inside_gate;
                     iteration.vertical_local_recovery_iterations.push_back(iteration_row);
-                    iteration_prefit_u_m = final_iteration_postfit_u_m;
+                    iteration_prefit_u_m = local_postfit_residual_enu_m.z();
                     if (inside_gate) {
                       break;
                     }
                   }
-                  consistency_record.local_recovery_iteration_count = 0;
-                  consistency_record.pure_delta_up_anchor_start_iteration = pure_delta_up_anchor_start_iteration;
-                  if (!iteration.vertical_local_recovery_iterations.empty()) {
-                    std::size_t count = 0;
-                    for (auto it = iteration.vertical_local_recovery_iterations.rbegin();
-                         it != iteration.vertical_local_recovery_iterations.rend();
-                         ++it) {
-                      if (it->sample_index != sample_index) {
-                        break;
-                      }
-                      ++count;
-                    }
-                    consistency_record.local_recovery_iteration_count = static_cast<long long>(count);
+
+                  if (!iteration.failed && !inside_gate && last_recovery_result.has_value() &&
+                      std::isfinite(last_recovery_result->required_up_anchor_correction_m) &&
+                      std::abs(last_recovery_result->required_up_anchor_correction_m) > 0.0) {
+                    const auto corrected_anchor_state = ApplyVerticalUpAnchorCorrection(
+                      iteration.gate_reference_states[recovery_anchor_state_index],
+                      last_recovery_result->required_up_anchor_correction_m);
+                    iteration.gate_reference_states[recovery_anchor_state_index] = corrected_anchor_state;
+                    UpsertReferenceStateInitialValues(
+                      recovery_anchor_state_index,
+                      corrected_anchor_state,
+                      &sequential_initial_values);
+                    sequential_reference_valid_until_index = recovery_anchor_state_index;
+                    EnsureReferenceStatesValidUntil(
+                      state_timestamps,
+                      dataset.imu_samples,
+                      imu_params,
+                      &iteration.gate_reference_states,
+                      &sequential_reference_valid_until_index,
+                      required_prefit_index,
+                      &sequential_initial_values);
+
+                    const ReferenceNodeState corrected_postfit_reference_state =
+                      sync_result.status == StateMeasSyncStatus::kInterpolated
+                        ? InterpolateReferenceState(iteration.gate_reference_states, record.corrected_time_s)
+                        : iteration.gate_reference_states[required_prefit_index];
+                    const Eigen::Vector3d corrected_postfit_residual_enu_m =
+                      ComputePositionResidualEnu(corrected_postfit_reference_state.pose, record.measurement_enu_m);
+                    consistency_record.prefit_residual_u_after_local_recovery_m =
+                      corrected_postfit_residual_enu_m.z();
+                    consistency_record.local_postfit_residual_u_m = corrected_postfit_residual_enu_m.z();
+                    consistency_record.delta_up_anchor_applied_m =
+                      last_recovery_result->required_up_anchor_correction_m;
+                    inside_gate =
+                      ComputeVerticalNis(corrected_postfit_residual_enu_m.z(), consistency_base_sigma_m.z()) <=
+                      vertical_gate_nis_threshold;
+
+                    VerticalLocalRecoveryIterationRow fallback_iteration_row;
+                    fallback_iteration_row.sample_index = sample_index;
+                    fallback_iteration_row.corrected_time_s = record.corrected_time_s;
+                    fallback_iteration_row.recovery_anchor_state_index =
+                      static_cast<long long>(recovery_anchor_state_index);
+                    fallback_iteration_row.feedback_anchor_state_index =
+                      static_cast<long long>(*feedback_anchor_state);
+                    fallback_iteration_row.nhc_jump_anchor_state_index =
+                      nhc_jump_anchor_state.has_value() ? static_cast<long long>(*nhc_jump_anchor_state) : -1;
+                    fallback_iteration_row.iteration_index =
+                      static_cast<long long>(velocity_recovery_attempt_count + 1);
+                    fallback_iteration_row.prefit_u_before_iteration_m = iteration_prefit_u_m;
+                    fallback_iteration_row.postfit_u_after_velocity_recovery_m =
+                      last_velocity_recovery_postfit_u_m;
+                    fallback_iteration_row.postfit_u_after_iteration_m = corrected_postfit_residual_enu_m.z();
+                    fallback_iteration_row.delta_vz_applied_mps = 0.0;
+                    fallback_iteration_row.delta_up_anchor_applied_m =
+                      last_recovery_result->required_up_anchor_correction_m;
+                    fallback_iteration_row.delta_roll_applied_rad = 0.0;
+                    fallback_iteration_row.delta_pitch_applied_rad = 0.0;
+                    fallback_iteration_row.delta_baz_applied_mps2 = 0.0;
+                    fallback_iteration_row.required_up_anchor_correction_m =
+                      last_recovery_result->required_up_anchor_correction_m;
+                    fallback_iteration_row.used_up_anchor_fallback = true;
+                    fallback_iteration_row.pure_delta_up_anchor_only = true;
+                    fallback_iteration_row.inside_after_velocity_recovery = false;
+                    fallback_iteration_row.inside_after_iteration = inside_gate;
+                    iteration.vertical_local_recovery_iterations.push_back(fallback_iteration_row);
+                    pure_delta_up_anchor_start_iteration =
+                      static_cast<long long>(velocity_recovery_attempt_count + 1);
                   }
+
+                  consistency_record.local_recovery_iteration_count =
+                    static_cast<long long>(velocity_recovery_attempt_count);
+                  consistency_record.pure_delta_up_anchor_start_iteration = pure_delta_up_anchor_start_iteration;
 
                   if (!inside_gate) {
                     iteration.failed = true;
