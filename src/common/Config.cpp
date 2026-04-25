@@ -305,6 +305,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.nhc_body_vz_percentile_scale = ParseDouble(normalized_value);
   } else if (normalized_key == "nhc_jump_min_separation_s") {
     config.nhc_jump_min_separation_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "nhc_jump_recovery_lookback_s") {
+    config.nhc_jump_recovery_lookback_s = ParseDouble(normalized_value);
   } else if (normalized_key == "reserve_vertical_velocity_feedback_interface") {
     config.reserve_vertical_velocity_feedback_interface = ParseBool(normalized_value);
   } else if (
@@ -700,6 +702,9 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     if (config.nhc_jump_min_separation_s < 0.0) {
       throw std::runtime_error("nhc_jump_min_separation_s must be non-negative");
     }
+    if (config.nhc_jump_recovery_lookback_s <= 0.0) {
+      throw std::runtime_error("nhc_jump_recovery_lookback_s must be positive");
+    }
     if (config.static_alignment_duration_s < 0.0) {
       throw std::runtime_error("static_alignment_duration_s must be non-negative");
     }
@@ -996,6 +1001,9 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
   if (config.nhc_jump_min_separation_s < 0.0) {
     throw std::runtime_error("nhc_jump_min_separation_s must be non-negative");
   }
+  if (config.nhc_jump_recovery_lookback_s <= 0.0) {
+    throw std::runtime_error("nhc_jump_recovery_lookback_s must be positive");
+  }
   if (config.static_alignment_duration_s < 0.0) {
     throw std::runtime_error("static_alignment_duration_s must be non-negative");
   }
@@ -1126,6 +1134,7 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "nhc_body_vy_percentile_scale=" << config.nhc_body_vy_percentile_scale << '\n'
       << "nhc_body_vz_percentile_scale=" << config.nhc_body_vz_percentile_scale << '\n'
       << "nhc_jump_min_separation_s=" << config.nhc_jump_min_separation_s << '\n'
+      << "nhc_jump_recovery_lookback_s=" << config.nhc_jump_recovery_lookback_s << '\n'
       << "reserve_vertical_velocity_feedback_interface="
       << (config.reserve_vertical_velocity_feedback_interface ? "true" : "false") << '\n'
       << "enable_reweighted_combined_imu_factor="

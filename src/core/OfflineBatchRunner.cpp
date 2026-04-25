@@ -3091,19 +3091,28 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     confirmed_inside_state_index.value_or(graph_timeline.dynamic_start_index);
                   std::size_t nhc_search_start_state_index = recovery_anchor_state_index;
                   const double nhc_search_start_time_s =
-                    record.corrected_time_s - std::max(config_.vertical_jump_hold_window_s, 1e-3);
+                    record.corrected_time_s -
+                    std::max(
+                      {config_.vertical_jump_hold_window_s,
+                       config_.nhc_jump_recovery_lookback_s,
+                       1e-3});
                   while (nhc_search_start_state_index > graph_timeline.dynamic_start_index &&
                          state_timestamps[nhc_search_start_state_index] > nhc_search_start_time_s) {
                     --nhc_search_start_state_index;
                   }
+                  const double preferred_nhc_jump_sign = prefit_residual_enu_m.z();
                   auto nhc_jump_anchor_state =
-                    nhc_jump_detector.FindRecentJumpAnchor(nhc_search_start_state_index, *feedback_anchor_state);
+                    nhc_jump_detector.FindRecentJumpAnchor(
+                      nhc_search_start_state_index,
+                      *feedback_anchor_state,
+                      preferred_nhc_jump_sign);
                   if (!nhc_jump_anchor_state.has_value()) {
                     nhc_jump_anchor_state =
                       nhc_jump_detector.FindJumpAnchor(
                         iteration.gate_reference_states,
                         nhc_search_start_state_index,
-                        *feedback_anchor_state);
+                        *feedback_anchor_state,
+                        preferred_nhc_jump_sign);
                   }
                   if (nhc_jump_anchor_state.has_value()) {
                     consistency_record.nhc_jump_anchor_state_index =
@@ -3265,7 +3274,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                             iteration.gate_reference_states[window_candidate.start_state_index - 1U].time_s,
                           0.05);
                         forced_tail_delta_options_mps.push_back(
-                          std::clamp(iteration_prefit_u_m / residual_correction_dt_s, -2.0, 2.0));
+                          std::clamp(-iteration_prefit_u_m / residual_correction_dt_s, -2.0, 2.0));
                       }
                       for (const double forced_tail_delta_mps : forced_tail_delta_options_mps) {
                       for (const double tail_delta_scale : {0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0}) {
@@ -3385,8 +3394,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     }
 
                     if (!best_window.has_value() || !best_window_correction.has_value() ||
-                        !best_recovery_result.has_value() ||
-                        !(best_objective + 1e-9 < current_objective)) {
+                        !best_recovery_result.has_value()) {
+                      break;
+                    }
+                    const bool best_objective_improved = best_objective + 1e-9 < current_objective;
+                    const bool best_height_improved =
+                      std::abs(best_hold_evaluation.current_local_postfit_u_m) + 1e-4 <
+                      std::abs(iteration_prefit_u_m);
+                    if (!best_objective_improved && !best_height_improved) {
                       break;
                     }
                     if (!recovered_current_inside(best_hold_evaluation) &&

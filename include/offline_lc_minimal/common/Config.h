@@ -86,6 +86,7 @@ struct OfflineRunnerConfig {
   double nhc_body_vy_percentile_scale = 1.3;
   double nhc_body_vz_percentile_scale = 3.0;
   double nhc_jump_min_separation_s = 0.5;
+  double nhc_jump_recovery_lookback_s = 5.0;
   bool reserve_vertical_velocity_feedback_interface = false;
   bool enable_reweighted_combined_imu_factor = false;
   double reweighted_combined_imu_attitude_sigma_rad = 1e-3;

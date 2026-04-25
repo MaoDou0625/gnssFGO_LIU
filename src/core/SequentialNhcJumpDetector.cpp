@@ -54,6 +54,13 @@ double Median(std::vector<double> values) {
   return values[middle];
 }
 
+int SignOf(const double value) {
+  if (!std::isfinite(value) || std::abs(value) <= 1e-12) {
+    return 0;
+  }
+  return value > 0.0 ? 1 : -1;
+}
+
 }  // namespace
 
 SequentialNhcJumpDetector::SequentialNhcJumpDetector(const OfflineRunnerConfig &config)
@@ -171,35 +178,46 @@ NhcStateEvaluation SequentialNhcJumpDetector::EvaluateTransition(
 std::optional<std::size_t> SequentialNhcJumpDetector::FindJumpAnchor(
   const std::vector<ReferenceNodeState> &reference_states,
   const std::size_t start_index,
-  const std::size_t end_index) const {
+  const std::size_t end_index,
+  const double preferred_body_vz_jump_sign) const {
   if (!config_.enable_nhc_jump_reference || reference_states.empty() || start_index >= end_index ||
       end_index >= reference_states.size()) {
     return std::nullopt;
   }
 
+  const int preferred_sign = SignOf(preferred_body_vz_jump_sign);
   std::optional<std::size_t> first_crossing_index;
+  std::optional<std::size_t> first_preferred_crossing_index;
   for (std::size_t state_index = start_index + 1U; state_index <= end_index; ++state_index) {
     const NhcStateEvaluation evaluation =
       EvaluateTransition(reference_states[state_index - 1U], reference_states[state_index], reference_states[state_index].time_s);
     if (evaluation.exceeds_threshold) {
-      first_crossing_index = state_index;
-      break;
+      if (!first_crossing_index.has_value()) {
+        first_crossing_index = state_index;
+      }
+      if (preferred_sign == 0 || SignOf(evaluation.body_vz_jump_mps) == preferred_sign) {
+        first_preferred_crossing_index = state_index;
+        break;
+      }
     }
   }
-  if (!first_crossing_index.has_value()) {
-    return std::nullopt;
+  if (first_preferred_crossing_index.has_value()) {
+    return first_preferred_crossing_index;
   }
   return first_crossing_index;
 }
 
 std::optional<std::size_t> SequentialNhcJumpDetector::FindRecentJumpAnchor(
   const std::size_t start_index,
-  const std::size_t end_index) const {
+  const std::size_t end_index,
+  const double preferred_body_vz_jump_sign) const {
   if (!config_.enable_nhc_jump_reference || start_index > end_index || jump_history_.empty()) {
     return std::nullopt;
   }
 
+  const int preferred_sign = SignOf(preferred_body_vz_jump_sign);
   std::optional<DetectedJump> earliest_jump;
+  std::optional<DetectedJump> earliest_preferred_jump;
   for (const auto &jump : jump_history_) {
     if (jump.state_index < start_index || jump.state_index > end_index) {
       continue;
@@ -207,6 +225,13 @@ std::optional<std::size_t> SequentialNhcJumpDetector::FindRecentJumpAnchor(
     if (!earliest_jump.has_value() || jump.time_s < earliest_jump->time_s) {
       earliest_jump = jump;
     }
+    if ((preferred_sign == 0 || SignOf(jump.body_vz_jump_mps) == preferred_sign) &&
+        (!earliest_preferred_jump.has_value() || jump.time_s < earliest_preferred_jump->time_s)) {
+      earliest_preferred_jump = jump;
+    }
+  }
+  if (earliest_preferred_jump.has_value()) {
+    return earliest_preferred_jump->state_index;
   }
   if (!earliest_jump.has_value()) {
     return std::nullopt;
@@ -269,9 +294,10 @@ void SequentialNhcJumpDetector::AppendState(const ReferenceNodeState &state, con
         .body_vz_threshold_mps = snapshot.body_vz_threshold_mps,
       };
       if (!jump_history_.empty() &&
-          state.time_s - jump_history_.back().time_s < config_.nhc_jump_min_separation_s) {
-        // Keep the earliest threshold crossing as the recovery anchor. Later peaks in the
-        // same event are useful diagnostics but are too late for local velocity repair.
+          state.time_s - jump_history_.back().time_s < config_.nhc_jump_min_separation_s &&
+          SignOf(jump_history_.back().body_vz_jump_mps) == SignOf(body_vz_jump_mps)) {
+        // Keep the earliest same-direction crossing as the recovery anchor. Opposite-sign
+        // crossings are separate events and must remain available for later recovery.
       } else {
         jump_history_.push_back(jump);
       }

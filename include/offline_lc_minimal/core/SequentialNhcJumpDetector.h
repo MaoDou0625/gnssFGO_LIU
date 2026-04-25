@@ -55,11 +55,13 @@ class SequentialNhcJumpDetector {
   [[nodiscard]] std::optional<std::size_t> FindJumpAnchor(
     const std::vector<ReferenceNodeState> &reference_states,
     std::size_t start_index,
-    std::size_t end_index) const;
+    std::size_t end_index,
+    double preferred_body_vz_jump_sign = 0.0) const;
 
   [[nodiscard]] std::optional<std::size_t> FindRecentJumpAnchor(
     std::size_t start_index,
-    std::size_t end_index) const;
+    std::size_t end_index,
+    double preferred_body_vz_jump_sign = 0.0) const;
 
  private:
   struct AcceptedSample {
