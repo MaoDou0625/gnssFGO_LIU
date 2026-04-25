@@ -256,9 +256,8 @@ void SequentialNhcJumpDetector::AppendState(const ReferenceNodeState &state, con
       };
       if (!jump_history_.empty() &&
           state.time_s - jump_history_.back().time_s < config_.nhc_jump_min_separation_s) {
-        if (std::abs(body_vz_jump_mps) > std::abs(jump_history_.back().body_vz_jump_mps)) {
-          jump_history_.back() = jump;
-        }
+        // Keep the earliest threshold crossing as the recovery anchor. Later peaks in the
+        // same event are useful diagnostics but are too late for local velocity repair.
       } else {
         jump_history_.push_back(jump);
       }
