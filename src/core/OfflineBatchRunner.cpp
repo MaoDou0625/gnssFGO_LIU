@@ -458,6 +458,19 @@ ReferenceNodeState ResolveReferenceStateForHoldWindowSpec(
            : reference_states[spec.reference_state_index];
 }
 
+std::vector<VerticalHoldWindowSpec> FilterVerticalHoldWindowSpecsAfterState(
+  const std::vector<VerticalHoldWindowSpec> &hold_window_specs,
+  const std::size_t state_index) {
+  std::vector<VerticalHoldWindowSpec> filtered_specs;
+  filtered_specs.reserve(hold_window_specs.size());
+  for (const auto &spec : hold_window_specs) {
+    if (spec.reference_state_index > state_index) {
+      filtered_specs.push_back(spec);
+    }
+  }
+  return filtered_specs;
+}
+
 VerticalHoldWindowEvaluation EvaluateVerticalHoldWindow(
   const std::vector<ReferenceNodeState> &reference_states,
   const std::vector<VerticalHoldWindowSpec> &hold_window_specs,
@@ -3624,7 +3637,19 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
 
                       std::size_t candidate_scoring_end_state_index = recovery_scoring_end_state_index;
                       std::vector<VerticalHoldWindowSpec> body_z_segment_specs;
-                      if (window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW") {
+                      const bool body_z_seed_candidate =
+                        window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW";
+                      const bool current_sample_covered_by_body_z_window =
+                        body_z_seed_candidate && *feedback_anchor_state <= window_candidate.end_state_index;
+                      std::vector<VerticalHoldWindowSpec> candidate_acceptance_hold_specs = hold_window_specs;
+                      if (current_sample_covered_by_body_z_window) {
+                        // The triggering RTK sample is synchronized inside the detected acceleration anomaly.
+                        // Do not reject the correction only because the abnormal window's internal height is
+                        // outside gate; score the candidate from the first post-window RTK evidence instead.
+                        candidate_acceptance_hold_specs =
+                          FilterVerticalHoldWindowSpecsAfterState(hold_window_specs, window_candidate.end_state_index);
+                      }
+                      if (body_z_seed_candidate) {
                         std::size_t body_z_segment_end_state_index = recovery_scoring_end_state_index;
                         std::optional<std::size_t> next_body_z_start_state_index;
                         for (const auto &body_z_window : body_z_seed_detection.windows) {
@@ -3650,6 +3675,16 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         body_z_segment_specs = build_vertical_window_specs_between_times(
                           iteration.gate_reference_states[window_candidate.end_state_index].time_s,
                           iteration.gate_reference_states[body_z_segment_end_state_index].time_s);
+                        body_z_segment_specs = FilterVerticalHoldWindowSpecsAfterState(
+                          body_z_segment_specs, window_candidate.end_state_index);
+                        if (current_sample_covered_by_body_z_window &&
+                            candidate_acceptance_hold_specs.empty()) {
+                          candidate_acceptance_hold_specs = body_z_segment_specs;
+                        }
+                      }
+                      if (current_sample_covered_by_body_z_window &&
+                          candidate_acceptance_hold_specs.empty()) {
+                        continue;
                       }
                       for (const double forced_tail_delta_mps : forced_tail_delta_options_mps) {
                       for (const double tail_delta_scale : {0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0}) {
@@ -3694,11 +3729,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
 
                       const auto candidate_hold_evaluation = EvaluateVerticalHoldWindow(
                         candidate_reference_states,
-                        hold_window_specs,
+                        candidate_acceptance_hold_specs,
                         recovery_anchor_state_index,
                         vertical_gate_nis_threshold);
-                      if (window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW" &&
-                          !recovered_current_inside(candidate_hold_evaluation)) {
+                      if (body_z_seed_candidate && !recovered_current_inside(candidate_hold_evaluation)) {
                         continue;
                       }
                       const double candidate_vz_reference_rms = compute_vz_reference_rms(
@@ -3753,8 +3787,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       scored_result.local_postfit_u_m = candidate_hold_evaluation.current_local_postfit_u_m;
                       scored_result.required_up_anchor_correction_m =
                         ComputeRequiredUpAnchorCorrectionM(
-                          ResolveReferenceStateForHoldWindowSpec(candidate_reference_states, hold_window_specs.front()).pose,
-                          hold_window_specs.front().measurement_enu_m);
+                          ResolveReferenceStateForHoldWindowSpec(
+                            candidate_reference_states,
+                            candidate_acceptance_hold_specs.front())
+                            .pose,
+                          candidate_acceptance_hold_specs.front().measurement_enu_m);
                       scored_result.delta_vz_applied_mps = window_correction->delta_vz_tail_mps;
                       scored_result.delta_roll_applied_rad = 0.0;
                       scored_result.delta_pitch_applied_rad = 0.0;
@@ -3810,7 +3847,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       }
                     }
 
-                    if (window_correction_attempt_limit_reached) {
+                    if (window_correction_attempt_limit_reached &&
+                        (!best_window.has_value() || !best_window_correction.has_value() ||
+                         !best_recovery_result.has_value())) {
                       iteration.failed = true;
                       iteration.failure_message =
                         "vertical local recovery exceeded window correction attempt limit at sample " +
