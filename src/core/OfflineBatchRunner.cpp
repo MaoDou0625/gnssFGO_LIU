@@ -3176,9 +3176,54 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         return build_vertical_window_specs(current_sample_index, config_.vertical_jump_future_trend_window_s);
       };
 
+      const auto refresh_local_postfit_residual =
+        [&](const GnssFactorRecord &gnss_record, GnssConsistencyRecord *gnss_consistency) {
+          if (gnss_consistency == nullptr ||
+              (!IsSynchronizedStatus(gnss_record.sync_status) &&
+               gnss_record.sync_status != StateMeasSyncStatus::kInterpolated)) {
+            return;
+          }
+          const ReferenceNodeState refreshed_state =
+            InterpolateReferenceState(iteration.gate_reference_states, gnss_record.corrected_time_s);
+          const Eigen::Vector3d refreshed_residual_enu_m =
+            ComputePositionResidualEnu(refreshed_state.pose, gnss_record.measurement_enu_m);
+          gnss_consistency->postfit_residual_enu_m = refreshed_residual_enu_m;
+          gnss_consistency->local_postfit_residual_u_m = refreshed_residual_enu_m.z();
+          gnss_consistency->prefit_residual_u_after_local_recovery_m = refreshed_residual_enu_m.z();
+          const double sigma_u_m =
+            std::isfinite(gnss_consistency->effective_sigma_u_m)
+              ? gnss_consistency->effective_sigma_u_m
+              : gnss_consistency->sigma_u_m;
+          if (std::isfinite(sigma_u_m) && sigma_u_m > 0.0) {
+            gnss_consistency->postfit_nis =
+              ComputeVerticalNis(refreshed_residual_enu_m.z(), sigma_u_m);
+            gnss_consistency->vertical_gate_inside =
+              gnss_consistency->postfit_nis <= vertical_gate_nis_threshold ? 1.0 : 0.0;
+          }
+        };
+
+      const auto refresh_local_postfit_residuals_between_times =
+        [&](const double window_start_time_s, const double window_end_time_s) {
+          if (!collect_gnss_consistency ||
+              iteration.gnss_factor_records.empty() ||
+              iteration.gnss_factor_records.size() != iteration.gnss_consistency_records.size()) {
+            return;
+          }
+          for (std::size_t record_index = 0; record_index < iteration.gnss_factor_records.size(); ++record_index) {
+            const auto &existing_record = iteration.gnss_factor_records[record_index];
+            auto &existing_consistency = iteration.gnss_consistency_records[record_index];
+            if (!existing_record.factor_used ||
+                existing_record.corrected_time_s < window_start_time_s - kTimeEpsilonS ||
+                existing_record.corrected_time_s > window_end_time_s + kTimeEpsilonS) {
+              continue;
+            }
+            refresh_local_postfit_residual(existing_record, &existing_consistency);
+          }
+        };
+
       const auto compute_vz_reference_rms = [&](
-                                              const std::vector<ReferenceNodeState> &reference_states,
-                                              const std::size_t start_index,
+                                               const std::vector<ReferenceNodeState> &reference_states,
+                                               const std::size_t start_index,
                                               const std::size_t end_index) {
         if (reference_states.empty() || start_index >= reference_states.size() || end_index >= reference_states.size() ||
             start_index > end_index) {
@@ -3990,6 +4035,15 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     consistency_record.future_trend_fix_count = best_recovery_result->future_trend_fix_count;
                     consistency_record.recovery_mode = "SPARSE_WINDOW";
                     consistency_record.hold_window_passed = hold_window_passed;
+                    if (best_window->start_state_index < iteration.gate_reference_states.size() &&
+                        best_window->end_state_index < iteration.gate_reference_states.size()) {
+                      refresh_local_postfit_residuals_between_times(
+                        iteration.gate_reference_states[best_window->start_state_index].time_s,
+                        std::max(
+                          iteration.gate_reference_states[best_window->end_state_index].time_s,
+                          record.corrected_time_s));
+                    }
+                    refresh_local_postfit_residual(record, &consistency_record);
 
                     VerticalLocalRecoveryIterationRow iteration_row;
                     iteration_row.sample_index = sample_index;
