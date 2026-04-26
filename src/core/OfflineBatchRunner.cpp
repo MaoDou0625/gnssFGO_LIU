@@ -3501,6 +3501,21 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       if (!body_z_seed_candidate) {
                         forced_tail_delta_options_mps.push_back(
                           window_candidate.center_candidate.delta_vz_init_mps);
+                      } else if (
+                        window_candidate.end_state_index < iteration.gate_reference_states.size() &&
+                        std::isfinite(iteration_prefit_u_m)) {
+                        const double feedback_dt_s = std::max(
+                          record.corrected_time_s -
+                            iteration.gate_reference_states[window_candidate.end_state_index].time_s,
+                          0.05);
+                        const double residual_feedback_delta_vz_mps =
+                          std::clamp(-iteration_prefit_u_m / feedback_dt_s, -0.5, 0.5);
+                        const double current_tail_vz_mps =
+                          iteration.gate_reference_states[window_candidate.end_state_index].velocity.z();
+                        for (const double feedback_scale : {0.5, 0.75, 1.0, 1.25, 1.5}) {
+                          forced_tail_delta_options_mps.push_back(
+                            current_tail_vz_mps + feedback_scale * residual_feedback_delta_vz_mps);
+                        }
                       }
                       std::vector<double> forced_tail_delta_up_options_m{
                         std::numeric_limits<double>::quiet_NaN(),
@@ -3722,7 +3737,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       scored_result.future_trend_cost = candidate_future_trend_evaluation.cost;
                       scored_result.future_trend_fix_count =
                         static_cast<long long>(candidate_future_trend_evaluation.fix_count);
-                      scored_result.recovery_mode = "SPARSE_WINDOW";
+                      scored_result.recovery_mode =
+                        body_z_seed_candidate && std::isfinite(forced_tail_delta_mps)
+                          ? "SPARSE_WINDOW_FEEDBACK"
+                          : "SPARSE_WINDOW";
                       scored_result.hold_window_passed = candidate_hold_evaluation.hold_window_passed;
                       best_objective = candidate_objective;
                       best_window = window_candidate;
@@ -3843,7 +3861,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       best_recovery_result->future_trend_residual_slope_mps;
                     consistency_record.future_trend_cost = best_recovery_result->future_trend_cost;
                     consistency_record.future_trend_fix_count = best_recovery_result->future_trend_fix_count;
-                    consistency_record.recovery_mode = "SPARSE_WINDOW";
+                    consistency_record.recovery_mode = best_recovery_result->recovery_mode;
                     consistency_record.hold_window_passed = hold_window_passed;
                     if (best_window->start_state_index < iteration.gate_reference_states.size() &&
                         best_window->end_state_index < iteration.gate_reference_states.size()) {
@@ -3917,7 +3935,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       best_recovery_result->future_trend_residual_slope_mps;
                     iteration_row.future_trend_cost = best_recovery_result->future_trend_cost;
                     iteration_row.future_trend_fix_count = best_recovery_result->future_trend_fix_count;
-                    iteration_row.recovery_mode = "SPARSE_WINDOW";
+                    iteration_row.recovery_mode = best_recovery_result->recovery_mode;
                     iteration_row.hold_window_passed = hold_window_passed;
                     iteration_row.used_up_anchor_fallback = false;
                     iteration_row.pure_delta_up_anchor_only = false;
