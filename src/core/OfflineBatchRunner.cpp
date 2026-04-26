@@ -4195,7 +4195,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   config_.vertical_rtk_feedback_sigma_attitude_rad,
                   config_.vertical_rtk_feedback_sigma_attitude_rad,
                   0.05,
-                  std::max(std::min(config_.vertical_rtk_feedback_sigma_baz_mps2, config_.bias_acc_prior_sigma), 1e-4)))
+                  std::max(ResolveVerticalAccBiasSigmaMps2(config_), 1e-12)))
               : gtsam::SharedNoiseModel{};
 
           switch (sync_result.status) {
