@@ -456,6 +456,7 @@ SparseVerticalJumpWindowCandidate SparseVerticalJumpPlanner::BuildWindowAroundCa
   const double max_duration_s = std::max(config_.vertical_jump_window_max_duration_s, 1e-6);
   const double support_ratio = std::clamp(config_.vertical_jump_window_support_ratio, 0.0, 1.0);
   const int center_sign = SignOf(candidate.vz_mismatch_jump_mps);
+  const double center_abs_jump_mps = std::abs(candidate.vz_mismatch_jump_mps);
 
   auto would_fit = [&](const std::size_t proposed_start, const std::size_t proposed_end) {
     if (proposed_start < lower_bound || proposed_end > upper_bound || proposed_start > proposed_end) {
@@ -474,7 +475,13 @@ SparseVerticalJumpWindowCandidate SparseVerticalJumpPlanner::BuildWindowAroundCa
       return false;
     }
     const double threshold_mps = CurrentJumpStepThreshold(reference_states[state_index].time_s);
-    return std::abs(mismatch_jump_mps) >= support_ratio * threshold_mps;
+    double support_threshold_mps = support_ratio * threshold_mps;
+    if (std::isfinite(center_abs_jump_mps) && center_abs_jump_mps > 0.0) {
+      support_threshold_mps =
+        std::min(support_threshold_mps, support_ratio * center_abs_jump_mps);
+    }
+    support_threshold_mps = std::max(support_threshold_mps, 1e-6);
+    return std::abs(mismatch_jump_mps) >= support_threshold_mps;
   };
   auto include_left = [&]() {
     if (window.start_state_index == lower_bound) {
@@ -517,6 +524,10 @@ SparseVerticalJumpWindowCandidate SparseVerticalJumpPlanner::BuildWindowAroundCa
         include_right()) {
       expanded = true;
     }
+  }
+  for (int count = 0; count < padding; ++count) {
+    (void)include_left();
+    (void)include_right();
   }
 
   window.duration_s =

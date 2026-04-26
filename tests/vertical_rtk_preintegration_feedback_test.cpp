@@ -879,14 +879,14 @@ void TestSparseVerticalJumpPlannerBuildsWindowAroundPeakCandidate() {
     "window should include the state before the peak");
   ExpectNear(
     static_cast<double>(windows.front().end_state_index),
-    3.0,
+    4.0,
     0.0,
-    "window should include the state after the peak");
+    "window should include redundant safety padding after the peak");
   ExpectNear(
     static_cast<double>(windows.front().point_count),
-    3.0,
+    4.0,
     0.0,
-    "window point count should reflect the padded correction span");
+    "window point count should reflect the redundant correction span");
 }
 
 }  // namespace

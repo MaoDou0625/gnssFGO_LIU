@@ -27,10 +27,11 @@ class DetectorConfig:
     center_gap_s: float = 0.03
     velocity_smooth_s: float = 0.20
     threshold_ratio: float = 0.35
-    support_ratio: float = 0.35
+    support_ratio: float = 0.25
+    redundant_padding_s: float = 0.10
     min_score_mps: float = 0.008
     min_separation_s: float = 0.50
-    max_window_duration_s: float = 0.55
+    max_window_duration_s: float = 0.75
     max_levels: int = 12
     dense_gap_s: float = 0.80
     dense_peak_count: int = 20
@@ -124,7 +125,10 @@ def build_window(
     cfg: DetectorConfig,
 ) -> tuple[int, int]:
     center_score = float(score[center_index])
-    support_threshold = max(cfg.min_score_mps, cfg.support_ratio * threshold_mps)
+    support_threshold = max(
+        cfg.min_score_mps,
+        min(cfg.support_ratio * threshold_mps, cfg.support_ratio * center_score),
+    )
     max_half_duration_s = 0.5 * cfg.max_window_duration_s
     start_index = center_index
     end_index = center_index
@@ -142,6 +146,13 @@ def build_window(
         if not math.isfinite(float(score[next_end])) or score[next_end] < support_threshold:
             break
         end_index = next_end
+    local_dt_s = float(np.nanmedian(np.diff(time_s))) if len(time_s) > 1 else cfg.redundant_padding_s
+    padding_count = max(0, int(round(cfg.redundant_padding_s / max(local_dt_s, 1e-9))))
+    for _ in range(padding_count):
+        if start_index > 0 and time_s[end_index] - time_s[start_index - 1] <= cfg.max_window_duration_s:
+            start_index -= 1
+        if end_index + 1 < len(score) and time_s[end_index + 1] - time_s[start_index] <= cfg.max_window_duration_s:
+            end_index += 1
     if start_index == center_index and center_index > 0:
         start_index -= 1
     if end_index == center_index and center_index + 1 < len(score):

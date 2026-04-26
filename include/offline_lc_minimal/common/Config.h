@@ -67,10 +67,10 @@ struct OfflineRunnerConfig {
   double vertical_jump_hold_window_s = 2.0;
   double vertical_jump_step_min_threshold_mps = 0.05;
   double vertical_jump_vz_prior_sigma_mps = 0.03;
-  int vertical_jump_window_default_padding_states = 1;
-  double vertical_jump_window_support_ratio = 0.35;
-  double vertical_jump_window_max_duration_s = 0.35;
-  int vertical_jump_window_max_points = 7;
+  int vertical_jump_window_default_padding_states = 2;
+  double vertical_jump_window_support_ratio = 0.25;
+  double vertical_jump_window_max_duration_s = 0.75;
+  int vertical_jump_window_max_points = 15;
   double vertical_jump_window_tail_target_s = 1.0;
   double vertical_jump_window_velocity_smoothness_weight = 20.0;
   double vertical_jump_window_height_integral_weight = 5.0;
