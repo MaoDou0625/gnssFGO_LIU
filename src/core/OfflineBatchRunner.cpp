@@ -3503,7 +3503,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       0.02 * static_cast<double>(selected_jump_window_center_indices.size());
 
                     std::vector<SparseVerticalJumpWindowCandidate> sparse_jump_windows;
-                    if (config_.enable_body_z_seed_jump_windows && !body_z_seed_detection.windows.empty()) {
+                    const bool use_body_z_seed_window_candidates =
+                      config_.enable_body_z_seed_jump_windows && !body_z_seed_detection.windows.empty();
+                    if (use_body_z_seed_window_candidates) {
                       for (const auto &body_z_window : body_z_seed_detection.windows) {
                         if (body_z_window.end_state_index < graph_timeline.dynamic_start_index + 1U ||
                             body_z_window.start_state_index > *feedback_anchor_state) {
@@ -3572,18 +3574,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         sparse_jump_windows.push_back(window_candidate);
                       }
                     }
-                    auto fallback_sparse_jump_windows = iteration_sparse_jump_planner.BuildWindowCandidates(
-                      iteration.gate_reference_states,
-                      vertical_vz_reference_by_state,
-                      recovery_anchor_state_index,
-                      *feedback_anchor_state,
-                      [&](const std::size_t state_index) {
-                        return nhc_supported_state_indices.contains(state_index);
-                      });
-                    sparse_jump_windows.insert(
-                      sparse_jump_windows.end(),
-                      std::make_move_iterator(fallback_sparse_jump_windows.begin()),
-                      std::make_move_iterator(fallback_sparse_jump_windows.end()));
+                    if (!use_body_z_seed_window_candidates) {
+                      auto fallback_sparse_jump_windows = iteration_sparse_jump_planner.BuildWindowCandidates(
+                        iteration.gate_reference_states,
+                        vertical_vz_reference_by_state,
+                        recovery_anchor_state_index,
+                        *feedback_anchor_state,
+                        [&](const std::size_t state_index) {
+                          return nhc_supported_state_indices.contains(state_index);
+                        });
+                      sparse_jump_windows.insert(
+                        sparse_jump_windows.end(),
+                        std::make_move_iterator(fallback_sparse_jump_windows.begin()),
+                        std::make_move_iterator(fallback_sparse_jump_windows.end()));
+                    }
                     sparse_jump_windows.erase(
                       std::remove_if(
                         sparse_jump_windows.begin(),
