@@ -220,6 +220,25 @@ std::size_t NearestStateIndex(const std::vector<double> &state_timestamps, const
            : left_index;
 }
 
+void ExpandWindowByElapsedPadding(
+  const std::vector<BodyZJumpSignalSample> &signal,
+  const double left_target_time_s,
+  const double right_target_time_s,
+  const double max_duration_s,
+  std::size_t &start_index,
+  std::size_t &end_index) {
+  while (start_index > 0U &&
+         signal[start_index - 1U].time_s >= left_target_time_s - kTimeEpsilonS &&
+         signal[end_index].time_s - signal[start_index - 1U].time_s <= max_duration_s + kTimeEpsilonS) {
+    --start_index;
+  }
+  while (end_index + 1U < signal.size() &&
+         signal[end_index + 1U].time_s <= right_target_time_s + kTimeEpsilonS &&
+         signal[end_index + 1U].time_s - signal[start_index].time_s <= max_duration_s + kTimeEpsilonS) {
+    ++end_index;
+  }
+}
+
 std::pair<std::size_t, std::size_t> BuildWindow(
   const std::size_t center_index,
   const std::vector<double> &score,
@@ -255,21 +274,15 @@ std::pair<std::size_t, std::size_t> BuildWindow(
     end_index = next_end;
   }
 
-  const double median_dt_s = signal.size() > 1U
-                               ? std::max(signal[1U].time_s - signal[0U].time_s, 1e-9)
-                               : std::max(config.body_z_jump_redundant_padding_s, 1e-9);
-  const int padding_count =
-    std::max(0, static_cast<int>(std::llround(config.body_z_jump_redundant_padding_s / median_dt_s)));
-  for (int index = 0; index < padding_count; ++index) {
-    if (start_index > 0U &&
-        signal[end_index].time_s - signal[start_index - 1U].time_s <= config.body_z_jump_max_window_duration_s) {
-      --start_index;
-    }
-    if (end_index + 1U < signal.size() &&
-        signal[end_index + 1U].time_s - signal[start_index].time_s <= config.body_z_jump_max_window_duration_s) {
-      ++end_index;
-    }
-  }
+  const double left_target_time_s = signal[start_index].time_s - config.body_z_jump_redundant_padding_s;
+  const double right_target_time_s = signal[end_index].time_s + config.body_z_jump_redundant_padding_s;
+  ExpandWindowByElapsedPadding(
+    signal,
+    left_target_time_s,
+    right_target_time_s,
+    config.body_z_jump_max_window_duration_s,
+    start_index,
+    end_index);
   if (start_index == center_index && center_index > 0U) {
     --start_index;
   }
