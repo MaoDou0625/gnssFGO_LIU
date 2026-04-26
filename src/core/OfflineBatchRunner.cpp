@@ -4388,10 +4388,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                 const double corrected_vertical_nis =
                   ComputeVerticalNis(corrected_residual_enu_m.z(), consistency_base_sigma_m.z());
                 const bool correction_keeps_inside = corrected_vertical_nis <= vertical_gate_nis_threshold;
+                const bool correction_is_current_bias_seed =
+                  bias_anchor_state_index >= required_prefit_index;
                 const bool correction_improves_residual =
                   std::abs(corrected_residual_enu_m.z()) + 1e-6 <
                   std::abs(consistency_record.local_postfit_residual_u_m);
-                if (correction_keeps_inside && correction_improves_residual) {
+                if (correction_keeps_inside && (correction_improves_residual || correction_is_current_bias_seed)) {
                   inside_bias_adapter.AcceptUpdate(*inside_bias_update);
                   iteration.gate_reference_states = std::move(candidate_reference_states);
                   sequential_initial_values = std::move(candidate_initial_values);

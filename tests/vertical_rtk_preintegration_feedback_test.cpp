@@ -991,7 +991,7 @@ void TestVerticalInsideBiasAdapterUsesInsideResidualTrend() {
   ExpectTrue(update.has_value(), "inside residual trend should produce a bias update");
   ExpectNear(update->delta_baz_mps2, -1e-3, 1e-12, "bias update should be bounded and follow residual trend sign");
   ExpectNear(update->equivalent_acc_mps2, -0.08, 1e-12, "equivalent acceleration should be 2*dr/T^2");
-  ExpectTrue(update->anchor_state_index == 1U, "bias update should anchor at the start of the observed trend");
+  ExpectTrue(update->anchor_state_index == 3U, "bias update should be applied at the current state continuously");
   ExpectTrue(update->current_state_index == 3U, "bias update should report the latest observed state");
 }
 

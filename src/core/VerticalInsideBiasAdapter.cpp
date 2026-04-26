@@ -95,7 +95,7 @@ std::optional<VerticalInsideBiasUpdate> VerticalInsideBiasAdapter::BuildUpdateCa
   }
 
   VerticalInsideBiasUpdate update;
-  update.anchor_state_index = oldest.state_index;
+  update.anchor_state_index = latest.state_index;
   update.current_state_index = latest.state_index;
   update.current_time_s = latest.time_s;
   update.delta_baz_mps2 = bounded_delta_baz_mps2;
