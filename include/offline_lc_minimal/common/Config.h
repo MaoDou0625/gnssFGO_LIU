@@ -81,6 +81,16 @@ struct OfflineRunnerConfig {
   double vertical_jump_future_trend_mean_weight = 0.0;
   double vertical_jump_future_trend_slope_weight = 0.0;
   bool enable_vertical_local_up_anchor_fallback = false;
+  bool enable_vertical_inside_bias_adaptation = false;
+  double vertical_inside_bias_window_s = 8.0;
+  double vertical_inside_bias_min_window_s = 2.0;
+  int vertical_inside_bias_min_observations = 8;
+  double vertical_inside_bias_update_interval_s = 3.0;
+  double vertical_inside_bias_gain = 0.005;
+  double vertical_inside_bias_max_delta_mps2 = 5e-5;
+  double vertical_inside_bias_min_abs_residual_m = 0.04;
+  double vertical_inside_bias_min_residual_delta_m = 0.005;
+  double vertical_inside_bias_gate_fraction = 0.95;
   bool enable_vertical_rtk_seed_pass = false;
   bool enable_body_z_seed_jump_windows = false;
   bool body_z_seed_jump_use_fix_only = true;

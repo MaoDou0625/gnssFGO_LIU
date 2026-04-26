@@ -13,6 +13,7 @@
 #include "offline_lc_minimal/core/BodyZBidirectionalJumpDetector.h"
 #include "offline_lc_minimal/core/SequentialNhcJumpDetector.h"
 #include "offline_lc_minimal/core/SparseVerticalJumpPlanner.h"
+#include "offline_lc_minimal/core/VerticalInsideBiasAdapter.h"
 #include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/VerticalInsideKinematicFactor.h"
@@ -27,6 +28,7 @@ using offline_lc_minimal::LoadConfigFile;
 using offline_lc_minimal::ReferenceNodeState;
 using offline_lc_minimal::SequentialNhcJumpDetector;
 using offline_lc_minimal::SparseVerticalJumpPlanner;
+using offline_lc_minimal::VerticalInsideBiasAdapter;
 using offline_lc_minimal::VerticalVzReferenceSample;
 using offline_lc_minimal::factor::HorizontalPositionFactor;
 using offline_lc_minimal::factor::StaticVerticalSpecificForceFactor;
@@ -965,6 +967,56 @@ void TestBodyZSeedJumpDetectorUsesSeedAttitudeGravityProjection() {
     "body-z detector should use seed pitch when projecting gravity");
 }
 
+void TestVerticalInsideBiasAdapterUsesInsideResidualTrend() {
+  auto config = DefaultConfig();
+  config.enable_vertical_inside_bias_adaptation = true;
+  config.vertical_inside_bias_window_s = 2.0;
+  config.vertical_inside_bias_min_window_s = 1.0;
+  config.vertical_inside_bias_min_observations = 3;
+  config.vertical_inside_bias_update_interval_s = 0.1;
+  config.vertical_inside_bias_gain = 0.5;
+  config.vertical_inside_bias_max_delta_mps2 = 1e-3;
+  config.vertical_inside_bias_min_abs_residual_m = 0.0;
+  config.vertical_inside_bias_min_residual_delta_m = 0.0;
+  config.vertical_inside_bias_gate_fraction = 1.0;
+
+  VerticalInsideBiasAdapter adapter(config);
+  ExpectTrue(
+    !adapter.ObserveInsideResidual(1U, 0.0, 0.0, 0.05, 0.1).has_value(),
+    "first inside residual should only seed the bias adapter");
+  ExpectTrue(
+    !adapter.ObserveInsideResidual(2U, 0.5, -0.01, 0.05, 0.1).has_value(),
+    "adapter should wait for the configured time window");
+  const auto update = adapter.ObserveInsideResidual(3U, 1.0, -0.04, 0.05, 0.1);
+  ExpectTrue(update.has_value(), "inside residual trend should produce a bias update");
+  ExpectNear(update->delta_baz_mps2, -1e-3, 1e-12, "bias update should be bounded and follow residual trend sign");
+  ExpectNear(update->equivalent_acc_mps2, -0.08, 1e-12, "equivalent acceleration should be 2*dr/T^2");
+  ExpectTrue(update->anchor_state_index == 1U, "bias update should anchor at the start of the observed trend");
+  ExpectTrue(update->current_state_index == 3U, "bias update should report the latest observed state");
+}
+
+void TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual() {
+  auto config = DefaultConfig();
+  config.enable_vertical_inside_bias_adaptation = true;
+  config.vertical_inside_bias_window_s = 2.0;
+  config.vertical_inside_bias_min_window_s = 1.0;
+  config.vertical_inside_bias_min_observations = 2;
+  config.vertical_inside_bias_update_interval_s = 0.1;
+  config.vertical_inside_bias_gain = 1.0;
+  config.vertical_inside_bias_max_delta_mps2 = 1e-3;
+  config.vertical_inside_bias_min_abs_residual_m = 0.0;
+  config.vertical_inside_bias_min_residual_delta_m = 0.0;
+  config.vertical_inside_bias_gate_fraction = 1.0;
+
+  VerticalInsideBiasAdapter adapter(config);
+  ExpectTrue(
+    !adapter.ObserveInsideResidual(1U, 0.0, 0.0, 0.05, 0.1).has_value(),
+    "first inside residual should only seed the bias adapter");
+  ExpectTrue(
+    !adapter.ObserveInsideResidual(2U, 1.0, -0.12, 0.05, 0.1).has_value(),
+    "outside residual should not be used for inside bias adaptation");
+}
+
 }  // namespace
 
 int main() {
@@ -1034,6 +1086,12 @@ int main() {
     RunTest(
       "TestBodyZSeedJumpDetectorUsesSeedAttitudeGravityProjection",
       TestBodyZSeedJumpDetectorUsesSeedAttitudeGravityProjection);
+    RunTest(
+      "TestVerticalInsideBiasAdapterUsesInsideResidualTrend",
+      TestVerticalInsideBiasAdapterUsesInsideResidualTrend);
+    RunTest(
+      "TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual",
+      TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return EXIT_FAILURE;

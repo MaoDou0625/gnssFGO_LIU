@@ -31,6 +31,7 @@
 #include "offline_lc_minimal/core/SequentialNhcJumpDetector.h"
 #include "offline_lc_minimal/core/SparseVerticalJumpPlanner.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
+#include "offline_lc_minimal/core/VerticalInsideBiasAdapter.h"
 #include "offline_lc_minimal/factor/AngularRateFactor.h"
 #include "offline_lc_minimal/factor/BiasGmTransitionFactor.h"
 #include "offline_lc_minimal/factor/GPInterpolatedGPSFactor.h"
@@ -3057,6 +3058,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       std::vector<ReferenceNodeState> inside_reference_states = iteration.gate_reference_states;
       SequentialNhcJumpDetector nhc_jump_detector(config_);
       SparseVerticalJumpPlanner iteration_sparse_jump_planner(config_);
+      VerticalInsideBiasAdapter inside_bias_adapter(config_);
       if (use_vertical_rtk_1d_nis_gate && !iteration.gate_reference_states.empty() &&
           graph_timeline.dynamic_start_index > 0U) {
         nhc_jump_detector.SeedWithConfirmedStates(
@@ -4340,6 +4342,83 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
             }
 
             consistency_record.vertical_gate_inside = inside_gate ? 1.0 : 0.0;
+            if (!iteration.failed && inside_gate && !apply_initial_vertical_anchor &&
+                feedback_anchor_state.has_value() && config_.enable_vertical_inside_bias_adaptation) {
+              const auto inside_bias_update = inside_bias_adapter.ObserveInsideResidual(
+                *feedback_anchor_state,
+                record.corrected_time_s,
+                consistency_record.local_postfit_residual_u_m,
+                consistency_base_sigma_m.z(),
+                consistency_record.vertical_gate_threshold_m);
+              if (inside_bias_update.has_value() &&
+                  inside_bias_update->anchor_state_index < iteration.gate_reference_states.size()) {
+                auto candidate_reference_states = iteration.gate_reference_states;
+                gtsam::Values candidate_initial_values = sequential_initial_values;
+                const std::size_t bias_anchor_state_index = inside_bias_update->anchor_state_index;
+                auto corrected_bias_anchor_state = candidate_reference_states[bias_anchor_state_index];
+                corrected_bias_anchor_state.bias = gtsam::imuBias::ConstantBias(
+                  gtsam::Vector3(
+                    corrected_bias_anchor_state.bias.accelerometer().x(),
+                    corrected_bias_anchor_state.bias.accelerometer().y(),
+                    corrected_bias_anchor_state.bias.accelerometer().z() + inside_bias_update->delta_baz_mps2),
+                  corrected_bias_anchor_state.bias.gyroscope());
+                candidate_reference_states[bias_anchor_state_index] = corrected_bias_anchor_state;
+                UpsertReferenceStateInitialValues(
+                  bias_anchor_state_index,
+                  corrected_bias_anchor_state,
+                  &candidate_initial_values);
+
+                std::size_t candidate_valid_until_index = bias_anchor_state_index;
+                const std::size_t required_prefit_index = ResolvePrefitReferenceRightIndex(sync_result);
+                EnsureReferenceStatesValidUntil(
+                  state_timestamps,
+                  dataset.imu_samples,
+                  imu_params,
+                  &candidate_reference_states,
+                  &candidate_valid_until_index,
+                  required_prefit_index,
+                  &candidate_initial_values);
+
+                const ReferenceNodeState corrected_prefit_reference_state =
+                  sync_result.status == StateMeasSyncStatus::kInterpolated
+                    ? InterpolateReferenceState(candidate_reference_states, record.corrected_time_s)
+                    : candidate_reference_states[required_prefit_index];
+                const Eigen::Vector3d corrected_residual_enu_m =
+                  ComputePositionResidualEnu(corrected_prefit_reference_state.pose, record.measurement_enu_m);
+                const double corrected_vertical_nis =
+                  ComputeVerticalNis(corrected_residual_enu_m.z(), consistency_base_sigma_m.z());
+                const bool correction_keeps_inside = corrected_vertical_nis <= vertical_gate_nis_threshold;
+                const bool correction_improves_residual =
+                  std::abs(corrected_residual_enu_m.z()) + 1e-6 <
+                  std::abs(consistency_record.local_postfit_residual_u_m);
+                if (correction_keeps_inside && correction_improves_residual) {
+                  inside_bias_adapter.AcceptUpdate(*inside_bias_update);
+                  iteration.gate_reference_states = std::move(candidate_reference_states);
+                  sequential_initial_values = std::move(candidate_initial_values);
+                  sequential_reference_valid_until_index = candidate_valid_until_index;
+                  inside_reference_states = iteration.gate_reference_states;
+                  history_reobserve_begin_state_index =
+                    history_reobserve_begin_state_index.has_value()
+                      ? std::min(*history_reobserve_begin_state_index, bias_anchor_state_index)
+                      : std::optional<std::size_t>(bias_anchor_state_index);
+                  consistency_record.inside_bias_delta_baz_applied_mps2 =
+                    inside_bias_update->delta_baz_mps2;
+                  consistency_record.inside_bias_equivalent_acc_mps2 =
+                    inside_bias_update->equivalent_acc_mps2;
+                  consistency_record.inside_bias_residual_delta_m =
+                    inside_bias_update->residual_delta_m;
+                  consistency_record.inside_bias_window_dt_s = inside_bias_update->window_dt_s;
+                  consistency_record.inside_bias_anchor_state_index =
+                    static_cast<long long>(inside_bias_update->anchor_state_index);
+                  consistency_record.inside_bias_observation_count =
+                    inside_bias_update->observation_count;
+                  consistency_record.local_postfit_residual_u_m = corrected_residual_enu_m.z();
+                  consistency_record.prefit_residual_u_after_local_recovery_m =
+                    corrected_residual_enu_m.z();
+                  consistency_record.vertical_gate_inside = 1.0;
+                }
+              }
+            }
           } else {
             if (sync_result.status == StateMeasSyncStatus::kInterpolated) {
               prefit_pose = InterpolateReferenceState(reference_node_states, record.corrected_time_s).pose;
@@ -4586,6 +4665,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   std::min(*history_reobserve_begin_state_index, *feedback_anchor_state);
                 nhc_jump_detector.RewindFromStateIndex(reobserve_begin);
                 iteration_sparse_jump_planner.RewindFromStateIndex(reobserve_begin);
+                inside_bias_adapter.RewindFromStateIndex(reobserve_begin);
                 observe_begin = std::min(observe_begin, reobserve_begin);
                 history_reobserve_begin_state_index.reset();
               }

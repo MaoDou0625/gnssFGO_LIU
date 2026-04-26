@@ -351,6 +351,8 @@ void WriteGnssConsistencyCsv(
        "nhc_body_vy_mps,nhc_body_vz_mps,nhc_body_vz_baseline_mps,nhc_body_vz_residual_mps,nhc_body_vz_jump_mps,"
        "nhc_body_vy_threshold_mps,nhc_body_vz_threshold_mps,"
        "delta_vz_applied_mps,delta_up_anchor_applied_m,delta_roll_applied_rad,delta_pitch_applied_rad,delta_baz_applied_mps2,"
+       "inside_bias_delta_baz_applied_mps2,inside_bias_equivalent_acc_mps2,inside_bias_residual_delta_m,"
+       "inside_bias_window_dt_s,inside_bias_anchor_state_index,inside_bias_observation_count,"
        "vz_ref_global_smoothed_mps,vz_prefit_mps,vz_mismatch_mps,vz_mismatch_jump_mps,jump_candidate_score,"
        "candidate_source,body_z_jump_direction,body_z_signed_delta_velocity_mps,body_z_direction_score_mps,body_z_axis_nav_z,"
        "selected_jump_state_index,selected_jump_delta_vz_mps,"
@@ -401,6 +403,12 @@ void WriteGnssConsistencyCsv(
            << row.delta_roll_applied_rad << ','
            << row.delta_pitch_applied_rad << ','
            << row.delta_baz_applied_mps2 << ','
+           << row.inside_bias_delta_baz_applied_mps2 << ','
+           << row.inside_bias_equivalent_acc_mps2 << ','
+           << row.inside_bias_residual_delta_m << ','
+           << row.inside_bias_window_dt_s << ','
+           << row.inside_bias_anchor_state_index << ','
+           << row.inside_bias_observation_count << ','
            << row.vz_ref_global_smoothed_mps << ','
            << row.vz_prefit_mps << ','
            << row.vz_mismatch_mps << ','

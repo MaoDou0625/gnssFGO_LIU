@@ -61,6 +61,7 @@ add_library(offline_lc_minimal_lib
   src/core/SequentialNhcJumpDetector.cpp
   src/core/SparseVerticalJumpPlanner.cpp
   src/core/TrajectoryInitializer.cpp
+  src/core/VerticalInsideBiasAdapter.cpp
   src/core/OfflineBatchRunner.cpp
 )
 

@@ -413,6 +413,12 @@ struct GnssConsistencyRecord {
   double delta_roll_applied_rad = std::numeric_limits<double>::quiet_NaN();
   double delta_pitch_applied_rad = std::numeric_limits<double>::quiet_NaN();
   double delta_baz_applied_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double inside_bias_delta_baz_applied_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double inside_bias_equivalent_acc_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double inside_bias_residual_delta_m = std::numeric_limits<double>::quiet_NaN();
+  double inside_bias_window_dt_s = std::numeric_limits<double>::quiet_NaN();
+  long long inside_bias_anchor_state_index = -1;
+  long long inside_bias_observation_count = 0;
   double required_up_anchor_correction_m = std::numeric_limits<double>::quiet_NaN();
   double vz_ref_global_smoothed_mps = std::numeric_limits<double>::quiet_NaN();
   double vz_prefit_mps = std::numeric_limits<double>::quiet_NaN();
