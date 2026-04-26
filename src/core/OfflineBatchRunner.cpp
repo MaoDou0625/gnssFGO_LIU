@@ -3250,30 +3250,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                          state_timestamps[nhc_search_start_state_index] > nhc_search_start_time_s) {
                     --nhc_search_start_state_index;
                   }
-                  std::optional<BodyZJumpWindowCandidate> body_z_recovery_window;
-                  std::optional<std::size_t> body_z_recovery_anchor_state_index;
-                  if (config_.enable_body_z_seed_jump_windows && !body_z_seed_detection.windows.empty()) {
-                    for (const auto &body_z_window : body_z_seed_detection.windows) {
-                      if (body_z_window.end_state_index < nhc_search_start_state_index ||
-                          body_z_window.start_state_index > *feedback_anchor_state) {
-                        continue;
-                      }
-                      if (!body_z_recovery_window.has_value() ||
-                          body_z_window.center_state_index > body_z_recovery_window->center_state_index) {
-                        body_z_recovery_window = body_z_window;
-                      }
-                    }
-                    if (body_z_recovery_window.has_value()) {
-                      if (body_z_recovery_window->start_state_index > graph_timeline.dynamic_start_index + 1U) {
-                        body_z_recovery_anchor_state_index = body_z_recovery_window->start_state_index - 2U;
-                      } else if (body_z_recovery_window->start_state_index > graph_timeline.dynamic_start_index) {
-                        body_z_recovery_anchor_state_index = body_z_recovery_window->start_state_index - 1U;
-                      } else {
-                        body_z_recovery_anchor_state_index = body_z_recovery_window->start_state_index;
-                      }
-                      recovery_anchor_state_index = *body_z_recovery_anchor_state_index;
-                    }
-                  }
                   const double preferred_nhc_jump_sign = prefit_residual_enu_m.z();
                   auto nhc_jump_anchor_state =
                     nhc_jump_detector.FindRecentJumpAnchor(
@@ -3297,10 +3273,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     } else if (*nhc_jump_anchor_state > graph_timeline.dynamic_start_index) {
                       nhc_recovery_anchor_state_index = *nhc_jump_anchor_state - 1U;
                     }
-                    recovery_anchor_state_index =
-                      body_z_recovery_anchor_state_index.has_value()
-                        ? std::min(*body_z_recovery_anchor_state_index, nhc_recovery_anchor_state_index)
-                        : nhc_recovery_anchor_state_index;
+                    recovery_anchor_state_index = nhc_recovery_anchor_state_index;
                   }
                   consistency_record.recovery_anchor_state_index =
                     static_cast<long long>(recovery_anchor_state_index);
@@ -3408,14 +3381,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     std::vector<SparseVerticalJumpWindowCandidate> sparse_jump_windows;
                     if (config_.enable_body_z_seed_jump_windows && !body_z_seed_detection.windows.empty()) {
                       for (const auto &body_z_window : body_z_seed_detection.windows) {
-                        if (body_z_window.end_state_index < recovery_anchor_state_index + 1U ||
+                        if (body_z_window.end_state_index < graph_timeline.dynamic_start_index + 1U ||
                             body_z_window.start_state_index > *feedback_anchor_state) {
                           continue;
                         }
                         const std::size_t window_start_state_index =
                           std::clamp(
                             body_z_window.start_state_index,
-                            recovery_anchor_state_index + 1U,
+                            graph_timeline.dynamic_start_index + 1U,
                             *feedback_anchor_state);
                         const std::size_t window_end_state_index =
                           std::clamp(
@@ -3499,6 +3472,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                                    window_candidate.center_state_index) != selected_jump_window_center_indices.end();
                         }),
                       sparse_jump_windows.end());
+                    const bool has_body_z_seed_window_candidate =
+                      std::any_of(
+                        sparse_jump_windows.begin(),
+                        sparse_jump_windows.end(),
+                        [](const SparseVerticalJumpWindowCandidate &window_candidate) {
+                          return window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW";
+                        });
                     if (sparse_jump_windows.empty()) {
                       break;
                     }
@@ -3573,7 +3553,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         config_.vertical_jump_future_trend_min_fix_count,
                         config_.vertical_jump_future_trend_mean_weight,
                         config_.vertical_jump_future_trend_slope_weight);
+                      // Body-z seed windows are pre-localized by the RTK seed attitude pass, so they should not
+                      // lose to later GNSS/NHC mismatch windows while any body-z candidate remains viable.
                       const double candidate_objective =
+                        (has_body_z_seed_window_candidate &&
+                             window_candidate.center_candidate.source != "BODY_Z_SEED_WINDOW"
+                           ? 1.0e6
+                           : 0.0) +
                         candidate_hold_evaluation.gate_excess_cost +
                         (candidate_hold_evaluation.hold_window_passed ? 0.0 : 1.0) +
                         config_.vertical_jump_window_ref_weight *
