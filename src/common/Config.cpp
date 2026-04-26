@@ -293,6 +293,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_jump_future_trend_mean_weight = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_future_trend_slope_weight") {
     config.vertical_jump_future_trend_slope_weight = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_local_up_anchor_fallback") {
+    config.enable_vertical_local_up_anchor_fallback = ParseBool(normalized_value);
   } else if (normalized_key == "enable_vertical_rtk_seed_pass") {
     config.enable_vertical_rtk_seed_pass = ParseBool(normalized_value);
   } else if (normalized_key == "enable_body_z_seed_jump_windows") {
@@ -1235,6 +1237,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << config.vertical_jump_future_trend_min_fix_count << '\n'
       << "vertical_jump_future_trend_mean_weight=" << config.vertical_jump_future_trend_mean_weight << '\n'
       << "vertical_jump_future_trend_slope_weight=" << config.vertical_jump_future_trend_slope_weight << '\n'
+      << "enable_vertical_local_up_anchor_fallback="
+      << (config.enable_vertical_local_up_anchor_fallback ? "true" : "false") << '\n'
       << "enable_vertical_rtk_seed_pass=" << (config.enable_vertical_rtk_seed_pass ? "true" : "false") << '\n'
       << "enable_body_z_seed_jump_windows=" << (config.enable_body_z_seed_jump_windows ? "true" : "false") << '\n'
       << "body_z_seed_jump_use_fix_only=" << (config.body_z_seed_jump_use_fix_only ? "true" : "false") << '\n'

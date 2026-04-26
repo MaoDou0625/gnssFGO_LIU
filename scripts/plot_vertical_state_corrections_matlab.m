@@ -21,7 +21,7 @@ if isempty(rows)
     error('No rows found in %s', csv_path);
 end
 
-time_rel_s = rows.state_time_s - rows.state_time_s(1);
+time_rel_s = rows.corrected_time_s - rows.corrected_time_s(1);
 delta_pitch_deg = rad2deg(rows.delta_pitch_rad);
 delta_roll_deg = rad2deg(rows.delta_roll_rad);
 reference_pitch_deg = rad2deg(rows.reference_pitch_rad);
@@ -41,7 +41,7 @@ grid on;
 xlabel('Relative time (s)');
 ylabel('Up (m)');
 legend({'RTK up', 'Reference up', 'Optimized up'}, 'Location', 'best');
-title('Up State');
+title('Up State at GNSS measurement time');
 
 nexttile;
 plot(time_rel_s, rows.delta_up_m, 'b-', 'LineWidth', 1.1); hold on;

@@ -255,6 +255,27 @@ ReferenceNodeState InterpolateReferenceState(
   const auto &right_state = reference_states[right_index];
   const double alpha =
     std::clamp((time_s - left_state.time_s) / (right_state.time_s - left_state.time_s), 0.0, 1.0);
+  const double dt_s = std::max(right_state.time_s - left_state.time_s, kTimeEpsilonS);
+
+  const double alpha2 = alpha * alpha;
+  const double alpha3 = alpha2 * alpha;
+  const double h00 = 2.0 * alpha3 - 3.0 * alpha2 + 1.0;
+  const double h10 = alpha3 - 2.0 * alpha2 + alpha;
+  const double h01 = -2.0 * alpha3 + 3.0 * alpha2;
+  const double h11 = alpha3 - alpha2;
+  const double interpolated_up_m =
+    h00 * left_state.pose.translation().z() +
+    h10 * dt_s * left_state.velocity.z() +
+    h01 * right_state.pose.translation().z() +
+    h11 * dt_s * right_state.velocity.z();
+  Eigen::Vector3d interpolated_velocity =
+    (1.0 - alpha) * left_state.velocity + alpha * right_state.velocity;
+  interpolated_velocity.z() =
+    ((6.0 * alpha2 - 6.0 * alpha) * left_state.pose.translation().z() +
+     (-6.0 * alpha2 + 6.0 * alpha) * right_state.pose.translation().z()) /
+      dt_s +
+    (3.0 * alpha2 - 4.0 * alpha + 1.0) * left_state.velocity.z() +
+    (3.0 * alpha2 - 2.0 * alpha) * right_state.velocity.z();
 
   ReferenceNodeState interpolated;
   interpolated.time_s = time_s;
@@ -263,8 +284,8 @@ ReferenceNodeState InterpolateReferenceState(
     gtsam::Point3(
       (1.0 - alpha) * left_state.pose.translation().x() + alpha * right_state.pose.translation().x(),
       (1.0 - alpha) * left_state.pose.translation().y() + alpha * right_state.pose.translation().y(),
-      (1.0 - alpha) * left_state.pose.translation().z() + alpha * right_state.pose.translation().z()));
-  interpolated.velocity = (1.0 - alpha) * left_state.velocity + alpha * right_state.velocity;
+      interpolated_up_m));
+  interpolated.velocity = interpolated_velocity;
   interpolated.bias = gtsam::imuBias::ConstantBias(
     (1.0 - alpha) * left_state.bias.accelerometer() + alpha * right_state.bias.accelerometer(),
     (1.0 - alpha) * left_state.bias.gyroscope() + alpha * right_state.bias.gyroscope());
@@ -4158,7 +4179,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     }
                   }
 
-                  if (!iteration.failed && !inside_gate && last_recovery_result.has_value() &&
+                  if (!iteration.failed && !inside_gate &&
+                      config_.enable_vertical_local_up_anchor_fallback &&
+                      last_recovery_result.has_value() &&
                       std::isfinite(last_recovery_result->required_up_anchor_correction_m) &&
                       std::abs(last_recovery_result->required_up_anchor_correction_m) > 0.0) {
                     const auto corrected_anchor_state = ApplyVerticalUpAnchorCorrection(
@@ -4828,6 +4851,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
 
     run_result.vertical_state_corrections.clear();
     run_result.vertical_state_corrections.reserve(run_result.gnss_factor_records.size());
+    const std::vector<ReferenceNodeState> optimized_reference_states =
+      BuildReferenceStatesFromOptimizedValues(state_timestamps, optimized_values);
     for (std::size_t record_index = 0; record_index < run_result.gnss_factor_records.size(); ++record_index) {
       const auto &record = run_result.gnss_factor_records[record_index];
       if (!record.factor_used) {
@@ -4863,18 +4888,18 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         row.postfit_residual_u_m = consistency_record.postfit_residual_enu_m.z();
       }
 
-      const auto optimized_pose = optimized_values.at<gtsam::Pose3>(X(*correction_state_index));
-      const auto optimized_velocity = optimized_values.at<gtsam::Vector3>(V(*correction_state_index));
-      const auto optimized_bias = optimized_values.at<gtsam::imuBias::ConstantBias>(B(*correction_state_index));
-      const Eigen::Vector3d optimized_ypr = Rot3ToYpr(optimized_pose.rotation());
-      row.optimized_up_m = optimized_pose.translation().z();
-      row.optimized_vz_mps = optimized_velocity.z();
+      const ReferenceNodeState optimized_state =
+        InterpolateReferenceState(optimized_reference_states, record.corrected_time_s);
+      const Eigen::Vector3d optimized_ypr = Rot3ToYpr(optimized_state.pose.rotation());
+      row.optimized_up_m = optimized_state.pose.translation().z();
+      row.optimized_vz_mps = optimized_state.velocity.z();
       row.optimized_pitch_rad = optimized_ypr.y();
       row.optimized_roll_rad = optimized_ypr.z();
-      row.optimized_baz_mps2 = optimized_bias.accelerometer().z();
+      row.optimized_baz_mps2 = optimized_state.bias.accelerometer().z();
 
-      if (*correction_state_index < final_iteration_result.gate_reference_states.size()) {
-        const auto &reference_state = final_iteration_result.gate_reference_states[*correction_state_index];
+      if (!final_iteration_result.gate_reference_states.empty()) {
+        const ReferenceNodeState reference_state =
+          InterpolateReferenceState(final_iteration_result.gate_reference_states, record.corrected_time_s);
         const Eigen::Vector3d reference_ypr = Rot3ToYpr(reference_state.pose.rotation());
         row.reference_available = true;
         row.reference_up_m = reference_state.pose.translation().z();
