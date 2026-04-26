@@ -283,6 +283,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_jump_window_height_integral_weight = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_window_ref_weight") {
     config.vertical_jump_window_ref_weight = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_window_max_correction_attempts") {
+    config.vertical_jump_window_max_correction_attempts = ParseInt(normalized_value);
   } else if (normalized_key == "vertical_jump_future_trend_window_s") {
     config.vertical_jump_future_trend_window_s = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_future_trend_min_fix_count") {
@@ -717,6 +719,9 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
         config.vertical_jump_window_ref_weight < 0.0) {
       throw std::runtime_error("vertical jump window objective weights must be non-negative");
     }
+    if (config.vertical_jump_window_max_correction_attempts <= 0) {
+      throw std::runtime_error("vertical_jump_window_max_correction_attempts must be positive");
+    }
     if (config.vertical_jump_future_trend_window_s < 0.0 ||
         config.vertical_jump_future_trend_min_fix_count < 0 ||
         config.vertical_jump_future_trend_mean_weight < 0.0 ||
@@ -1046,6 +1051,9 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
       config.vertical_jump_window_ref_weight < 0.0) {
     throw std::runtime_error("vertical jump window objective weights must be non-negative");
   }
+  if (config.vertical_jump_window_max_correction_attempts <= 0) {
+    throw std::runtime_error("vertical_jump_window_max_correction_attempts must be positive");
+  }
   if (config.vertical_jump_future_trend_window_s < 0.0 ||
       config.vertical_jump_future_trend_min_fix_count < 0 ||
       config.vertical_jump_future_trend_mean_weight < 0.0 ||
@@ -1220,6 +1228,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "vertical_jump_window_height_integral_weight="
       << config.vertical_jump_window_height_integral_weight << '\n'
       << "vertical_jump_window_ref_weight=" << config.vertical_jump_window_ref_weight << '\n'
+      << "vertical_jump_window_max_correction_attempts="
+      << config.vertical_jump_window_max_correction_attempts << '\n'
       << "vertical_jump_future_trend_window_s=" << config.vertical_jump_future_trend_window_s << '\n'
       << "vertical_jump_future_trend_min_fix_count="
       << config.vertical_jump_future_trend_min_fix_count << '\n'

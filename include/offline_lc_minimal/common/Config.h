@@ -75,6 +75,7 @@ struct OfflineRunnerConfig {
   double vertical_jump_window_velocity_smoothness_weight = 20.0;
   double vertical_jump_window_height_integral_weight = 5.0;
   double vertical_jump_window_ref_weight = 1.0;
+  int vertical_jump_window_max_correction_attempts = 240;
   double vertical_jump_future_trend_window_s = 0.0;
   int vertical_jump_future_trend_min_fix_count = 5;
   double vertical_jump_future_trend_mean_weight = 0.0;

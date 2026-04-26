@@ -1504,10 +1504,13 @@ struct VerticalVelocityWindowCorrection {
   std::size_t start_state_index = 0;
   std::size_t center_state_index = 0;
   std::size_t end_state_index = 0;
+  double target_tail_up_m = std::numeric_limits<double>::quiet_NaN();
   double target_tail_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double delta_up_tail_m = std::numeric_limits<double>::quiet_NaN();
   double delta_vz_tail_mps = std::numeric_limits<double>::quiet_NaN();
   double velocity_smooth_cost = std::numeric_limits<double>::quiet_NaN();
   double height_integral_delta_m = std::numeric_limits<double>::quiet_NaN();
+  std::vector<double> corrected_up_m;
   std::vector<double> corrected_vz_mps;
 };
 
@@ -1538,7 +1541,8 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
   const SparseVerticalJumpWindowCandidate &window_candidate,
   const std::size_t segment_end_state_index,
   const double tail_delta_scale = 1.0,
-  const double forced_tail_delta_mps = std::numeric_limits<double>::quiet_NaN()) {
+  const double forced_tail_delta_mps = std::numeric_limits<double>::quiet_NaN(),
+  const double forced_tail_delta_up_m = std::numeric_limits<double>::quiet_NaN()) {
   if (reference_states.empty() || vertical_vz_reference.size() != reference_states.size() ||
       window_candidate.start_state_index == 0U ||
       window_candidate.start_state_index > window_candidate.end_state_index ||
@@ -1572,6 +1576,9 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
   if (!std::isfinite(target_tail_vz_mps)) {
     return std::nullopt;
   }
+  const std::size_t previous_state_index = window_candidate.start_state_index - 1U;
+  const double previous_up_m = reference_states[previous_state_index].pose.translation().z();
+  const double previous_vz_mps = reference_states[previous_state_index].velocity.z();
   const double original_tail_vz_mps = reference_states[window_candidate.end_state_index].velocity.z();
   if (std::isfinite(forced_tail_delta_mps)) {
     target_tail_vz_mps =
@@ -1581,25 +1588,80 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
       original_tail_vz_mps +
       std::max(tail_delta_scale, 0.0) * (target_tail_vz_mps - original_tail_vz_mps);
   }
+  if (!std::isfinite(target_tail_vz_mps)) {
+    return std::nullopt;
+  }
+
+  double integrated_tail_up_m = previous_up_m;
+  double integrated_previous_vz_mps = previous_vz_mps;
+  const double denominator = static_cast<double>(window_candidate.end_state_index - previous_state_index);
+  for (std::size_t state_index = window_candidate.start_state_index;
+       state_index <= window_candidate.end_state_index;
+       ++state_index) {
+    const double alpha = static_cast<double>(state_index - previous_state_index) / std::max(denominator, 1.0);
+    const double smooth_alpha = SmoothStep01(alpha);
+    const double smooth_vz_mps =
+      (1.0 - smooth_alpha) * previous_vz_mps + smooth_alpha * target_tail_vz_mps;
+    const double dt_s =
+      std::max(reference_states[state_index].time_s - reference_states[state_index - 1U].time_s, 0.0);
+    integrated_tail_up_m += 0.5 * (integrated_previous_vz_mps + smooth_vz_mps) * dt_s;
+    integrated_previous_vz_mps = smooth_vz_mps;
+  }
+
+  const double original_tail_up_m = reference_states[window_candidate.end_state_index].pose.translation().z();
+  double target_tail_up_m = integrated_tail_up_m;
+  if (std::isfinite(forced_tail_delta_up_m)) {
+    target_tail_up_m = original_tail_up_m + forced_tail_delta_up_m;
+  }
+  if (!std::isfinite(target_tail_up_m)) {
+    return std::nullopt;
+  }
 
   VerticalVelocityWindowCorrection correction;
   correction.start_state_index = window_candidate.start_state_index;
   correction.center_state_index = window_candidate.center_state_index;
   correction.end_state_index = window_candidate.end_state_index;
+  correction.target_tail_up_m = target_tail_up_m;
   correction.target_tail_vz_mps = target_tail_vz_mps;
+  correction.delta_up_tail_m = target_tail_up_m - original_tail_up_m;
+  correction.corrected_up_m.reserve(
+    correction.end_state_index - correction.start_state_index + 1U);
   correction.corrected_vz_mps.reserve(
     correction.end_state_index - correction.start_state_index + 1U);
 
-  const std::size_t previous_state_index = correction.start_state_index - 1U;
-  const double previous_vz_mps = reference_states[previous_state_index].velocity.z();
-  const double denominator = static_cast<double>(correction.end_state_index - previous_state_index);
+  const double window_duration_s =
+    reference_states[correction.end_state_index].time_s - reference_states[previous_state_index].time_s;
+  if (window_duration_s <= kTimeEpsilonS) {
+    return std::nullopt;
+  }
   for (std::size_t state_index = correction.start_state_index;
        state_index <= correction.end_state_index;
        ++state_index) {
-    const double alpha = static_cast<double>(state_index - previous_state_index) / std::max(denominator, 1.0);
-    const double smooth_alpha = SmoothStep01(alpha);
-    correction.corrected_vz_mps.push_back(
-      (1.0 - smooth_alpha) * previous_vz_mps + smooth_alpha * target_tail_vz_mps);
+    const double alpha =
+      std::clamp(
+        (reference_states[state_index].time_s - reference_states[previous_state_index].time_s) /
+          window_duration_s,
+        0.0,
+        1.0);
+    const double alpha2 = alpha * alpha;
+    const double alpha3 = alpha2 * alpha;
+    const double h00 = 2.0 * alpha3 - 3.0 * alpha2 + 1.0;
+    const double h10 = alpha3 - 2.0 * alpha2 + alpha;
+    const double h01 = -2.0 * alpha3 + 3.0 * alpha2;
+    const double h11 = alpha3 - alpha2;
+    const double corrected_up_m =
+      h00 * previous_up_m +
+      h10 * window_duration_s * previous_vz_mps +
+      h01 * target_tail_up_m +
+      h11 * window_duration_s * target_tail_vz_mps;
+    const double corrected_vz_mps =
+      ((6.0 * alpha2 - 6.0 * alpha) * previous_up_m +
+       (-6.0 * alpha2 + 6.0 * alpha) * target_tail_up_m) /
+        window_duration_s +
+      (3.0 * alpha2 - 4.0 * alpha + 1.0) * previous_vz_mps +
+      (3.0 * alpha2 - 2.0 * alpha) * target_tail_vz_mps;
+    correction.corrected_up_m.push_back(corrected_up_m);
+    correction.corrected_vz_mps.push_back(corrected_vz_mps);
   }
 
   correction.delta_vz_tail_mps =
@@ -1629,17 +1691,7 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
   correction.velocity_smooth_cost =
     smooth_count > 0U ? smooth_cost / static_cast<double>(smooth_count) : 0.0;
 
-  double corrected_up_m = reference_states[previous_state_index].pose.translation().z();
-  double previous_corrected_vz_mps = previous_vz_mps;
-  for (std::size_t offset = 0U; offset < correction.corrected_vz_mps.size(); ++offset) {
-    const std::size_t state_index = correction.start_state_index + offset;
-    const double dt_s =
-      std::max(reference_states[state_index].time_s - reference_states[state_index - 1U].time_s, 0.0);
-    corrected_up_m += 0.5 * (previous_corrected_vz_mps + correction.corrected_vz_mps[offset]) * dt_s;
-    previous_corrected_vz_mps = correction.corrected_vz_mps[offset];
-  }
-  correction.height_integral_delta_m =
-    corrected_up_m - reference_states[correction.end_state_index].pose.translation().z();
+  correction.height_integral_delta_m = correction.delta_up_tail_m;
   return correction;
 }
 
@@ -1650,20 +1702,14 @@ void ApplyVerticalVelocityWindowCorrection(
   if (reference_states == nullptr || reference_states->empty() ||
       correction.start_state_index == 0U ||
       correction.end_state_index >= reference_states->size() ||
+      correction.corrected_up_m.size() != correction.end_state_index - correction.start_state_index + 1U ||
       correction.corrected_vz_mps.size() != correction.end_state_index - correction.start_state_index + 1U) {
     return;
   }
 
-  double corrected_up_m =
-    (*reference_states)[correction.start_state_index - 1U].pose.translation().z();
-  double previous_corrected_vz_mps =
-    (*reference_states)[correction.start_state_index - 1U].velocity.z();
   for (std::size_t offset = 0U; offset < correction.corrected_vz_mps.size(); ++offset) {
     const std::size_t state_index = correction.start_state_index + offset;
     auto corrected_state = (*reference_states)[state_index];
-    const double dt_s =
-      std::max(corrected_state.time_s - (*reference_states)[state_index - 1U].time_s, 0.0);
-    corrected_up_m += 0.5 * (previous_corrected_vz_mps + correction.corrected_vz_mps[offset]) * dt_s;
     corrected_state.velocity = gtsam::Vector3(
       corrected_state.velocity.x(),
       corrected_state.velocity.y(),
@@ -1673,12 +1719,11 @@ void ApplyVerticalVelocityWindowCorrection(
       gtsam::Point3(
         corrected_state.pose.translation().x(),
         corrected_state.pose.translation().y(),
-        corrected_up_m));
+        correction.corrected_up_m[offset]));
     (*reference_states)[state_index] = corrected_state;
     if (initial_values != nullptr) {
       UpsertReferenceStateInitialValues(state_index, corrected_state, initial_values);
     }
-    previous_corrected_vz_mps = correction.corrected_vz_mps[offset];
   }
 }
 
@@ -3027,6 +3072,55 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         }
         return specs;
       };
+      const auto build_vertical_window_specs_between_times = [&](const double window_start_time_s, const double window_end_time_s) {
+        std::vector<VerticalHoldWindowSpec> specs;
+        if (!std::isfinite(window_start_time_s) || !std::isfinite(window_end_time_s) ||
+            window_end_time_s < window_start_time_s - kTimeEpsilonS) {
+          return specs;
+        }
+        for (std::size_t future_sample_index = navigation_start_index + 1U;
+             future_sample_index < dataset.gnss_samples.size();
+             ++future_sample_index) {
+          const auto &future_sample = dataset.gnss_samples[future_sample_index];
+          const double corrected_time_s = CorrectedGnssTime(future_sample);
+          if (corrected_time_s < window_start_time_s - kTimeEpsilonS) {
+            continue;
+          }
+          if (corrected_time_s > window_end_time_s + kTimeEpsilonS) {
+            break;
+          }
+          if (future_sample.fix_type() != GnssFixType::kRtkFix ||
+              !PassesGnssQualityFilters(future_sample) ||
+              !future_sample.has_enu_position ||
+              !IsWithinImuCoverage(dataset.imu_samples, corrected_time_s)) {
+            continue;
+          }
+          const StateMeasSyncResult future_sync_result =
+            FindStateForMeasurement(state_timestamp_map, corrected_time_s, config_);
+          if (!IsSynchronizedStatus(future_sync_result.status) &&
+              future_sync_result.status != StateMeasSyncStatus::kInterpolated) {
+            continue;
+          }
+          Eigen::Vector3d measurement_enu_m = future_sample.enu_position_m;
+          if (config_.enable_gnss_vertical_drift_model &&
+              future_sample_index < gnss_vertical_reference_up_by_sample.size()) {
+            const double vertical_reference_up_m = gnss_vertical_reference_up_by_sample[future_sample_index];
+            if (std::isfinite(vertical_reference_up_m)) {
+              measurement_enu_m.z() = vertical_reference_up_m;
+            }
+          }
+          const Eigen::Vector3d hold_sigma_m = ClampGnssSigma(future_sample);
+          specs.push_back(VerticalHoldWindowSpec{
+            future_sample_index,
+            corrected_time_s,
+            measurement_enu_m,
+            hold_sigma_m.z(),
+            ResolvePrefitReferenceRightIndex(future_sync_result),
+            future_sync_result.status == StateMeasSyncStatus::kInterpolated,
+          });
+        }
+        return specs;
+      };
       const auto build_hold_window_specs = [&](const std::size_t current_sample_index) {
         return build_vertical_window_specs(current_sample_index, config_.vertical_jump_hold_window_s);
       };
@@ -3339,10 +3433,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     nhc_supported_state_indices.insert(*nhc_jump_anchor_state);
                   }
                   std::vector<std::size_t> selected_jump_window_center_indices;
+                  int window_correction_attempt_count = 0;
+                  bool window_correction_attempt_limit_reached = false;
 
                   for (int jump_selection_index = 0;
                        jump_selection_index < config_.vertical_jump_max_selected_points_per_segment &&
-                       !inside_gate;
+                       !inside_gate &&
+                       !window_correction_attempt_limit_reached;
                        ++jump_selection_index) {
                     auto current_scoring_reference_states = iteration.gate_reference_states;
                     std::size_t current_scoring_valid_until_index = sequential_reference_valid_until_index;
@@ -3497,6 +3594,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         std::numeric_limits<double>::quiet_NaN(),
                         window_candidate.center_candidate.delta_vz_init_mps,
                       };
+                      std::vector<double> forced_tail_delta_up_options_m{
+                        std::numeric_limits<double>::quiet_NaN(),
+                      };
                       if (window_candidate.start_state_index > 0U &&
                           window_candidate.start_state_index - 1U < iteration.gate_reference_states.size() &&
                           std::isfinite(iteration_prefit_u_m)) {
@@ -3506,20 +3606,74 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                           0.05);
                         forced_tail_delta_options_mps.push_back(
                           std::clamp(-iteration_prefit_u_m / residual_correction_dt_s, -2.0, 2.0));
+                        for (const double up_delta_scale : {0.5, 0.75, 1.0, 1.25, 1.5, 2.0}) {
+                          forced_tail_delta_up_options_m.push_back(
+                            std::clamp(-iteration_prefit_u_m * up_delta_scale, -5.0, 5.0));
+                        }
+                      }
+                      if (current_future_trend_evaluation.valid &&
+                          std::isfinite(current_future_trend_evaluation.residual_mean_m)) {
+                        for (const double up_delta_scale : {0.5, 1.0, 1.5}) {
+                          forced_tail_delta_up_options_m.push_back(
+                            std::clamp(
+                              -current_future_trend_evaluation.residual_mean_m * up_delta_scale,
+                              -5.0,
+                              5.0));
+                        }
+                      }
+
+                      std::size_t candidate_scoring_end_state_index = recovery_scoring_end_state_index;
+                      std::vector<VerticalHoldWindowSpec> body_z_segment_specs;
+                      if (window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW") {
+                        std::size_t body_z_segment_end_state_index = recovery_scoring_end_state_index;
+                        std::optional<std::size_t> next_body_z_start_state_index;
+                        for (const auto &body_z_window : body_z_seed_detection.windows) {
+                          if (body_z_window.start_state_index <= window_candidate.end_state_index) {
+                            continue;
+                          }
+                          next_body_z_start_state_index =
+                            next_body_z_start_state_index.has_value()
+                              ? std::min(*next_body_z_start_state_index, body_z_window.start_state_index)
+                              : std::optional<std::size_t>(body_z_window.start_state_index);
+                        }
+                        if (next_body_z_start_state_index.has_value() &&
+                            *next_body_z_start_state_index > 0U) {
+                          body_z_segment_end_state_index =
+                            std::max(
+                              body_z_segment_end_state_index,
+                              *next_body_z_start_state_index - 1U);
+                        }
+                        body_z_segment_end_state_index =
+                          std::min(body_z_segment_end_state_index, iteration.gate_reference_states.size() - 1U);
+                        candidate_scoring_end_state_index =
+                          std::max(candidate_scoring_end_state_index, body_z_segment_end_state_index);
+                        body_z_segment_specs = build_vertical_window_specs_between_times(
+                          iteration.gate_reference_states[window_candidate.end_state_index].time_s,
+                          iteration.gate_reference_states[body_z_segment_end_state_index].time_s);
                       }
                       for (const double forced_tail_delta_mps : forced_tail_delta_options_mps) {
                       for (const double tail_delta_scale : {0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0}) {
+                      for (const double forced_tail_delta_up_m : forced_tail_delta_up_options_m) {
+                      if (window_correction_attempt_count >=
+                          config_.vertical_jump_window_max_correction_attempts) {
+                        window_correction_attempt_limit_reached = true;
+                        break;
+                      }
+                      ++window_correction_attempt_count;
                       const auto window_correction = BuildVerticalVelocityWindowCorrection(
                         config_,
                         iteration.gate_reference_states,
                         vertical_vz_reference_by_state,
                         window_candidate,
-                        hold_window_end_state_index,
+                        candidate_scoring_end_state_index,
                         tail_delta_scale,
-                        forced_tail_delta_mps);
+                        forced_tail_delta_mps,
+                        forced_tail_delta_up_m);
                       if (!window_correction.has_value() ||
                           !std::isfinite(window_correction->delta_vz_tail_mps) ||
-                          std::abs(window_correction->delta_vz_tail_mps) <= 1e-9) {
+                          !std::isfinite(window_correction->delta_up_tail_m) ||
+                          (std::abs(window_correction->delta_vz_tail_mps) <= 1e-9 &&
+                           std::abs(window_correction->delta_up_tail_m) <= 1e-9)) {
                         continue;
                       }
                       auto candidate_reference_states = iteration.gate_reference_states;
@@ -3535,7 +3689,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         imu_params,
                         &candidate_reference_states,
                         &candidate_valid_until_index,
-                        recovery_scoring_end_state_index,
+                        candidate_scoring_end_state_index,
                         &candidate_initial_values);
 
                       const auto candidate_hold_evaluation = EvaluateVerticalHoldWindow(
@@ -3543,6 +3697,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         hold_window_specs,
                         recovery_anchor_state_index,
                         vertical_gate_nis_threshold);
+                      if (window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW" &&
+                          !recovered_current_inside(candidate_hold_evaluation)) {
+                        continue;
+                      }
                       const double candidate_vz_reference_rms = compute_vz_reference_rms(
                         candidate_reference_states,
                         window_correction->end_state_index,
@@ -3553,6 +3711,17 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         config_.vertical_jump_future_trend_min_fix_count,
                         config_.vertical_jump_future_trend_mean_weight,
                         config_.vertical_jump_future_trend_slope_weight);
+                      double body_z_segment_gate_cost = 0.0;
+                      if (!body_z_segment_specs.empty()) {
+                        const auto candidate_body_z_segment_evaluation = EvaluateVerticalHoldWindow(
+                          candidate_reference_states,
+                          body_z_segment_specs,
+                          window_correction->end_state_index,
+                          vertical_gate_nis_threshold);
+                        body_z_segment_gate_cost =
+                          100.0 * candidate_body_z_segment_evaluation.gate_excess_cost +
+                          (candidate_body_z_segment_evaluation.hold_window_passed ? 0.0 : 1.0);
+                      }
                       // Body-z seed windows are pre-localized by the RTK seed attitude pass, so they should not
                       // lose to later GNSS/NHC mismatch windows while any body-z candidate remains viable.
                       const double candidate_objective =
@@ -3571,6 +3740,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         config_.vertical_jump_window_height_integral_weight *
                           window_correction->height_integral_delta_m *
                           window_correction->height_integral_delta_m +
+                        body_z_segment_gate_cost +
                         candidate_future_trend_evaluation.cost +
                         0.02 * static_cast<double>(selected_jump_window_center_indices.size() + 1U);
                       if (!std::isfinite(candidate_objective) || candidate_objective >= best_objective) {
@@ -3627,7 +3797,27 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       best_valid_until_index = candidate_valid_until_index;
                       best_hold_evaluation = candidate_hold_evaluation;
                       }
+                      if (window_correction_attempt_limit_reached) {
+                        break;
                       }
+                      }
+                      if (window_correction_attempt_limit_reached) {
+                        break;
+                      }
+                      }
+                      if (window_correction_attempt_limit_reached) {
+                        break;
+                      }
+                    }
+
+                    if (window_correction_attempt_limit_reached) {
+                      iteration.failed = true;
+                      iteration.failure_message =
+                        "vertical local recovery exceeded window correction attempt limit at sample " +
+                        std::to_string(sample_index) +
+                        ", limit=" +
+                        std::to_string(config_.vertical_jump_window_max_correction_attempts);
+                      break;
                     }
 
                     if (!best_window.has_value() || !best_window_correction.has_value() ||
@@ -3994,7 +4184,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     static_cast<long long>(local_recovery_attempt_count);
                   consistency_record.pure_delta_up_anchor_start_iteration = pure_delta_up_anchor_start_iteration;
 
-                  if (!inside_gate || (consistency_record.recovery_mode == "UP_ANCHOR" && !hold_window_passed)) {
+                  if (!iteration.failed &&
+                      (!inside_gate || (consistency_record.recovery_mode == "UP_ANCHOR" && !hold_window_passed))) {
                     iteration.failed = true;
                     iteration.failure_message =
                       "vertical local recovery failed at sample " + std::to_string(sample_index) +
