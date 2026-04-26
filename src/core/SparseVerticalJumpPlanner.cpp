@@ -393,6 +393,7 @@ std::vector<SparseVerticalJumpCandidate> SparseVerticalJumpPlanner::BuildCandida
     candidate.jump_step_threshold_mps = threshold_mps;
     candidate.delta_vz_init_mps = -mismatch_jump_mps;
     candidate.nhc_supported = nhc_support ? nhc_support(state_index) : false;
+    candidate.source = "GNSS_MISMATCH";
     candidate.score = abs_jump - threshold_mps + (candidate.nhc_supported ? 0.25 * threshold_mps : 0.0);
     seeds.push_back(CandidateSeed{candidate, abs_jump});
   }
@@ -589,6 +590,7 @@ std::vector<SparseVerticalJumpWindowCandidate> SparseVerticalJumpPlanner::BuildW
     candidate.jump_step_threshold_mps = threshold_mps;
     candidate.delta_vz_init_mps = -mismatch_jump_mps;
     candidate.nhc_supported = true;
+    candidate.source = "NHC_SUPPORTED";
     candidate.score = std::abs(mismatch_jump_mps) - support_ratio * threshold_mps +
                       std::max(threshold_mps, 0.0);
     point_candidates.push_back(candidate);

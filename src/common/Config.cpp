@@ -291,6 +291,38 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_jump_future_trend_mean_weight = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_future_trend_slope_weight") {
     config.vertical_jump_future_trend_slope_weight = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_rtk_seed_pass") {
+    config.enable_vertical_rtk_seed_pass = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_body_z_seed_jump_windows") {
+    config.enable_body_z_seed_jump_windows = ParseBool(normalized_value);
+  } else if (normalized_key == "body_z_seed_jump_use_fix_only") {
+    config.body_z_seed_jump_use_fix_only = ParseBool(normalized_value);
+  } else if (normalized_key == "body_z_jump_pre_post_window_s") {
+    config.body_z_jump_pre_post_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_jump_center_gap_s") {
+    config.body_z_jump_center_gap_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_jump_velocity_smooth_s") {
+    config.body_z_jump_velocity_smooth_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_jump_threshold_ratio") {
+    config.body_z_jump_threshold_ratio = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_jump_support_ratio") {
+    config.body_z_jump_support_ratio = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_jump_redundant_padding_s") {
+    config.body_z_jump_redundant_padding_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_jump_min_score_mps") {
+    config.body_z_jump_min_score_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_jump_min_separation_s") {
+    config.body_z_jump_min_separation_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_jump_max_window_duration_s") {
+    config.body_z_jump_max_window_duration_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_jump_max_levels") {
+    config.body_z_jump_max_levels = ParseInt(normalized_value);
+  } else if (normalized_key == "body_z_jump_dense_gap_s") {
+    config.body_z_jump_dense_gap_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_jump_dense_peak_count") {
+    config.body_z_jump_dense_peak_count = ParseInt(normalized_value);
+  } else if (normalized_key == "body_z_jump_dense_peak_floor_ratio") {
+    config.body_z_jump_dense_peak_floor_ratio = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_nhc_jump_reference") {
     config.enable_nhc_jump_reference = ParseBool(normalized_value);
   } else if (normalized_key == "nhc_history_half_life_s") {
@@ -691,6 +723,32 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
         config.vertical_jump_future_trend_slope_weight < 0.0) {
       throw std::runtime_error("vertical jump future trend settings must be non-negative");
     }
+    if (config.enable_body_z_seed_jump_windows && !config.enable_vertical_rtk_seed_pass) {
+      throw std::runtime_error("enable_body_z_seed_jump_windows requires enable_vertical_rtk_seed_pass");
+    }
+    if (config.enable_vertical_rtk_seed_pass && !config.enable_gnss) {
+      throw std::runtime_error("enable_vertical_rtk_seed_pass requires enable_gnss");
+    }
+    if (config.body_z_jump_pre_post_window_s <= 0.0 ||
+        config.body_z_jump_velocity_smooth_s <= 0.0 ||
+        config.body_z_jump_min_score_mps <= 0.0 ||
+        config.body_z_jump_min_separation_s < 0.0 ||
+        config.body_z_jump_max_window_duration_s <= 0.0 ||
+        config.body_z_jump_dense_gap_s <= 0.0 ||
+        config.body_z_jump_dense_peak_floor_ratio <= 0.0) {
+      throw std::runtime_error("body-z jump detector timing and threshold settings are invalid");
+    }
+    if (config.body_z_jump_center_gap_s < 0.0 || config.body_z_jump_redundant_padding_s < 0.0) {
+      throw std::runtime_error("body-z jump detector gap and padding settings must be non-negative");
+    }
+    if (config.body_z_jump_threshold_ratio <= 0.0 ||
+        config.body_z_jump_support_ratio < 0.0 ||
+        config.body_z_jump_support_ratio > 1.0) {
+      throw std::runtime_error("body-z jump detector ratios are invalid");
+    }
+    if (config.body_z_jump_max_levels <= 0 || config.body_z_jump_dense_peak_count <= 0) {
+      throw std::runtime_error("body-z jump detector level and density limits must be positive");
+    }
     if (config.nhc_history_half_life_s <= 0.0 || config.nhc_history_max_age_s <= 0.0) {
       throw std::runtime_error("NHC history windows must be positive");
     }
@@ -994,6 +1052,32 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
       config.vertical_jump_future_trend_slope_weight < 0.0) {
     throw std::runtime_error("vertical jump future trend settings must be non-negative");
   }
+  if (config.enable_body_z_seed_jump_windows && !config.enable_vertical_rtk_seed_pass) {
+    throw std::runtime_error("enable_body_z_seed_jump_windows requires enable_vertical_rtk_seed_pass");
+  }
+  if (config.enable_vertical_rtk_seed_pass && !config.enable_gnss) {
+    throw std::runtime_error("enable_vertical_rtk_seed_pass requires enable_gnss");
+  }
+  if (config.body_z_jump_pre_post_window_s <= 0.0 ||
+      config.body_z_jump_velocity_smooth_s <= 0.0 ||
+      config.body_z_jump_min_score_mps <= 0.0 ||
+      config.body_z_jump_min_separation_s < 0.0 ||
+      config.body_z_jump_max_window_duration_s <= 0.0 ||
+      config.body_z_jump_dense_gap_s <= 0.0 ||
+      config.body_z_jump_dense_peak_floor_ratio <= 0.0) {
+    throw std::runtime_error("body-z jump detector timing and threshold settings are invalid");
+  }
+  if (config.body_z_jump_center_gap_s < 0.0 || config.body_z_jump_redundant_padding_s < 0.0) {
+    throw std::runtime_error("body-z jump detector gap and padding settings must be non-negative");
+  }
+  if (config.body_z_jump_threshold_ratio <= 0.0 ||
+      config.body_z_jump_support_ratio < 0.0 ||
+      config.body_z_jump_support_ratio > 1.0) {
+    throw std::runtime_error("body-z jump detector ratios are invalid");
+  }
+  if (config.body_z_jump_max_levels <= 0 || config.body_z_jump_dense_peak_count <= 0) {
+    throw std::runtime_error("body-z jump detector level and density limits must be positive");
+  }
   if (config.nhc_history_half_life_s <= 0.0 || config.nhc_history_max_age_s <= 0.0) {
     throw std::runtime_error("NHC history windows must be positive");
   }
@@ -1141,6 +1225,22 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << config.vertical_jump_future_trend_min_fix_count << '\n'
       << "vertical_jump_future_trend_mean_weight=" << config.vertical_jump_future_trend_mean_weight << '\n'
       << "vertical_jump_future_trend_slope_weight=" << config.vertical_jump_future_trend_slope_weight << '\n'
+      << "enable_vertical_rtk_seed_pass=" << (config.enable_vertical_rtk_seed_pass ? "true" : "false") << '\n'
+      << "enable_body_z_seed_jump_windows=" << (config.enable_body_z_seed_jump_windows ? "true" : "false") << '\n'
+      << "body_z_seed_jump_use_fix_only=" << (config.body_z_seed_jump_use_fix_only ? "true" : "false") << '\n'
+      << "body_z_jump_pre_post_window_s=" << config.body_z_jump_pre_post_window_s << '\n'
+      << "body_z_jump_center_gap_s=" << config.body_z_jump_center_gap_s << '\n'
+      << "body_z_jump_velocity_smooth_s=" << config.body_z_jump_velocity_smooth_s << '\n'
+      << "body_z_jump_threshold_ratio=" << config.body_z_jump_threshold_ratio << '\n'
+      << "body_z_jump_support_ratio=" << config.body_z_jump_support_ratio << '\n'
+      << "body_z_jump_redundant_padding_s=" << config.body_z_jump_redundant_padding_s << '\n'
+      << "body_z_jump_min_score_mps=" << config.body_z_jump_min_score_mps << '\n'
+      << "body_z_jump_min_separation_s=" << config.body_z_jump_min_separation_s << '\n'
+      << "body_z_jump_max_window_duration_s=" << config.body_z_jump_max_window_duration_s << '\n'
+      << "body_z_jump_max_levels=" << config.body_z_jump_max_levels << '\n'
+      << "body_z_jump_dense_gap_s=" << config.body_z_jump_dense_gap_s << '\n'
+      << "body_z_jump_dense_peak_count=" << config.body_z_jump_dense_peak_count << '\n'
+      << "body_z_jump_dense_peak_floor_ratio=" << config.body_z_jump_dense_peak_floor_ratio << '\n'
       << "enable_nhc_jump_reference=" << (config.enable_nhc_jump_reference ? "true" : "false") << '\n'
       << "nhc_history_half_life_s=" << config.nhc_history_half_life_s << '\n'
       << "nhc_history_max_age_s=" << config.nhc_history_max_age_s << '\n'

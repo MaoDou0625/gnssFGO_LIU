@@ -5,6 +5,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <iterator>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
@@ -25,6 +26,7 @@
 
 #include "offline_lc_minimal/core/ImuIntegrationUtils.h"
 #include "offline_lc_minimal/core/InitialStaticConstraintBuilder.h"
+#include "offline_lc_minimal/core/BodyZBidirectionalJumpDetector.h"
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
 #include "offline_lc_minimal/core/SequentialNhcJumpDetector.h"
 #include "offline_lc_minimal/core/SparseVerticalJumpPlanner.h"
@@ -2788,6 +2790,135 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     gate_seed_values = seed_optimizer.optimize();
     gate_seed_reference_states = BuildReferenceStatesFromOptimizedValues(state_timestamps, gate_seed_values);
   }
+  std::vector<ReferenceNodeState> body_z_seed_reference_states;
+  BodyZJumpDetectionResult body_z_seed_detection;
+  if (config_.enable_vertical_rtk_seed_pass) {
+    auto rtk_seed_graph = base_graph;
+    std::size_t rtk_seed_factor_count = 0U;
+    const auto rtk_seed_noise_model = [&](const GnssSolutionSample &sample) {
+      const Eigen::Vector3d sigma_m = ClampGnssSigma(sample);
+      return gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(sigma_m.x(), sigma_m.y(), sigma_m.z()));
+    };
+    for (std::size_t sample_index = 0; sample_index < dataset.gnss_samples.size(); ++sample_index) {
+      if (sample_index <= navigation_start_index) {
+        continue;
+      }
+      const auto &gnss_sample = dataset.gnss_samples[sample_index];
+      if (config_.body_z_seed_jump_use_fix_only && gnss_sample.fix_type() != GnssFixType::kRtkFix) {
+        continue;
+      }
+      if (!PassesGnssQualityFilters(gnss_sample) || !gnss_sample.has_enu_position) {
+        continue;
+      }
+      const double corrected_time_s = CorrectedGnssTime(gnss_sample);
+      if (!IsWithinImuCoverage(dataset.imu_samples, corrected_time_s)) {
+        continue;
+      }
+      const StateMeasSyncResult sync_result =
+        FindStateForMeasurement(state_timestamp_map, corrected_time_s, config_);
+      if (sync_result.status == StateMeasSyncStatus::kSynchronizedI ||
+          sync_result.status == StateMeasSyncStatus::kSynchronizedJ) {
+        const std::size_t sync_state_index =
+          sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i : sync_result.key_index_j;
+        rtk_seed_graph.add(gtsam::GPSFactor(
+          X(sync_state_index),
+          gtsam::Point3(
+            gnss_sample.enu_position_m.x(),
+            gnss_sample.enu_position_m.y(),
+            gnss_sample.enu_position_m.z()),
+          rtk_seed_noise_model(gnss_sample)));
+        ++rtk_seed_factor_count;
+      } else if (
+        sync_result.status == StateMeasSyncStatus::kInterpolated &&
+        config_.enable_gp_interpolated_gnss &&
+        sync_result.state_j_exists()) {
+        gp::GPWNOJInterpolator interpolator = base_interpolator;
+        interpolator.Recalculate(
+          sync_result.timestamp_j_s - sync_result.timestamp_i_s,
+          sync_result.duration_from_state_i_s);
+        rtk_seed_graph.add(factor::GPInterpolatedGPSFactor(
+          X(sync_result.key_index_i),
+          V(sync_result.key_index_i),
+          W(sync_result.key_index_i),
+          X(sync_result.key_index_j),
+          V(sync_result.key_index_j),
+          W(sync_result.key_index_j),
+          gtsam::Point3(
+            gnss_sample.enu_position_m.x(),
+            gnss_sample.enu_position_m.y(),
+            gnss_sample.enu_position_m.z()),
+          gtsam::Vector3::Zero(),
+          rtk_seed_noise_model(gnss_sample),
+          interpolator));
+        ++rtk_seed_factor_count;
+      }
+    }
+    if (rtk_seed_factor_count > 0U) {
+      gtsam::LevenbergMarquardtOptimizer rtk_seed_optimizer(
+        rtk_seed_graph,
+        base_initial_values,
+        optimizer_params);
+      const gtsam::Values rtk_seed_values = rtk_seed_optimizer.optimize();
+      body_z_seed_reference_states = BuildReferenceStatesFromOptimizedValues(state_timestamps, rtk_seed_values);
+    }
+  }
+  if (config_.enable_body_z_seed_jump_windows && !body_z_seed_reference_states.empty()) {
+    BodyZBidirectionalJumpDetector body_z_detector(config_);
+    body_z_seed_detection = body_z_detector.Detect(
+      dataset.imu_samples,
+      body_z_seed_reference_states,
+      state_timestamps,
+      dynamic_start_time_s,
+      state_timestamps.back());
+    run_result.seed_body_z_acc_diagnostics.reserve(body_z_seed_detection.signal.size());
+    for (const auto &sample : body_z_seed_detection.signal) {
+      BodyZSeedImuDiagnosticRow row;
+      row.time_s = sample.time_s;
+      row.relative_time_s = sample.relative_time_s;
+      row.body_z_specific_force_mps2 = sample.body_z_specific_force_mps2;
+      row.gravity_projection_z_mps2 = sample.gravity_projection_z_mps2;
+      row.body_z_acc_mps2 = sample.body_z_acc_mps2;
+      row.body_z_acc_1s_smooth_mps2 = sample.body_z_acc_1s_smooth_mps2;
+      row.integrated_body_z_velocity_mps = sample.integrated_body_z_velocity_mps;
+      row.integrated_body_z_velocity_0p2s_smooth_mps = sample.integrated_body_z_velocity_0p2s_smooth_mps;
+      row.integrated_body_z_velocity_1s_smooth_mps = sample.integrated_body_z_velocity_1s_smooth_mps;
+      row.signed_step_metric_mps = sample.signed_step_metric_mps;
+      row.downward_score_mps = sample.downward_score_mps;
+      row.upward_score_mps = sample.upward_score_mps;
+      row.body_z_axis_nav_z = sample.body_z_axis_nav_z;
+      run_result.seed_body_z_acc_diagnostics.push_back(row);
+    }
+    run_result.body_z_seed_jump_windows.reserve(body_z_seed_detection.windows.size());
+    for (const auto &window : body_z_seed_detection.windows) {
+      BodyZSeedJumpWindowRow row;
+      row.direction = window.direction;
+      row.selection_level = window.selection_level;
+      row.start_state_index = static_cast<long long>(window.start_state_index);
+      row.center_state_index = static_cast<long long>(window.center_state_index);
+      row.end_state_index = static_cast<long long>(window.end_state_index);
+      row.start_time_s = window.start_time_s;
+      row.center_time_s = window.center_time_s;
+      row.end_time_s = window.end_time_s;
+      row.start_relative_time_s = window.start_relative_time_s;
+      row.center_relative_time_s = window.center_relative_time_s;
+      row.end_relative_time_s = window.end_relative_time_s;
+      row.duration_s = window.duration_s;
+      row.pre_velocity_mps = window.pre_velocity_mps;
+      row.post_velocity_mps = window.post_velocity_mps;
+      row.signed_delta_velocity_mps = window.signed_delta_velocity_mps;
+      row.direction_score_mps = window.direction_score_mps;
+      row.signed_step_metric_mps = window.signed_step_metric_mps;
+      row.level_threshold_mps = window.level_threshold_mps;
+      row.level_max_peak_mps = window.level_max_peak_mps;
+      row.level_noise_floor_mps = window.level_noise_floor_mps;
+      row.min_acc_mps2 = window.min_acc_mps2;
+      row.max_acc_mps2 = window.max_acc_mps2;
+      row.mean_acc_mps2 = window.mean_acc_mps2;
+      row.body_z_axis_nav_z = window.body_z_axis_nav_z;
+      row.delta_vz_init_mps = window.delta_vz_init_mps;
+      run_result.body_z_seed_jump_windows.push_back(row);
+    }
+  }
   struct VerticalGateIterationResult {
     gtsam::Values optimized_values;
     std::vector<GnssFactorRecord> gnss_factor_records;
@@ -3119,6 +3250,30 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                          state_timestamps[nhc_search_start_state_index] > nhc_search_start_time_s) {
                     --nhc_search_start_state_index;
                   }
+                  std::optional<BodyZJumpWindowCandidate> body_z_recovery_window;
+                  std::optional<std::size_t> body_z_recovery_anchor_state_index;
+                  if (config_.enable_body_z_seed_jump_windows && !body_z_seed_detection.windows.empty()) {
+                    for (const auto &body_z_window : body_z_seed_detection.windows) {
+                      if (body_z_window.end_state_index < nhc_search_start_state_index ||
+                          body_z_window.start_state_index > *feedback_anchor_state) {
+                        continue;
+                      }
+                      if (!body_z_recovery_window.has_value() ||
+                          body_z_window.center_state_index > body_z_recovery_window->center_state_index) {
+                        body_z_recovery_window = body_z_window;
+                      }
+                    }
+                    if (body_z_recovery_window.has_value()) {
+                      if (body_z_recovery_window->start_state_index > graph_timeline.dynamic_start_index + 1U) {
+                        body_z_recovery_anchor_state_index = body_z_recovery_window->start_state_index - 2U;
+                      } else if (body_z_recovery_window->start_state_index > graph_timeline.dynamic_start_index) {
+                        body_z_recovery_anchor_state_index = body_z_recovery_window->start_state_index - 1U;
+                      } else {
+                        body_z_recovery_anchor_state_index = body_z_recovery_window->start_state_index;
+                      }
+                      recovery_anchor_state_index = *body_z_recovery_anchor_state_index;
+                    }
+                  }
                   const double preferred_nhc_jump_sign = prefit_residual_enu_m.z();
                   auto nhc_jump_anchor_state =
                     nhc_jump_detector.FindRecentJumpAnchor(
@@ -3136,13 +3291,16 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   if (nhc_jump_anchor_state.has_value()) {
                     consistency_record.nhc_jump_anchor_state_index =
                       static_cast<long long>(*nhc_jump_anchor_state);
+                    std::size_t nhc_recovery_anchor_state_index = *nhc_jump_anchor_state;
                     if (*nhc_jump_anchor_state > graph_timeline.dynamic_start_index + 1U) {
-                      recovery_anchor_state_index = *nhc_jump_anchor_state - 2U;
+                      nhc_recovery_anchor_state_index = *nhc_jump_anchor_state - 2U;
                     } else if (*nhc_jump_anchor_state > graph_timeline.dynamic_start_index) {
-                      recovery_anchor_state_index = *nhc_jump_anchor_state - 1U;
-                    } else {
-                      recovery_anchor_state_index = *nhc_jump_anchor_state;
+                      nhc_recovery_anchor_state_index = *nhc_jump_anchor_state - 1U;
                     }
+                    recovery_anchor_state_index =
+                      body_z_recovery_anchor_state_index.has_value()
+                        ? std::min(*body_z_recovery_anchor_state_index, nhc_recovery_anchor_state_index)
+                        : nhc_recovery_anchor_state_index;
                   }
                   consistency_record.recovery_anchor_state_index =
                     static_cast<long long>(recovery_anchor_state_index);
@@ -3247,7 +3405,77 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       current_future_trend_evaluation.cost +
                       0.02 * static_cast<double>(selected_jump_window_center_indices.size());
 
-                    auto sparse_jump_windows = iteration_sparse_jump_planner.BuildWindowCandidates(
+                    std::vector<SparseVerticalJumpWindowCandidate> sparse_jump_windows;
+                    if (config_.enable_body_z_seed_jump_windows && !body_z_seed_detection.windows.empty()) {
+                      for (const auto &body_z_window : body_z_seed_detection.windows) {
+                        if (body_z_window.end_state_index < recovery_anchor_state_index + 1U ||
+                            body_z_window.start_state_index > *feedback_anchor_state) {
+                          continue;
+                        }
+                        const std::size_t window_start_state_index =
+                          std::clamp(
+                            body_z_window.start_state_index,
+                            recovery_anchor_state_index + 1U,
+                            *feedback_anchor_state);
+                        const std::size_t window_end_state_index =
+                          std::clamp(
+                            body_z_window.end_state_index,
+                            window_start_state_index,
+                            *feedback_anchor_state);
+                        const std::size_t window_center_state_index =
+                          std::clamp(
+                            body_z_window.center_state_index,
+                            window_start_state_index,
+                            window_end_state_index);
+                        if (std::find(
+                              selected_jump_window_center_indices.begin(),
+                              selected_jump_window_center_indices.end(),
+                              window_center_state_index) != selected_jump_window_center_indices.end()) {
+                          continue;
+                        }
+                        SparseVerticalJumpCandidate center_candidate;
+                        center_candidate.state_index = window_center_state_index;
+                        center_candidate.time_s = iteration.gate_reference_states[window_center_state_index].time_s;
+                        center_candidate.vz_prefit_mps =
+                          iteration.gate_reference_states[window_center_state_index].velocity.z();
+                        if (window_center_state_index < vertical_vz_reference_by_state.size() &&
+                            vertical_vz_reference_by_state[window_center_state_index].valid &&
+                            std::isfinite(
+                              vertical_vz_reference_by_state[window_center_state_index]
+                                .vz_ref_global_smoothed_mps)) {
+                          center_candidate.vz_ref_global_smoothed_mps =
+                            vertical_vz_reference_by_state[window_center_state_index].vz_ref_global_smoothed_mps;
+                          center_candidate.vz_mismatch_mps =
+                            center_candidate.vz_prefit_mps -
+                            center_candidate.vz_ref_global_smoothed_mps;
+                        }
+                        center_candidate.vz_mismatch_jump_mps =
+                          body_z_window.signed_delta_velocity_mps * body_z_window.body_z_axis_nav_z;
+                        center_candidate.jump_step_threshold_mps = body_z_window.level_threshold_mps;
+                        center_candidate.delta_vz_init_mps = body_z_window.delta_vz_init_mps;
+                        center_candidate.score = body_z_window.direction_score_mps;
+                        center_candidate.nhc_supported = nhc_supported_state_indices.contains(window_center_state_index);
+                        center_candidate.source = "BODY_Z_SEED_WINDOW";
+                        center_candidate.body_z_direction = body_z_window.direction;
+                        center_candidate.body_z_signed_delta_velocity_mps =
+                          body_z_window.signed_delta_velocity_mps;
+                        center_candidate.body_z_direction_score_mps = body_z_window.direction_score_mps;
+                        center_candidate.body_z_axis_nav_z = body_z_window.body_z_axis_nav_z;
+
+                        SparseVerticalJumpWindowCandidate window_candidate;
+                        window_candidate.center_candidate = center_candidate;
+                        window_candidate.start_state_index = window_start_state_index;
+                        window_candidate.center_state_index = window_center_state_index;
+                        window_candidate.end_state_index = window_end_state_index;
+                        window_candidate.duration_s =
+                          iteration.gate_reference_states[window_end_state_index].time_s -
+                          iteration.gate_reference_states[window_start_state_index].time_s;
+                        window_candidate.point_count =
+                          window_candidate.end_state_index - window_candidate.start_state_index + 1U;
+                        sparse_jump_windows.push_back(window_candidate);
+                      }
+                    }
+                    auto fallback_sparse_jump_windows = iteration_sparse_jump_planner.BuildWindowCandidates(
                       iteration.gate_reference_states,
                       vertical_vz_reference_by_state,
                       recovery_anchor_state_index,
@@ -3255,6 +3483,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       [&](const std::size_t state_index) {
                         return nhc_supported_state_indices.contains(state_index);
                       });
+                    sparse_jump_windows.insert(
+                      sparse_jump_windows.end(),
+                      std::make_move_iterator(fallback_sparse_jump_windows.begin()),
+                      std::make_move_iterator(fallback_sparse_jump_windows.end()));
                     sparse_jump_windows.erase(
                       std::remove_if(
                         sparse_jump_windows.begin(),
@@ -3460,6 +3692,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     consistency_record.vz_mismatch_mps = best_window->center_candidate.vz_mismatch_mps;
                     consistency_record.vz_mismatch_jump_mps = best_window->center_candidate.vz_mismatch_jump_mps;
                     consistency_record.jump_candidate_score = best_window->center_candidate.score;
+                    consistency_record.candidate_source = best_window->center_candidate.source;
+                    consistency_record.body_z_jump_direction = best_window->center_candidate.body_z_direction;
+                    consistency_record.body_z_signed_delta_velocity_mps =
+                      best_window->center_candidate.body_z_signed_delta_velocity_mps;
+                    consistency_record.body_z_direction_score_mps =
+                      best_window->center_candidate.body_z_direction_score_mps;
+                    consistency_record.body_z_axis_nav_z = best_window->center_candidate.body_z_axis_nav_z;
                     consistency_record.selected_jump_state_index =
                       static_cast<long long>(best_window->center_state_index);
                     consistency_record.selected_jump_delta_vz_mps =
@@ -3518,6 +3757,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     iteration_row.vz_mismatch_jump_mps =
                       best_window->center_candidate.vz_mismatch_jump_mps;
                     iteration_row.jump_candidate_score = best_window->center_candidate.score;
+                    iteration_row.candidate_source = best_window->center_candidate.source;
+                    iteration_row.body_z_jump_direction = best_window->center_candidate.body_z_direction;
+                    iteration_row.body_z_signed_delta_velocity_mps =
+                      best_window->center_candidate.body_z_signed_delta_velocity_mps;
+                    iteration_row.body_z_direction_score_mps =
+                      best_window->center_candidate.body_z_direction_score_mps;
+                    iteration_row.body_z_axis_nav_z = best_window->center_candidate.body_z_axis_nav_z;
                     iteration_row.selected_jump_state_index =
                       static_cast<long long>(best_window->center_state_index);
                     iteration_row.selected_jump_delta_vz_mps =
@@ -3647,6 +3893,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       iteration_row.vz_mismatch_mps = consistency_record.vz_mismatch_mps;
                       iteration_row.vz_mismatch_jump_mps = consistency_record.vz_mismatch_jump_mps;
                       iteration_row.jump_candidate_score = consistency_record.jump_candidate_score;
+                      iteration_row.candidate_source = consistency_record.candidate_source;
+                      iteration_row.body_z_jump_direction = consistency_record.body_z_jump_direction;
+                      iteration_row.body_z_signed_delta_velocity_mps =
+                        consistency_record.body_z_signed_delta_velocity_mps;
+                      iteration_row.body_z_direction_score_mps =
+                        consistency_record.body_z_direction_score_mps;
+                      iteration_row.body_z_axis_nav_z = consistency_record.body_z_axis_nav_z;
                       iteration_row.selected_jump_state_index = consistency_record.selected_jump_state_index;
                       iteration_row.selected_jump_delta_vz_mps = consistency_record.selected_jump_delta_vz_mps;
                       iteration_row.recovery_mode = "DRIFT_ONLY";
@@ -3729,6 +3982,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     fallback_iteration_row.vz_mismatch_mps = consistency_record.vz_mismatch_mps;
                     fallback_iteration_row.vz_mismatch_jump_mps = consistency_record.vz_mismatch_jump_mps;
                     fallback_iteration_row.jump_candidate_score = consistency_record.jump_candidate_score;
+                    fallback_iteration_row.candidate_source = consistency_record.candidate_source;
+                    fallback_iteration_row.body_z_jump_direction = consistency_record.body_z_jump_direction;
+                    fallback_iteration_row.body_z_signed_delta_velocity_mps =
+                      consistency_record.body_z_signed_delta_velocity_mps;
+                    fallback_iteration_row.body_z_direction_score_mps =
+                      consistency_record.body_z_direction_score_mps;
+                    fallback_iteration_row.body_z_axis_nav_z = consistency_record.body_z_axis_nav_z;
                     fallback_iteration_row.selected_jump_state_index =
                       consistency_record.selected_jump_state_index;
                     fallback_iteration_row.selected_jump_delta_vz_mps =

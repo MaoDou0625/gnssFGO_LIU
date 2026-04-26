@@ -54,6 +54,7 @@ add_library(offline_lc_minimal_lib
   src/gp/Pose3Utils.cpp
   src/io/TextDatasetLoader.cpp
   src/core/InitialStaticConstraintBuilder.cpp
+  src/core/BodyZBidirectionalJumpDetector.cpp
   src/core/ImuIntegrationUtils.cpp
   src/core/ImuRateAvpReconstructor.cpp
   src/core/StaticImuAlignment.cpp

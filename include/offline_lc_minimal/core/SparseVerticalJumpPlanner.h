@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <functional>
 #include <limits>
+#include <string>
 #include <vector>
 
 #include "offline_lc_minimal/common/Config.h"
@@ -28,6 +29,11 @@ struct SparseVerticalJumpCandidate {
   double delta_vz_init_mps = std::numeric_limits<double>::quiet_NaN();
   double score = std::numeric_limits<double>::quiet_NaN();
   bool nhc_supported = false;
+  std::string source = "GNSS_MISMATCH";
+  std::string body_z_direction = "NONE";
+  double body_z_signed_delta_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double body_z_direction_score_mps = std::numeric_limits<double>::quiet_NaN();
+  double body_z_axis_nav_z = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct SparseVerticalJumpWindowCandidate {

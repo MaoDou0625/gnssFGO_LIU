@@ -145,6 +145,79 @@ void WriteReferenceNodeCsv(
   }
 }
 
+void WriteSeedBodyZAccDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<BodyZSeedImuDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "time_s,relative_time_s,body_z_specific_force_mps2,gravity_projection_z_mps2,body_z_acc_mps2,"
+       "body_z_acc_1s_smooth_mps2,integrated_body_z_velocity_mps,"
+       "integrated_body_z_velocity_0p2s_smooth_mps,integrated_body_z_velocity_1s_smooth_mps,"
+       "signed_step_metric_mps,downward_score_mps,upward_score_mps,body_z_axis_nav_z\n";
+  for (const auto &row : rows) {
+    stream << row.time_s << ','
+           << row.relative_time_s << ','
+           << row.body_z_specific_force_mps2 << ','
+           << row.gravity_projection_z_mps2 << ','
+           << row.body_z_acc_mps2 << ','
+           << row.body_z_acc_1s_smooth_mps2 << ','
+           << row.integrated_body_z_velocity_mps << ','
+           << row.integrated_body_z_velocity_0p2s_smooth_mps << ','
+           << row.integrated_body_z_velocity_1s_smooth_mps << ','
+           << row.signed_step_metric_mps << ','
+           << row.downward_score_mps << ','
+           << row.upward_score_mps << ','
+           << row.body_z_axis_nav_z << '\n';
+  }
+}
+
+void WriteBodyZSeedJumpWindowCsv(
+  const std::filesystem::path &path,
+  const std::vector<BodyZSeedJumpWindowRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "direction,selection_level,start_state_index,center_state_index,end_state_index,"
+       "start_time_s,center_time_s,end_time_s,start_relative_time_s,center_relative_time_s,end_relative_time_s,"
+       "duration_s,pre_velocity_mps,post_velocity_mps,signed_delta_velocity_mps,direction_score_mps,"
+       "signed_step_metric_mps,level_threshold_mps,level_max_peak_mps,level_noise_floor_mps,"
+       "min_acc_mps2,max_acc_mps2,mean_acc_mps2,body_z_axis_nav_z,delta_vz_init_mps\n";
+  for (const auto &row : rows) {
+    stream << row.direction << ','
+           << row.selection_level << ','
+           << row.start_state_index << ','
+           << row.center_state_index << ','
+           << row.end_state_index << ','
+           << row.start_time_s << ','
+           << row.center_time_s << ','
+           << row.end_time_s << ','
+           << row.start_relative_time_s << ','
+           << row.center_relative_time_s << ','
+           << row.end_relative_time_s << ','
+           << row.duration_s << ','
+           << row.pre_velocity_mps << ','
+           << row.post_velocity_mps << ','
+           << row.signed_delta_velocity_mps << ','
+           << row.direction_score_mps << ','
+           << row.signed_step_metric_mps << ','
+           << row.level_threshold_mps << ','
+           << row.level_max_peak_mps << ','
+           << row.level_noise_floor_mps << ','
+           << row.min_acc_mps2 << ','
+           << row.max_acc_mps2 << ','
+           << row.mean_acc_mps2 << ','
+           << row.body_z_axis_nav_z << ','
+           << row.delta_vz_init_mps << '\n';
+  }
+}
+
 void WriteErrorStateCsv(const std::filesystem::path &path, const std::vector<ErrorStateRow> &rows) {
   std::ofstream stream(path);
   if (!stream.is_open()) {
@@ -279,6 +352,7 @@ void WriteGnssConsistencyCsv(
        "nhc_body_vy_threshold_mps,nhc_body_vz_threshold_mps,"
        "delta_vz_applied_mps,delta_up_anchor_applied_m,delta_roll_applied_rad,delta_pitch_applied_rad,delta_baz_applied_mps2,"
        "vz_ref_global_smoothed_mps,vz_prefit_mps,vz_mismatch_mps,vz_mismatch_jump_mps,jump_candidate_score,"
+       "candidate_source,body_z_jump_direction,body_z_signed_delta_velocity_mps,body_z_direction_score_mps,body_z_axis_nav_z,"
        "selected_jump_state_index,selected_jump_delta_vz_mps,"
        "selected_jump_window_start_state_index,selected_jump_window_center_state_index,"
        "selected_jump_window_end_state_index,selected_jump_window_duration_s,selected_jump_window_point_count,"
@@ -332,6 +406,11 @@ void WriteGnssConsistencyCsv(
            << row.vz_mismatch_mps << ','
            << row.vz_mismatch_jump_mps << ','
            << row.jump_candidate_score << ','
+           << row.candidate_source << ','
+           << row.body_z_jump_direction << ','
+           << row.body_z_signed_delta_velocity_mps << ','
+           << row.body_z_direction_score_mps << ','
+           << row.body_z_axis_nav_z << ','
            << row.selected_jump_state_index << ','
            << row.selected_jump_delta_vz_mps << ','
            << row.selected_jump_window_start_state_index << ','
@@ -382,7 +461,8 @@ void WriteVerticalLocalRecoveryIterationCsv(
        "postfit_u_after_velocity_recovery_m,postfit_u_after_iteration_m,delta_vz_applied_mps,"
        "delta_up_anchor_applied_m,delta_roll_applied_rad,delta_pitch_applied_rad,delta_baz_applied_mps2,"
        "required_up_anchor_correction_m,vz_ref_global_smoothed_mps,vz_prefit_mps,vz_mismatch_mps,vz_mismatch_jump_mps,"
-       "jump_candidate_score,selected_jump_state_index,selected_jump_delta_vz_mps,"
+       "jump_candidate_score,candidate_source,body_z_jump_direction,body_z_signed_delta_velocity_mps,"
+       "body_z_direction_score_mps,body_z_axis_nav_z,selected_jump_state_index,selected_jump_delta_vz_mps,"
        "selected_jump_window_start_state_index,selected_jump_window_center_state_index,"
        "selected_jump_window_end_state_index,selected_jump_window_duration_s,selected_jump_window_point_count,"
        "selected_jump_delta_vz_tail_mps,window_velocity_smooth_cost,window_height_integral_delta_m,"
@@ -411,6 +491,11 @@ void WriteVerticalLocalRecoveryIterationCsv(
            << row.vz_mismatch_mps << ','
            << row.vz_mismatch_jump_mps << ','
            << row.jump_candidate_score << ','
+           << row.candidate_source << ','
+           << row.body_z_jump_direction << ','
+           << row.body_z_signed_delta_velocity_mps << ','
+           << row.body_z_direction_score_mps << ','
+           << row.body_z_axis_nav_z << ','
            << row.selected_jump_state_index << ','
            << row.selected_jump_delta_vz_mps << ','
            << row.selected_jump_window_start_state_index << ','
@@ -576,6 +661,16 @@ void ResultWriter::WriteOutputs(
   }
   if (!result.reference_node_trajectory.empty()) {
     WriteReferenceNodeCsv(output_path / "reference_node_trajectory.csv", result.reference_node_trajectory, geo_reference);
+  }
+  if (!result.seed_body_z_acc_diagnostics.empty()) {
+    WriteSeedBodyZAccDiagnosticsCsv(
+      output_path / "seed_body_z_acc_diagnostics.csv",
+      result.seed_body_z_acc_diagnostics);
+  }
+  if (!result.body_z_seed_jump_windows.empty()) {
+    WriteBodyZSeedJumpWindowCsv(
+      output_path / "body_z_seed_jump_windows.csv",
+      result.body_z_seed_jump_windows);
   }
   if (!result.error_state_trajectory.empty()) {
     WriteErrorStateCsv(output_path / "error_state_trajectory.csv", result.error_state_trajectory);

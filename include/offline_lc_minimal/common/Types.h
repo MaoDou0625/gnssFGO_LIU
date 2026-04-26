@@ -308,6 +308,50 @@ struct ReferenceNodeState {
   gtsam::Vector3 omega = gtsam::Vector3::Zero();
 };
 
+struct BodyZSeedImuDiagnosticRow {
+  double time_s = 0.0;
+  double relative_time_s = 0.0;
+  double body_z_specific_force_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double gravity_projection_z_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double body_z_acc_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double body_z_acc_1s_smooth_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double integrated_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double integrated_body_z_velocity_0p2s_smooth_mps = std::numeric_limits<double>::quiet_NaN();
+  double integrated_body_z_velocity_1s_smooth_mps = std::numeric_limits<double>::quiet_NaN();
+  double signed_step_metric_mps = std::numeric_limits<double>::quiet_NaN();
+  double downward_score_mps = std::numeric_limits<double>::quiet_NaN();
+  double upward_score_mps = std::numeric_limits<double>::quiet_NaN();
+  double body_z_axis_nav_z = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct BodyZSeedJumpWindowRow {
+  std::string direction = "UNKNOWN";
+  long long selection_level = 0;
+  long long start_state_index = -1;
+  long long center_state_index = -1;
+  long long end_state_index = -1;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double center_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double start_relative_time_s = std::numeric_limits<double>::quiet_NaN();
+  double center_relative_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_relative_time_s = std::numeric_limits<double>::quiet_NaN();
+  double duration_s = std::numeric_limits<double>::quiet_NaN();
+  double pre_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double post_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double signed_delta_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double direction_score_mps = std::numeric_limits<double>::quiet_NaN();
+  double signed_step_metric_mps = std::numeric_limits<double>::quiet_NaN();
+  double level_threshold_mps = std::numeric_limits<double>::quiet_NaN();
+  double level_max_peak_mps = std::numeric_limits<double>::quiet_NaN();
+  double level_noise_floor_mps = std::numeric_limits<double>::quiet_NaN();
+  double min_acc_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double max_acc_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double mean_acc_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double body_z_axis_nav_z = std::numeric_limits<double>::quiet_NaN();
+  double delta_vz_init_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct ErrorStateRow {
   double time_s = 0.0;
   ErrorStateVector state = ErrorStateVector::Zero();
@@ -375,6 +419,11 @@ struct GnssConsistencyRecord {
   double vz_mismatch_mps = std::numeric_limits<double>::quiet_NaN();
   double vz_mismatch_jump_mps = std::numeric_limits<double>::quiet_NaN();
   double jump_candidate_score = std::numeric_limits<double>::quiet_NaN();
+  std::string candidate_source = "NONE";
+  std::string body_z_jump_direction = "NONE";
+  double body_z_signed_delta_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double body_z_direction_score_mps = std::numeric_limits<double>::quiet_NaN();
+  double body_z_axis_nav_z = std::numeric_limits<double>::quiet_NaN();
   long long selected_jump_state_index = -1;
   double selected_jump_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
   long long selected_jump_window_start_state_index = -1;
@@ -457,6 +506,11 @@ struct VerticalLocalRecoveryIterationRow {
   double vz_mismatch_mps = std::numeric_limits<double>::quiet_NaN();
   double vz_mismatch_jump_mps = std::numeric_limits<double>::quiet_NaN();
   double jump_candidate_score = std::numeric_limits<double>::quiet_NaN();
+  std::string candidate_source = "NONE";
+  std::string body_z_jump_direction = "NONE";
+  double body_z_signed_delta_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double body_z_direction_score_mps = std::numeric_limits<double>::quiet_NaN();
+  double body_z_axis_nav_z = std::numeric_limits<double>::quiet_NaN();
   long long selected_jump_state_index = -1;
   double selected_jump_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
   long long selected_jump_window_start_state_index = -1;
@@ -662,6 +716,8 @@ struct OfflineRunResult {
   std::vector<TrajectoryRow> initial_static_trajectory;
   std::vector<TrajectoryRow> optimized_static_terminal_forward_trajectory;
   std::vector<ReferenceNodeRow> reference_node_trajectory;
+  std::vector<BodyZSeedImuDiagnosticRow> seed_body_z_acc_diagnostics;
+  std::vector<BodyZSeedJumpWindowRow> body_z_seed_jump_windows;
   std::vector<ErrorStateRow> error_state_trajectory;
   std::vector<SegmentErrorDiagnostic> segment_error_diagnostics;
   std::vector<TrajectoryRow> trajectory;
