@@ -1563,12 +1563,25 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
     return std::nullopt;
   }
 
+  const bool body_z_seed_candidate =
+    window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW";
+  const std::size_t previous_state_index = window_candidate.start_state_index - 1U;
+  const double previous_up_m = reference_states[previous_state_index].pose.translation().z();
+  const double previous_vz_mps = reference_states[previous_state_index].velocity.z();
+  const double original_tail_vz_mps = reference_states[window_candidate.end_state_index].velocity.z();
   const std::size_t tail_end_state_index = std::min(segment_end_state_index, reference_states.size() - 1U);
   const double tail_end_time_s =
     reference_states[window_candidate.end_state_index].time_s +
     std::max(config.vertical_jump_window_tail_target_s, 1e-3);
   std::vector<double> tail_reference_values_mps;
-  for (std::size_t state_index = window_candidate.end_state_index; state_index <= tail_end_state_index; ++state_index) {
+  std::size_t tail_reference_start_state_index = window_candidate.end_state_index;
+  if (body_z_seed_candidate) {
+    tail_reference_start_state_index =
+      window_candidate.end_state_index < tail_end_state_index
+        ? window_candidate.end_state_index + 1U
+        : tail_end_state_index + 1U;
+  }
+  for (std::size_t state_index = tail_reference_start_state_index; state_index <= tail_end_state_index; ++state_index) {
     if (reference_states[state_index].time_s > tail_end_time_s + kTimeEpsilonS) {
       break;
     }
@@ -1580,6 +1593,9 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
   }
 
   double target_tail_vz_mps = MedianFinite(std::move(tail_reference_values_mps));
+  if (!std::isfinite(target_tail_vz_mps) && body_z_seed_candidate) {
+    target_tail_vz_mps = previous_vz_mps;
+  }
   if (!std::isfinite(target_tail_vz_mps) &&
       std::isfinite(window_candidate.center_candidate.delta_vz_init_mps)) {
     target_tail_vz_mps =
@@ -1589,14 +1605,12 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
   if (!std::isfinite(target_tail_vz_mps)) {
     return std::nullopt;
   }
-  const std::size_t previous_state_index = window_candidate.start_state_index - 1U;
-  const double previous_up_m = reference_states[previous_state_index].pose.translation().z();
-  const double previous_vz_mps = reference_states[previous_state_index].velocity.z();
-  const double original_tail_vz_mps = reference_states[window_candidate.end_state_index].velocity.z();
   if (std::isfinite(forced_tail_delta_mps)) {
-    target_tail_vz_mps =
-      original_tail_vz_mps + std::max(tail_delta_scale, 0.0) * forced_tail_delta_mps;
-  } else {
+    target_tail_vz_mps = body_z_seed_candidate
+                           ? forced_tail_delta_mps
+                           : original_tail_vz_mps +
+                               std::max(tail_delta_scale, 0.0) * forced_tail_delta_mps;
+  } else if (!body_z_seed_candidate) {
     target_tail_vz_mps =
       original_tail_vz_mps +
       std::max(tail_delta_scale, 0.0) * (target_tail_vz_mps - original_tail_vz_mps);
@@ -3603,14 +3617,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     VerticalHoldWindowEvaluation best_hold_evaluation;
 
                     for (const auto &window_candidate : sparse_jump_windows) {
+                      const bool body_z_seed_candidate =
+                        window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW";
                       std::vector<double> forced_tail_delta_options_mps{
                         std::numeric_limits<double>::quiet_NaN(),
-                        window_candidate.center_candidate.delta_vz_init_mps,
                       };
+                      if (!body_z_seed_candidate) {
+                        forced_tail_delta_options_mps.push_back(
+                          window_candidate.center_candidate.delta_vz_init_mps);
+                      }
                       std::vector<double> forced_tail_delta_up_options_m{
                         std::numeric_limits<double>::quiet_NaN(),
                       };
-                      if (window_candidate.start_state_index > 0U &&
+                      if (!body_z_seed_candidate &&
+                          window_candidate.start_state_index > 0U &&
                           window_candidate.start_state_index - 1U < iteration.gate_reference_states.size() &&
                           std::isfinite(iteration_prefit_u_m)) {
                         const double residual_correction_dt_s = std::max(
@@ -3624,7 +3644,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                             std::clamp(-iteration_prefit_u_m * up_delta_scale, -5.0, 5.0));
                         }
                       }
-                      if (current_future_trend_evaluation.valid &&
+                      if (!body_z_seed_candidate &&
+                          current_future_trend_evaluation.valid &&
                           std::isfinite(current_future_trend_evaluation.residual_mean_m)) {
                         for (const double up_delta_scale : {0.5, 1.0, 1.5}) {
                           forced_tail_delta_up_options_m.push_back(
@@ -3637,8 +3658,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
 
                       std::size_t candidate_scoring_end_state_index = recovery_scoring_end_state_index;
                       std::vector<VerticalHoldWindowSpec> body_z_segment_specs;
-                      const bool body_z_seed_candidate =
-                        window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW";
                       const bool current_sample_covered_by_body_z_window =
                         body_z_seed_candidate && *feedback_anchor_state <= window_candidate.end_state_index;
                       std::vector<VerticalHoldWindowSpec> candidate_acceptance_hold_specs = hold_window_specs;
@@ -3686,8 +3705,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                           candidate_acceptance_hold_specs.empty()) {
                         continue;
                       }
+                      const std::vector<double> tail_delta_scales =
+                        body_z_seed_candidate
+                          ? std::vector<double>{1.0}
+                          : std::vector<double>{0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0};
                       for (const double forced_tail_delta_mps : forced_tail_delta_options_mps) {
-                      for (const double tail_delta_scale : {0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0}) {
+                      for (const double tail_delta_scale : tail_delta_scales) {
                       for (const double forced_tail_delta_up_m : forced_tail_delta_up_options_m) {
                       if (window_correction_attempt_count >=
                           config_.vertical_jump_window_max_correction_attempts) {
