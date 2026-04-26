@@ -87,6 +87,8 @@ struct OfflineRunnerConfig {
   int vertical_inside_bias_min_observations = 8;
   double vertical_inside_bias_update_interval_s = 0.2;
   double vertical_inside_bias_gain = 0.002;
+  double vertical_inside_attitude_gain = 0.002;
+  double vertical_inside_max_delta_attitude_rad = 2e-6;
   double vertical_inside_bias_max_delta_mps2 = 5e-6;
   double vertical_inside_bias_min_abs_residual_m = 0.04;
   double vertical_inside_bias_min_residual_delta_m = 0.005;

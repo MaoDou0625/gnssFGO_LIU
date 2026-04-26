@@ -307,6 +307,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_inside_bias_update_interval_s = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_inside_bias_gain") {
     config.vertical_inside_bias_gain = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_inside_attitude_gain") {
+    config.vertical_inside_attitude_gain = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_inside_max_delta_attitude_rad") {
+    config.vertical_inside_max_delta_attitude_rad = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_inside_bias_max_delta_mps2") {
     config.vertical_inside_bias_max_delta_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_inside_bias_min_abs_residual_m") {
@@ -762,6 +766,8 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
       throw std::runtime_error("vertical_inside_bias_min_observations must be greater than 1");
     }
     if (config.vertical_inside_bias_gain < 0.0 ||
+        config.vertical_inside_attitude_gain < 0.0 ||
+        config.vertical_inside_max_delta_attitude_rad <= 0.0 ||
         config.vertical_inside_bias_max_delta_mps2 <= 0.0 ||
         config.vertical_inside_bias_min_abs_residual_m < 0.0 ||
         config.vertical_inside_bias_min_residual_delta_m < 0.0 ||
@@ -1112,6 +1118,8 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     throw std::runtime_error("vertical_inside_bias_min_observations must be greater than 1");
   }
   if (config.vertical_inside_bias_gain < 0.0 ||
+      config.vertical_inside_attitude_gain < 0.0 ||
+      config.vertical_inside_max_delta_attitude_rad <= 0.0 ||
       config.vertical_inside_bias_max_delta_mps2 <= 0.0 ||
       config.vertical_inside_bias_min_abs_residual_m < 0.0 ||
       config.vertical_inside_bias_min_residual_delta_m < 0.0 ||
@@ -1302,6 +1310,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "vertical_inside_bias_min_observations=" << config.vertical_inside_bias_min_observations << '\n'
       << "vertical_inside_bias_update_interval_s=" << config.vertical_inside_bias_update_interval_s << '\n'
       << "vertical_inside_bias_gain=" << config.vertical_inside_bias_gain << '\n'
+      << "vertical_inside_attitude_gain=" << config.vertical_inside_attitude_gain << '\n'
+      << "vertical_inside_max_delta_attitude_rad=" << config.vertical_inside_max_delta_attitude_rad << '\n'
       << "vertical_inside_bias_max_delta_mps2=" << config.vertical_inside_bias_max_delta_mps2 << '\n'
       << "vertical_inside_bias_min_abs_residual_m=" << config.vertical_inside_bias_min_abs_residual_m << '\n'
       << "vertical_inside_bias_min_residual_delta_m=" << config.vertical_inside_bias_min_residual_delta_m << '\n'

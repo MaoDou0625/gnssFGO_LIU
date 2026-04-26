@@ -413,6 +413,8 @@ struct GnssConsistencyRecord {
   double delta_roll_applied_rad = std::numeric_limits<double>::quiet_NaN();
   double delta_pitch_applied_rad = std::numeric_limits<double>::quiet_NaN();
   double delta_baz_applied_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double inside_bias_delta_roll_applied_rad = std::numeric_limits<double>::quiet_NaN();
+  double inside_bias_delta_pitch_applied_rad = std::numeric_limits<double>::quiet_NaN();
   double inside_bias_delta_baz_applied_mps2 = std::numeric_limits<double>::quiet_NaN();
   double inside_bias_equivalent_acc_mps2 = std::numeric_limits<double>::quiet_NaN();
   double inside_bias_residual_delta_m = std::numeric_limits<double>::quiet_NaN();

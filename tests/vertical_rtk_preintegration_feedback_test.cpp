@@ -279,6 +279,8 @@ void TestSequentialRecoveryConfigLoads() {
       "vertical_jump_future_trend_min_fix_count=6\n"
       "vertical_jump_future_trend_mean_weight=0.8\n"
       "vertical_jump_future_trend_slope_weight=120.0\n"
+      "vertical_inside_attitude_gain=0.015\n"
+      "vertical_inside_max_delta_attitude_rad=3e-6\n"
       "enable_nhc_jump_reference=true\n"
       "nhc_history_half_life_s=12.0\n"
       "nhc_history_max_age_s=45.0\n"
@@ -336,6 +338,12 @@ void TestSequentialRecoveryConfigLoads() {
   ExpectNear(config.vertical_jump_future_trend_min_fix_count, 6, 0.0, "future trend minimum fix count should load");
   ExpectNear(config.vertical_jump_future_trend_mean_weight, 0.8, 1e-12, "future trend mean weight should load");
   ExpectNear(config.vertical_jump_future_trend_slope_weight, 120.0, 1e-12, "future trend slope weight should load");
+  ExpectNear(config.vertical_inside_attitude_gain, 0.015, 1e-12, "inside attitude gain should load");
+  ExpectNear(
+    config.vertical_inside_max_delta_attitude_rad,
+    3e-6,
+    1e-12,
+    "inside attitude update bound should load");
   ExpectTrue(config.enable_nhc_jump_reference, "NHC jump reference flag should load");
   ExpectNear(config.nhc_history_half_life_s, 12.0, 1e-12, "NHC half-life should load");
   ExpectNear(config.nhc_history_max_age_s, 45.0, 1e-12, "NHC max age should load");
@@ -975,6 +983,8 @@ void TestVerticalInsideBiasAdapterUsesInsideResidualTrend() {
   config.vertical_inside_bias_min_observations = 3;
   config.vertical_inside_bias_update_interval_s = 0.1;
   config.vertical_inside_bias_gain = 0.5;
+  config.vertical_inside_attitude_gain = 0.5;
+  config.vertical_inside_max_delta_attitude_rad = 2e-4;
   config.vertical_inside_bias_max_delta_mps2 = 1e-3;
   config.vertical_inside_bias_min_abs_residual_m = 0.0;
   config.vertical_inside_bias_min_residual_delta_m = 0.0;
@@ -982,14 +992,20 @@ void TestVerticalInsideBiasAdapterUsesInsideResidualTrend() {
 
   VerticalInsideBiasAdapter adapter(config);
   ExpectTrue(
-    !adapter.ObserveInsideResidual(1U, 0.0, 0.0, 0.05, 0.1).has_value(),
+    !adapter.ObserveInsideResidual(1U, 0.0, 0.0, 0.05, 0.1, 0.1, 0.0).has_value(),
     "first inside residual should only seed the bias adapter");
   ExpectTrue(
-    !adapter.ObserveInsideResidual(2U, 0.5, -0.01, 0.05, 0.1).has_value(),
+    !adapter.ObserveInsideResidual(2U, 0.5, -0.01, 0.05, 0.1, 0.1, 0.0).has_value(),
     "adapter should wait for the configured time window");
-  const auto update = adapter.ObserveInsideResidual(3U, 1.0, -0.04, 0.05, 0.1);
+  const auto update = adapter.ObserveInsideResidual(3U, 1.0, -0.04, 0.05, 0.1, 0.1, 0.0);
   ExpectTrue(update.has_value(), "inside residual trend should produce a bias update");
   ExpectNear(update->delta_baz_mps2, -1e-3, 1e-12, "bias update should be bounded and follow residual trend sign");
+  ExpectNear(
+    update->delta_pitch_rad,
+    2e-4,
+    1e-12,
+    "inside residual trend should also produce a bounded pitch update");
+  ExpectNear(update->delta_roll_rad, 0.0, 1e-12, "zero roll gradient should not produce roll updates");
   ExpectNear(update->equivalent_acc_mps2, -0.08, 1e-12, "equivalent acceleration should be 2*dr/T^2");
   ExpectTrue(update->anchor_state_index == 3U, "bias update should be applied at the current state continuously");
   ExpectTrue(update->current_state_index == 3U, "bias update should report the latest observed state");
@@ -1003,6 +1019,8 @@ void TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual() {
   config.vertical_inside_bias_min_observations = 2;
   config.vertical_inside_bias_update_interval_s = 0.1;
   config.vertical_inside_bias_gain = 1.0;
+  config.vertical_inside_attitude_gain = 1.0;
+  config.vertical_inside_max_delta_attitude_rad = 2e-4;
   config.vertical_inside_bias_max_delta_mps2 = 1e-3;
   config.vertical_inside_bias_min_abs_residual_m = 0.0;
   config.vertical_inside_bias_min_residual_delta_m = 0.0;
@@ -1010,10 +1028,10 @@ void TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual() {
 
   VerticalInsideBiasAdapter adapter(config);
   ExpectTrue(
-    !adapter.ObserveInsideResidual(1U, 0.0, 0.0, 0.05, 0.1).has_value(),
+    !adapter.ObserveInsideResidual(1U, 0.0, 0.0, 0.05, 0.1, 0.1, 0.0).has_value(),
     "first inside residual should only seed the bias adapter");
   ExpectTrue(
-    !adapter.ObserveInsideResidual(2U, 1.0, -0.12, 0.05, 0.1).has_value(),
+    !adapter.ObserveInsideResidual(2U, 1.0, -0.12, 0.05, 0.1, 0.1, 0.0).has_value(),
     "outside residual should not be used for inside bias adaptation");
 }
 

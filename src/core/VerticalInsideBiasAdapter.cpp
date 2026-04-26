@@ -29,19 +29,23 @@ std::optional<VerticalInsideBiasUpdate> VerticalInsideBiasAdapter::ObserveInside
   const double time_s,
   const double residual_u_m,
   const double sigma_u_m,
-  const double gate_threshold_m) {
+  const double gate_threshold_m,
+  const double pitch_rad,
+  const double roll_rad) {
   if (!config_.enable_vertical_inside_bias_adaptation) {
     return std::nullopt;
   }
   if (!std::isfinite(time_s) || !std::isfinite(residual_u_m) || !std::isfinite(sigma_u_m) ||
-      !std::isfinite(gate_threshold_m) || sigma_u_m <= 0.0 || gate_threshold_m <= 0.0) {
+      !std::isfinite(gate_threshold_m) || !std::isfinite(pitch_rad) || !std::isfinite(roll_rad) ||
+      sigma_u_m <= 0.0 || gate_threshold_m <= 0.0) {
     return std::nullopt;
   }
   if (std::abs(residual_u_m) > config_.vertical_inside_bias_gate_fraction * gate_threshold_m) {
     return std::nullopt;
   }
 
-  observations_.push_back(Observation{state_index, time_s, residual_u_m, sigma_u_m, gate_threshold_m});
+  observations_.push_back(
+    Observation{state_index, time_s, residual_u_m, sigma_u_m, gate_threshold_m, pitch_rad, roll_rad});
   PruneHistory(time_s);
   const auto candidate = BuildUpdateCandidate();
   return candidate;
@@ -90,7 +94,33 @@ std::optional<VerticalInsideBiasUpdate> VerticalInsideBiasAdapter::BuildUpdateCa
     raw_delta_baz_mps2,
     -config_.vertical_inside_bias_max_delta_mps2,
     config_.vertical_inside_bias_max_delta_mps2);
-  if (std::abs(bounded_delta_baz_mps2) <= 0.0) {
+
+  double bounded_delta_pitch_rad = 0.0;
+  double bounded_delta_roll_rad = 0.0;
+  const double desired_attitude_acc_mps2 =
+    config_.vertical_inside_attitude_gain * equivalent_acc_mps2;
+  if (std::abs(desired_attitude_acc_mps2) > 0.0) {
+    const double gravity_mps2 = std::max(std::abs(config_.gravity_mps2), 1e-6);
+    const double d_acc_d_pitch =
+      -gravity_mps2 * std::sin(latest.pitch_rad) * std::cos(latest.roll_rad);
+    const double d_acc_d_roll =
+      -gravity_mps2 * std::cos(latest.pitch_rad) * std::sin(latest.roll_rad);
+    const double gradient_norm2 = d_acc_d_pitch * d_acc_d_pitch + d_acc_d_roll * d_acc_d_roll;
+    if (gradient_norm2 > 1e-12) {
+      bounded_delta_pitch_rad = std::clamp(
+        desired_attitude_acc_mps2 * d_acc_d_pitch / gradient_norm2,
+        -config_.vertical_inside_max_delta_attitude_rad,
+        config_.vertical_inside_max_delta_attitude_rad);
+      bounded_delta_roll_rad = std::clamp(
+        desired_attitude_acc_mps2 * d_acc_d_roll / gradient_norm2,
+        -config_.vertical_inside_max_delta_attitude_rad,
+        config_.vertical_inside_max_delta_attitude_rad);
+    }
+  }
+
+  if (std::abs(bounded_delta_baz_mps2) <= 0.0 &&
+      std::abs(bounded_delta_pitch_rad) <= 0.0 &&
+      std::abs(bounded_delta_roll_rad) <= 0.0) {
     return std::nullopt;
   }
 
@@ -98,6 +128,8 @@ std::optional<VerticalInsideBiasUpdate> VerticalInsideBiasAdapter::BuildUpdateCa
   update.anchor_state_index = latest.state_index;
   update.current_state_index = latest.state_index;
   update.current_time_s = latest.time_s;
+  update.delta_pitch_rad = bounded_delta_pitch_rad;
+  update.delta_roll_rad = bounded_delta_roll_rad;
   update.delta_baz_mps2 = bounded_delta_baz_mps2;
   update.equivalent_acc_mps2 = equivalent_acc_mps2;
   update.residual_delta_m = residual_delta_m;

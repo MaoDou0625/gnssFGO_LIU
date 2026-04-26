@@ -48,7 +48,6 @@
 #include "offline_lc_minimal/factor/StaticAttitudeDriftFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasGmTransitionFactor.h"
 #include "offline_lc_minimal/factor/VerticalInsideKinematicFactor.h"
-#include "offline_lc_minimal/factor/VerticalRtkPreintegrationFeedbackFactor.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
 
 namespace offline_lc_minimal {
@@ -767,14 +766,6 @@ std::optional<std::size_t> ResolveVerticalFeedbackAnchorState(
   return std::nullopt;
 }
 
-gtsam::SharedNoiseModel MakeVerticalRtkFeedbackNoiseModel(const OfflineRunnerConfig &config) {
-  return gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4(
-    config.vertical_rtk_feedback_sigma_attitude_rad,
-    config.vertical_rtk_feedback_sigma_attitude_rad,
-    config.vertical_rtk_feedback_sigma_dp_m,
-    config.vertical_rtk_feedback_sigma_baz_mps2));
-}
-
 ForwardDriftSummary ComputeFeedbackForwardDriftSummary(
   const std::vector<ImuSample> &imu_samples,
   const gtsam::Pose3 &start_pose,
@@ -1294,45 +1285,6 @@ struct VerticalLocalRecoveryResult {
   bool hold_window_passed = false;
 };
 
-ReferenceNodeState ApplyVerticalAnchorCorrections(
-  const ReferenceNodeState &anchor_state,
-  const gtsam::Pose3 &optimized_anchor_pose,
-  const gtsam::Vector3 &optimized_anchor_velocity,
-  const gtsam::imuBias::ConstantBias &optimized_anchor_bias,
-  const double max_attitude_delta_rad,
-  const double max_baz_delta_mps2) {
-  ReferenceNodeState corrected_anchor_state = anchor_state;
-  const Eigen::Vector3d anchor_ypr = Rot3ToYpr(anchor_state.pose.rotation());
-  const Eigen::Vector3d optimized_ypr = Rot3ToYpr(optimized_anchor_pose.rotation());
-  const double bounded_delta_pitch_rad = std::clamp(
-    WrapAngleRad(optimized_ypr.y() - anchor_ypr.y()),
-    -max_attitude_delta_rad,
-    max_attitude_delta_rad);
-  const double bounded_delta_roll_rad = std::clamp(
-    WrapAngleRad(optimized_ypr.z() - anchor_ypr.z()),
-    -max_attitude_delta_rad,
-    max_attitude_delta_rad);
-  const double bounded_delta_baz_mps2 = std::clamp(
-    optimized_anchor_bias.accelerometer().z() - anchor_state.bias.accelerometer().z(),
-    -max_baz_delta_mps2,
-    max_baz_delta_mps2);
-  corrected_anchor_state.pose = gtsam::Pose3(
-    gtsam::Rot3::Ypr(
-      anchor_ypr.x(),
-      anchor_ypr.y() + bounded_delta_pitch_rad,
-      anchor_ypr.z() + bounded_delta_roll_rad),
-    anchor_state.pose.translation());
-  corrected_anchor_state.velocity =
-    gtsam::Vector3(anchor_state.velocity.x(), anchor_state.velocity.y(), optimized_anchor_velocity.z());
-  corrected_anchor_state.bias = gtsam::imuBias::ConstantBias(
-    gtsam::Vector3(
-      anchor_state.bias.accelerometer().x(),
-      anchor_state.bias.accelerometer().y(),
-      anchor_state.bias.accelerometer().z() + bounded_delta_baz_mps2),
-    anchor_state.bias.gyroscope());
-  return corrected_anchor_state;
-}
-
 ReferenceNodeState ApplyVerticalUpAnchorCorrection(
   const ReferenceNodeState &anchor_state,
   const double delta_up_anchor_m) {
@@ -1343,6 +1295,26 @@ ReferenceNodeState ApplyVerticalUpAnchorCorrection(
       anchor_state.pose.translation().x(),
       anchor_state.pose.translation().y(),
       anchor_state.pose.translation().z() + delta_up_anchor_m));
+  return corrected_anchor_state;
+}
+
+ReferenceNodeState ApplyInsideLowFrequencyStateCorrection(
+  const ReferenceNodeState &anchor_state,
+  const VerticalInsideBiasUpdate &update) {
+  ReferenceNodeState corrected_anchor_state = anchor_state;
+  const Eigen::Vector3d anchor_ypr = Rot3ToYpr(anchor_state.pose.rotation());
+  corrected_anchor_state.pose = gtsam::Pose3(
+    gtsam::Rot3::Ypr(
+      anchor_ypr.x(),
+      anchor_ypr.y() + update.delta_pitch_rad,
+      anchor_ypr.z() + update.delta_roll_rad),
+    anchor_state.pose.translation());
+  corrected_anchor_state.bias = gtsam::imuBias::ConstantBias(
+    gtsam::Vector3(
+      anchor_state.bias.accelerometer().x(),
+      anchor_state.bias.accelerometer().y(),
+      anchor_state.bias.accelerometer().z() + update.delta_baz_mps2),
+    anchor_state.bias.gyroscope());
   return corrected_anchor_state;
 }
 
@@ -1364,175 +1336,6 @@ std::size_t ResolvePrefitReferenceRightIndex(const StateMeasSyncResult &sync_res
     default:
       return sync_result.key_index_i;
   }
-}
-
-std::optional<VerticalLocalRecoveryResult> RecoverVerticalReferenceStateLocally(
-  const OfflineRunnerConfig &config,
-  const boost::shared_ptr<gtsam::PreintegrationCombinedParams> &imu_params,
-  const gtsam::SharedNoiseModel &vertical_feedback_noise_model,
-  const std::vector<ImuSample> &imu_samples,
-  const std::vector<ReferenceNodeState> &reference_states,
-  const std::size_t start_state_index,
-  const std::size_t end_state_index,
-  const Eigen::Vector3d &measurement_enu_m,
-  const Eigen::Vector3d &sigma_m,
-  const std::optional<double> target_anchor_vz_mps = std::nullopt) {
-  if (end_state_index <= start_state_index || end_state_index >= reference_states.size()) {
-    return std::nullopt;
-  }
-
-  const auto &start_state = reference_states[start_state_index];
-  const auto &end_state = reference_states[end_state_index];
-  const double delta_time_s = std::max(end_state.time_s - start_state.time_s, 1e-6);
-  const auto imu_window =
-    IntegrateImuWindow(imu_samples, start_state.time_s, end_state.time_s, imu_params, start_state.bias);
-  if (imu_window.imu_segments == 0U) {
-    return std::nullopt;
-  }
-
-  constexpr std::size_t kLocalStartIndex = 0U;
-  constexpr std::size_t kLocalEndIndex = 1U;
-  const gtsam::Key local_global_acc_bias_key = gtsam::Symbol('G', 0);
-  const double local_attitude_sigma_rad =
-    std::min(std::max(config.vertical_rtk_feedback_sigma_attitude_rad, 1e-3), 0.05);
-  const double jump_vz_sigma_mps =
-    std::max(std::min(config.vertical_jump_vz_prior_sigma_mps, 1.0), 1e-4);
-  const double local_baz_sigma_mps2 =
-    std::max(std::min(config.vertical_rtk_feedback_sigma_baz_mps2, config.bias_acc_prior_sigma), 1e-4);
-  const double start_velocity_prior_vz_mps = target_anchor_vz_mps.has_value()
-                                               ? *target_anchor_vz_mps
-                                               : start_state.velocity.z();
-  const double start_velocity_prior_sigma_z_mps = target_anchor_vz_mps.has_value() ? jump_vz_sigma_mps : 1e-6;
-
-  gtsam::NonlinearFactorGraph local_graph;
-  gtsam::Values local_initial_values;
-
-  const auto start_pose_noise = gtsam::noiseModel::Diagonal::Sigmas(
-    (gtsam::Vector6() << local_attitude_sigma_rad, local_attitude_sigma_rad, 1e-6, 1e-6, 1e-6, 1e-6).finished());
-  const auto start_velocity_noise = gtsam::noiseModel::Diagonal::Sigmas(
-    (gtsam::Vector3() << 1e-6, 1e-6, start_velocity_prior_sigma_z_mps).finished());
-  const auto start_bias_noise = gtsam::noiseModel::Diagonal::Sigmas(
-    (gtsam::Vector6() << 1e-7, 1e-7, local_baz_sigma_mps2, 1e-7, 1e-7, 1e-7).finished());
-  const auto end_pose_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
-    (gtsam::Vector6() << 0.05, 0.05, 0.05, 0.5, 0.5, 5.0).finished());
-  const auto end_velocity_prior_noise = gtsam::noiseModel::Isotropic::Sigma(3, 0.5);
-  const auto end_bias_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
-    (gtsam::Vector6() << 1e-7, 1e-7, local_baz_sigma_mps2,
-      1e-7, 1e-7, 1e-7).finished());
-  const auto global_acc_bias_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
-    (gtsam::Vector3() << 1e-7, 1e-7, local_baz_sigma_mps2).finished());
-
-  local_graph.add(gtsam::PriorFactor<gtsam::Pose3>(X(kLocalStartIndex), start_state.pose, start_pose_noise));
-  local_graph.add(
-    gtsam::PriorFactor<gtsam::Vector3>(
-      V(kLocalStartIndex),
-      gtsam::Vector3(start_state.velocity.x(), start_state.velocity.y(), start_velocity_prior_vz_mps),
-      start_velocity_noise));
-  local_graph.add(
-    gtsam::PriorFactor<gtsam::imuBias::ConstantBias>(B(kLocalStartIndex), start_state.bias, start_bias_noise));
-  local_graph.add(gtsam::PriorFactor<gtsam::Pose3>(X(kLocalEndIndex), end_state.pose, end_pose_prior_noise));
-  local_graph.add(gtsam::PriorFactor<gtsam::Vector3>(V(kLocalEndIndex), end_state.velocity, end_velocity_prior_noise));
-  local_graph.add(
-    gtsam::PriorFactor<gtsam::imuBias::ConstantBias>(B(kLocalEndIndex), end_state.bias, end_bias_prior_noise));
-  local_graph.add(gtsam::PriorFactor<gtsam::Vector3>(
-    local_global_acc_bias_key,
-    start_state.bias.accelerometer(),
-    global_acc_bias_prior_noise));
-
-  local_graph.add(gtsam::ImuFactor(
-    X(kLocalStartIndex),
-    V(kLocalStartIndex),
-    X(kLocalEndIndex),
-    V(kLocalEndIndex),
-    B(kLocalStartIndex),
-    imu_window.preintegrated_imu_measurements));
-  local_graph.add(gtsam::GPSFactor(
-    X(kLocalEndIndex),
-    gtsam::Point3(measurement_enu_m.x(), measurement_enu_m.y(), measurement_enu_m.z()),
-    gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(sigma_m.x(), sigma_m.y(), sigma_m.z()))));
-
-  if (config.enable_vertical_acc_bias_gm_process) {
-    const double phi_vertical_acc = ComputeBiasDecay(delta_time_s, config.vertical_acc_bias_tau_s);
-    const double vertical_acc_variance = ComputeVerticalAccBiasProcessVariance(delta_time_s, config);
-    local_graph.add(factor::VerticalAccelBiasGmTransitionFactor(
-      B(kLocalStartIndex),
-      B(kLocalEndIndex),
-      local_global_acc_bias_key,
-      phi_vertical_acc,
-      gtsam::noiseModel::Isotropic::Sigma(1, std::sqrt(std::max(vertical_acc_variance, 1e-12)))));
-
-    const Eigen::Vector3d vertical_residual_enu_m =
-      ComputePositionResidualEnu(end_state.pose, measurement_enu_m);
-    local_graph.add(factor::VerticalRtkPreintegrationFeedbackFactor(
-      X(kLocalStartIndex),
-      V(kLocalStartIndex),
-      B(kLocalStartIndex),
-      X(kLocalEndIndex),
-      V(kLocalEndIndex),
-      B(kLocalEndIndex),
-      local_global_acc_bias_key,
-      imu_window.preintegrated_imu_measurements,
-      phi_vertical_acc,
-      delta_time_s,
-      vertical_residual_enu_m.z(),
-      config.vertical_rtk_outside_feedback_gain_scale,
-      config.vertical_rtk_feedback_bias_gain,
-      config.vertical_rtk_feedback_attitude_gain,
-      vertical_feedback_noise_model));
-  }
-
-  local_initial_values.insert(X(kLocalStartIndex), start_state.pose);
-  local_initial_values.insert(V(kLocalStartIndex), start_state.velocity);
-  local_initial_values.insert(B(kLocalStartIndex), start_state.bias);
-  local_initial_values.insert(X(kLocalEndIndex), end_state.pose);
-  local_initial_values.insert(V(kLocalEndIndex), end_state.velocity);
-  local_initial_values.insert(B(kLocalEndIndex), end_state.bias);
-  local_initial_values.insert(local_global_acc_bias_key, start_state.bias.accelerometer());
-
-  gtsam::LevenbergMarquardtParams local_optimizer_params;
-  local_optimizer_params.maxIterations = std::min(config.lm_max_iterations, 25);
-  local_optimizer_params.lambdaInitial = config.lm_lambda_initial;
-  local_optimizer_params.setVerbosity("SILENT");
-  local_optimizer_params.setVerbosityLM("SILENT");
-  gtsam::LevenbergMarquardtOptimizer local_optimizer(local_graph, local_initial_values, local_optimizer_params);
-  const gtsam::Values local_optimized_values = local_optimizer.optimize();
-  const auto optimized_anchor_pose = local_optimized_values.at<gtsam::Pose3>(X(kLocalStartIndex));
-  const auto optimized_anchor_velocity = local_optimized_values.at<gtsam::Vector3>(V(kLocalStartIndex));
-  const auto optimized_anchor_bias = local_optimized_values.at<gtsam::imuBias::ConstantBias>(B(kLocalStartIndex));
-  const ReferenceNodeState recovered_anchor_state = ApplyVerticalAnchorCorrections(
-    start_state,
-    optimized_anchor_pose,
-    optimized_anchor_velocity,
-    optimized_anchor_bias,
-    config.vertical_local_recovery_max_attitude_delta_rad,
-    config.vertical_local_recovery_max_baz_delta_mps2);
-  auto propagate_end_state = [&](const ReferenceNodeState &anchor_state) {
-    return imu_window.preintegrated_imu_measurements.predict(
-      gtsam::NavState(anchor_state.pose, anchor_state.velocity),
-      anchor_state.bias);
-  };
-  ReferenceNodeState corrected_anchor_state = recovered_anchor_state;
-  gtsam::NavState propagated_end_state = propagate_end_state(corrected_anchor_state);
-  Eigen::Vector3d propagated_residual_enu_m =
-    ComputePositionResidualEnu(propagated_end_state.pose(), measurement_enu_m);
-  const double required_up_anchor_correction_m =
-    ComputeRequiredUpAnchorCorrectionM(propagated_end_state.pose(), measurement_enu_m);
-
-  VerticalLocalRecoveryResult result;
-  result.recovered_anchor_state = corrected_anchor_state;
-  result.local_postfit_u_m = propagated_residual_enu_m.z();
-  result.required_up_anchor_correction_m = required_up_anchor_correction_m;
-  result.delta_vz_applied_mps = corrected_anchor_state.velocity.z() - start_state.velocity.z();
-  const Eigen::Vector3d start_ypr = Rot3ToYpr(start_state.pose.rotation());
-  const Eigen::Vector3d recovered_ypr = Rot3ToYpr(corrected_anchor_state.pose.rotation());
-  result.delta_pitch_applied_rad = WrapAngleRad(recovered_ypr.y() - start_ypr.y());
-  result.delta_roll_applied_rad = WrapAngleRad(recovered_ypr.z() - start_ypr.z());
-  result.delta_baz_applied_mps2 =
-    corrected_anchor_state.bias.accelerometer().z() - start_state.bias.accelerometer().z();
-  result.selected_jump_state_index = static_cast<long long>(start_state_index);
-  result.selected_jump_delta_vz_mps = result.delta_vz_applied_mps;
-  result.recovery_mode = target_anchor_vz_mps.has_value() ? "SPARSE_JUMP" : "DRIFT_ONLY";
-  return result;
 }
 
 struct VerticalVelocityWindowCorrection {
@@ -2862,10 +2665,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     use_vertical_rtk_1d_nis_gate
       ? ChiSquareQuantile1D(config_.gnss_nis_confidence)
       : std::numeric_limits<double>::quiet_NaN();
-  const gtsam::SharedNoiseModel vertical_rtk_feedback_noise_model =
-    config_.enable_vertical_rtk_preintegration_feedback
-      ? MakeVerticalRtkFeedbackNoiseModel(config_)
-      : gtsam::SharedNoiseModel{};
   const gp::GPWNOJInterpolator base_interpolator(
     gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(kInterpolatorQcVariance)));
   const gtsam::NonlinearFactorGraph base_graph = graph;
@@ -4119,122 +3918,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     iteration_prefit_u_m = best_hold_evaluation.current_local_postfit_u_m;
                   }
 
-                  if (!iteration.failed && !inside_gate) {
-                    for (int local_recovery_iteration = 0;
-                         local_recovery_iteration < config_.vertical_local_recovery_max_iterations;
-                         ++local_recovery_iteration) {
-                      ++local_recovery_attempt_count;
-                      const auto recovery_result = RecoverVerticalReferenceStateLocally(
-                        config_,
-                        imu_params,
-                        vertical_rtk_feedback_noise_model,
-                        dataset.imu_samples,
-                        iteration.gate_reference_states,
-                        recovery_anchor_state_index,
-                        *feedback_anchor_state,
-                        record.measurement_enu_m,
-                        consistency_base_sigma_m);
-                      if (!recovery_result.has_value()) {
-                        iteration.failed = true;
-                        iteration.failure_message =
-                          "failed to recover local vertical window at sample " + std::to_string(sample_index);
-                        break;
-                      }
-                      last_recovery_result = recovery_result;
-
-                      iteration.gate_reference_states[recovery_anchor_state_index] =
-                        recovery_result->recovered_anchor_state;
-                      UpsertReferenceStateInitialValues(
-                        recovery_anchor_state_index,
-                        recovery_result->recovered_anchor_state,
-                        &sequential_initial_values);
-                      sequential_reference_valid_until_index = recovery_anchor_state_index;
-                      EnsureReferenceStatesValidUntil(
-                        state_timestamps,
-                        dataset.imu_samples,
-                        imu_params,
-                        &iteration.gate_reference_states,
-                        &sequential_reference_valid_until_index,
-                        hold_window_end_state_index,
-                        &sequential_initial_values);
-                      inside_reference_states = iteration.gate_reference_states;
-                      history_reobserve_begin_state_index =
-                        history_reobserve_begin_state_index.has_value()
-                          ? std::min(*history_reobserve_begin_state_index, recovery_anchor_state_index)
-                          : std::optional<std::size_t>(recovery_anchor_state_index);
-
-                      const auto drift_hold_evaluation = EvaluateVerticalHoldWindow(
-                        iteration.gate_reference_states,
-                        hold_window_specs,
-                        recovery_anchor_state_index,
-                        vertical_gate_nis_threshold);
-                      last_velocity_recovery_postfit_u_m = drift_hold_evaluation.current_local_postfit_u_m;
-                      hold_window_passed = drift_hold_evaluation.hold_window_passed;
-                      inside_gate = recovered_current_inside(drift_hold_evaluation);
-                      consistency_record.prefit_residual_u_after_local_recovery_m =
-                        drift_hold_evaluation.current_local_postfit_u_m;
-                      consistency_record.local_postfit_residual_u_m =
-                        drift_hold_evaluation.current_local_postfit_u_m;
-                      consistency_record.required_up_anchor_correction_m =
-                        recovery_result->required_up_anchor_correction_m;
-                      consistency_record.delta_vz_applied_mps = recovery_result->delta_vz_applied_mps;
-                      consistency_record.delta_up_anchor_applied_m = std::numeric_limits<double>::quiet_NaN();
-                      consistency_record.delta_roll_applied_rad = recovery_result->delta_roll_applied_rad;
-                      consistency_record.delta_pitch_applied_rad = recovery_result->delta_pitch_applied_rad;
-                      consistency_record.delta_baz_applied_mps2 = recovery_result->delta_baz_applied_mps2;
-                      consistency_record.recovery_mode = "DRIFT_ONLY";
-                      consistency_record.hold_window_passed = hold_window_passed;
-
-                      VerticalLocalRecoveryIterationRow iteration_row;
-                      iteration_row.sample_index = sample_index;
-                      iteration_row.corrected_time_s = record.corrected_time_s;
-                      iteration_row.recovery_anchor_state_index =
-                        static_cast<long long>(recovery_anchor_state_index);
-                      iteration_row.feedback_anchor_state_index =
-                        static_cast<long long>(*feedback_anchor_state);
-                      iteration_row.nhc_jump_anchor_state_index =
-                        nhc_jump_anchor_state.has_value() ? static_cast<long long>(*nhc_jump_anchor_state) : -1;
-                      iteration_row.iteration_index = static_cast<long long>(local_recovery_attempt_count);
-                      iteration_row.prefit_u_before_iteration_m = iteration_prefit_u_m;
-                      iteration_row.postfit_u_after_velocity_recovery_m =
-                        drift_hold_evaluation.current_local_postfit_u_m;
-                      iteration_row.postfit_u_after_iteration_m =
-                        drift_hold_evaluation.current_local_postfit_u_m;
-                      iteration_row.delta_vz_applied_mps = recovery_result->delta_vz_applied_mps;
-                      iteration_row.delta_up_anchor_applied_m = std::numeric_limits<double>::quiet_NaN();
-                      iteration_row.delta_roll_applied_rad = recovery_result->delta_roll_applied_rad;
-                      iteration_row.delta_pitch_applied_rad = recovery_result->delta_pitch_applied_rad;
-                      iteration_row.delta_baz_applied_mps2 = recovery_result->delta_baz_applied_mps2;
-                      iteration_row.required_up_anchor_correction_m =
-                        recovery_result->required_up_anchor_correction_m;
-                      iteration_row.vz_ref_global_smoothed_mps = consistency_record.vz_ref_global_smoothed_mps;
-                      iteration_row.vz_prefit_mps = consistency_record.vz_prefit_mps;
-                      iteration_row.vz_mismatch_mps = consistency_record.vz_mismatch_mps;
-                      iteration_row.vz_mismatch_jump_mps = consistency_record.vz_mismatch_jump_mps;
-                      iteration_row.jump_candidate_score = consistency_record.jump_candidate_score;
-                      iteration_row.candidate_source = consistency_record.candidate_source;
-                      iteration_row.body_z_jump_direction = consistency_record.body_z_jump_direction;
-                      iteration_row.body_z_signed_delta_velocity_mps =
-                        consistency_record.body_z_signed_delta_velocity_mps;
-                      iteration_row.body_z_direction_score_mps =
-                        consistency_record.body_z_direction_score_mps;
-                      iteration_row.body_z_axis_nav_z = consistency_record.body_z_axis_nav_z;
-                      iteration_row.selected_jump_state_index = consistency_record.selected_jump_state_index;
-                      iteration_row.selected_jump_delta_vz_mps = consistency_record.selected_jump_delta_vz_mps;
-                      iteration_row.recovery_mode = "DRIFT_ONLY";
-                      iteration_row.hold_window_passed = hold_window_passed;
-                      iteration_row.used_up_anchor_fallback = false;
-                      iteration_row.pure_delta_up_anchor_only = false;
-                      iteration_row.inside_after_velocity_recovery = drift_hold_evaluation.current_inside;
-                      iteration_row.inside_after_iteration = inside_gate;
-                      iteration.vertical_local_recovery_iterations.push_back(iteration_row);
-                      iteration_prefit_u_m = drift_hold_evaluation.current_local_postfit_u_m;
-                      if (inside_gate) {
-                        break;
-                      }
-                    }
-                  }
-
                   if (!iteration.failed && !inside_gate &&
                       config_.enable_vertical_local_up_anchor_fallback &&
                       last_recovery_result.has_value() &&
@@ -4343,25 +4026,28 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
 
             consistency_record.vertical_gate_inside = inside_gate ? 1.0 : 0.0;
             if (!iteration.failed && inside_gate && !apply_initial_vertical_anchor &&
-                feedback_anchor_state.has_value() && config_.enable_vertical_inside_bias_adaptation) {
+                feedback_anchor_state.has_value() &&
+                *feedback_anchor_state < iteration.gate_reference_states.size() &&
+                config_.enable_vertical_inside_bias_adaptation) {
+              const auto &inside_feedback_state = iteration.gate_reference_states[*feedback_anchor_state];
+              const Eigen::Vector3d inside_feedback_ypr =
+                Rot3ToYpr(inside_feedback_state.pose.rotation());
               const auto inside_bias_update = inside_bias_adapter.ObserveInsideResidual(
                 *feedback_anchor_state,
                 record.corrected_time_s,
                 consistency_record.local_postfit_residual_u_m,
                 consistency_base_sigma_m.z(),
-                consistency_record.vertical_gate_threshold_m);
+                consistency_record.vertical_gate_threshold_m,
+                inside_feedback_ypr.y(),
+                inside_feedback_ypr.z());
               if (inside_bias_update.has_value() &&
                   inside_bias_update->anchor_state_index < iteration.gate_reference_states.size()) {
                 auto candidate_reference_states = iteration.gate_reference_states;
                 gtsam::Values candidate_initial_values = sequential_initial_values;
                 const std::size_t bias_anchor_state_index = inside_bias_update->anchor_state_index;
-                auto corrected_bias_anchor_state = candidate_reference_states[bias_anchor_state_index];
-                corrected_bias_anchor_state.bias = gtsam::imuBias::ConstantBias(
-                  gtsam::Vector3(
-                    corrected_bias_anchor_state.bias.accelerometer().x(),
-                    corrected_bias_anchor_state.bias.accelerometer().y(),
-                    corrected_bias_anchor_state.bias.accelerometer().z() + inside_bias_update->delta_baz_mps2),
-                  corrected_bias_anchor_state.bias.gyroscope());
+                const auto corrected_bias_anchor_state = ApplyInsideLowFrequencyStateCorrection(
+                  candidate_reference_states[bias_anchor_state_index],
+                  *inside_bias_update);
                 candidate_reference_states[bias_anchor_state_index] = corrected_bias_anchor_state;
                 UpsertReferenceStateInitialValues(
                   bias_anchor_state_index,
@@ -4403,6 +4089,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     history_reobserve_begin_state_index.has_value()
                       ? std::min(*history_reobserve_begin_state_index, bias_anchor_state_index)
                       : std::optional<std::size_t>(bias_anchor_state_index);
+                  consistency_record.inside_bias_delta_roll_applied_rad =
+                    inside_bias_update->delta_roll_rad;
+                  consistency_record.inside_bias_delta_pitch_applied_rad =
+                    inside_bias_update->delta_pitch_rad;
                   consistency_record.inside_bias_delta_baz_applied_mps2 =
                     inside_bias_update->delta_baz_mps2;
                   consistency_record.inside_bias_equivalent_acc_mps2 =
