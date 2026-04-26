@@ -205,9 +205,13 @@ gtsam::Matrix3 ComputeBiasPhi(const double dt_s, const double tau_s) {
   return ComputeBiasDecay(dt_s, tau_s) * gtsam::I_3x3;
 }
 
+double ResolveVerticalAccBiasSigmaMps2(const OfflineRunnerConfig &config) {
+  return config.vertical_acc_bias_sigma_mps2 > 0.0 ? config.vertical_acc_bias_sigma_mps2 : config.bias_acc_sigma;
+}
+
 double ComputeVerticalAccBiasProcessVariance(const double dt_s, const OfflineRunnerConfig &config) {
   const double bounded_dt_s = std::max(dt_s, 1e-6);
-  return std::pow(config.bias_acc_sigma, 2.0) * config.vertical_acc_bias_process_noise_scale *
+  return std::pow(ResolveVerticalAccBiasSigmaMps2(config), 2.0) * config.vertical_acc_bias_process_noise_scale *
          std::max(1.0 - std::exp(-2.0 * bounded_dt_s / std::max(config.vertical_acc_bias_tau_s, 1e-9)), 1e-9);
 }
 
@@ -2872,6 +2876,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       }
       std::optional<std::size_t> confirmed_inside_state_index;
       std::optional<std::size_t> history_reobserve_begin_state_index;
+      std::optional<std::size_t> inside_bias_adapter_reobserve_begin_state_index;
       bool vertical_initial_anchor_applied = false;
 
       const auto build_vertical_window_specs = [&](const std::size_t current_sample_index, const double window_s) {
@@ -3780,6 +3785,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       history_reobserve_begin_state_index.has_value()
                         ? std::min(*history_reobserve_begin_state_index, best_window->start_state_index)
                         : std::optional<std::size_t>(best_window->start_state_index);
+                    inside_bias_adapter_reobserve_begin_state_index =
+                      inside_bias_adapter_reobserve_begin_state_index.has_value()
+                        ? std::min(*inside_bias_adapter_reobserve_begin_state_index, best_window->start_state_index)
+                        : std::optional<std::size_t>(best_window->start_state_index);
                     last_recovery_result = best_recovery_result;
                     last_velocity_recovery_postfit_u_m = best_hold_evaluation.current_local_postfit_u_m;
                     hold_window_passed = best_hold_evaluation.hold_window_passed;
@@ -4074,12 +4083,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                 const double corrected_vertical_nis =
                   ComputeVerticalNis(corrected_residual_enu_m.z(), consistency_base_sigma_m.z());
                 const bool correction_keeps_inside = corrected_vertical_nis <= vertical_gate_nis_threshold;
-                const bool correction_is_current_bias_seed =
-                  bias_anchor_state_index >= required_prefit_index;
-                const bool correction_improves_residual =
-                  std::abs(corrected_residual_enu_m.z()) + 1e-6 <
-                  std::abs(consistency_record.local_postfit_residual_u_m);
-                if (correction_keeps_inside && (correction_improves_residual || correction_is_current_bias_seed)) {
+                if (correction_keeps_inside) {
                   inside_bias_adapter.AcceptUpdate(*inside_bias_update);
                   iteration.gate_reference_states = std::move(candidate_reference_states);
                   sequential_initial_values = std::move(candidate_initial_values);
@@ -4089,6 +4093,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     history_reobserve_begin_state_index.has_value()
                       ? std::min(*history_reobserve_begin_state_index, bias_anchor_state_index)
                       : std::optional<std::size_t>(bias_anchor_state_index);
+                  const std::size_t inside_bias_reobserve_begin_state_index = bias_anchor_state_index + 1U;
+                  inside_bias_adapter_reobserve_begin_state_index =
+                    inside_bias_adapter_reobserve_begin_state_index.has_value()
+                      ? std::min(
+                          *inside_bias_adapter_reobserve_begin_state_index,
+                          inside_bias_reobserve_begin_state_index)
+                      : std::optional<std::size_t>(inside_bias_reobserve_begin_state_index);
                   consistency_record.inside_bias_delta_roll_applied_rad =
                     inside_bias_update->delta_roll_rad;
                   consistency_record.inside_bias_delta_pitch_applied_rad =
@@ -4357,9 +4368,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   std::min(*history_reobserve_begin_state_index, *feedback_anchor_state);
                 nhc_jump_detector.RewindFromStateIndex(reobserve_begin);
                 iteration_sparse_jump_planner.RewindFromStateIndex(reobserve_begin);
-                inside_bias_adapter.RewindFromStateIndex(reobserve_begin);
+                if (inside_bias_adapter_reobserve_begin_state_index.has_value() &&
+                    *inside_bias_adapter_reobserve_begin_state_index <= *feedback_anchor_state) {
+                  inside_bias_adapter.RewindFromStateIndex(
+                    std::min(*inside_bias_adapter_reobserve_begin_state_index, *feedback_anchor_state));
+                }
                 observe_begin = std::min(observe_begin, reobserve_begin);
                 history_reobserve_begin_state_index.reset();
+                inside_bias_adapter_reobserve_begin_state_index.reset();
               }
               if (observe_begin <= *feedback_anchor_state) {
                 nhc_jump_detector.ObserveConfirmedWindow(

@@ -43,6 +43,7 @@ struct OfflineRunnerConfig {
   double global_gyro_bias_tie_sigma_radps = 1e-7;
   bool enable_vertical_acc_bias_gm_process = false;
   double vertical_acc_bias_tau_s = 100.0;
+  double vertical_acc_bias_sigma_mps2 = 0.0;
   double vertical_acc_bias_process_noise_scale = 1.0;
   bool enable_vertical_rtk_preintegration_feedback = false;
   double vertical_rtk_gate_sigma_multiple = 2.0;
@@ -82,17 +83,8 @@ struct OfflineRunnerConfig {
   double vertical_jump_future_trend_slope_weight = 0.0;
   bool enable_vertical_local_up_anchor_fallback = false;
   bool enable_vertical_inside_bias_adaptation = false;
-  double vertical_inside_bias_window_s = 8.0;
-  double vertical_inside_bias_min_window_s = 2.0;
-  int vertical_inside_bias_min_observations = 8;
-  double vertical_inside_bias_update_interval_s = 0.2;
-  double vertical_inside_bias_gain = 0.002;
   double vertical_inside_attitude_gain = 0.002;
   double vertical_inside_max_delta_attitude_rad = 2e-6;
-  double vertical_inside_bias_max_delta_mps2 = 5e-6;
-  double vertical_inside_bias_min_abs_residual_m = 0.04;
-  double vertical_inside_bias_min_residual_delta_m = 0.005;
-  double vertical_inside_bias_gate_fraction = 0.95;
   bool enable_vertical_rtk_seed_pass = false;
   bool enable_body_z_seed_jump_windows = false;
   bool body_z_seed_jump_use_fix_only = true;

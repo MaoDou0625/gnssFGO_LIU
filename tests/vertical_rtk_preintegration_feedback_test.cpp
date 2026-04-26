@@ -279,6 +279,7 @@ void TestSequentialRecoveryConfigLoads() {
       "vertical_jump_future_trend_min_fix_count=6\n"
       "vertical_jump_future_trend_mean_weight=0.8\n"
       "vertical_jump_future_trend_slope_weight=120.0\n"
+      "vertical_acc_bias_sigma_mps2=9.80665e-5\n"
       "vertical_inside_attitude_gain=0.015\n"
       "vertical_inside_max_delta_attitude_rad=3e-6\n"
       "enable_nhc_jump_reference=true\n"
@@ -338,6 +339,7 @@ void TestSequentialRecoveryConfigLoads() {
   ExpectNear(config.vertical_jump_future_trend_min_fix_count, 6, 0.0, "future trend minimum fix count should load");
   ExpectNear(config.vertical_jump_future_trend_mean_weight, 0.8, 1e-12, "future trend mean weight should load");
   ExpectNear(config.vertical_jump_future_trend_slope_weight, 120.0, 1e-12, "future trend slope weight should load");
+  ExpectNear(config.vertical_acc_bias_sigma_mps2, 9.80665e-5, 1e-12, "vertical bias sigma should load");
   ExpectNear(config.vertical_inside_attitude_gain, 0.015, 1e-12, "inside attitude gain should load");
   ExpectNear(
     config.vertical_inside_max_delta_attitude_rad,
@@ -975,56 +977,47 @@ void TestBodyZSeedJumpDetectorUsesSeedAttitudeGravityProjection() {
     "body-z detector should use seed pitch when projecting gravity");
 }
 
-void TestVerticalInsideBiasAdapterUsesInsideResidualTrend() {
+void TestVerticalInsideBiasAdapterFiltersSmallInsideResiduals() {
   auto config = DefaultConfig();
   config.enable_vertical_inside_bias_adaptation = true;
-  config.vertical_inside_bias_window_s = 2.0;
-  config.vertical_inside_bias_min_window_s = 1.0;
-  config.vertical_inside_bias_min_observations = 3;
-  config.vertical_inside_bias_update_interval_s = 0.1;
-  config.vertical_inside_bias_gain = 0.5;
-  config.vertical_inside_attitude_gain = 0.5;
+  config.vertical_acc_bias_sigma_mps2 = 1e-3;
+  config.vertical_acc_bias_tau_s = 100.0;
+  config.vertical_inside_attitude_gain = 0.0;
   config.vertical_inside_max_delta_attitude_rad = 2e-4;
-  config.vertical_inside_bias_max_delta_mps2 = 1e-3;
-  config.vertical_inside_bias_min_abs_residual_m = 0.0;
-  config.vertical_inside_bias_min_residual_delta_m = 0.0;
-  config.vertical_inside_bias_gate_fraction = 1.0;
 
   VerticalInsideBiasAdapter adapter(config);
   ExpectTrue(
     !adapter.ObserveInsideResidual(1U, 0.0, 0.0, 0.05, 0.1, 0.1, 0.0).has_value(),
-    "first inside residual should only seed the bias adapter");
+    "first inside residual should only seed the Kalman adapter");
+  const auto update = adapter.ObserveInsideResidual(2U, 1.0, -0.01, 0.05, 0.1, 0.1, 0.0);
+  ExpectTrue(update.has_value(), "small inside residual changes should still produce a filtered bias update");
+  const double expected_prior_variance_mps4 =
+    config.vertical_acc_bias_sigma_mps2 * config.vertical_acc_bias_sigma_mps2;
+  ExpectTrue(update->delta_baz_mps2 < 0.0, "negative height residual should lower ba_z");
   ExpectTrue(
-    !adapter.ObserveInsideResidual(2U, 0.5, -0.01, 0.05, 0.1, 0.1, 0.0).has_value(),
-    "adapter should wait for the configured time window");
-  const auto update = adapter.ObserveInsideResidual(3U, 1.0, -0.04, 0.05, 0.1, 0.1, 0.0);
-  ExpectTrue(update.has_value(), "inside residual trend should produce a bias update");
-  ExpectNear(update->delta_baz_mps2, -1e-3, 1e-12, "bias update should be bounded and follow residual trend sign");
+    std::abs(update->delta_baz_mps2) < config.vertical_acc_bias_sigma_mps2,
+    "bias update should stay within the configured vertical bias scale");
+  ExpectNear(update->delta_pitch_rad, 0.0, 1e-12, "disabled attitude gain should not update pitch");
+  ExpectNear(update->delta_roll_rad, 0.0, 1e-12, "disabled attitude gain should not update roll");
+  ExpectNear(update->equivalent_acc_mps2, -0.02, 1e-12, "equivalent acceleration should remain diagnostic");
+  ExpectTrue(update->anchor_state_index == 2U, "bias update should be applied at the current state");
+  ExpectTrue(update->current_state_index == 2U, "bias update should report the latest observed state");
   ExpectNear(
-    update->delta_pitch_rad,
-    2e-4,
-    1e-12,
-    "inside residual trend should also produce a bounded pitch update");
-  ExpectNear(update->delta_roll_rad, 0.0, 1e-12, "zero roll gradient should not produce roll updates");
-  ExpectNear(update->equivalent_acc_mps2, -0.08, 1e-12, "equivalent acceleration should be 2*dr/T^2");
-  ExpectTrue(update->anchor_state_index == 3U, "bias update should be applied at the current state continuously");
-  ExpectTrue(update->current_state_index == 3U, "bias update should report the latest observed state");
+    update->filter_variance_mps4,
+    update->filter_covariance(1, 1),
+    1e-18,
+    "diagnostic ba_z variance should match the stored filter covariance");
+  ExpectTrue(
+    update->filter_variance_mps4 < expected_prior_variance_mps4,
+    "inside bias measurement should reduce posterior covariance");
 }
 
 void TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual() {
   auto config = DefaultConfig();
   config.enable_vertical_inside_bias_adaptation = true;
-  config.vertical_inside_bias_window_s = 2.0;
-  config.vertical_inside_bias_min_window_s = 1.0;
-  config.vertical_inside_bias_min_observations = 2;
-  config.vertical_inside_bias_update_interval_s = 0.1;
-  config.vertical_inside_bias_gain = 1.0;
-  config.vertical_inside_attitude_gain = 1.0;
+  config.vertical_acc_bias_sigma_mps2 = 1e-3;
+  config.vertical_inside_attitude_gain = 0.0;
   config.vertical_inside_max_delta_attitude_rad = 2e-4;
-  config.vertical_inside_bias_max_delta_mps2 = 1e-3;
-  config.vertical_inside_bias_min_abs_residual_m = 0.0;
-  config.vertical_inside_bias_min_residual_delta_m = 0.0;
-  config.vertical_inside_bias_gate_fraction = 1.0;
 
   VerticalInsideBiasAdapter adapter(config);
   ExpectTrue(
@@ -1033,6 +1026,39 @@ void TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual() {
   ExpectTrue(
     !adapter.ObserveInsideResidual(2U, 1.0, -0.12, 0.05, 0.1, 0.1, 0.0).has_value(),
     "outside residual should not be used for inside bias adaptation");
+}
+
+void TestVerticalInsideBiasAdapterRewindRestoresFilterState() {
+  auto config = DefaultConfig();
+  config.enable_vertical_inside_bias_adaptation = true;
+  config.vertical_acc_bias_sigma_mps2 = 1e-3;
+  config.vertical_acc_bias_tau_s = 100.0;
+  config.vertical_inside_attitude_gain = 0.0;
+
+  VerticalInsideBiasAdapter adapter(config);
+  ExpectTrue(
+    !adapter.ObserveInsideResidual(1U, 0.0, 0.0, 0.05, 0.1, 0.0, 0.0).has_value(),
+    "first residual should seed the rewind test");
+  const auto first_update = adapter.ObserveInsideResidual(2U, 1.0, -0.01, 0.05, 0.1, 0.0, 0.0);
+  ExpectTrue(first_update.has_value(), "second residual should produce an update before rewind");
+  adapter.AcceptUpdate(*first_update);
+  const auto second_update = adapter.ObserveInsideResidual(3U, 2.0, -0.02, 0.05, 0.1, 0.0, 0.0);
+  ExpectTrue(second_update.has_value(), "third residual should produce an update before rewind");
+  ExpectNear(
+    second_update->residual_delta_m,
+    -0.01,
+    1e-12,
+    "second accepted update should use the previous accepted observation as its baseline");
+  adapter.AcceptUpdate(*second_update);
+
+  adapter.RewindFromStateIndex(3U);
+  const auto replayed_update = adapter.ObserveInsideResidual(3U, 2.0, -0.02, 0.05, 0.1, 0.0, 0.0);
+  ExpectTrue(replayed_update.has_value(), "rewound adapter should replay the removed second update");
+  ExpectNear(
+    replayed_update->delta_baz_mps2,
+    second_update->delta_baz_mps2,
+    1e-12,
+    "rewind should restore the filter posterior before the removed state");
 }
 
 }  // namespace
@@ -1105,11 +1131,14 @@ int main() {
       "TestBodyZSeedJumpDetectorUsesSeedAttitudeGravityProjection",
       TestBodyZSeedJumpDetectorUsesSeedAttitudeGravityProjection);
     RunTest(
-      "TestVerticalInsideBiasAdapterUsesInsideResidualTrend",
-      TestVerticalInsideBiasAdapterUsesInsideResidualTrend);
+      "TestVerticalInsideBiasAdapterFiltersSmallInsideResiduals",
+      TestVerticalInsideBiasAdapterFiltersSmallInsideResiduals);
     RunTest(
       "TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual",
       TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual);
+    RunTest(
+      "TestVerticalInsideBiasAdapterRewindRestoresFilterState",
+      TestVerticalInsideBiasAdapterRewindRestoresFilterState);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return EXIT_FAILURE;

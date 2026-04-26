@@ -219,6 +219,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_vertical_acc_bias_gm_process = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_acc_bias_tau_s") {
     config.vertical_acc_bias_tau_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_acc_bias_sigma_mps2") {
+    config.vertical_acc_bias_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_acc_bias_process_noise_scale") {
     config.vertical_acc_bias_process_noise_scale = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_rtk_preintegration_feedback") {
@@ -297,28 +299,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_vertical_local_up_anchor_fallback = ParseBool(normalized_value);
   } else if (normalized_key == "enable_vertical_inside_bias_adaptation") {
     config.enable_vertical_inside_bias_adaptation = ParseBool(normalized_value);
-  } else if (normalized_key == "vertical_inside_bias_window_s") {
-    config.vertical_inside_bias_window_s = ParseDouble(normalized_value);
-  } else if (normalized_key == "vertical_inside_bias_min_window_s") {
-    config.vertical_inside_bias_min_window_s = ParseDouble(normalized_value);
-  } else if (normalized_key == "vertical_inside_bias_min_observations") {
-    config.vertical_inside_bias_min_observations = ParseInt(normalized_value);
-  } else if (normalized_key == "vertical_inside_bias_update_interval_s") {
-    config.vertical_inside_bias_update_interval_s = ParseDouble(normalized_value);
-  } else if (normalized_key == "vertical_inside_bias_gain") {
-    config.vertical_inside_bias_gain = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_inside_attitude_gain") {
     config.vertical_inside_attitude_gain = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_inside_max_delta_attitude_rad") {
     config.vertical_inside_max_delta_attitude_rad = ParseDouble(normalized_value);
-  } else if (normalized_key == "vertical_inside_bias_max_delta_mps2") {
-    config.vertical_inside_bias_max_delta_mps2 = ParseDouble(normalized_value);
-  } else if (normalized_key == "vertical_inside_bias_min_abs_residual_m") {
-    config.vertical_inside_bias_min_abs_residual_m = ParseDouble(normalized_value);
-  } else if (normalized_key == "vertical_inside_bias_min_residual_delta_m") {
-    config.vertical_inside_bias_min_residual_delta_m = ParseDouble(normalized_value);
-  } else if (normalized_key == "vertical_inside_bias_gate_fraction") {
-    config.vertical_inside_bias_gate_fraction = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_rtk_seed_pass") {
     config.enable_vertical_rtk_seed_pass = ParseBool(normalized_value);
   } else if (normalized_key == "enable_body_z_seed_jump_windows") {
@@ -595,6 +579,9 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     if (config.vertical_acc_bias_tau_s <= 0.0) {
       throw std::runtime_error("vertical_acc_bias_tau_s must be positive");
     }
+    if (config.vertical_acc_bias_sigma_mps2 < 0.0) {
+      throw std::runtime_error("vertical_acc_bias_sigma_mps2 must be non-negative");
+    }
     if (config.vertical_acc_bias_process_noise_scale <= 0.0) {
       throw std::runtime_error("vertical_acc_bias_process_noise_scale must be positive");
     }
@@ -754,25 +741,9 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
         config.vertical_jump_future_trend_slope_weight < 0.0) {
       throw std::runtime_error("vertical jump future trend settings must be non-negative");
     }
-    if (config.vertical_inside_bias_window_s <= 0.0 ||
-        config.vertical_inside_bias_min_window_s <= 0.0 ||
-        config.vertical_inside_bias_update_interval_s <= 0.0) {
-      throw std::runtime_error("vertical inside bias timing settings must be positive");
-    }
-    if (config.vertical_inside_bias_min_window_s > config.vertical_inside_bias_window_s) {
-      throw std::runtime_error("vertical_inside_bias_min_window_s must be <= vertical_inside_bias_window_s");
-    }
-    if (config.vertical_inside_bias_min_observations <= 1) {
-      throw std::runtime_error("vertical_inside_bias_min_observations must be greater than 1");
-    }
-    if (config.vertical_inside_bias_gain < 0.0 ||
-        config.vertical_inside_attitude_gain < 0.0 ||
-        config.vertical_inside_max_delta_attitude_rad <= 0.0 ||
-        config.vertical_inside_bias_max_delta_mps2 <= 0.0 ||
-        config.vertical_inside_bias_min_abs_residual_m < 0.0 ||
-        config.vertical_inside_bias_min_residual_delta_m < 0.0 ||
-        config.vertical_inside_bias_gate_fraction <= 0.0) {
-      throw std::runtime_error("vertical inside bias gain, limits, and gate fraction must be valid");
+    if (config.vertical_inside_attitude_gain < 0.0 ||
+        config.vertical_inside_max_delta_attitude_rad <= 0.0) {
+      throw std::runtime_error("vertical inside attitude gain and limit must be valid");
     }
     if (config.enable_body_z_seed_jump_windows && !config.enable_vertical_rtk_seed_pass) {
       throw std::runtime_error("enable_body_z_seed_jump_windows requires enable_vertical_rtk_seed_pass");
@@ -947,6 +918,9 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
   if (config.vertical_acc_bias_tau_s <= 0.0) {
     throw std::runtime_error("vertical_acc_bias_tau_s must be positive");
   }
+  if (config.vertical_acc_bias_sigma_mps2 < 0.0) {
+    throw std::runtime_error("vertical_acc_bias_sigma_mps2 must be non-negative");
+  }
   if (config.vertical_acc_bias_process_noise_scale <= 0.0) {
     throw std::runtime_error("vertical_acc_bias_process_noise_scale must be positive");
   }
@@ -1106,25 +1080,9 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
       config.vertical_jump_future_trend_slope_weight < 0.0) {
     throw std::runtime_error("vertical jump future trend settings must be non-negative");
   }
-  if (config.vertical_inside_bias_window_s <= 0.0 ||
-      config.vertical_inside_bias_min_window_s <= 0.0 ||
-      config.vertical_inside_bias_update_interval_s <= 0.0) {
-    throw std::runtime_error("vertical inside bias timing settings must be positive");
-  }
-  if (config.vertical_inside_bias_min_window_s > config.vertical_inside_bias_window_s) {
-    throw std::runtime_error("vertical_inside_bias_min_window_s must be <= vertical_inside_bias_window_s");
-  }
-  if (config.vertical_inside_bias_min_observations <= 1) {
-    throw std::runtime_error("vertical_inside_bias_min_observations must be greater than 1");
-  }
-  if (config.vertical_inside_bias_gain < 0.0 ||
-      config.vertical_inside_attitude_gain < 0.0 ||
-      config.vertical_inside_max_delta_attitude_rad <= 0.0 ||
-      config.vertical_inside_bias_max_delta_mps2 <= 0.0 ||
-      config.vertical_inside_bias_min_abs_residual_m < 0.0 ||
-      config.vertical_inside_bias_min_residual_delta_m < 0.0 ||
-      config.vertical_inside_bias_gate_fraction <= 0.0) {
-    throw std::runtime_error("vertical inside bias gain, limits, and gate fraction must be valid");
+  if (config.vertical_inside_attitude_gain < 0.0 ||
+      config.vertical_inside_max_delta_attitude_rad <= 0.0) {
+    throw std::runtime_error("vertical inside attitude gain and limit must be valid");
   }
   if (config.enable_body_z_seed_jump_windows && !config.enable_vertical_rtk_seed_pass) {
     throw std::runtime_error("enable_body_z_seed_jump_windows requires enable_vertical_rtk_seed_pass");
@@ -1255,6 +1213,7 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "enable_vertical_acc_bias_gm_process=" << (config.enable_vertical_acc_bias_gm_process ? "true" : "false")
       << '\n'
       << "vertical_acc_bias_tau_s=" << config.vertical_acc_bias_tau_s << '\n'
+      << "vertical_acc_bias_sigma_mps2=" << config.vertical_acc_bias_sigma_mps2 << '\n'
       << "vertical_acc_bias_process_noise_scale=" << config.vertical_acc_bias_process_noise_scale << '\n'
       << "enable_vertical_rtk_preintegration_feedback="
       << (config.enable_vertical_rtk_preintegration_feedback ? "true" : "false") << '\n'
@@ -1305,17 +1264,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << (config.enable_vertical_local_up_anchor_fallback ? "true" : "false") << '\n'
       << "enable_vertical_inside_bias_adaptation="
       << (config.enable_vertical_inside_bias_adaptation ? "true" : "false") << '\n'
-      << "vertical_inside_bias_window_s=" << config.vertical_inside_bias_window_s << '\n'
-      << "vertical_inside_bias_min_window_s=" << config.vertical_inside_bias_min_window_s << '\n'
-      << "vertical_inside_bias_min_observations=" << config.vertical_inside_bias_min_observations << '\n'
-      << "vertical_inside_bias_update_interval_s=" << config.vertical_inside_bias_update_interval_s << '\n'
-      << "vertical_inside_bias_gain=" << config.vertical_inside_bias_gain << '\n'
       << "vertical_inside_attitude_gain=" << config.vertical_inside_attitude_gain << '\n'
       << "vertical_inside_max_delta_attitude_rad=" << config.vertical_inside_max_delta_attitude_rad << '\n'
-      << "vertical_inside_bias_max_delta_mps2=" << config.vertical_inside_bias_max_delta_mps2 << '\n'
-      << "vertical_inside_bias_min_abs_residual_m=" << config.vertical_inside_bias_min_abs_residual_m << '\n'
-      << "vertical_inside_bias_min_residual_delta_m=" << config.vertical_inside_bias_min_residual_delta_m << '\n'
-      << "vertical_inside_bias_gate_fraction=" << config.vertical_inside_bias_gate_fraction << '\n'
       << "enable_vertical_rtk_seed_pass=" << (config.enable_vertical_rtk_seed_pass ? "true" : "false") << '\n'
       << "enable_body_z_seed_jump_windows=" << (config.enable_body_z_seed_jump_windows ? "true" : "false") << '\n'
       << "body_z_seed_jump_use_fix_only=" << (config.body_z_seed_jump_use_fix_only ? "true" : "false") << '\n'
