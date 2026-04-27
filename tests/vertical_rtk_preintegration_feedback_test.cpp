@@ -290,7 +290,9 @@ void TestSequentialRecoveryConfigLoads() {
       "nhc_body_vz_max_threshold_mps=0.06\n"
       "nhc_body_vy_percentile_scale=1.6\n"
       "nhc_body_vz_percentile_scale=3.5\n"
-      "nhc_jump_min_separation_s=1.25\n",
+      "nhc_jump_min_separation_s=1.25\n"
+      "body_z_jump_merge_gap_s=2.5\n"
+      "body_z_jump_merge_max_duration_s=6.0\n",
     "vertical_rtk_sequential_recovery_loads.cfg");
   const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
   std::filesystem::remove(config_path);
@@ -355,6 +357,12 @@ void TestSequentialRecoveryConfigLoads() {
   ExpectNear(config.nhc_body_vy_percentile_scale, 1.6, 1e-12, "NHC vy percentile scale should load");
   ExpectNear(config.nhc_body_vz_percentile_scale, 3.5, 1e-12, "NHC vz percentile scale should load");
   ExpectNear(config.nhc_jump_min_separation_s, 1.25, 1e-12, "NHC jump separation should load");
+  ExpectNear(config.body_z_jump_merge_gap_s, 2.5, 1e-12, "body-z merge gap should load");
+  ExpectNear(
+    config.body_z_jump_merge_max_duration_s,
+    6.0,
+    1e-12,
+    "body-z merge max duration should load");
 }
 
 void TestSequentialRecoveryRejectsNonPositiveIterationCount() {
@@ -950,6 +958,158 @@ void TestBodyZSeedJumpDetectorFindsDownwardWindow() {
     "DOWN body-z window should initialize an upward nav-z velocity correction");
 }
 
+void TestBodyZSeedJumpDetectorMergesNearbyDownwardWindows() {
+  auto config = DefaultConfig();
+  config.body_z_jump_min_score_mps = 0.003;
+  config.body_z_jump_threshold_ratio = 0.35;
+  config.body_z_jump_support_ratio = 0.25;
+  config.body_z_jump_max_window_duration_s = 0.75;
+  config.body_z_jump_min_separation_s = 0.1;
+  config.body_z_jump_merge_gap_s = 1.5;
+  config.body_z_jump_merge_max_duration_s = 3.0;
+
+  std::vector<ImuSample> imu_samples;
+  for (int sample_index = 0; sample_index <= 800; ++sample_index) {
+    const double time_s = 0.005 * static_cast<double>(sample_index);
+    ImuSample sample;
+    sample.time_s = time_s;
+    sample.accel_mps2 = Eigen::Vector3d(0.0, 0.0, 9.81);
+    if ((time_s >= 1.0 && time_s <= 1.10) ||
+        (time_s >= 2.0 && time_s <= 2.10)) {
+      sample.accel_mps2.z() -= 1.0;
+    }
+    imu_samples.push_back(sample);
+  }
+
+  std::vector<double> state_timestamps;
+  std::vector<ReferenceNodeState> seed_states;
+  for (int state_index = 0; state_index <= 80; ++state_index) {
+    const double time_s = 0.05 * static_cast<double>(state_index);
+    state_timestamps.push_back(time_s);
+    seed_states.push_back(MakeReferenceNodeState(time_s, gtsam::Pose3(), gtsam::Vector3::Zero()));
+  }
+
+  BodyZBidirectionalJumpDetector detector(config);
+  const auto detection = detector.Detect(imu_samples, seed_states, state_timestamps, 0.0, 4.0);
+  const auto down_window_count = std::count_if(
+    detection.windows.begin(),
+    detection.windows.end(),
+    [](const auto &window) { return window.direction == "DOWN"; });
+  ExpectNear(
+    static_cast<double>(down_window_count),
+    1.0,
+    0.0,
+    "nearby DOWN body-z windows should merge into one correction window");
+  const auto down_window_it = std::find_if(
+    detection.windows.begin(),
+    detection.windows.end(),
+    [](const auto &window) { return window.direction == "DOWN"; });
+  ExpectTrue(down_window_it != detection.windows.end(), "merged DOWN body-z window should exist");
+  ExpectTrue(
+    down_window_it->start_time_s < 1.2 && down_window_it->end_time_s > 2.0,
+    "merged DOWN body-z window should cover both injected pulses");
+}
+
+void TestBodyZSeedJumpDetectorDoesNotMergeAcrossOppositeDirectionWindow() {
+  auto config = DefaultConfig();
+  config.body_z_jump_min_score_mps = 0.003;
+  config.body_z_jump_threshold_ratio = 0.35;
+  config.body_z_jump_support_ratio = 0.25;
+  config.body_z_jump_max_window_duration_s = 0.75;
+  config.body_z_jump_min_separation_s = 0.1;
+  config.body_z_jump_merge_gap_s = 2.0;
+  config.body_z_jump_merge_max_duration_s = 4.0;
+
+  std::vector<ImuSample> imu_samples;
+  for (int sample_index = 0; sample_index <= 800; ++sample_index) {
+    const double time_s = 0.005 * static_cast<double>(sample_index);
+    ImuSample sample;
+    sample.time_s = time_s;
+    sample.accel_mps2 = Eigen::Vector3d(0.0, 0.0, 9.81);
+    if ((time_s >= 1.0 && time_s <= 1.10) ||
+        (time_s >= 2.0 && time_s <= 2.10)) {
+      sample.accel_mps2.z() -= 1.0;
+    }
+    if (time_s >= 1.5 && time_s <= 1.60) {
+      sample.accel_mps2.z() += 1.0;
+    }
+    imu_samples.push_back(sample);
+  }
+
+  std::vector<double> state_timestamps;
+  std::vector<ReferenceNodeState> seed_states;
+  for (int state_index = 0; state_index <= 80; ++state_index) {
+    const double time_s = 0.05 * static_cast<double>(state_index);
+    state_timestamps.push_back(time_s);
+    seed_states.push_back(MakeReferenceNodeState(time_s, gtsam::Pose3(), gtsam::Vector3::Zero()));
+  }
+
+  BodyZBidirectionalJumpDetector detector(config);
+  const auto detection = detector.Detect(imu_samples, seed_states, state_timestamps, 0.0, 4.0);
+  const auto down_window_count = std::count_if(
+    detection.windows.begin(),
+    detection.windows.end(),
+    [](const auto &window) { return window.direction == "DOWN"; });
+  const auto up_window_count = std::count_if(
+    detection.windows.begin(),
+    detection.windows.end(),
+    [](const auto &window) { return window.direction == "UP"; });
+  ExpectTrue(up_window_count >= 1U, "opposite-direction body-z window should be detected");
+  ExpectTrue(
+    down_window_count >= 2U,
+    "same-direction body-z windows should not merge across an opposite-direction window");
+}
+
+void TestBodyZSeedJumpDetectorMergeMaxDurationLimitsChainMerging() {
+  auto config = DefaultConfig();
+  config.body_z_jump_min_score_mps = 0.003;
+  config.body_z_jump_threshold_ratio = 0.35;
+  config.body_z_jump_support_ratio = 0.25;
+  config.body_z_jump_max_window_duration_s = 0.75;
+  config.body_z_jump_min_separation_s = 0.1;
+  config.body_z_jump_merge_gap_s = 1.5;
+  config.body_z_jump_merge_max_duration_s = 2.0;
+
+  std::vector<ImuSample> imu_samples;
+  for (int sample_index = 0; sample_index <= 1000; ++sample_index) {
+    const double time_s = 0.005 * static_cast<double>(sample_index);
+    ImuSample sample;
+    sample.time_s = time_s;
+    sample.accel_mps2 = Eigen::Vector3d(0.0, 0.0, 9.81);
+    if ((time_s >= 1.0 && time_s <= 1.10) ||
+        (time_s >= 2.0 && time_s <= 2.10) ||
+        (time_s >= 3.0 && time_s <= 3.10)) {
+      sample.accel_mps2.z() -= 1.0;
+    }
+    imu_samples.push_back(sample);
+  }
+
+  std::vector<double> state_timestamps;
+  std::vector<ReferenceNodeState> seed_states;
+  for (int state_index = 0; state_index <= 100; ++state_index) {
+    const double time_s = 0.05 * static_cast<double>(state_index);
+    state_timestamps.push_back(time_s);
+    seed_states.push_back(MakeReferenceNodeState(time_s, gtsam::Pose3(), gtsam::Vector3::Zero()));
+  }
+
+  BodyZBidirectionalJumpDetector detector(config);
+  const auto detection = detector.Detect(imu_samples, seed_states, state_timestamps, 0.0, 5.0);
+  const auto down_window_count = std::count_if(
+    detection.windows.begin(),
+    detection.windows.end(),
+    [](const auto &window) { return window.direction == "DOWN"; });
+  ExpectTrue(
+    down_window_count >= 2U,
+    "merge max duration should prevent unlimited same-direction chain merging");
+  for (const auto &window : detection.windows) {
+    if (window.direction == "DOWN") {
+      ExpectTrue(
+        window.duration_s <= config.body_z_jump_merge_max_duration_s + 0.05,
+        "merged body-z window should respect configured max duration");
+    }
+  }
+}
+
 void TestBodyZSeedJumpDetectorUsesSeedAttitudeGravityProjection() {
   auto config = DefaultConfig();
   std::vector<ImuSample> imu_samples;
@@ -1127,6 +1287,15 @@ int main() {
       "TestSparseVerticalJumpPlannerBuildsWindowAroundPeakCandidate",
       TestSparseVerticalJumpPlannerBuildsWindowAroundPeakCandidate);
     RunTest("TestBodyZSeedJumpDetectorFindsDownwardWindow", TestBodyZSeedJumpDetectorFindsDownwardWindow);
+    RunTest(
+      "TestBodyZSeedJumpDetectorMergesNearbyDownwardWindows",
+      TestBodyZSeedJumpDetectorMergesNearbyDownwardWindows);
+    RunTest(
+      "TestBodyZSeedJumpDetectorDoesNotMergeAcrossOppositeDirectionWindow",
+      TestBodyZSeedJumpDetectorDoesNotMergeAcrossOppositeDirectionWindow);
+    RunTest(
+      "TestBodyZSeedJumpDetectorMergeMaxDurationLimitsChainMerging",
+      TestBodyZSeedJumpDetectorMergeMaxDurationLimitsChainMerging);
     RunTest(
       "TestBodyZSeedJumpDetectorUsesSeedAttitudeGravityProjection",
       TestBodyZSeedJumpDetectorUsesSeedAttitudeGravityProjection);

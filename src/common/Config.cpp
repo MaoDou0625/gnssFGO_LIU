@@ -337,6 +337,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.body_z_jump_support_ratio = ParseDouble(normalized_value);
   } else if (normalized_key == "body_z_jump_redundant_padding_s") {
     config.body_z_jump_redundant_padding_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_jump_merge_gap_s") {
+    config.body_z_jump_merge_gap_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_jump_merge_max_duration_s") {
+    config.body_z_jump_merge_max_duration_s = ParseDouble(normalized_value);
   } else if (normalized_key == "body_z_jump_min_score_mps") {
     config.body_z_jump_min_score_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "body_z_jump_min_separation_s") {
@@ -786,7 +790,10 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
         config.body_z_jump_dense_peak_floor_ratio <= 0.0) {
       throw std::runtime_error("body-z jump detector timing and threshold settings are invalid");
     }
-    if (config.body_z_jump_center_gap_s < 0.0 || config.body_z_jump_redundant_padding_s < 0.0) {
+    if (config.body_z_jump_center_gap_s < 0.0 ||
+        config.body_z_jump_redundant_padding_s < 0.0 ||
+        config.body_z_jump_merge_gap_s < 0.0 ||
+        config.body_z_jump_merge_max_duration_s < 0.0) {
       throw std::runtime_error("body-z jump detector gap and padding settings must be non-negative");
     }
     if (config.body_z_jump_threshold_ratio <= 0.0 ||
@@ -1135,7 +1142,10 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
       config.body_z_jump_dense_peak_floor_ratio <= 0.0) {
     throw std::runtime_error("body-z jump detector timing and threshold settings are invalid");
   }
-  if (config.body_z_jump_center_gap_s < 0.0 || config.body_z_jump_redundant_padding_s < 0.0) {
+  if (config.body_z_jump_center_gap_s < 0.0 ||
+      config.body_z_jump_redundant_padding_s < 0.0 ||
+      config.body_z_jump_merge_gap_s < 0.0 ||
+      config.body_z_jump_merge_max_duration_s < 0.0) {
     throw std::runtime_error("body-z jump detector gap and padding settings must be non-negative");
   }
   if (config.body_z_jump_threshold_ratio <= 0.0 ||
@@ -1326,6 +1336,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "body_z_jump_threshold_ratio=" << config.body_z_jump_threshold_ratio << '\n'
       << "body_z_jump_support_ratio=" << config.body_z_jump_support_ratio << '\n'
       << "body_z_jump_redundant_padding_s=" << config.body_z_jump_redundant_padding_s << '\n'
+      << "body_z_jump_merge_gap_s=" << config.body_z_jump_merge_gap_s << '\n'
+      << "body_z_jump_merge_max_duration_s=" << config.body_z_jump_merge_max_duration_s << '\n'
       << "body_z_jump_min_score_mps=" << config.body_z_jump_min_score_mps << '\n'
       << "body_z_jump_min_separation_s=" << config.body_z_jump_min_separation_s << '\n'
       << "body_z_jump_max_window_duration_s=" << config.body_z_jump_max_window_duration_s << '\n'

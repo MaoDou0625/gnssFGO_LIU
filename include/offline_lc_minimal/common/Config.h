@@ -102,6 +102,8 @@ struct OfflineRunnerConfig {
   double body_z_jump_threshold_ratio = 0.35;
   double body_z_jump_support_ratio = 0.25;
   double body_z_jump_redundant_padding_s = 0.30;
+  double body_z_jump_merge_gap_s = 0.0;
+  double body_z_jump_merge_max_duration_s = 0.0;
   double body_z_jump_min_score_mps = 0.008;
   double body_z_jump_min_separation_s = 0.50;
   double body_z_jump_max_window_duration_s = 1.50;
