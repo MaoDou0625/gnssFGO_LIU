@@ -1399,7 +1399,7 @@ std::vector<double> BuildBodyZTailVelocityTargetsMps(
     return targets;
   }
 
-  if (!velocity_feedback_requested_for_window) {
+  if (!velocity_feedback_requested_for_window || !velocity_already_corrected) {
     PushUniqueCandidateValue(
       &targets,
       velocity_already_corrected
@@ -1408,15 +1408,8 @@ std::vector<double> BuildBodyZTailVelocityTargetsMps(
     return targets;
   }
 
-  if (!velocity_already_corrected) {
-    PushUniqueCandidateValue(&targets, std::numeric_limits<double>::quiet_NaN());
-  }
   const double feedback_base_vz_mps =
-    velocity_already_corrected
-      ? reference_states[window_candidate.end_state_index].velocity.z()
-      : (window_candidate.start_state_index > 0U
-           ? reference_states[window_candidate.start_state_index - 1U].velocity.z()
-           : reference_states[window_candidate.end_state_index].velocity.z());
+    reference_states[window_candidate.end_state_index].velocity.z();
   PushUniqueCandidateValue(&targets, feedback_base_vz_mps + velocity_feedback_delta_mps);
   return targets;
 }
@@ -1524,6 +1517,10 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
 
   double integrated_tail_up_m = previous_up_m;
   double integrated_previous_vz_mps = previous_vz_mps;
+  std::vector<double> integrated_window_up_m;
+  std::vector<double> integrated_window_vz_mps;
+  integrated_window_up_m.reserve(window_candidate.end_state_index - window_candidate.start_state_index + 1U);
+  integrated_window_vz_mps.reserve(window_candidate.end_state_index - window_candidate.start_state_index + 1U);
   const double denominator = static_cast<double>(window_candidate.end_state_index - previous_state_index);
   for (std::size_t state_index = window_candidate.start_state_index;
        state_index <= window_candidate.end_state_index;
@@ -1536,6 +1533,8 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
       std::max(reference_states[state_index].time_s - reference_states[state_index - 1U].time_s, 0.0);
     integrated_tail_up_m += 0.5 * (integrated_previous_vz_mps + smooth_vz_mps) * dt_s;
     integrated_previous_vz_mps = smooth_vz_mps;
+    integrated_window_up_m.push_back(integrated_tail_up_m);
+    integrated_window_vz_mps.push_back(smooth_vz_mps);
   }
 
   const double original_tail_up_m = reference_states[window_candidate.end_state_index].pose.translation().z();
@@ -1570,6 +1569,8 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
   correction.corrected_vz_mps.reserve(
     correction.end_state_index - correction.start_state_index + 1U);
 
+  const double decoupled_tail_up_offset_m =
+    body_z_seed_candidate ? target_tail_up_m - integrated_tail_up_m : 0.0;
   for (std::size_t state_index = correction.start_state_index;
        state_index <= correction.end_state_index;
        ++state_index) {
@@ -1579,6 +1580,14 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
           window_duration_s,
         0.0,
         1.0);
+    const std::size_t window_offset = state_index - correction.start_state_index;
+    if (body_z_seed_candidate) {
+      const double smooth_alpha = SmoothStep01(alpha);
+      correction.corrected_up_m.push_back(
+        integrated_window_up_m[window_offset] + smooth_alpha * decoupled_tail_up_offset_m);
+      correction.corrected_vz_mps.push_back(integrated_window_vz_mps[window_offset]);
+      continue;
+    }
     const double alpha2 = alpha * alpha;
     const double alpha3 = alpha2 * alpha;
     const double h00 = 2.0 * alpha3 - 3.0 * alpha2 + 1.0;
