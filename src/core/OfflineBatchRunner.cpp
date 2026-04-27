@@ -2877,6 +2877,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       std::optional<std::size_t> confirmed_inside_state_index;
       std::optional<std::size_t> history_reobserve_begin_state_index;
       std::optional<std::size_t> inside_bias_adapter_reobserve_begin_state_index;
+      std::optional<SparseVerticalJumpWindowCandidate> active_interval_feedback_window;
+      double last_interval_feedback_time_s = -std::numeric_limits<double>::infinity();
       bool vertical_initial_anchor_applied = false;
 
       const auto build_vertical_window_specs = [&](const std::size_t current_sample_index, const double window_s) {
@@ -3229,7 +3231,88 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                 consistency_record.required_up_anchor_correction_m = 0.0;
               } else {
                 inside_gate = consistency_record.prefit_nis <= vertical_gate_nis_threshold;
-                if (!inside_gate) {
+                bool interval_feedback_requested = false;
+                std::optional<std::size_t> interval_feedback_window_center_state_index;
+                double interval_feedback_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+                if (inside_gate && !apply_initial_vertical_anchor &&
+                    active_interval_feedback_window.has_value() &&
+                    record.corrected_time_s - last_interval_feedback_time_s >= 1.0 &&
+                    active_interval_feedback_window->end_state_index < iteration.gate_reference_states.size() &&
+                    *feedback_anchor_state > active_interval_feedback_window->end_state_index) {
+                  const double active_window_end_time_s =
+                    iteration.gate_reference_states[active_interval_feedback_window->end_state_index].time_s;
+                  double next_body_z_start_time_s = std::numeric_limits<double>::infinity();
+                  for (const auto &body_z_window : body_z_seed_detection.windows) {
+                    if (body_z_window.start_state_index > active_interval_feedback_window->end_state_index &&
+                        body_z_window.start_state_index < iteration.gate_reference_states.size()) {
+                      next_body_z_start_time_s = std::min(
+                        next_body_z_start_time_s,
+                        iteration.gate_reference_states[body_z_window.start_state_index].time_s);
+                    }
+                  }
+                  const bool safely_before_next_body_z_window =
+                    !std::isfinite(next_body_z_start_time_s) ||
+                    record.corrected_time_s < next_body_z_start_time_s - 0.75;
+                  if (safely_before_next_body_z_window) {
+                    auto interval_specs =
+                      build_vertical_window_specs_between_times(active_window_end_time_s, record.corrected_time_s);
+                    interval_specs =
+                      FilterVerticalHoldWindowSpecsAfterState(
+                        interval_specs,
+                        active_interval_feedback_window->end_state_index);
+                    if (interval_specs.size() >= 5U) {
+                      double weighted_residual_time_sum_m_s = 0.0;
+                      double weighted_time_squared_sum_s2 = 0.0;
+                      double max_abs_interval_residual_m = 0.0;
+                      bool interval_all_inside = true;
+                      for (const auto &interval_spec : interval_specs) {
+                        const ReferenceNodeState interval_state =
+                          ResolveReferenceStateForHoldWindowSpec(iteration.gate_reference_states, interval_spec);
+                        const Eigen::Vector3d residual_enu_m =
+                          ComputePositionResidualEnu(interval_state.pose, interval_spec.measurement_enu_m);
+                        const double tau_s = interval_spec.corrected_time_s - active_window_end_time_s;
+                        if (!std::isfinite(residual_enu_m.z()) || tau_s <= 0.1) {
+                          continue;
+                        }
+                        const double gate_threshold_m =
+                          std::sqrt(vertical_gate_nis_threshold) * interval_spec.sigma_u_m;
+                        if (std::abs(residual_enu_m.z()) > gate_threshold_m) {
+                          interval_all_inside = false;
+                        }
+                        max_abs_interval_residual_m =
+                          std::max(max_abs_interval_residual_m, std::abs(residual_enu_m.z()));
+                        weighted_residual_time_sum_m_s += tau_s * residual_enu_m.z();
+                        weighted_time_squared_sum_s2 += tau_s * tau_s;
+                      }
+                      const double interval_duration_s =
+                        interval_specs.back().corrected_time_s - interval_specs.front().corrected_time_s;
+                      const auto interval_trend = EvaluateVerticalFutureTrend(
+                        iteration.gate_reference_states,
+                        interval_specs,
+                        5,
+                        0.0,
+                        1.0);
+                      const double raw_interval_delta_vz_mps =
+                        weighted_time_squared_sum_s2 > 1e-9
+                          ? -weighted_residual_time_sum_m_s / weighted_time_squared_sum_s2
+                          : std::numeric_limits<double>::quiet_NaN();
+                      if (interval_all_inside &&
+                          interval_duration_s >= 1.0 &&
+                          interval_trend.valid &&
+                          std::isfinite(raw_interval_delta_vz_mps) &&
+                          std::abs(interval_trend.residual_slope_mps) >= 0.005 &&
+                          max_abs_interval_residual_m >= 0.015) {
+                        interval_feedback_requested = true;
+                        interval_feedback_window_center_state_index =
+                          active_interval_feedback_window->center_state_index;
+                        interval_feedback_delta_vz_mps =
+                          std::clamp(0.3 * raw_interval_delta_vz_mps, -0.02, 0.02);
+                      }
+                    }
+                  }
+                }
+
+                if (!inside_gate || interval_feedback_requested) {
                   std::size_t recovery_anchor_state_index =
                     confirmed_inside_state_index.value_or(graph_timeline.dynamic_start_index);
                   std::size_t nhc_search_start_state_index = recovery_anchor_state_index;
@@ -3337,7 +3420,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
 
                   for (int jump_selection_index = 0;
                        jump_selection_index < config_.vertical_jump_max_selected_points_per_segment &&
-                       !inside_gate &&
+                       (!inside_gate || interval_feedback_requested) &&
                        !window_correction_attempt_limit_reached;
                        ++jump_selection_index) {
                     auto current_scoring_reference_states = iteration.gate_reference_states;
@@ -3398,6 +3481,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                             body_z_window.center_state_index,
                             window_start_state_index,
                             window_end_state_index);
+                        if (interval_feedback_window_center_state_index.has_value() &&
+                            window_center_state_index != *interval_feedback_window_center_state_index) {
+                          continue;
+                        }
                         if (std::find(
                               selected_jump_window_center_indices.begin(),
                               selected_jump_window_center_indices.end(),
@@ -3501,6 +3588,19 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       if (!body_z_seed_candidate) {
                         forced_tail_delta_options_mps.push_back(
                           window_candidate.center_candidate.delta_vz_init_mps);
+                      } else if (
+                        interval_feedback_requested &&
+                        interval_feedback_window_center_state_index.has_value() &&
+                        window_candidate.center_state_index == *interval_feedback_window_center_state_index &&
+                        std::isfinite(interval_feedback_delta_vz_mps) &&
+                        window_candidate.end_state_index < iteration.gate_reference_states.size()) {
+                        forced_tail_delta_options_mps.clear();
+                        const double current_tail_vz_mps =
+                          iteration.gate_reference_states[window_candidate.end_state_index].velocity.z();
+                        for (const double feedback_scale : {0.5, 1.0, 1.5}) {
+                          forced_tail_delta_options_mps.push_back(
+                            current_tail_vz_mps + feedback_scale * interval_feedback_delta_vz_mps);
+                        }
                       } else if (
                         window_candidate.end_state_index < iteration.gate_reference_states.size() &&
                         std::isfinite(iteration_prefit_u_m)) {
@@ -3784,10 +3884,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     const bool best_height_improved =
                       std::abs(best_hold_evaluation.current_local_postfit_u_m) + 1e-4 <
                       std::abs(iteration_prefit_u_m);
-                    if (!best_objective_improved && !best_height_improved) {
+                    if (!interval_feedback_requested && !best_objective_improved && !best_height_improved) {
                       break;
                     }
-                    if (!recovered_current_inside(best_hold_evaluation) &&
+                    if (!interval_feedback_requested &&
+                        !recovered_current_inside(best_hold_evaluation) &&
                         std::abs(best_hold_evaluation.current_local_postfit_u_m) >=
                           std::abs(iteration_prefit_u_m)) {
                       break;
@@ -3811,6 +3912,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     last_velocity_recovery_postfit_u_m = best_hold_evaluation.current_local_postfit_u_m;
                     hold_window_passed = best_hold_evaluation.hold_window_passed;
                     inside_gate = recovered_current_inside(best_hold_evaluation);
+                    if (best_window->center_candidate.source == "BODY_Z_SEED_WINDOW") {
+                      active_interval_feedback_window = *best_window;
+                    }
                     consistency_record.prefit_residual_u_after_local_recovery_m =
                       best_hold_evaluation.current_local_postfit_u_m;
                     consistency_record.local_postfit_residual_u_m =
@@ -3943,6 +4047,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     iteration_row.inside_after_iteration = inside_gate;
                     iteration.vertical_local_recovery_iterations.push_back(iteration_row);
                     iteration_prefit_u_m = best_hold_evaluation.current_local_postfit_u_m;
+                    if (interval_feedback_requested) {
+                      last_interval_feedback_time_s = record.corrected_time_s;
+                      interval_feedback_requested = false;
+                    }
                   }
 
                   if (!iteration.failed && !inside_gate &&
