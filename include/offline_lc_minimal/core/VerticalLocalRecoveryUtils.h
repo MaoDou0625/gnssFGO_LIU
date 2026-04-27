@@ -152,7 +152,8 @@ void PushUniqueCandidateValue(std::vector<double> *values, double value);
   bool velocity_already_corrected,
   bool velocity_feedback_requested_for_window,
   double velocity_feedback_delta_mps,
-  double stored_tail_velocity_target_mps);
+  double stored_tail_velocity_target_mps,
+  bool allow_initial_velocity_feedback);
 [[nodiscard]] std::vector<double> BuildBodyZTailPositionOffsetsM(
   const std::vector<ReferenceNodeState> &reference_states,
   const SparseVerticalJumpWindowCandidate &window_candidate,

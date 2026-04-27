@@ -502,14 +502,18 @@ std::vector<double> BuildBodyZTailVelocityTargetsMps(
   const bool velocity_already_corrected,
   const bool velocity_feedback_requested_for_window,
   const double velocity_feedback_delta_mps,
-  const double stored_tail_velocity_target_mps) {
+  const double stored_tail_velocity_target_mps,
+  const bool allow_initial_velocity_feedback) {
   std::vector<double> targets;
   if (window_candidate.end_state_index >= reference_states.size()) {
     targets.push_back(std::numeric_limits<double>::quiet_NaN());
     return targets;
   }
 
-  if (!velocity_feedback_requested_for_window || !velocity_already_corrected) {
+  const bool velocity_feedback_allowed =
+    velocity_feedback_requested_for_window &&
+    (velocity_already_corrected || allow_initial_velocity_feedback);
+  if (!velocity_feedback_allowed) {
     PushUniqueCandidateValue(
       &targets,
       velocity_already_corrected
@@ -523,7 +527,9 @@ std::vector<double> BuildBodyZTailVelocityTargetsMps(
   const double feedback_base_vz_mps =
     std::isfinite(stored_tail_velocity_target_mps)
       ? stored_tail_velocity_target_mps
-      : reference_states[window_candidate.end_state_index].velocity.z();
+      : (velocity_already_corrected
+           ? reference_states[window_candidate.end_state_index].velocity.z()
+           : reference_states[window_candidate.start_state_index - 1U].velocity.z());
   PushUniqueCandidateValue(&targets, feedback_base_vz_mps + velocity_feedback_delta_mps);
   return targets;
 }

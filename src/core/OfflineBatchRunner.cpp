@@ -3190,7 +3190,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                           body_z_velocity_already_used,
                           body_z_velocity_feedback_for_window,
                           interval_feedback_delta_vz_mps,
-                          stored_tail_velocity_target_mps);
+                          stored_tail_velocity_target_mps,
+                          true);
                       }
                       if (!body_z_seed_candidate &&
                           !current_sample_covered_by_body_z_window &&
