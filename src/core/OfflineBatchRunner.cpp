@@ -1400,8 +1400,10 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
   const double original_tail_vz_mps = reference_states[window_candidate.end_state_index].velocity.z();
   const std::size_t tail_end_state_index = std::min(segment_end_state_index, reference_states.size() - 1U);
   const double tail_end_time_s =
-    reference_states[window_candidate.end_state_index].time_s +
-    std::max(config.vertical_jump_window_tail_target_s, 1e-3);
+    body_z_seed_candidate
+      ? reference_states[tail_end_state_index].time_s
+      : reference_states[window_candidate.end_state_index].time_s +
+          std::max(config.vertical_jump_window_tail_target_s, 1e-3);
   std::vector<double> tail_reference_values_mps;
   std::size_t tail_reference_start_state_index = window_candidate.end_state_index;
   if (body_z_seed_candidate) {
@@ -3842,9 +3844,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         const double current_tail_vz_mps =
                           current_scoring_reference_states[window_candidate.end_state_index].velocity.z();
                         if (body_z_seed_candidate) {
-                          constexpr double kBodyZResidualFeedbackMinDtS = 0.75;
+                          const double conservative_feedback_dt_s =
+                            std::max(
+                              {config_.vertical_interval_feedback_min_duration_s,
+                               config_.vertical_jump_window_tail_target_s,
+                               0.75});
                           const double effective_feedback_dt_s =
-                            std::max(feedback_dt_s, kBodyZResidualFeedbackMinDtS);
+                            std::max(feedback_dt_s, conservative_feedback_dt_s);
                           const double target_residual_u_m =
                             std::copysign(0.5 * local_gate_threshold_m, iteration_prefit_u_m);
                           const double body_z_residual_to_correct_m =
@@ -3854,7 +3860,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                               -body_z_residual_to_correct_m / effective_feedback_dt_s,
                               -0.5,
                               0.5);
-                          forced_tail_delta_options_mps.clear();
                           forced_tail_delta_options_mps.push_back(
                             current_tail_vz_mps + body_z_residual_feedback_delta_vz_mps);
                         } else {
