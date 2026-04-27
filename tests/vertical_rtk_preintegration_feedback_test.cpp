@@ -23,6 +23,7 @@ namespace {
 
 using offline_lc_minimal::DefaultConfig;
 using offline_lc_minimal::BodyZBidirectionalJumpDetector;
+using offline_lc_minimal::BodyZJumpWindowCandidate;
 using offline_lc_minimal::ImuSample;
 using offline_lc_minimal::LoadConfigFile;
 using offline_lc_minimal::ReferenceNodeState;
@@ -1060,7 +1061,7 @@ void TestBodyZSeedJumpDetectorDoesNotMergeAcrossOppositeDirectionWindow() {
     "same-direction body-z windows should not merge across an opposite-direction window");
 }
 
-void TestBodyZSeedJumpDetectorMergeMaxDurationLimitsChainMerging() {
+void TestBodyZSeedJumpDetectorMergesChainByGapOnly() {
   auto config = DefaultConfig();
   config.body_z_jump_min_score_mps = 0.003;
   config.body_z_jump_threshold_ratio = 0.35;
@@ -1094,20 +1095,19 @@ void TestBodyZSeedJumpDetectorMergeMaxDurationLimitsChainMerging() {
 
   BodyZBidirectionalJumpDetector detector(config);
   const auto detection = detector.Detect(imu_samples, seed_states, state_timestamps, 0.0, 5.0);
-  const auto down_window_count = std::count_if(
-    detection.windows.begin(),
-    detection.windows.end(),
-    [](const auto &window) { return window.direction == "DOWN"; });
-  ExpectTrue(
-    down_window_count >= 2U,
-    "merge max duration should prevent unlimited same-direction chain merging");
+  std::vector<BodyZJumpWindowCandidate> down_windows;
   for (const auto &window : detection.windows) {
     if (window.direction == "DOWN") {
-      ExpectTrue(
-        window.duration_s <= config.body_z_jump_merge_max_duration_s + 0.05,
-        "merged body-z window should respect configured max duration");
+      down_windows.push_back(window);
     }
   }
+  ExpectTrue(down_windows.size() == 1U, "same-direction windows should merge by gap only");
+  ExpectTrue(
+    down_windows.front().duration_s > config.body_z_jump_merge_max_duration_s,
+    "body-z merge max duration should not limit gap-based chain merging");
+  ExpectTrue(
+    down_windows.front().start_time_s <= 1.0 && down_windows.front().end_time_s >= 3.10,
+    "merged body-z window should cover the complete same-direction chain");
 }
 
 void TestBodyZSeedJumpDetectorUsesSeedAttitudeGravityProjection() {
@@ -1294,8 +1294,8 @@ int main() {
       "TestBodyZSeedJumpDetectorDoesNotMergeAcrossOppositeDirectionWindow",
       TestBodyZSeedJumpDetectorDoesNotMergeAcrossOppositeDirectionWindow);
     RunTest(
-      "TestBodyZSeedJumpDetectorMergeMaxDurationLimitsChainMerging",
-      TestBodyZSeedJumpDetectorMergeMaxDurationLimitsChainMerging);
+      "TestBodyZSeedJumpDetectorMergesChainByGapOnly",
+      TestBodyZSeedJumpDetectorMergesChainByGapOnly);
     RunTest(
       "TestBodyZSeedJumpDetectorUsesSeedAttitudeGravityProjection",
       TestBodyZSeedJumpDetectorUsesSeedAttitudeGravityProjection);
