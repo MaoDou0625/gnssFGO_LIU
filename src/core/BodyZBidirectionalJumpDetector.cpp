@@ -465,6 +465,125 @@ std::vector<BodyZJumpWindowCandidate> SelectDirection(
   return windows;
 }
 
+BodyZJumpWindowCandidate RebuildMergedWindow(
+  const std::vector<BodyZJumpWindowCandidate> &windows,
+  const std::size_t begin_index,
+  const std::size_t end_index,
+  const std::vector<BodyZJumpSignalSample> &signal,
+  const std::vector<double> &state_timestamps) {
+  BodyZJumpWindowCandidate merged = windows[begin_index];
+  std::size_t best_window_index = begin_index;
+  for (std::size_t index = begin_index; index <= end_index; ++index) {
+    const auto &window = windows[index];
+    if (window.start_time_s < merged.start_time_s) {
+      merged.start_time_s = window.start_time_s;
+      merged.start_relative_time_s = window.start_relative_time_s;
+      merged.start_signal_index = window.start_signal_index;
+    }
+    if (window.end_time_s > merged.end_time_s) {
+      merged.end_time_s = window.end_time_s;
+      merged.end_relative_time_s = window.end_relative_time_s;
+      merged.end_signal_index = window.end_signal_index;
+    }
+    if (window.direction_score_mps > windows[best_window_index].direction_score_mps) {
+      best_window_index = index;
+    }
+    merged.selection_level = std::min(merged.selection_level, window.selection_level);
+    merged.level_noise_floor_mps =
+      std::max(merged.level_noise_floor_mps, window.level_noise_floor_mps);
+    merged.level_max_peak_mps =
+      std::max(merged.level_max_peak_mps, window.level_max_peak_mps);
+    merged.level_threshold_mps =
+      std::min(merged.level_threshold_mps, window.level_threshold_mps);
+  }
+
+  const auto &best = windows[best_window_index];
+  merged.center_signal_index = best.center_signal_index;
+  merged.center_time_s = best.center_time_s;
+  merged.center_relative_time_s = best.center_relative_time_s;
+  merged.direction_score_mps = best.direction_score_mps;
+  merged.signed_step_metric_mps = best.signed_step_metric_mps;
+  merged.body_z_axis_nav_z = best.body_z_axis_nav_z;
+
+  merged.start_state_index = NearestStateIndex(state_timestamps, merged.start_time_s);
+  merged.center_state_index = NearestStateIndex(state_timestamps, merged.center_time_s);
+  merged.end_state_index = NearestStateIndex(state_timestamps, merged.end_time_s);
+  merged.duration_s = merged.end_time_s - merged.start_time_s;
+  merged.pre_velocity_mps = signal[merged.start_signal_index].integrated_body_z_velocity_mps;
+  merged.post_velocity_mps = signal[merged.end_signal_index].integrated_body_z_velocity_mps;
+  merged.signed_delta_velocity_mps = merged.post_velocity_mps - merged.pre_velocity_mps;
+  merged.delta_vz_init_mps = -merged.signed_delta_velocity_mps * merged.body_z_axis_nav_z;
+
+  double acc_sum = 0.0;
+  std::size_t acc_count = 0U;
+  merged.min_acc_mps2 = std::numeric_limits<double>::infinity();
+  merged.max_acc_mps2 = -std::numeric_limits<double>::infinity();
+  for (std::size_t signal_index = merged.start_signal_index;
+       signal_index <= merged.end_signal_index && signal_index < signal.size();
+       ++signal_index) {
+    const double acc_mps2 = signal[signal_index].body_z_acc_mps2;
+    if (!std::isfinite(acc_mps2)) {
+      continue;
+    }
+    merged.min_acc_mps2 = std::min(merged.min_acc_mps2, acc_mps2);
+    merged.max_acc_mps2 = std::max(merged.max_acc_mps2, acc_mps2);
+    acc_sum += acc_mps2;
+    ++acc_count;
+  }
+  if (acc_count > 0U) {
+    merged.mean_acc_mps2 = acc_sum / static_cast<double>(acc_count);
+  } else {
+    merged.min_acc_mps2 = std::numeric_limits<double>::quiet_NaN();
+    merged.max_acc_mps2 = std::numeric_limits<double>::quiet_NaN();
+    merged.mean_acc_mps2 = std::numeric_limits<double>::quiet_NaN();
+  }
+  return merged;
+}
+
+std::vector<BodyZJumpWindowCandidate> MergeNearbySameDirectionWindows(
+  std::vector<BodyZJumpWindowCandidate> windows,
+  const std::vector<BodyZJumpSignalSample> &signal,
+  const std::vector<double> &state_timestamps,
+  const OfflineRunnerConfig &config) {
+  if (windows.size() < 2U) {
+    return windows;
+  }
+  std::sort(
+    windows.begin(),
+    windows.end(),
+    [](const BodyZJumpWindowCandidate &left, const BodyZJumpWindowCandidate &right) {
+      if (left.direction == right.direction) {
+        return left.start_time_s < right.start_time_s;
+      }
+      return left.direction < right.direction;
+    });
+
+  std::vector<BodyZJumpWindowCandidate> merged_windows;
+  const double merge_gap_s = std::max(config.body_z_jump_redundant_padding_s, 0.0);
+  std::size_t group_begin = 0U;
+  while (group_begin < windows.size()) {
+    std::size_t group_end = group_begin;
+    double group_end_time_s = windows[group_begin].end_time_s;
+    while (group_end + 1U < windows.size() &&
+           windows[group_end + 1U].direction == windows[group_begin].direction &&
+           windows[group_end + 1U].start_time_s <= group_end_time_s + merge_gap_s) {
+      ++group_end;
+      group_end_time_s = std::max(group_end_time_s, windows[group_end].end_time_s);
+    }
+    merged_windows.push_back(
+      RebuildMergedWindow(windows, group_begin, group_end, signal, state_timestamps));
+    group_begin = group_end + 1U;
+  }
+
+  std::sort(
+    merged_windows.begin(),
+    merged_windows.end(),
+    [](const BodyZJumpWindowCandidate &left, const BodyZJumpWindowCandidate &right) {
+      return left.center_time_s < right.center_time_s;
+    });
+  return merged_windows;
+}
+
 }  // namespace
 
 BodyZBidirectionalJumpDetector::BodyZBidirectionalJumpDetector(const OfflineRunnerConfig &config)
@@ -582,6 +701,11 @@ BodyZJumpDetectionResult BodyZBidirectionalJumpDetector::Detect(
     [](const BodyZJumpWindowCandidate &left, const BodyZJumpWindowCandidate &right) {
       return left.center_time_s < right.center_time_s;
     });
+  result.windows = MergeNearbySameDirectionWindows(
+    std::move(result.windows),
+    result.signal,
+    state_timestamps,
+    config_);
   return result;
 }
 
