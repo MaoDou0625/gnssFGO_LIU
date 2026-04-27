@@ -3653,14 +3653,17 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     nhc_supported_state_indices.insert(*nhc_jump_anchor_state);
                   }
                   std::vector<std::size_t> selected_jump_window_center_indices;
-                  int window_correction_attempt_count = 0;
-                  bool window_correction_attempt_limit_reached = false;
+                  const int max_accepted_window_corrections =
+                    std::max(
+                      1,
+                      std::min(
+                        config_.vertical_jump_max_selected_points_per_segment,
+                        config_.vertical_jump_window_max_correction_attempts));
 
                   for (int jump_selection_index = 0;
-                       jump_selection_index < config_.vertical_jump_max_selected_points_per_segment &&
+                       jump_selection_index < max_accepted_window_corrections &&
                        (!inside_gate || interval_feedback_requested) &&
-                       !defer_body_z_window_gate_until_post_window &&
-                       !window_correction_attempt_limit_reached;
+                       !defer_body_z_window_gate_until_post_window;
                        ++jump_selection_index) {
                     auto current_scoring_reference_states = iteration.gate_reference_states;
                     std::size_t current_scoring_valid_until_index = sequential_reference_valid_until_index;
@@ -3844,24 +3847,43 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         const double current_tail_vz_mps =
                           current_scoring_reference_states[window_candidate.end_state_index].velocity.z();
                         if (body_z_seed_candidate) {
-                          const double conservative_feedback_dt_s =
-                            std::max(
-                              {config_.vertical_interval_feedback_min_duration_s,
-                               config_.vertical_jump_window_tail_target_s,
-                               0.75});
-                          const double effective_feedback_dt_s =
-                            std::max(feedback_dt_s, conservative_feedback_dt_s);
-                          const double target_residual_u_m =
-                            std::copysign(0.5 * local_gate_threshold_m, iteration_prefit_u_m);
-                          const double body_z_residual_to_correct_m =
-                            iteration_prefit_u_m - target_residual_u_m;
-                          const double body_z_residual_feedback_delta_vz_mps =
-                            std::clamp(
-                              -body_z_residual_to_correct_m / effective_feedback_dt_s,
-                              -0.5,
-                              0.5);
-                          forced_tail_delta_options_mps.push_back(
-                            current_tail_vz_mps + body_z_residual_feedback_delta_vz_mps);
+                          const bool future_slope_feedback_available =
+                            current_future_trend_evaluation.valid &&
+                            std::isfinite(current_future_trend_evaluation.residual_slope_mps);
+                          if (future_slope_feedback_available) {
+                            const double slope_feedback_max_delta_vz_mps =
+                              std::max(
+                                config_.vertical_interval_feedback_max_delta_vz_mps,
+                                0.05);
+                            const double slope_feedback_delta_vz_mps =
+                              std::clamp(
+                                -config_.vertical_interval_feedback_gain *
+                                  current_future_trend_evaluation.residual_slope_mps,
+                                -slope_feedback_max_delta_vz_mps,
+                                slope_feedback_max_delta_vz_mps);
+                            forced_tail_delta_options_mps.push_back(
+                              current_tail_vz_mps + slope_feedback_delta_vz_mps);
+                          }
+                          {
+                            const double conservative_feedback_dt_s =
+                              std::max(
+                                {config_.vertical_interval_feedback_min_duration_s,
+                                 config_.vertical_jump_window_tail_target_s,
+                                 0.75});
+                            const double effective_feedback_dt_s =
+                              std::max(feedback_dt_s, conservative_feedback_dt_s);
+                            const double target_residual_u_m =
+                              std::copysign(0.5 * local_gate_threshold_m, iteration_prefit_u_m);
+                            const double body_z_residual_to_correct_m =
+                              iteration_prefit_u_m - target_residual_u_m;
+                            const double body_z_residual_feedback_delta_vz_mps =
+                              std::clamp(
+                                -body_z_residual_to_correct_m / effective_feedback_dt_s,
+                                -0.5,
+                                0.5);
+                            forced_tail_delta_options_mps.push_back(
+                              current_tail_vz_mps + body_z_residual_feedback_delta_vz_mps);
+                          }
                         } else {
                           const double residual_feedback_delta_vz_mps =
                             std::clamp(-iteration_prefit_u_m / feedback_dt_s, -0.5, 0.5);
@@ -3877,6 +3899,38 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       if (body_z_seed_candidate) {
                         forced_tail_delta_up_options_m.clear();
                         forced_tail_delta_up_options_m.push_back(0.0);
+                        const double micro_up_slope_limit_mps =
+                          std::max(
+                            2.0 * config_.vertical_interval_feedback_max_delta_vz_mps,
+                            0.01);
+                        const bool velocity_slope_reasonable =
+                          current_future_trend_evaluation.valid &&
+                          std::isfinite(current_future_trend_evaluation.residual_slope_mps) &&
+                          std::abs(current_future_trend_evaluation.residual_slope_mps) <=
+                            micro_up_slope_limit_mps;
+                        const bool residual_mean_observable =
+                          current_future_trend_evaluation.valid &&
+                          std::isfinite(current_future_trend_evaluation.residual_mean_m) &&
+                          std::abs(current_future_trend_evaluation.residual_mean_m) >=
+                            config_.vertical_interval_feedback_min_residual_m;
+                        if (!current_sample_covered_by_body_z_window &&
+                            velocity_slope_reasonable &&
+                            residual_mean_observable) {
+                          const double max_micro_up_delta_m =
+                            std::min(0.03, 0.5 * local_gate_threshold_m);
+                          const double requested_micro_up_delta_m =
+                            std::clamp(
+                              -current_future_trend_evaluation.residual_mean_m,
+                              -max_micro_up_delta_m,
+                              max_micro_up_delta_m);
+                          for (const double up_delta_scale : {0.25, 0.5, 0.75, 1.0}) {
+                            const double scaled_micro_up_delta_m =
+                              up_delta_scale * requested_micro_up_delta_m;
+                            if (std::abs(scaled_micro_up_delta_m) > 1e-4) {
+                              forced_tail_delta_up_options_m.push_back(scaled_micro_up_delta_m);
+                            }
+                          }
+                        }
                       }
                       if (!body_z_seed_candidate &&
                           window_candidate.start_state_index > 0U &&
@@ -3963,12 +4017,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       for (const double forced_tail_delta_mps : forced_tail_delta_options_mps) {
                       for (const double tail_delta_scale : tail_delta_scales) {
                       for (const double forced_tail_delta_up_m : forced_tail_delta_up_options_m) {
-                      if (window_correction_attempt_count >=
-                          config_.vertical_jump_window_max_correction_attempts) {
-                        window_correction_attempt_limit_reached = true;
-                        break;
-                      }
-                      ++window_correction_attempt_count;
                       auto candidate_reference_states = iteration.gate_reference_states;
                       gtsam::Values candidate_initial_values = sequential_initial_values;
                       std::size_t candidate_valid_until_index = sequential_reference_valid_until_index;
@@ -4120,16 +4168,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       best_valid_until_index = candidate_valid_until_index;
                       best_hold_evaluation = candidate_hold_evaluation;
                       }
-                      if (window_correction_attempt_limit_reached) {
-                        break;
                       }
-                      }
-                      if (window_correction_attempt_limit_reached) {
-                        break;
-                      }
-                      }
-                      if (window_correction_attempt_limit_reached) {
-                        break;
                       }
                       if (body_z_seed_candidate &&
                           best_window.has_value() &&
@@ -4137,18 +4176,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                           recovered_current_inside(best_hold_evaluation)) {
                         break;
                       }
-                    }
-
-                    if (window_correction_attempt_limit_reached &&
-                        (!best_window.has_value() || !best_window_correction.has_value() ||
-                         !best_recovery_result.has_value())) {
-                      iteration.failed = true;
-                      iteration.failure_message =
-                        "vertical local recovery exceeded window correction attempt limit at sample " +
-                        std::to_string(sample_index) +
-                        ", limit=" +
-                        std::to_string(config_.vertical_jump_window_max_correction_attempts);
-                      break;
                     }
 
                     if (!best_window.has_value() || !best_window_correction.has_value() ||
