@@ -1629,6 +1629,39 @@ std::optional<SparseVerticalJumpWindowCandidate> BuildBodyZSeedSparseWindowCandi
   return window_candidate;
 }
 
+std::optional<SparseVerticalJumpWindowCandidate> FindLatestEndedBodyZSeedWindowCandidate(
+  const std::vector<BodyZJumpWindowCandidate> &body_z_windows,
+  const std::vector<double> &state_timestamps,
+  const std::vector<ReferenceNodeState> &reference_states,
+  const std::vector<VerticalVzReferenceSample> &vertical_vz_reference,
+  const std::size_t dynamic_start_index,
+  const std::size_t feedback_anchor_state_index) {
+  std::optional<SparseVerticalJumpWindowCandidate> latest_window_candidate;
+  const std::unordered_set<std::size_t> no_nhc_support;
+  for (const auto &body_z_window : body_z_windows) {
+    if (body_z_window.end_state_index >= feedback_anchor_state_index) {
+      continue;
+    }
+    const auto window_candidate = BuildBodyZSeedSparseWindowCandidate(
+      body_z_window,
+      state_timestamps,
+      reference_states,
+      vertical_vz_reference,
+      dynamic_start_index,
+      feedback_anchor_state_index,
+      std::nullopt,
+      no_nhc_support);
+    if (!window_candidate.has_value()) {
+      continue;
+    }
+    if (!latest_window_candidate.has_value() ||
+        window_candidate->end_state_index > latest_window_candidate->end_state_index) {
+      latest_window_candidate = *window_candidate;
+    }
+  }
+  return latest_window_candidate;
+}
+
 void ApplyVerticalVelocityWindowCorrection(
   const VerticalVelocityWindowCorrection &correction,
   std::vector<ReferenceNodeState> *reference_states,
@@ -3312,16 +3345,37 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                 bool interval_feedback_requested = false;
                 std::optional<std::size_t> interval_feedback_window_center_state_index;
                 double interval_feedback_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
-                if (inside_gate && !apply_initial_vertical_anchor &&
-                    active_interval_feedback_window.has_value() &&
+                std::optional<SparseVerticalJumpWindowCandidate> interval_feedback_window =
+                  active_interval_feedback_window;
+                if (config_.enable_body_z_seed_jump_windows && !body_z_seed_detection.windows.empty()) {
+                  const auto pending_body_z_window = FindLatestEndedBodyZSeedWindowCandidate(
+                    body_z_seed_detection.windows,
+                    state_timestamps,
+                    iteration.gate_reference_states,
+                    vertical_vz_reference_by_state,
+                    graph_timeline.dynamic_start_index,
+                    *feedback_anchor_state);
+                  if (pending_body_z_window.has_value() &&
+                      (!interval_feedback_window.has_value() ||
+                       pending_body_z_window->end_state_index >= interval_feedback_window->end_state_index)) {
+                    interval_feedback_window = *pending_body_z_window;
+                  }
+                }
+                constexpr double kIntervalFeedbackNearGateToleranceM = 0.03;
+                const bool interval_feedback_gate_eligible =
+                  inside_gate ||
+                  std::abs(prefit_residual_enu_m.z()) <=
+                    consistency_record.vertical_gate_threshold_m + kIntervalFeedbackNearGateToleranceM;
+                if (interval_feedback_gate_eligible && !apply_initial_vertical_anchor &&
+                    interval_feedback_window.has_value() &&
                     record.corrected_time_s - last_interval_feedback_time_s >= 1.0 &&
-                    active_interval_feedback_window->end_state_index < iteration.gate_reference_states.size() &&
-                    *feedback_anchor_state > active_interval_feedback_window->end_state_index) {
+                    interval_feedback_window->end_state_index < iteration.gate_reference_states.size() &&
+                    *feedback_anchor_state > interval_feedback_window->end_state_index) {
                   const double active_window_end_time_s =
-                    iteration.gate_reference_states[active_interval_feedback_window->end_state_index].time_s;
+                    iteration.gate_reference_states[interval_feedback_window->end_state_index].time_s;
                   double next_body_z_start_time_s = std::numeric_limits<double>::infinity();
                   for (const auto &body_z_window : body_z_seed_detection.windows) {
-                    if (body_z_window.start_state_index > active_interval_feedback_window->end_state_index &&
+                    if (body_z_window.start_state_index > interval_feedback_window->end_state_index &&
                         body_z_window.start_state_index < iteration.gate_reference_states.size()) {
                       next_body_z_start_time_s = std::min(
                         next_body_z_start_time_s,
@@ -3330,14 +3384,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   }
                   const bool safely_before_next_body_z_window =
                     !std::isfinite(next_body_z_start_time_s) ||
-                    record.corrected_time_s < next_body_z_start_time_s - 0.75;
+                    record.corrected_time_s < next_body_z_start_time_s - kTimeEpsilonS;
                   if (safely_before_next_body_z_window) {
                     auto interval_specs =
                       build_vertical_window_specs_between_times(active_window_end_time_s, record.corrected_time_s);
                     interval_specs =
                       FilterVerticalHoldWindowSpecsAfterState(
                         interval_specs,
-                        active_interval_feedback_window->end_state_index);
+                        interval_feedback_window->end_state_index);
                     if (interval_specs.size() >=
                         static_cast<std::size_t>(std::max(config_.vertical_jump_future_trend_min_fix_count, 1))) {
                       std::vector<double> interval_times_s;
@@ -3359,7 +3413,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         }
                         const double gate_threshold_m =
                           std::sqrt(vertical_gate_nis_threshold) * interval_spec.sigma_u_m;
-                        if (std::abs(residual_enu_m.z()) > gate_threshold_m) {
+                        if (std::abs(residual_enu_m.z()) >
+                            gate_threshold_m + kIntervalFeedbackNearGateToleranceM) {
                           interval_all_inside = false;
                         }
                         max_abs_interval_residual_m =
@@ -3447,7 +3502,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                             config_.vertical_interval_feedback_min_residual_m) {
                         interval_feedback_requested = true;
                         interval_feedback_window_center_state_index =
-                          active_interval_feedback_window->center_state_index;
+                          interval_feedback_window->center_state_index;
                         interval_feedback_delta_vz_mps =
                           std::clamp(
                               config_.vertical_interval_feedback_gain * raw_interval_delta_vz_mps,
