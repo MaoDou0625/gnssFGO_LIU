@@ -1425,7 +1425,7 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
   if (!std::isfinite(target_tail_vz_mps) && body_z_seed_candidate) {
     target_tail_vz_mps = previous_vz_mps;
   }
-  if (!std::isfinite(target_tail_vz_mps) &&
+  if (!std::isfinite(target_tail_vz_mps) && !body_z_seed_candidate &&
       std::isfinite(window_candidate.center_candidate.delta_vz_init_mps)) {
     target_tail_vz_mps =
       reference_states[window_candidate.end_state_index].velocity.z() +
@@ -1608,7 +1608,9 @@ std::optional<SparseVerticalJumpWindowCandidate> BuildBodyZSeedSparseWindowCandi
   center_candidate.vz_mismatch_jump_mps =
     body_z_window.signed_delta_velocity_mps * body_z_window.body_z_axis_nav_z;
   center_candidate.jump_step_threshold_mps = body_z_window.level_threshold_mps;
-  center_candidate.delta_vz_init_mps = body_z_window.delta_vz_init_mps;
+  // Body-z integration localizes the anomaly window, but it is not a velocity
+  // correction observation. Keep the signed step fields below for diagnostics.
+  center_candidate.delta_vz_init_mps = std::numeric_limits<double>::quiet_NaN();
   center_candidate.score = body_z_window.direction_score_mps;
   center_candidate.nhc_supported = nhc_supported_state_indices.contains(window_center_state_index);
   center_candidate.source = "BODY_Z_SEED_WINDOW";
@@ -3600,8 +3602,15 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     std::optional<std::size_t> covering_body_z_window_start_state_index;
                     std::optional<std::size_t> covering_body_z_window_end_state_index;
                     for (const auto &body_z_window : body_z_seed_detection.windows) {
-                      if (body_z_window.start_state_index <= *feedback_anchor_state &&
-                          *feedback_anchor_state <= body_z_window.end_state_index &&
+                      const bool feedback_state_inside_window =
+                        body_z_window.start_state_index <= *feedback_anchor_state &&
+                        *feedback_anchor_state <= body_z_window.end_state_index;
+                      const bool gnss_time_inside_window =
+                        record.corrected_time_s >= body_z_window.start_time_s - kTimeEpsilonS &&
+                        record.corrected_time_s <=
+                          body_z_window.end_time_s +
+                            std::max(config_.state_meas_sync_upper_bound_s, kTimeEpsilonS);
+                      if ((feedback_state_inside_window || gnss_time_inside_window) &&
                           body_z_window.start_state_index >= graph_timeline.dynamic_start_index + 1U) {
                         if (!covering_body_z_window_start_state_index.has_value() ||
                             body_z_window.start_state_index > *covering_body_z_window_start_state_index) {
@@ -3799,7 +3808,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       const bool body_z_seed_candidate =
                         window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW";
                       const bool current_sample_covered_by_body_z_window =
-                        body_z_seed_candidate && *feedback_anchor_state <= window_candidate.end_state_index;
+                        body_z_seed_candidate &&
+                        (*feedback_anchor_state <= window_candidate.end_state_index ||
+                         record.corrected_time_s <=
+                           state_timestamps[window_candidate.end_state_index] +
+                             std::max(config_.state_meas_sync_upper_bound_s, kTimeEpsilonS));
                       std::vector<double> forced_tail_delta_options_mps{
                         std::numeric_limits<double>::quiet_NaN(),
                       };
@@ -3831,9 +3844,15 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         const double current_tail_vz_mps =
                           current_scoring_reference_states[window_candidate.end_state_index].velocity.z();
                         if (body_z_seed_candidate) {
+                          const double target_residual_u_m =
+                            std::copysign(0.5 * local_gate_threshold_m, iteration_prefit_u_m);
+                          const double body_z_residual_to_correct_m =
+                            iteration_prefit_u_m - target_residual_u_m;
+                          const double body_z_residual_feedback_delta_vz_mps =
+                            std::clamp(-body_z_residual_to_correct_m / feedback_dt_s, -0.5, 0.5);
                           forced_tail_delta_options_mps.clear();
                           forced_tail_delta_options_mps.push_back(
-                            current_tail_vz_mps + residual_feedback_delta_vz_mps);
+                            current_tail_vz_mps + body_z_residual_feedback_delta_vz_mps);
                         } else {
                           for (const double feedback_scale : {1.0, 0.75, 1.25, 0.5, 1.5}) {
                             forced_tail_delta_options_mps.push_back(
