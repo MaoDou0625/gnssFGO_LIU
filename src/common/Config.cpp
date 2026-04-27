@@ -295,6 +295,22 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_jump_future_trend_mean_weight = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_future_trend_slope_weight") {
     config.vertical_jump_future_trend_slope_weight = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_interval_feedback_min_duration_s") {
+    config.vertical_interval_feedback_min_duration_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_interval_feedback_min_slope_mps") {
+    config.vertical_interval_feedback_min_slope_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_interval_feedback_min_drift_m") {
+    config.vertical_interval_feedback_min_drift_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_interval_feedback_min_residual_m") {
+    config.vertical_interval_feedback_min_residual_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_interval_feedback_snr_threshold") {
+    config.vertical_interval_feedback_snr_threshold = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_interval_feedback_noise_floor_m") {
+    config.vertical_interval_feedback_noise_floor_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_interval_feedback_gain") {
+    config.vertical_interval_feedback_gain = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_interval_feedback_max_delta_vz_mps") {
+    config.vertical_interval_feedback_max_delta_vz_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_local_up_anchor_fallback") {
     config.enable_vertical_local_up_anchor_fallback = ParseBool(normalized_value);
   } else if (normalized_key == "enable_vertical_inside_bias_adaptation") {
@@ -741,6 +757,16 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
         config.vertical_jump_future_trend_slope_weight < 0.0) {
       throw std::runtime_error("vertical jump future trend settings must be non-negative");
     }
+    if (config.vertical_interval_feedback_min_duration_s <= 0.0 ||
+        config.vertical_interval_feedback_min_slope_mps < 0.0 ||
+        config.vertical_interval_feedback_min_drift_m < 0.0 ||
+        config.vertical_interval_feedback_min_residual_m < 0.0 ||
+        config.vertical_interval_feedback_snr_threshold <= 0.0 ||
+        config.vertical_interval_feedback_noise_floor_m < 0.0 ||
+        config.vertical_interval_feedback_gain < 0.0 ||
+        config.vertical_interval_feedback_max_delta_vz_mps <= 0.0) {
+      throw std::runtime_error("vertical interval feedback settings must be valid");
+    }
     if (config.vertical_inside_attitude_gain < 0.0 ||
         config.vertical_inside_max_delta_attitude_rad <= 0.0) {
       throw std::runtime_error("vertical inside attitude gain and limit must be valid");
@@ -1080,6 +1106,16 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
       config.vertical_jump_future_trend_slope_weight < 0.0) {
     throw std::runtime_error("vertical jump future trend settings must be non-negative");
   }
+  if (config.vertical_interval_feedback_min_duration_s <= 0.0 ||
+      config.vertical_interval_feedback_min_slope_mps < 0.0 ||
+      config.vertical_interval_feedback_min_drift_m < 0.0 ||
+      config.vertical_interval_feedback_min_residual_m < 0.0 ||
+      config.vertical_interval_feedback_snr_threshold <= 0.0 ||
+      config.vertical_interval_feedback_noise_floor_m < 0.0 ||
+      config.vertical_interval_feedback_gain < 0.0 ||
+      config.vertical_interval_feedback_max_delta_vz_mps <= 0.0) {
+    throw std::runtime_error("vertical interval feedback settings must be valid");
+  }
   if (config.vertical_inside_attitude_gain < 0.0 ||
       config.vertical_inside_max_delta_attitude_rad <= 0.0) {
     throw std::runtime_error("vertical inside attitude gain and limit must be valid");
@@ -1260,6 +1296,21 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << config.vertical_jump_future_trend_min_fix_count << '\n'
       << "vertical_jump_future_trend_mean_weight=" << config.vertical_jump_future_trend_mean_weight << '\n'
       << "vertical_jump_future_trend_slope_weight=" << config.vertical_jump_future_trend_slope_weight << '\n'
+      << "vertical_interval_feedback_min_duration_s="
+      << config.vertical_interval_feedback_min_duration_s << '\n'
+      << "vertical_interval_feedback_min_slope_mps="
+      << config.vertical_interval_feedback_min_slope_mps << '\n'
+      << "vertical_interval_feedback_min_drift_m="
+      << config.vertical_interval_feedback_min_drift_m << '\n'
+      << "vertical_interval_feedback_min_residual_m="
+      << config.vertical_interval_feedback_min_residual_m << '\n'
+      << "vertical_interval_feedback_snr_threshold="
+      << config.vertical_interval_feedback_snr_threshold << '\n'
+      << "vertical_interval_feedback_noise_floor_m="
+      << config.vertical_interval_feedback_noise_floor_m << '\n'
+      << "vertical_interval_feedback_gain=" << config.vertical_interval_feedback_gain << '\n'
+      << "vertical_interval_feedback_max_delta_vz_mps="
+      << config.vertical_interval_feedback_max_delta_vz_mps << '\n'
       << "enable_vertical_local_up_anchor_fallback="
       << (config.enable_vertical_local_up_anchor_fallback ? "true" : "false") << '\n'
       << "enable_vertical_inside_bias_adaptation="

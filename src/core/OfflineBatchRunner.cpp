@@ -3274,7 +3274,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       FilterVerticalHoldWindowSpecsAfterState(
                         interval_specs,
                         active_interval_feedback_window->end_state_index);
-                    if (interval_specs.size() >= 5U) {
+                    if (interval_specs.size() >=
+                        static_cast<std::size_t>(std::max(config_.vertical_jump_future_trend_min_fix_count, 1))) {
+                      std::vector<double> interval_times_s;
+                      std::vector<double> interval_residuals_m;
+                      interval_times_s.reserve(interval_specs.size());
+                      interval_residuals_m.reserve(interval_specs.size());
                       double weighted_residual_time_sum_m_s = 0.0;
                       double weighted_time_squared_sum_s2 = 0.0;
                       double max_abs_interval_residual_m = 0.0;
@@ -3297,30 +3302,93 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                           std::max(max_abs_interval_residual_m, std::abs(residual_enu_m.z()));
                         weighted_residual_time_sum_m_s += tau_s * residual_enu_m.z();
                         weighted_time_squared_sum_s2 += tau_s * tau_s;
+                        interval_times_s.push_back(tau_s);
+                        interval_residuals_m.push_back(residual_enu_m.z());
                       }
                       const double interval_duration_s =
                         interval_specs.back().corrected_time_s - interval_specs.front().corrected_time_s;
                       const auto interval_trend = EvaluateVerticalFutureTrend(
                         iteration.gate_reference_states,
                         interval_specs,
-                        5,
+                        config_.vertical_jump_future_trend_min_fix_count,
                         0.0,
                         1.0);
                       const double raw_interval_delta_vz_mps =
                         weighted_time_squared_sum_s2 > 1e-9
                           ? -weighted_residual_time_sum_m_s / weighted_time_squared_sum_s2
                           : std::numeric_limits<double>::quiet_NaN();
+                      double residual_noise_m = std::numeric_limits<double>::quiet_NaN();
+                      double residual_trend_signal_m = std::numeric_limits<double>::quiet_NaN();
+                      double residual_trend_snr = std::numeric_limits<double>::quiet_NaN();
+                      if (interval_trend.valid &&
+                          interval_residuals_m.size() >=
+                            static_cast<std::size_t>(std::max(config_.vertical_jump_future_trend_min_fix_count, 1))) {
+                        const double mean_time_s =
+                          std::accumulate(interval_times_s.begin(), interval_times_s.end(), 0.0) /
+                          static_cast<double>(interval_times_s.size());
+                        const double mean_residual_m =
+                          std::accumulate(interval_residuals_m.begin(), interval_residuals_m.end(), 0.0) /
+                          static_cast<double>(interval_residuals_m.size());
+                        std::vector<double> detrended_residuals_m;
+                        detrended_residuals_m.reserve(interval_residuals_m.size());
+                        double residual_variance_sum_m2 = 0.0;
+                        for (std::size_t residual_index = 0U;
+                             residual_index < interval_residuals_m.size();
+                             ++residual_index) {
+                          const double fitted_residual_m =
+                            mean_residual_m +
+                            interval_trend.residual_slope_mps *
+                              (interval_times_s[residual_index] - mean_time_s);
+                          const double detrended_residual_m =
+                            interval_residuals_m[residual_index] - fitted_residual_m;
+                          detrended_residuals_m.push_back(detrended_residual_m);
+                          residual_variance_sum_m2 += detrended_residual_m * detrended_residual_m;
+                        }
+                        const double residual_std_m =
+                          interval_residuals_m.size() > 1U
+                            ? std::sqrt(
+                                residual_variance_sum_m2 /
+                                static_cast<double>(interval_residuals_m.size() - 1U))
+                            : 0.0;
+                        const double median_detrended_residual_m =
+                          MedianFinite(detrended_residuals_m);
+                        std::vector<double> abs_mad_residuals_m;
+                        abs_mad_residuals_m.reserve(detrended_residuals_m.size());
+                        for (const double detrended_residual_m : detrended_residuals_m) {
+                          abs_mad_residuals_m.push_back(
+                            std::abs(detrended_residual_m - median_detrended_residual_m));
+                        }
+                        const double residual_mad_sigma_m = 1.4826 * MedianFinite(abs_mad_residuals_m);
+                        residual_noise_m =
+                          std::max(
+                            {residual_std_m,
+                             residual_mad_sigma_m,
+                             config_.vertical_interval_feedback_noise_floor_m});
+                        residual_trend_signal_m =
+                          std::abs(interval_trend.residual_slope_mps) * interval_duration_s;
+                        residual_trend_snr =
+                          residual_noise_m > 1e-12 ? residual_trend_signal_m / residual_noise_m
+                                                    : std::numeric_limits<double>::infinity();
+                      }
                       if (interval_all_inside &&
-                          interval_duration_s >= 1.0 &&
+                          interval_duration_s >= config_.vertical_interval_feedback_min_duration_s &&
                           interval_trend.valid &&
                           std::isfinite(raw_interval_delta_vz_mps) &&
-                          std::abs(interval_trend.residual_slope_mps) >= 0.005 &&
-                          max_abs_interval_residual_m >= 0.015) {
+                          std::isfinite(residual_trend_snr) &&
+                          residual_trend_snr >= config_.vertical_interval_feedback_snr_threshold &&
+                          std::abs(interval_trend.residual_slope_mps) >=
+                            config_.vertical_interval_feedback_min_slope_mps &&
+                          residual_trend_signal_m >= config_.vertical_interval_feedback_min_drift_m &&
+                          max_abs_interval_residual_m >=
+                            config_.vertical_interval_feedback_min_residual_m) {
                         interval_feedback_requested = true;
                         interval_feedback_window_center_state_index =
                           active_interval_feedback_window->center_state_index;
                         interval_feedback_delta_vz_mps =
-                          std::clamp(0.3 * raw_interval_delta_vz_mps, -0.02, 0.02);
+                          std::clamp(
+                              config_.vertical_interval_feedback_gain * raw_interval_delta_vz_mps,
+                              -config_.vertical_interval_feedback_max_delta_vz_mps,
+                              config_.vertical_interval_feedback_max_delta_vz_mps);
                       }
                     }
                   }

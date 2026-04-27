@@ -81,6 +81,14 @@ struct OfflineRunnerConfig {
   int vertical_jump_future_trend_min_fix_count = 5;
   double vertical_jump_future_trend_mean_weight = 0.0;
   double vertical_jump_future_trend_slope_weight = 0.0;
+  double vertical_interval_feedback_min_duration_s = 3.0;
+  double vertical_interval_feedback_min_slope_mps = 0.0;
+  double vertical_interval_feedback_min_drift_m = 0.02;
+  double vertical_interval_feedback_min_residual_m = 0.01;
+  double vertical_interval_feedback_snr_threshold = 2.0;
+  double vertical_interval_feedback_noise_floor_m = 0.005;
+  double vertical_interval_feedback_gain = 0.3;
+  double vertical_interval_feedback_max_delta_vz_mps = 0.02;
   bool enable_vertical_local_up_anchor_fallback = false;
   bool enable_vertical_inside_bias_adaptation = false;
   double vertical_inside_attitude_gain = 0.002;
