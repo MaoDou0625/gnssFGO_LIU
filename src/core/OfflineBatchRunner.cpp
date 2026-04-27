@@ -3839,21 +3839,27 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                             record.corrected_time_s -
                             state_timestamps[window_candidate.end_state_index]),
                           0.05);
-                        const double residual_feedback_delta_vz_mps =
-                          std::clamp(-iteration_prefit_u_m / feedback_dt_s, -0.5, 0.5);
                         const double current_tail_vz_mps =
                           current_scoring_reference_states[window_candidate.end_state_index].velocity.z();
                         if (body_z_seed_candidate) {
+                          constexpr double kBodyZResidualFeedbackMinDtS = 0.75;
+                          const double effective_feedback_dt_s =
+                            std::max(feedback_dt_s, kBodyZResidualFeedbackMinDtS);
                           const double target_residual_u_m =
                             std::copysign(0.5 * local_gate_threshold_m, iteration_prefit_u_m);
                           const double body_z_residual_to_correct_m =
                             iteration_prefit_u_m - target_residual_u_m;
                           const double body_z_residual_feedback_delta_vz_mps =
-                            std::clamp(-body_z_residual_to_correct_m / feedback_dt_s, -0.5, 0.5);
+                            std::clamp(
+                              -body_z_residual_to_correct_m / effective_feedback_dt_s,
+                              -0.5,
+                              0.5);
                           forced_tail_delta_options_mps.clear();
                           forced_tail_delta_options_mps.push_back(
                             current_tail_vz_mps + body_z_residual_feedback_delta_vz_mps);
                         } else {
+                          const double residual_feedback_delta_vz_mps =
+                            std::clamp(-iteration_prefit_u_m / feedback_dt_s, -0.5, 0.5);
                           for (const double feedback_scale : {1.0, 0.75, 1.25, 0.5, 1.5}) {
                             forced_tail_delta_options_mps.push_back(
                               current_tail_vz_mps + feedback_scale * residual_feedback_delta_vz_mps);
