@@ -1465,12 +1465,31 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
   }
 
   const double original_tail_up_m = reference_states[window_candidate.end_state_index].pose.translation().z();
+  const double window_duration_s =
+    reference_states[window_candidate.end_state_index].time_s - reference_states[previous_state_index].time_s;
+  if (window_duration_s <= kTimeEpsilonS) {
+    return std::nullopt;
+  }
+  const double continuity_tail_up_m = previous_up_m + previous_vz_mps * window_duration_s;
   double target_tail_up_m = integrated_tail_up_m;
   if (std::isfinite(forced_tail_delta_up_m)) {
-    target_tail_up_m = original_tail_up_m + forced_tail_delta_up_m;
+    // Body-z seed windows discard the abnormal IMU height inside the window, so the
+    // height search is a bounded offset around the pre-window kinematic continuation.
+    // Other fallback windows keep the legacy "original tail plus delta" meaning.
+    target_tail_up_m =
+      body_z_seed_candidate ? continuity_tail_up_m + forced_tail_delta_up_m
+                            : original_tail_up_m + forced_tail_delta_up_m;
   }
   if (!std::isfinite(target_tail_up_m)) {
     return std::nullopt;
+  }
+
+  if (body_z_seed_candidate) {
+    constexpr double kMaxBodyZSeedTailUpOffsetM = 0.03;
+    target_tail_up_m = std::clamp(
+      target_tail_up_m,
+      continuity_tail_up_m - kMaxBodyZSeedTailUpOffsetM,
+      continuity_tail_up_m + kMaxBodyZSeedTailUpOffsetM);
   }
 
   VerticalVelocityWindowCorrection correction;
@@ -1485,11 +1504,6 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
   correction.corrected_vz_mps.reserve(
     correction.end_state_index - correction.start_state_index + 1U);
 
-  const double window_duration_s =
-    reference_states[correction.end_state_index].time_s - reference_states[previous_state_index].time_s;
-  if (window_duration_s <= kTimeEpsilonS) {
-    return std::nullopt;
-  }
   for (std::size_t state_index = correction.start_state_index;
        state_index <= correction.end_state_index;
        ++state_index) {
@@ -3425,13 +3439,25 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                        ++jump_selection_index) {
                     auto current_scoring_reference_states = iteration.gate_reference_states;
                     std::size_t current_scoring_valid_until_index = sequential_reference_valid_until_index;
+                    std::size_t current_scoring_required_index = recovery_scoring_end_state_index;
+                    if (config_.enable_body_z_seed_jump_windows && !body_z_seed_detection.windows.empty()) {
+                      for (const auto &body_z_window : body_z_seed_detection.windows) {
+                        if (body_z_window.end_state_index < graph_timeline.dynamic_start_index + 1U ||
+                            body_z_window.start_state_index > *feedback_anchor_state ||
+                            body_z_window.end_state_index >= state_timestamps.size()) {
+                          continue;
+                        }
+                        current_scoring_required_index =
+                          std::max(current_scoring_required_index, body_z_window.end_state_index);
+                      }
+                    }
                     EnsureReferenceStatesValidUntil(
                       state_timestamps,
                       dataset.imu_samples,
                       imu_params,
                       &current_scoring_reference_states,
                       &current_scoring_valid_until_index,
-                      recovery_scoring_end_state_index,
+                      current_scoring_required_index,
                       nullptr);
                     const auto current_hold_evaluation = EvaluateVerticalHoldWindow(
                       current_scoring_reference_states,
@@ -3470,12 +3496,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                           std::clamp(
                             body_z_window.start_state_index,
                             graph_timeline.dynamic_start_index + 1U,
-                            *feedback_anchor_state);
+                            state_timestamps.size() - 1U);
                         const std::size_t window_end_state_index =
                           std::clamp(
                             body_z_window.end_state_index,
                             window_start_state_index,
-                            *feedback_anchor_state);
+                            state_timestamps.size() - 1U);
                         const std::size_t window_center_state_index =
                           std::clamp(
                             body_z_window.center_state_index,
@@ -3493,9 +3519,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         }
                         SparseVerticalJumpCandidate center_candidate;
                         center_candidate.state_index = window_center_state_index;
-                        center_candidate.time_s = iteration.gate_reference_states[window_center_state_index].time_s;
+                        center_candidate.time_s = state_timestamps[window_center_state_index];
                         center_candidate.vz_prefit_mps =
-                          iteration.gate_reference_states[window_center_state_index].velocity.z();
+                          current_scoring_reference_states[window_center_state_index].velocity.z();
                         if (window_center_state_index < vertical_vz_reference_by_state.size() &&
                             vertical_vz_reference_by_state[window_center_state_index].valid &&
                             std::isfinite(
@@ -3526,8 +3552,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         window_candidate.center_state_index = window_center_state_index;
                         window_candidate.end_state_index = window_end_state_index;
                         window_candidate.duration_s =
-                          iteration.gate_reference_states[window_end_state_index].time_s -
-                          iteration.gate_reference_states[window_start_state_index].time_s;
+                          state_timestamps[window_end_state_index] -
+                          state_timestamps[window_start_state_index];
                         window_candidate.point_count =
                           window_candidate.end_state_index - window_candidate.start_state_index + 1U;
                         sparse_jump_windows.push_back(window_candidate);
@@ -3569,6 +3595,22 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     if (sparse_jump_windows.empty()) {
                       break;
                     }
+                    std::stable_sort(
+                      sparse_jump_windows.begin(),
+                      sparse_jump_windows.end(),
+                      [&](const SparseVerticalJumpWindowCandidate &left,
+                          const SparseVerticalJumpWindowCandidate &right) {
+                        if (interval_feedback_window_center_state_index.has_value()) {
+                          const bool left_is_active =
+                            left.center_state_index == *interval_feedback_window_center_state_index;
+                          const bool right_is_active =
+                            right.center_state_index == *interval_feedback_window_center_state_index;
+                          if (left_is_active != right_is_active) {
+                            return left_is_active;
+                          }
+                        }
+                        return left.end_state_index > right.end_state_index;
+                      });
 
                     double best_objective = std::numeric_limits<double>::infinity();
                     std::optional<SparseVerticalJumpWindowCandidate> best_window;
@@ -3582,6 +3624,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     for (const auto &window_candidate : sparse_jump_windows) {
                       const bool body_z_seed_candidate =
                         window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW";
+                      const bool current_sample_covered_by_body_z_window =
+                        body_z_seed_candidate && *feedback_anchor_state <= window_candidate.end_state_index;
                       std::vector<double> forced_tail_delta_options_mps{
                         std::numeric_limits<double>::quiet_NaN(),
                       };
@@ -3596,37 +3640,46 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         window_candidate.end_state_index < iteration.gate_reference_states.size()) {
                         forced_tail_delta_options_mps.clear();
                         const double current_tail_vz_mps =
-                          iteration.gate_reference_states[window_candidate.end_state_index].velocity.z();
-                        for (const double feedback_scale : {0.5, 1.0, 1.5}) {
-                          forced_tail_delta_options_mps.push_back(
-                            current_tail_vz_mps + feedback_scale * interval_feedback_delta_vz_mps);
-                        }
+                          current_scoring_reference_states[window_candidate.end_state_index].velocity.z();
+                        forced_tail_delta_options_mps.push_back(
+                          current_tail_vz_mps + interval_feedback_delta_vz_mps);
                       } else if (
-                        window_candidate.end_state_index < iteration.gate_reference_states.size() &&
+                        window_candidate.end_state_index < current_scoring_reference_states.size() &&
                         std::isfinite(iteration_prefit_u_m)) {
                         const double feedback_dt_s = std::max(
-                          record.corrected_time_s -
-                            iteration.gate_reference_states[window_candidate.end_state_index].time_s,
+                          std::abs(
+                            record.corrected_time_s -
+                            state_timestamps[window_candidate.end_state_index]),
                           0.05);
                         const double residual_feedback_delta_vz_mps =
                           std::clamp(-iteration_prefit_u_m / feedback_dt_s, -0.5, 0.5);
                         const double current_tail_vz_mps =
-                          iteration.gate_reference_states[window_candidate.end_state_index].velocity.z();
-                        for (const double feedback_scale : {0.5, 0.75, 1.0, 1.25, 1.5}) {
+                          current_scoring_reference_states[window_candidate.end_state_index].velocity.z();
+                        if (body_z_seed_candidate) {
+                          forced_tail_delta_options_mps.clear();
                           forced_tail_delta_options_mps.push_back(
-                            current_tail_vz_mps + feedback_scale * residual_feedback_delta_vz_mps);
+                            current_tail_vz_mps + residual_feedback_delta_vz_mps);
+                        } else {
+                          for (const double feedback_scale : {1.0, 0.75, 1.25, 0.5, 1.5}) {
+                            forced_tail_delta_options_mps.push_back(
+                              current_tail_vz_mps + feedback_scale * residual_feedback_delta_vz_mps);
+                          }
                         }
                       }
                       std::vector<double> forced_tail_delta_up_options_m{
                         std::numeric_limits<double>::quiet_NaN(),
                       };
+                      if (body_z_seed_candidate) {
+                        forced_tail_delta_up_options_m.clear();
+                        forced_tail_delta_up_options_m.push_back(0.0);
+                      }
                       if (!body_z_seed_candidate &&
                           window_candidate.start_state_index > 0U &&
                           window_candidate.start_state_index - 1U < iteration.gate_reference_states.size() &&
                           std::isfinite(iteration_prefit_u_m)) {
                         const double residual_correction_dt_s = std::max(
                           record.corrected_time_s -
-                            iteration.gate_reference_states[window_candidate.start_state_index - 1U].time_s,
+                            state_timestamps[window_candidate.start_state_index - 1U],
                           0.05);
                         forced_tail_delta_options_mps.push_back(
                           std::clamp(-iteration_prefit_u_m / residual_correction_dt_s, -2.0, 2.0));
@@ -3649,8 +3702,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
 
                       std::size_t candidate_scoring_end_state_index = recovery_scoring_end_state_index;
                       std::vector<VerticalHoldWindowSpec> body_z_segment_specs;
-                      const bool current_sample_covered_by_body_z_window =
-                        body_z_seed_candidate && *feedback_anchor_state <= window_candidate.end_state_index;
                       std::vector<VerticalHoldWindowSpec> candidate_acceptance_hold_specs = hold_window_specs;
                       if (current_sample_covered_by_body_z_window) {
                         // The triggering RTK sample is synchronized inside the detected acceleration anomaly.
@@ -3683,8 +3734,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         candidate_scoring_end_state_index =
                           std::max(candidate_scoring_end_state_index, body_z_segment_end_state_index);
                         body_z_segment_specs = build_vertical_window_specs_between_times(
-                          iteration.gate_reference_states[window_candidate.end_state_index].time_s,
-                          iteration.gate_reference_states[body_z_segment_end_state_index].time_s);
+                          state_timestamps[window_candidate.end_state_index],
+                          state_timestamps[body_z_segment_end_state_index]);
                         body_z_segment_specs = FilterVerticalHoldWindowSpecsAfterState(
                           body_z_segment_specs, window_candidate.end_state_index);
                         if (current_sample_covered_by_body_z_window &&
@@ -3692,6 +3743,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                           candidate_acceptance_hold_specs = body_z_segment_specs;
                         }
                       }
+                      candidate_scoring_end_state_index =
+                        std::min(
+                          std::max(candidate_scoring_end_state_index, window_candidate.end_state_index),
+                          iteration.gate_reference_states.size() - 1U);
                       if (current_sample_covered_by_body_z_window &&
                           candidate_acceptance_hold_specs.empty()) {
                         continue;
@@ -3709,9 +3764,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                         break;
                       }
                       ++window_correction_attempt_count;
+                      auto candidate_reference_states = iteration.gate_reference_states;
+                      gtsam::Values candidate_initial_values = sequential_initial_values;
+                      std::size_t candidate_valid_until_index = sequential_reference_valid_until_index;
+                      EnsureReferenceStatesValidUntil(
+                        state_timestamps,
+                        dataset.imu_samples,
+                        imu_params,
+                        &candidate_reference_states,
+                        &candidate_valid_until_index,
+                        candidate_scoring_end_state_index,
+                        &candidate_initial_values);
                       const auto window_correction = BuildVerticalVelocityWindowCorrection(
                         config_,
-                        iteration.gate_reference_states,
+                        candidate_reference_states,
                         vertical_vz_reference_by_state,
                         window_candidate,
                         candidate_scoring_end_state_index,
@@ -3725,13 +3791,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                            std::abs(window_correction->delta_up_tail_m) <= 1e-9)) {
                         continue;
                       }
-                      auto candidate_reference_states = iteration.gate_reference_states;
-                      gtsam::Values candidate_initial_values = sequential_initial_values;
                       ApplyVerticalVelocityWindowCorrection(
                         *window_correction,
                         &candidate_reference_states,
                         &candidate_initial_values);
-                      std::size_t candidate_valid_until_index = window_correction->end_state_index;
+                      candidate_valid_until_index = window_correction->end_state_index;
                       EnsureReferenceStatesValidUntil(
                         state_timestamps,
                         dataset.imu_samples,
