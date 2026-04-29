@@ -18,7 +18,8 @@ using gtsam::symbol_shorthand::W;
 using gtsam::symbol_shorthand::X;
 
 constexpr double kTimeEpsilonS = 1e-9;
-constexpr double kBodyZSeedTailVelocityMicroFeedbackLimitMps = 0.10;
+constexpr double kBodyZSeedTailVelocityMicroFeedbackLimitMps = 0.08;
+constexpr double kBodyZSeedTailPositionMicroFeedbackLimitM = 0.02;
 
 Eigen::Vector3d Rot3ToYprForVerticalRecovery(const gtsam::Rot3 &rotation) {
   const auto ypr = rotation.ypr();
@@ -645,18 +646,13 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
     const double alpha = static_cast<double>(state_index - previous_state_index) / std::max(denominator, 1.0);
     const double smooth_alpha = SmoothStep01(alpha);
     const double smooth_vz_mps =
-      body_z_seed_candidate
-        ? previous_vz_mps
-        : (1.0 - smooth_alpha) * previous_vz_mps + smooth_alpha * target_tail_vz_mps;
+      (1.0 - smooth_alpha) * previous_vz_mps + smooth_alpha * target_tail_vz_mps;
     const double dt_s =
       std::max(reference_states[state_index].time_s - reference_states[state_index - 1U].time_s, 0.0);
     integrated_tail_up_m += 0.5 * (integrated_previous_vz_mps + smooth_vz_mps) * dt_s;
     integrated_previous_vz_mps = smooth_vz_mps;
     integrated_window_up_m.push_back(integrated_tail_up_m);
-    integrated_window_vz_mps.push_back(
-      body_z_seed_candidate && state_index == window_candidate.end_state_index
-        ? target_tail_vz_mps
-        : smooth_vz_mps);
+    integrated_window_vz_mps.push_back(smooth_vz_mps);
   }
 
   const double original_tail_up_m = reference_states[window_candidate.end_state_index].pose.translation().z();
@@ -672,8 +668,13 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
     // height search is a bounded offset around the pre-window kinematic continuation.
     // Other fallback windows keep the legacy "original tail plus delta" meaning.
     target_tail_up_m =
-      body_z_seed_candidate ? continuity_tail_up_m + forced_tail_delta_up_m
-                            : original_tail_up_m + forced_tail_delta_up_m;
+      body_z_seed_candidate
+        ? continuity_tail_up_m +
+            std::clamp(
+              forced_tail_delta_up_m,
+              -kBodyZSeedTailPositionMicroFeedbackLimitM,
+              kBodyZSeedTailPositionMicroFeedbackLimitM)
+        : original_tail_up_m + forced_tail_delta_up_m;
   }
   if (!std::isfinite(target_tail_up_m)) {
     return std::nullopt;

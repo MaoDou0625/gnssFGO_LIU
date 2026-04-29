@@ -2896,7 +2896,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   std::optional<VerticalLocalRecoveryResult> last_recovery_result;
                   double last_velocity_recovery_postfit_u_m = std::numeric_limits<double>::quiet_NaN();
                   bool hold_window_passed = false;
-                  constexpr double kNearGateNoRecoveryToleranceM = 0.03;
+                  constexpr double kNearGateNoRecoveryToleranceM = 0.05;
                   bool defer_body_z_window_gate_until_post_window = false;
                   bool pending_body_z_interval_feedback = false;
                   bool accepted_body_z_velocity_feedback_pending = false;
