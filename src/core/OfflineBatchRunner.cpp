@@ -2815,7 +2815,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   }
                 }
 
-                if (!inside_gate || interval_feedback_requested) {
+                const bool ended_body_z_window_needs_initial_recovery =
+                  interval_feedback_window.has_value() &&
+                  interval_feedback_window->center_candidate.source == "BODY_Z_SEED_WINDOW" &&
+                  !body_z_windows_with_velocity_correction.contains(
+                    interval_feedback_window->center_state_index) &&
+                  !body_z_windows_with_position_offset_correction.contains(
+                    interval_feedback_window->center_state_index) &&
+                  interval_feedback_window->end_state_index < iteration.gate_reference_states.size() &&
+                  *feedback_anchor_state > interval_feedback_window->end_state_index;
+                const bool local_window_recovery_requested =
+                  covering_body_z_window.has_value() ||
+                  ended_body_z_window_needs_initial_recovery ||
+                  interval_feedback_requested;
+                if (local_window_recovery_requested) {
                   std::size_t recovery_anchor_state_index =
                     confirmed_inside_state_index.value_or(graph_timeline.dynamic_start_index);
                   std::size_t nhc_search_start_state_index = recovery_anchor_state_index;
@@ -2987,7 +3000,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
 
                   for (int jump_selection_index = 0;
                        jump_selection_index < max_accepted_window_corrections &&
-                       (!inside_gate || interval_feedback_requested) &&
+                       (ended_body_z_window_needs_initial_recovery || !inside_gate || interval_feedback_requested) &&
                        !defer_body_z_window_gate_until_post_window;
                        ++jump_selection_index) {
                     auto current_scoring_reference_states = iteration.gate_reference_states;
@@ -4005,21 +4018,17 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                     defer_body_z_window_gate_until_post_window = true;
                   }
 
-                  if (!iteration.failed &&
-                      !defer_body_z_window_gate_until_post_window &&
-                      (!inside_gate || (consistency_record.recovery_mode == "UP_ANCHOR" && !hold_window_passed))) {
-                    iteration.failed = true;
-                    iteration.failure_message =
-                      "vertical local recovery failed at sample " + std::to_string(sample_index) +
-                      ", required_up_anchor_correction_m=" +
-                      std::to_string(consistency_record.required_up_anchor_correction_m);
-                  }
+                  // Over-gate residuals are no longer allowed to force a hard local
+                  // speed/height correction.  If a body-z window candidate cannot
+                  // recover the sample, keep the diagnostic residual and let the
+                  // low-frequency ba_z adapter absorb bounded drift in later
+                  // propagation.
                 }
               }
             }
 
             consistency_record.vertical_gate_inside = inside_gate ? 1.0 : 0.0;
-            if (!iteration.failed && inside_gate && !apply_initial_vertical_anchor &&
+            if (!iteration.failed && !apply_initial_vertical_anchor &&
                 feedback_anchor_state.has_value() &&
                 *feedback_anchor_state < iteration.gate_reference_states.size() &&
                 config_.enable_vertical_inside_bias_adaptation) {
@@ -4067,13 +4076,33 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   ComputePositionResidualEnu(corrected_prefit_reference_state.pose, record.measurement_enu_m);
                 const double corrected_vertical_nis =
                   ComputeVerticalNis(corrected_residual_enu_m.z(), consistency_base_sigma_m.z());
+                const double current_vertical_nis =
+                  ComputeVerticalNis(consistency_record.local_postfit_residual_u_m, consistency_base_sigma_m.z());
                 const bool correction_keeps_inside = corrected_vertical_nis <= vertical_gate_nis_threshold;
-                if (correction_keeps_inside) {
+                const bool correction_improves_residual =
+                  std::isfinite(corrected_vertical_nis) && std::isfinite(current_vertical_nis) &&
+                  corrected_vertical_nis + 1e-9 < current_vertical_nis;
+                const bool bounded_bias_feedback_observation =
+                  std::abs(consistency_record.local_postfit_residual_u_m) <=
+                  10.0 * consistency_record.vertical_gate_threshold_m;
+                const bool correction_acceptable =
+                  correction_keeps_inside ||
+                  bounded_bias_feedback_observation ||
+                  (correction_improves_residual &&
+                   std::abs(corrected_residual_enu_m.z()) <=
+                     std::max(
+                       std::abs(consistency_record.local_postfit_residual_u_m),
+                       consistency_record.vertical_gate_threshold_m + 0.02));
+                if (correction_acceptable) {
                   inside_bias_adapter.AcceptUpdate(*inside_bias_update);
                   iteration.gate_reference_states = std::move(candidate_reference_states);
                   sequential_initial_values = std::move(candidate_initial_values);
                   sequential_reference_valid_until_index = candidate_valid_until_index;
                   inside_reference_states = iteration.gate_reference_states;
+                  body_z_reference_propagation_anchor_state_index =
+                    body_z_reference_propagation_anchor_state_index.has_value()
+                      ? std::max(*body_z_reference_propagation_anchor_state_index, bias_anchor_state_index)
+                      : std::optional<std::size_t>(bias_anchor_state_index);
                   history_reobserve_begin_state_index =
                     history_reobserve_begin_state_index.has_value()
                       ? std::min(*history_reobserve_begin_state_index, bias_anchor_state_index)
@@ -4103,7 +4132,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   consistency_record.local_postfit_residual_u_m = corrected_residual_enu_m.z();
                   consistency_record.prefit_residual_u_after_local_recovery_m =
                     corrected_residual_enu_m.z();
-                  consistency_record.vertical_gate_inside = 1.0;
+                  inside_gate = correction_keeps_inside;
+                  consistency_record.vertical_gate_inside = correction_keeps_inside ? 1.0 : 0.0;
                 }
               }
             }
@@ -4374,6 +4404,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   *feedback_anchor_state);
               }
               confirmed_inside_state_index = *feedback_anchor_state;
+            } else {
+              ++iteration.run_summary.vertical_gate_outside_count;
             }
           }
 

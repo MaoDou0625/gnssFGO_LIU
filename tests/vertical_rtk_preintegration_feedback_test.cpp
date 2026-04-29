@@ -1172,7 +1172,7 @@ void TestVerticalInsideBiasAdapterFiltersSmallInsideResiduals() {
     "inside bias measurement should reduce posterior covariance");
 }
 
-void TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual() {
+void TestVerticalInsideBiasAdapterUsesBoundedOutsideGateResiduals() {
   auto config = DefaultConfig();
   config.enable_vertical_inside_bias_adaptation = true;
   config.vertical_acc_bias_sigma_mps2 = 1e-3;
@@ -1183,9 +1183,16 @@ void TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual() {
   ExpectTrue(
     !adapter.ObserveInsideResidual(1U, 0.0, 0.0, 0.05, 0.1, 0.1, 0.0).has_value(),
     "first inside residual should only seed the bias adapter");
+  const auto bounded_update = adapter.ObserveInsideResidual(2U, 1.0, -0.12, 0.05, 0.1, 0.1, 0.0);
   ExpectTrue(
-    !adapter.ObserveInsideResidual(2U, 1.0, -0.12, 0.05, 0.1, 0.1, 0.0).has_value(),
-    "outside residual should not be used for inside bias adaptation");
+    bounded_update.has_value(),
+    "bounded outside residual should be usable as a robust ba_z feedback observation");
+  ExpectTrue(
+    bounded_update->sigma_u_m > 0.05,
+    "outside residual should be down-weighted by inflating its effective sigma");
+  ExpectTrue(
+    !adapter.ObserveInsideResidual(3U, 2.0, -1.20, 0.05, 0.1, 0.1, 0.0).has_value(),
+    "large outside residual should still be ignored as a vertical outlier");
 }
 
 void TestVerticalInsideBiasAdapterRewindRestoresFilterState() {
@@ -1303,8 +1310,8 @@ int main() {
       "TestVerticalInsideBiasAdapterFiltersSmallInsideResiduals",
       TestVerticalInsideBiasAdapterFiltersSmallInsideResiduals);
     RunTest(
-      "TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual",
-      TestVerticalInsideBiasAdapterIgnoresOutsideGateResidual);
+      "TestVerticalInsideBiasAdapterUsesBoundedOutsideGateResiduals",
+      TestVerticalInsideBiasAdapterUsesBoundedOutsideGateResiduals);
     RunTest(
       "TestVerticalInsideBiasAdapterRewindRestoresFilterState",
       TestVerticalInsideBiasAdapterRewindRestoresFilterState);

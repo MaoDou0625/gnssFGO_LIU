@@ -73,11 +73,24 @@ std::optional<VerticalInsideBiasUpdate> VerticalInsideBiasAdapter::ObserveInside
       sigma_u_m <= 0.0 || gate_threshold_m <= 0.0) {
     return std::nullopt;
   }
-  if (std::abs(residual_u_m) > gate_threshold_m) {
+  const double abs_residual_u_m = std::abs(residual_u_m);
+  const double max_bias_observation_residual_m = 10.0 * gate_threshold_m;
+  if (abs_residual_u_m > max_bias_observation_residual_m) {
     return std::nullopt;
   }
 
-  const Observation observation{state_index, time_s, residual_u_m, sigma_u_m, gate_threshold_m, pitch_rad, roll_rad};
+  const double robust_sigma_u_m =
+    abs_residual_u_m > gate_threshold_m
+      ? sigma_u_m * std::clamp(abs_residual_u_m / gate_threshold_m, 1.0, 10.0)
+      : sigma_u_m;
+  const Observation observation{
+    state_index,
+    time_s,
+    residual_u_m,
+    robust_sigma_u_m,
+    gate_threshold_m,
+    pitch_rad,
+    roll_rad};
   if (!filter_initialized_) {
     const double bias_std_mps2 = std::max(ResolveVerticalAccBiasSigmaMps2(config_), 1e-12);
     filter_initialized_ = true;

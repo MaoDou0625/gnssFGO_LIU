@@ -18,8 +18,8 @@ using gtsam::symbol_shorthand::W;
 using gtsam::symbol_shorthand::X;
 
 constexpr double kTimeEpsilonS = 1e-9;
-constexpr double kBodyZSeedTailVelocityMicroFeedbackLimitMps = 0.08;
-constexpr double kBodyZSeedTailPositionMicroFeedbackLimitM = 0.02;
+constexpr double kBodyZSeedTailVelocityMicroFeedbackLimitMps = 0.02;
+constexpr double kBodyZSeedTailPositionMicroFeedbackLimitM = 0.005;
 
 Eigen::Vector3d Rot3ToYprForVerticalRecovery(const gtsam::Rot3 &rotation) {
   const auto ypr = rotation.ypr();
