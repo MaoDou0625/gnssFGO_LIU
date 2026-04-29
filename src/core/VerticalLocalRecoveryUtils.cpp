@@ -18,6 +18,7 @@ using gtsam::symbol_shorthand::W;
 using gtsam::symbol_shorthand::X;
 
 constexpr double kTimeEpsilonS = 1e-9;
+constexpr double kBodyZSeedTailVelocityMicroFeedbackLimitMps = 0.10;
 
 Eigen::Vector3d Rot3ToYprForVerticalRecovery(const gtsam::Rot3 &rotation) {
   const auto ypr = rotation.ypr();
@@ -530,7 +531,19 @@ std::vector<double> BuildBodyZTailVelocityTargetsMps(
       : (velocity_already_corrected
            ? reference_states[window_candidate.end_state_index].velocity.z()
            : reference_states[window_candidate.start_state_index - 1U].velocity.z());
-  PushUniqueCandidateValue(&targets, feedback_base_vz_mps + velocity_feedback_delta_mps);
+  const double previous_vz_mps =
+    window_candidate.start_state_index > 0U
+      ? reference_states[window_candidate.start_state_index - 1U].velocity.z()
+      : reference_states[window_candidate.end_state_index].velocity.z();
+  const double bounded_feedback_delta_mps = std::clamp(
+    velocity_feedback_delta_mps,
+    -kBodyZSeedTailVelocityMicroFeedbackLimitMps,
+    kBodyZSeedTailVelocityMicroFeedbackLimitMps);
+  const double bounded_feedback_target_mps = std::clamp(
+    feedback_base_vz_mps + bounded_feedback_delta_mps,
+    previous_vz_mps - kBodyZSeedTailVelocityMicroFeedbackLimitMps,
+    previous_vz_mps + kBodyZSeedTailVelocityMicroFeedbackLimitMps);
+  PushUniqueCandidateValue(&targets, bounded_feedback_target_mps);
   return targets;
 }
 
@@ -602,10 +615,14 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
     return std::nullopt;
   }
   if (std::isfinite(forced_tail_delta_mps)) {
-    target_tail_vz_mps = body_z_seed_candidate
-                           ? forced_tail_delta_mps
-                           : original_tail_vz_mps +
-                               std::max(tail_delta_scale, 0.0) * forced_tail_delta_mps;
+    target_tail_vz_mps =
+      body_z_seed_candidate
+        ? std::clamp(
+            forced_tail_delta_mps,
+            previous_vz_mps - kBodyZSeedTailVelocityMicroFeedbackLimitMps,
+            previous_vz_mps + kBodyZSeedTailVelocityMicroFeedbackLimitMps)
+        : original_tail_vz_mps +
+            std::max(tail_delta_scale, 0.0) * forced_tail_delta_mps;
   } else if (!body_z_seed_candidate) {
     target_tail_vz_mps =
       original_tail_vz_mps +
@@ -688,7 +705,7 @@ std::optional<VerticalVelocityWindowCorrection> BuildVerticalVelocityWindowCorre
     const std::size_t window_offset = state_index - correction.start_state_index;
     if (body_z_seed_candidate) {
       const double tail_position_offset_m =
-        state_index == correction.end_state_index ? decoupled_tail_up_offset_m : 0.0;
+        SmoothStep01(alpha) * decoupled_tail_up_offset_m;
       correction.corrected_up_m.push_back(
         integrated_window_up_m[window_offset] + tail_position_offset_m);
       correction.corrected_vz_mps.push_back(integrated_window_vz_mps[window_offset]);
