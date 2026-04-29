@@ -3391,8 +3391,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       std::vector<double> candidate_forced_tail_delta_up_options_m =
                         forced_tail_delta_up_options_m;
                       if (body_z_seed_candidate &&
-                          !current_sample_covered_by_body_z_window &&
-                          !body_z_velocity_feedback_for_window) {
+                          !current_sample_covered_by_body_z_window) {
                         const double base_tail_up_offset_m =
                           candidate_forced_tail_delta_up_options_m.empty()
                             ? 0.0
@@ -3570,10 +3569,24 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                           config_.vertical_jump_future_trend_mean_weight,
                           config_.vertical_jump_future_trend_slope_weight);
                       }
+                      constexpr double kStableOffsetSlopeLimitMps = 0.01;
+                      const bool candidate_position_feedback =
+                        body_z_seed_candidate &&
+                        std::isfinite(forced_tail_delta_up_m) &&
+                        std::abs(forced_tail_delta_up_m) > 1e-4;
+                      const bool stable_offset_prefers_position =
+                        body_z_seed_candidate &&
+                        !current_sample_covered_by_body_z_window &&
+                        candidate_position_offset_trend_evaluation.valid &&
+                        std::isfinite(candidate_position_offset_trend_evaluation.residual_mean_m) &&
+                        std::isfinite(candidate_position_offset_trend_evaluation.residual_slope_mps) &&
+                        std::abs(candidate_position_offset_trend_evaluation.residual_mean_m) >=
+                          config_.vertical_interval_feedback_min_residual_m &&
+                        std::abs(candidate_position_offset_trend_evaluation.residual_slope_mps) <=
+                          kStableOffsetSlopeLimitMps;
                       if (body_z_seed_candidate &&
                           std::abs(window_correction->delta_vz_tail_mps) <= 1e-6 &&
                           std::abs(window_correction->delta_up_tail_m) > 1e-4) {
-                        constexpr double kStableOffsetSlopeLimitMps = 0.01;
                         if (!candidate_position_offset_trend_evaluation.valid ||
                             !std::isfinite(candidate_position_offset_trend_evaluation.residual_slope_mps) ||
                             std::abs(candidate_position_offset_trend_evaluation.residual_slope_mps) >
@@ -3614,6 +3627,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                           window_correction->height_integral_delta_m +
                         body_z_segment_gate_cost +
                         (body_z_seed_candidate ? 0.0 : candidate_future_trend_evaluation.cost) +
+                        (stable_offset_prefers_position && !candidate_position_feedback ? 5.0 : 0.0) +
+                        (stable_offset_prefers_position && candidate_position_feedback ? -0.5 : 0.0) +
                         0.02 * static_cast<double>(selected_jump_window_center_indices.size() + 1U);
                       if (!std::isfinite(candidate_objective) || candidate_objective >= best_objective) {
                         continue;
@@ -3661,13 +3676,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                       scored_result.future_trend_cost = candidate_future_trend_evaluation.cost;
                       scored_result.future_trend_fix_count =
                         static_cast<long long>(candidate_future_trend_evaluation.fix_count);
-                      if (body_z_seed_candidate &&
-                          std::abs(window_correction->delta_vz_tail_mps) > 1e-6) {
-                        scored_result.recovery_mode = "SPARSE_WINDOW_VELOCITY";
-                      } else if (body_z_seed_candidate &&
-                                 std::isfinite(forced_tail_delta_up_m) &&
-                                 std::abs(forced_tail_delta_up_m) > 1e-4) {
+                      if (candidate_position_feedback) {
                         scored_result.recovery_mode = "SPARSE_WINDOW_POSITION";
+                      } else if (body_z_seed_candidate &&
+                                 std::abs(window_correction->delta_vz_tail_mps) > 1e-6) {
+                        scored_result.recovery_mode = "SPARSE_WINDOW_VELOCITY";
                       } else {
                         scored_result.recovery_mode = "SPARSE_WINDOW";
                       }
