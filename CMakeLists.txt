@@ -127,6 +127,15 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     tests/body_z_bidirectional_jump_detector_test.cpp
   )
 
+  add_executable(config_test
+    tests/config_test.cpp
+  )
+
+  target_compile_definitions(config_test
+    PRIVATE
+      OFFLINE_LC_MINIMAL_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+  )
+
   target_link_libraries(vertical_rtk_factors_test
     PRIVATE
       offline_lc_minimal_lib
@@ -138,6 +147,11 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(body_z_bidirectional_jump_detector_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(config_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -157,6 +171,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       body_z_bidirectional_jump_detector_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      config_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -185,6 +205,13 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
         $<TARGET_FILE:gnss_factor_builder_test>
     )
+    add_test(
+      NAME config_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:config_test>
+    )
   else()
     add_test(
       NAME vertical_rtk_factors_test
@@ -197,6 +224,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     add_test(
       NAME gnss_factor_builder_test
       COMMAND $<TARGET_FILE:gnss_factor_builder_test>
+    )
+    add_test(
+      NAME config_test
+      COMMAND $<TARGET_FILE:config_test>
     )
   endif()
 endif()

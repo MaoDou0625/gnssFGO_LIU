@@ -36,10 +36,6 @@ class OfflineBatchRunner {
   [[nodiscard]] double CorrectedGnssTime(const GnssSolutionSample &sample) const;
   [[nodiscard]] double GnssFixScale(GnssFixType fix_type) const;
   [[nodiscard]] Eigen::Vector3d ClampGnssSigma(const GnssSolutionSample &sample) const;
-  [[nodiscard]] std::vector<double> BuildGnssVerticalReferenceUpBySample(
-    const std::vector<GnssSolutionSample> &gnss_samples,
-    const std::vector<ImuSample> &imu_samples,
-    std::size_t navigation_start_index) const;
 
   OfflineRunnerConfig config_;
 };

@@ -102,14 +102,8 @@ GnssConsistencyRecord MakeBaseConsistencyRecord(
   record.corrected_time_s = corrected_time_s;
   record.gnss_fix_type = sample.fix_type();
   record.raw_sigma_h_m = sample.sigma_h_m;
-  record.prefit_residual_enu_m =
-    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
   record.postfit_residual_enu_m =
     Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
-  record.covariance_scale = 1.0;
-  record.covariance_scale_e = 1.0;
-  record.covariance_scale_n = 1.0;
-  record.covariance_scale_u = 1.0;
   return record;
 }
 

@@ -57,8 +57,6 @@ struct RunSummary {
   double gnss_nis_median = std::numeric_limits<double>::quiet_NaN();
   double gnss_nis_p95 = std::numeric_limits<double>::quiet_NaN();
   double axis_2sigma_pass_rate = std::numeric_limits<double>::quiet_NaN();
-  std::size_t vertical_gate_inside_count = 0;
-  std::size_t vertical_gate_outside_count = 0;
   double feedback_forward_up_slope_10s = std::numeric_limits<double>::quiet_NaN();
   double feedback_forward_up_slope_30s = std::numeric_limits<double>::quiet_NaN();
   double feedback_forward_horizontal_slope_10s = std::numeric_limits<double>::quiet_NaN();
@@ -134,8 +132,6 @@ struct RunSummary {
         << "gnss_nis_median=" << gnss_nis_median << '\n'
         << "gnss_nis_p95=" << gnss_nis_p95 << '\n'
         << "axis_2sigma_pass_rate=" << axis_2sigma_pass_rate << '\n'
-        << "vertical_gate_inside_count=" << vertical_gate_inside_count << '\n'
-        << "vertical_gate_outside_count=" << vertical_gate_outside_count << '\n'
         << "feedback_forward_up_slope_10s=" << feedback_forward_up_slope_10s << '\n'
         << "feedback_forward_up_slope_30s=" << feedback_forward_up_slope_30s << '\n'
         << "feedback_forward_horizontal_slope_10s=" << feedback_forward_horizontal_slope_10s << '\n'

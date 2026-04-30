@@ -47,14 +47,11 @@ gtsam::SharedNoiseModel MakeRtkSeedNoiseModel(
 }
 
 std::vector<ReferenceNodeState> BuildRtkSeedReferenceStates(const BodyZWindowPipelineRequest &request) {
-  if (!request.config->enable_vertical_rtk_seed_pass) {
-    return {};
-  }
   if (request.gnss_samples == nullptr || request.base_graph == nullptr ||
       request.base_initial_values == nullptr || !request.passes_gnss_quality_filters ||
       !request.is_within_imu_coverage || !request.corrected_time_s ||
       !request.clamped_sigma_m || !request.find_state_for_time_s) {
-    throw std::runtime_error("BodyZWindowPipeline RTK seed pass received an incomplete request");
+    throw std::runtime_error("BodyZWindowPipeline received an incomplete RTK seed request");
   }
 
   gtsam::NonlinearFactorGraph rtk_seed_graph = *request.base_graph;
@@ -189,7 +186,7 @@ BodyZWindowPipelineResult BodyZWindowPipeline::Run() const {
   }
 
   BodyZWindowPipelineResult result;
-  if (!request_.config->enable_body_z_seed_jump_windows) {
+  if (!request_.config->enable_body_z_jump_detection) {
     return result;
   }
 

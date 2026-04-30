@@ -274,82 +274,6 @@ Eigen::Vector3d OfflineBatchRunner::ClampGnssSigma(const GnssSolutionSample &sam
   return sigma;
 }
 
-std::vector<double> OfflineBatchRunner::BuildGnssVerticalReferenceUpBySample(
-  const std::vector<GnssSolutionSample> &gnss_samples,
-  const std::vector<ImuSample> &imu_samples,
-  const std::size_t navigation_start_index) const {
-  std::vector<double> references(gnss_samples.size(), std::numeric_limits<double>::quiet_NaN());
-  if (!config_.enable_gnss_vertical_drift_model || gnss_samples.empty()) {
-    return references;
-  }
-
-  const double window_s = config_.gnss_vertical_drift_window_s;
-  const double half_window_s = 0.5 * window_s;
-  if (window_s <= 0.0) {
-    return references;
-  }
-
-  struct VerticalReferenceSample {
-    std::size_t sample_index = 0;
-    double corrected_time_s = 0.0;
-    double up_m = 0.0;
-  };
-
-  std::vector<VerticalReferenceSample> valid_samples;
-  valid_samples.reserve(gnss_samples.size());
-  for (std::size_t sample_index = 0; sample_index < gnss_samples.size(); ++sample_index) {
-    const auto &sample = gnss_samples[sample_index];
-    if (sample_index <= navigation_start_index) {
-      continue;
-    }
-    if (!sample.has_valid_position()) {
-      continue;
-    }
-    if (!PassesGnssQualityFilters(sample)) {
-      continue;
-    }
-    if (!IsWithinImuCoverage(imu_samples, CorrectedGnssTime(sample))) {
-      continue;
-    }
-    if (!sample.has_enu_position || !std::isfinite(sample.enu_position_m.z())) {
-      continue;
-    }
-    valid_samples.push_back(VerticalReferenceSample{
-      sample_index,
-      CorrectedGnssTime(sample),
-      sample.enu_position_m.z(),
-    });
-  }
-  if (valid_samples.empty()) {
-    return references;
-  }
-
-  std::size_t left_index = 0U;
-  std::size_t right_index = 0U;
-  double up_sum = 0.0;
-  for (std::size_t center_index = 0; center_index < valid_samples.size(); ++center_index) {
-    const double center_time_s = valid_samples[center_index].corrected_time_s;
-    while (left_index < valid_samples.size() &&
-           valid_samples[left_index].corrected_time_s < center_time_s - half_window_s) {
-      up_sum -= valid_samples[left_index].up_m;
-      ++left_index;
-    }
-    while (right_index < valid_samples.size() &&
-           valid_samples[right_index].corrected_time_s <= center_time_s + half_window_s) {
-      up_sum += valid_samples[right_index].up_m;
-      ++right_index;
-    }
-    const std::size_t count = right_index - left_index;
-    if (count == 0U) {
-      references[valid_samples[center_index].sample_index] = valid_samples[center_index].up_m;
-    } else {
-      references[valid_samples[center_index].sample_index] = up_sum / static_cast<double>(count);
-    }
-  }
-
-  return references;
-}
-
 OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   if (dataset.imu_samples.empty()) {
     throw std::runtime_error("offline runner received an empty IMU data set");
@@ -378,8 +302,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     config_.static_alignment_duration_s > 0.0 ? navigation_start_min_time_s : CorrectedGnssTime(navigation_start_sample);
   GeoReference geo_reference(origin_sample.lat_rad, origin_sample.lon_rad, origin_sample.h_m);
   PopulateEnuPositions(dataset.gnss_samples, geo_reference);
-  const std::vector<double> gnss_vertical_reference_up_by_sample =
-    BuildGnssVerticalReferenceUpBySample(dataset.gnss_samples, dataset.imu_samples, navigation_start_index);
 
   run_result.run_summary.origin_lat_rad = geo_reference.origin_lat_rad();
   run_result.run_summary.origin_lon_rad = geo_reference.origin_lon_rad();
@@ -456,7 +378,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     collect_error_diagnostics ||
     collect_segment_error_diagnostics ||
     config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone ||
-    config_.enable_body_z_seed_jump_windows;
+    config_.enable_body_z_jump_detection;
   run_result.run_summary.error_state_count = 0;
 
   const auto imu_params = gtsam::PreintegrationCombinedParams::MakeSharedU(config_.gravity_mps2);
@@ -812,7 +734,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   optimizer_params.setVerbosity(config_.verbose ? "ERROR" : "SILENT");
   optimizer_params.setVerbosityLM(config_.verbose ? "TRYLAMBDA" : "SILENT");
 
-  if (config_.enable_body_z_seed_jump_windows) {
+  if (config_.enable_body_z_jump_detection) {
     BodyZWindowPipelineRequest body_z_request;
     body_z_request.config = &config_;
     body_z_request.imu_samples = &dataset.imu_samples;
@@ -855,8 +777,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.dropped_nonfinite_sigma_count = 0;
   run_result.run_summary.dropped_bad_status_count = 0;
   run_result.run_summary.dropped_out_of_imu_coverage_count = 0;
-  run_result.run_summary.vertical_gate_inside_count = 0;
-  run_result.run_summary.vertical_gate_outside_count = 0;
   run_result.run_summary.gnss_nis_mean = std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.gnss_nis_median = std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.gnss_nis_p95 = std::numeric_limits<double>::quiet_NaN();

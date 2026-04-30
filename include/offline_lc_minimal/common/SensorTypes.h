@@ -43,10 +43,6 @@ enum class GnssVerticalSigmaMode : int {
   kFixed = 1,
 };
 
-enum class GnssVerticalDriftReferenceMode : int {
-  kMovingAverage = 0,
-};
-
 enum class VerticalConstraintMode : int {
   kDirectZ = 0,
   kEnvelope = 1,
@@ -112,14 +108,6 @@ inline std::string ToString(const GnssVerticalSigmaMode mode) {
     case GnssVerticalSigmaMode::kFromFile:
     default:
       return "from_file";
-  }
-}
-
-inline std::string ToString(const GnssVerticalDriftReferenceMode mode) {
-  switch (mode) {
-    case GnssVerticalDriftReferenceMode::kMovingAverage:
-    default:
-      return "moving_average";
   }
 }
 

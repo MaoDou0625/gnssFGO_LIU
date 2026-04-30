@@ -23,20 +23,8 @@ constexpr double kTimeEpsilonS = 1e-9;
 
 struct SegmentGnssStatsAccumulator {
   std::size_t gnss_factor_count = 0;
-  double prefit_nis_sum = 0.0;
   double postfit_nis_sum = 0.0;
-  double covariance_scale_sum = 0.0;
-  double vertical_rtk_residual_sum = 0.0;
-  double vertical_gate_inside_sum = 0.0;
-  double target_baz_sum = 0.0;
-  double feedback_attitude_scale_sum = 0.0;
-  std::size_t prefit_nis_count = 0;
   std::size_t postfit_nis_count = 0;
-  std::size_t covariance_scale_count = 0;
-  std::size_t vertical_rtk_residual_count = 0;
-  std::size_t vertical_gate_inside_count = 0;
-  std::size_t target_baz_count = 0;
-  std::size_t feedback_attitude_scale_count = 0;
 };
 
 struct ScalarSummaryStats {
@@ -175,8 +163,8 @@ void PopulateGnssPostfitResiduals(
       if (consistency_record != nullptr) {
         consistency_record->postfit_residual_enu_m = residual_enu_m;
         const Eigen::Vector2d scaled_horizontal_sigma_m(
-          consistency_record->sigma_e_m * consistency_record->covariance_scale_e,
-          consistency_record->sigma_n_m * consistency_record->covariance_scale_n);
+          consistency_record->sigma_e_m,
+          consistency_record->sigma_n_m);
         if (use_vertical_direct_position) {
           const Eigen::Vector3d scaled_sigma_m(
             scaled_horizontal_sigma_m.x(),
@@ -215,8 +203,8 @@ void PopulateGnssPostfitResiduals(
       if (consistency_record != nullptr) {
         consistency_record->postfit_residual_enu_m = residual_enu_m;
         const Eigen::Vector2d scaled_horizontal_sigma_m(
-          consistency_record->sigma_e_m * consistency_record->covariance_scale_e,
-          consistency_record->sigma_n_m * consistency_record->covariance_scale_n);
+          consistency_record->sigma_e_m,
+          consistency_record->sigma_n_m);
         if (use_vertical_direct_position) {
           const Eigen::Vector3d scaled_sigma_m(
             scaled_horizontal_sigma_m.x(),
@@ -441,33 +429,9 @@ std::vector<SegmentErrorDiagnostic> BuildSegmentErrorDiagnostics(
     ++accumulator.gnss_factor_count;
     if (record_index < gnss_consistency_records.size()) {
       const auto &consistency_record = gnss_consistency_records[record_index];
-      if (std::isfinite(consistency_record.prefit_nis)) {
-        accumulator.prefit_nis_sum += consistency_record.prefit_nis;
-        ++accumulator.prefit_nis_count;
-      }
       if (std::isfinite(consistency_record.postfit_nis)) {
         accumulator.postfit_nis_sum += consistency_record.postfit_nis;
         ++accumulator.postfit_nis_count;
-      }
-      if (std::isfinite(consistency_record.covariance_scale)) {
-        accumulator.covariance_scale_sum += consistency_record.covariance_scale;
-        ++accumulator.covariance_scale_count;
-      }
-      if (std::isfinite(consistency_record.prefit_residual_enu_m.z())) {
-        accumulator.vertical_rtk_residual_sum += consistency_record.prefit_residual_enu_m.z();
-        ++accumulator.vertical_rtk_residual_count;
-      }
-      if (std::isfinite(consistency_record.vertical_gate_inside)) {
-        accumulator.vertical_gate_inside_sum += consistency_record.vertical_gate_inside;
-        ++accumulator.vertical_gate_inside_count;
-      }
-      if (std::isfinite(consistency_record.vertical_feedback_target_baz_mps2)) {
-        accumulator.target_baz_sum += consistency_record.vertical_feedback_target_baz_mps2;
-        ++accumulator.target_baz_count;
-      }
-      if (std::isfinite(consistency_record.vertical_feedback_attitude_scale)) {
-        accumulator.feedback_attitude_scale_sum += consistency_record.vertical_feedback_attitude_scale;
-        ++accumulator.feedback_attitude_scale_count;
       }
     }
   }
@@ -507,33 +471,9 @@ std::vector<SegmentErrorDiagnostic> BuildSegmentErrorDiagnostics(
     if (const auto stats_it = gnss_stats_by_segment.find(segment_index); stats_it != gnss_stats_by_segment.end()) {
       const auto &stats = stats_it->second;
       diagnostic.gnss_factor_count = stats.gnss_factor_count;
-      diagnostic.mean_prefit_nis =
-        stats.prefit_nis_count > 0U
-          ? stats.prefit_nis_sum / static_cast<double>(stats.prefit_nis_count)
-          : std::numeric_limits<double>::quiet_NaN();
       diagnostic.mean_postfit_nis =
         stats.postfit_nis_count > 0U
           ? stats.postfit_nis_sum / static_cast<double>(stats.postfit_nis_count)
-          : std::numeric_limits<double>::quiet_NaN();
-      diagnostic.mean_covariance_scale =
-        stats.covariance_scale_count > 0U
-          ? stats.covariance_scale_sum / static_cast<double>(stats.covariance_scale_count)
-          : std::numeric_limits<double>::quiet_NaN();
-      diagnostic.segment_vertical_rtk_residual_m =
-        stats.vertical_rtk_residual_count > 0U
-          ? stats.vertical_rtk_residual_sum / static_cast<double>(stats.vertical_rtk_residual_count)
-          : std::numeric_limits<double>::quiet_NaN();
-      diagnostic.segment_vertical_gate_inside =
-        stats.vertical_gate_inside_count > 0U
-          ? stats.vertical_gate_inside_sum / static_cast<double>(stats.vertical_gate_inside_count)
-          : std::numeric_limits<double>::quiet_NaN();
-      diagnostic.segment_target_baz_mps2 =
-        stats.target_baz_count > 0U
-          ? stats.target_baz_sum / static_cast<double>(stats.target_baz_count)
-          : std::numeric_limits<double>::quiet_NaN();
-      diagnostic.segment_feedback_attitude_scale =
-        stats.feedback_attitude_scale_count > 0U
-          ? stats.feedback_attitude_scale_sum / static_cast<double>(stats.feedback_attitude_scale_count)
           : std::numeric_limits<double>::quiet_NaN();
     }
 
@@ -692,8 +632,8 @@ void AccumulateGnssConsistencySummary(
     }
     postfit_nis_values.push_back(record.postfit_nis);
     const Eigen::Vector3d scaled_sigma_m(
-      record.sigma_e_m * record.covariance_scale_e,
-      record.sigma_n_m * record.covariance_scale_n,
+      record.sigma_e_m,
+      record.sigma_n_m,
       record.vertical_sigma_u_used_m);
     const int axis_limit = record.vertical_direct_position_factor_used ? 3 : 2;
     for (int axis = 0; axis < axis_limit; ++axis) {
@@ -756,9 +696,7 @@ std::vector<VerticalStateCorrectionRow> BuildVerticalStateCorrections(
 
     if (collect_gnss_consistency && record_index < gnss_consistency_records.size()) {
       const auto &consistency_record = gnss_consistency_records[record_index];
-      row.vertical_gate_inside = consistency_record.vertical_gate_inside;
       row.vertical_direct_position_factor_used = consistency_record.vertical_direct_position_factor_used;
-      row.prefit_residual_u_m = consistency_record.prefit_residual_enu_m.z();
       row.postfit_residual_u_m = consistency_record.postfit_residual_enu_m.z();
     }
 

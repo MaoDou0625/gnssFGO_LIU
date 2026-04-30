@@ -243,9 +243,7 @@ void WriteSegmentErrorCsv(const std::filesystem::path &path, const std::vector<S
   stream
     << "segment_index,start_time_s,end_time_s,dtheta_x_rad,dtheta_y_rad,dtheta_z_rad,dv_x_mps,dv_y_mps,dv_z_mps,"
        "dp_x_m,dp_y_m,dp_z_m,dbg_x_radps,dbg_y_radps,dbg_z_radps,dba_x_mps2,dba_y_mps2,dba_z_mps2,"
-       "gnss_factor_count,mean_prefit_nis,mean_postfit_nis,mean_covariance_scale,"
-       "segment_vertical_rtk_residual_m,segment_vertical_gate_inside,segment_target_baz_mps2,"
-       "segment_feedback_attitude_scale\n";
+       "gnss_factor_count,mean_postfit_nis\n";
   for (const auto &row : rows) {
     stream << row.segment_index << ','
            << row.start_time_s << ','
@@ -266,13 +264,7 @@ void WriteSegmentErrorCsv(const std::filesystem::path &path, const std::vector<S
            << row.dba_mps2.y() << ','
            << row.dba_mps2.z() << ','
            << row.gnss_factor_count << ','
-           << row.mean_prefit_nis << ','
-           << row.mean_postfit_nis << ','
-           << row.mean_covariance_scale << ','
-           << row.segment_vertical_rtk_residual_m << ','
-           << row.segment_vertical_gate_inside << ','
-           << row.segment_target_baz_mps2 << ','
-           << row.segment_feedback_attitude_scale << '\n';
+           << row.mean_postfit_nis << '\n';
   }
 }
 
@@ -300,18 +292,6 @@ std::string BuildSegmentErrorSummaryText(const std::vector<SegmentErrorDiagnosti
     {"dba_x_mps2", [](const SegmentErrorDiagnostic &row) { return row.dba_mps2.x(); }},
     {"dba_y_mps2", [](const SegmentErrorDiagnostic &row) { return row.dba_mps2.y(); }},
     {"dba_z_mps2", [](const SegmentErrorDiagnostic &row) { return row.dba_mps2.z(); }},
-    {"segment_vertical_rtk_residual_m", [](const SegmentErrorDiagnostic &row) {
-      return row.segment_vertical_rtk_residual_m;
-    }},
-    {"segment_vertical_gate_inside", [](const SegmentErrorDiagnostic &row) {
-      return row.segment_vertical_gate_inside;
-    }},
-    {"segment_target_baz_mps2", [](const SegmentErrorDiagnostic &row) {
-      return row.segment_target_baz_mps2;
-    }},
-    {"segment_feedback_attitude_scale", [](const SegmentErrorDiagnostic &row) {
-      return row.segment_feedback_attitude_scale;
-    }},
   };
 
   stream << "segment_error_count=" << rows.size() << '\n';
@@ -341,30 +321,9 @@ void WriteGnssConsistencyCsv(
   stream << std::setprecision(17);
   stream
     << "sample_index,raw_time_s,corrected_time_s,factor_used,fix_type,sync_status,raw_sigma_h_m,"
-       "sigma_e_m,sigma_n_m,sigma_u_m,effective_sigma_u_m,vertical_gate_threshold_m,vertical_gate_inside,"
-       "vertical_sigma_u_used_m,vertical_direct_position_factor_used,"
-       "vertical_feedback_target_baz_mps2,vertical_feedback_attitude_scale,"
-       "vertical_reference_up_m,vertical_reference_used,local_prefit_residual_u_m,local_postfit_residual_u_m,"
-       "confirmed_inside_before_sample,recovery_anchor_state_index,nhc_jump_anchor_state_index,"
-       "nhc_body_vy_mps,nhc_body_vz_mps,nhc_body_vz_baseline_mps,nhc_body_vz_residual_mps,nhc_body_vz_jump_mps,"
-       "nhc_body_vy_threshold_mps,nhc_body_vz_threshold_mps,"
-       "delta_vz_applied_mps,delta_up_anchor_applied_m,delta_roll_applied_rad,delta_pitch_applied_rad,delta_baz_applied_mps2,"
-       "inside_bias_delta_roll_applied_rad,inside_bias_delta_pitch_applied_rad,"
-       "inside_bias_delta_baz_applied_mps2,inside_bias_equivalent_acc_mps2,inside_bias_residual_delta_m,"
-       "inside_bias_window_dt_s,inside_bias_anchor_state_index,inside_bias_observation_count,"
-       "vz_ref_global_smoothed_mps,vz_prefit_mps,vz_mismatch_mps,vz_mismatch_jump_mps,jump_candidate_score,"
-       "candidate_source,body_z_jump_direction,body_z_signed_delta_velocity_mps,body_z_direction_score_mps,body_z_axis_nav_z,"
-       "selected_jump_state_index,selected_jump_delta_vz_mps,"
-       "selected_jump_window_start_state_index,selected_jump_window_center_state_index,"
-       "selected_jump_window_end_state_index,selected_jump_window_duration_s,selected_jump_window_point_count,"
-       "selected_jump_delta_vz_tail_mps,window_velocity_smooth_cost,window_height_integral_delta_m,"
-       "future_trend_residual_mean_m,future_trend_residual_slope_mps,future_trend_cost,future_trend_fix_count,"
-       "recovery_mode,hold_window_passed,"
-       "required_up_anchor_correction_m,local_recovery_iteration_count,pure_delta_up_anchor_start_iteration,"
-       "covariance_scale,covariance_scale_e,covariance_scale_n,covariance_scale_u,"
-       "prefit_residual_u_before_local_recovery_m,prefit_residual_u_after_local_recovery_m,"
-       "prefit_residual_e_m,prefit_residual_n_m,prefit_residual_u_m,postfit_residual_e_m,"
-       "postfit_residual_n_m,postfit_residual_u_m,prefit_nis,postfit_nis\n";
+       "sigma_e_m,sigma_n_m,sigma_u_m,effective_sigma_u_m,vertical_sigma_u_used_m,"
+       "vertical_direct_position_factor_used,postfit_residual_e_m,postfit_residual_n_m,"
+       "postfit_residual_u_m,postfit_nis\n";
   for (const auto &row : rows) {
     stream << row.sample_index << ','
            << row.raw_time_s << ','
@@ -377,81 +336,11 @@ void WriteGnssConsistencyCsv(
            << row.sigma_n_m << ','
            << row.sigma_u_m << ','
            << row.effective_sigma_u_m << ','
-           << row.vertical_gate_threshold_m << ','
-           << row.vertical_gate_inside << ','
            << row.vertical_sigma_u_used_m << ','
            << (row.vertical_direct_position_factor_used ? 1 : 0) << ','
-           << row.vertical_feedback_target_baz_mps2 << ','
-           << row.vertical_feedback_attitude_scale << ','
-           << row.vertical_reference_up_m << ','
-           << (row.vertical_reference_used ? 1 : 0) << ','
-           << row.local_prefit_residual_u_m << ','
-           << row.local_postfit_residual_u_m << ','
-           << row.confirmed_inside_before_sample << ','
-           << row.recovery_anchor_state_index << ','
-           << row.nhc_jump_anchor_state_index << ','
-           << row.nhc_body_vy_mps << ','
-           << row.nhc_body_vz_mps << ','
-           << row.nhc_body_vz_baseline_mps << ','
-           << row.nhc_body_vz_residual_mps << ','
-           << row.nhc_body_vz_jump_mps << ','
-           << row.nhc_body_vy_threshold_mps << ','
-           << row.nhc_body_vz_threshold_mps << ','
-           << row.delta_vz_applied_mps << ','
-           << row.delta_up_anchor_applied_m << ','
-           << row.delta_roll_applied_rad << ','
-           << row.delta_pitch_applied_rad << ','
-           << row.delta_baz_applied_mps2 << ','
-           << row.inside_bias_delta_roll_applied_rad << ','
-           << row.inside_bias_delta_pitch_applied_rad << ','
-           << row.inside_bias_delta_baz_applied_mps2 << ','
-           << row.inside_bias_equivalent_acc_mps2 << ','
-           << row.inside_bias_residual_delta_m << ','
-           << row.inside_bias_window_dt_s << ','
-           << row.inside_bias_anchor_state_index << ','
-           << row.inside_bias_observation_count << ','
-           << row.vz_ref_global_smoothed_mps << ','
-           << row.vz_prefit_mps << ','
-           << row.vz_mismatch_mps << ','
-           << row.vz_mismatch_jump_mps << ','
-           << row.jump_candidate_score << ','
-           << row.candidate_source << ','
-           << row.body_z_jump_direction << ','
-           << row.body_z_signed_delta_velocity_mps << ','
-           << row.body_z_direction_score_mps << ','
-           << row.body_z_axis_nav_z << ','
-           << row.selected_jump_state_index << ','
-           << row.selected_jump_delta_vz_mps << ','
-           << row.selected_jump_window_start_state_index << ','
-           << row.selected_jump_window_center_state_index << ','
-           << row.selected_jump_window_end_state_index << ','
-           << row.selected_jump_window_duration_s << ','
-           << row.selected_jump_window_point_count << ','
-           << row.selected_jump_delta_vz_tail_mps << ','
-           << row.window_velocity_smooth_cost << ','
-           << row.window_height_integral_delta_m << ','
-           << row.future_trend_residual_mean_m << ','
-           << row.future_trend_residual_slope_mps << ','
-           << row.future_trend_cost << ','
-           << row.future_trend_fix_count << ','
-           << row.recovery_mode << ','
-           << (row.hold_window_passed ? 1 : 0) << ','
-           << row.required_up_anchor_correction_m << ','
-           << row.local_recovery_iteration_count << ','
-           << row.pure_delta_up_anchor_start_iteration << ','
-           << row.covariance_scale << ','
-           << row.covariance_scale_e << ','
-           << row.covariance_scale_n << ','
-           << row.covariance_scale_u << ','
-           << row.prefit_residual_u_before_local_recovery_m << ','
-           << row.prefit_residual_u_after_local_recovery_m << ','
-           << row.prefit_residual_enu_m.x() << ','
-           << row.prefit_residual_enu_m.y() << ','
-           << row.prefit_residual_enu_m.z() << ','
            << row.postfit_residual_enu_m.x() << ','
            << row.postfit_residual_enu_m.y() << ','
            << row.postfit_residual_enu_m.z() << ','
-           << row.prefit_nis << ','
            << row.postfit_nis << '\n';
   }
 }
@@ -466,11 +355,8 @@ void WriteVerticalStateCorrectionCsv(
   stream << std::setprecision(17);
   stream
     << "sample_index,raw_time_s,corrected_time_s,sync_status,state_index,state_time_s,factor_used,"
-       "reference_available,vertical_gate_inside,vertical_direct_position_factor_used,measurement_up_m,"
-       "reference_up_m,optimized_up_m,delta_up_m,reference_vz_mps,optimized_vz_mps,delta_vz_mps,"
-       "reference_pitch_rad,optimized_pitch_rad,delta_pitch_rad,reference_roll_rad,optimized_roll_rad,"
-       "delta_roll_rad,reference_baz_mps2,optimized_baz_mps2,delta_baz_mps2,prefit_residual_u_m,"
-       "postfit_residual_u_m\n";
+       "vertical_direct_position_factor_used,measurement_up_m,optimized_up_m,optimized_vz_mps,"
+       "optimized_pitch_rad,optimized_roll_rad,optimized_baz_mps2,postfit_residual_u_m\n";
   for (const auto &row : rows) {
     stream << row.sample_index << ','
            << row.raw_time_s << ','
@@ -479,26 +365,13 @@ void WriteVerticalStateCorrectionCsv(
            << row.state_index << ','
            << row.state_time_s << ','
            << (row.factor_used ? 1 : 0) << ','
-           << (row.reference_available ? 1 : 0) << ','
-           << row.vertical_gate_inside << ','
            << (row.vertical_direct_position_factor_used ? 1 : 0) << ','
            << row.measurement_up_m << ','
-           << row.reference_up_m << ','
            << row.optimized_up_m << ','
-           << row.delta_up_m << ','
-           << row.reference_vz_mps << ','
            << row.optimized_vz_mps << ','
-           << row.delta_vz_mps << ','
-           << row.reference_pitch_rad << ','
            << row.optimized_pitch_rad << ','
-           << row.delta_pitch_rad << ','
-           << row.reference_roll_rad << ','
            << row.optimized_roll_rad << ','
-           << row.delta_roll_rad << ','
-           << row.reference_baz_mps2 << ','
            << row.optimized_baz_mps2 << ','
-           << row.delta_baz_mps2 << ','
-           << row.prefit_residual_u_m << ','
            << row.postfit_residual_u_m << '\n';
   }
 }

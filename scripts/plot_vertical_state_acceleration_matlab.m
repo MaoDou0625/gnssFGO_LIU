@@ -23,40 +23,28 @@ end
 
 time_s = rows.state_time_s;
 time_rel_s = time_s - time_s(1);
-reference_az_mps2 = gradient(rows.reference_vz_mps, time_s);
 optimized_az_mps2 = gradient(rows.optimized_vz_mps, time_s);
-delta_az_mps2 = optimized_az_mps2 - reference_az_mps2;
 
 fig = figure('Visible', 'off', 'Color', 'w', 'Position', [100, 100, 1400, 900]);
-tiled = tiledlayout(fig, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+tiled = tiledlayout(fig, 2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
 title(tiled, 'Vertical Acceleration Derived From State Corrections', 'Interpreter', 'none');
 
 nexttile;
-plot(time_rel_s, reference_az_mps2, 'b--', 'LineWidth', 1.0); hold on;
 plot(time_rel_s, optimized_az_mps2, 'r-', 'LineWidth', 1.1);
 grid on;
 xlabel('Relative time (s)');
 ylabel('a_z (m/s^2)');
-legend({'Reference a_z', 'Optimized a_z'}, 'Location', 'best');
+legend({'Optimized a_z'}, 'Location', 'best');
 title('Derived Vertical Acceleration');
 
 nexttile;
-plot(time_rel_s, delta_az_mps2, 'k-', 'LineWidth', 1.0);
-grid on;
-xlabel('Relative time (s)');
-ylabel('\Delta a_z (m/s^2)');
-legend({'\Delta a_z = optimized - reference'}, 'Location', 'best');
-title('Acceleration Correction');
-
-nexttile;
-stairs(time_rel_s, rows.vertical_gate_inside, 'b-', 'LineWidth', 1.1); hold on;
 stairs(time_rel_s, double(rows.vertical_direct_position_factor_used), 'r-', 'LineWidth', 1.1);
 ylim([-0.1, 1.1]);
 grid on;
 xlabel('Relative time (s)');
 ylabel('Flag');
-legend({'Inside gate', 'Vertical direct position factor'}, 'Location', 'best');
-title('Gate / Factor Mode');
+legend({'Vertical direct position factor'}, 'Location', 'best');
+title('Factor Mode');
 
 savefig(fig, fig_path);
 exportgraphics(fig, png_path, 'Resolution', 180);
