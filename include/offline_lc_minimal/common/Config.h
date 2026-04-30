@@ -46,6 +46,7 @@ struct OfflineRunnerConfig {
   double vertical_acc_bias_sigma_mps2 = 0.0;
   double vertical_acc_bias_process_noise_scale = 1.0;
   bool enable_vertical_rtk_preintegration_feedback = false;
+  bool enable_vertical_rtk_global_position_factor = true;
   double vertical_rtk_gate_sigma_multiple = 2.0;
   double vertical_rtk_inside_gate_sigma_scale = 2.0;
   double vertical_rtk_outside_gate_sigma_scale = 1.0;
@@ -56,7 +57,9 @@ struct OfflineRunnerConfig {
   double vertical_rtk_feedback_sigma_dp_m = 5.0;
   double vertical_rtk_feedback_sigma_baz_mps2 = 10.0;
   double vertical_rtk_feedback_sigma_attitude_rad = 1.0;
+  double vertical_rtk_feedback_sigma_vz_mps = 0.05;
   double vertical_rtk_feedback_min_interval_s = 1.0;
+  double vertical_rtk_jump_inside_sigma_scale = 20.0;
   int vertical_local_recovery_max_iterations = 4;
   double vertical_local_recovery_max_attitude_delta_rad = 1e-2;
   double vertical_local_recovery_max_baz_delta_mps2 = 1e-2;

@@ -327,3 +327,41 @@ divergence through RTK height closure plus bounded bias dynamics, but the curren
 sequential reference framework removed the direct dynamic vertical closure and therefore
 can amplify wrong reference-state updates into long-term height drift.
 
+## Hybrid Global-Closure Direction Implemented On `codex/vertical-recovery-hybrid`
+
+Feasibility: the hybrid route is viable because it restores the missing global height
+closure without returning to hard pointwise RTK following. The sequential body-z logic is
+kept as a detector/reference helper, while the optimizer again sees vertical RTK, IMU
+preintegration, bounded `ba_z`, and jump-window uncertainty in one graph.
+
+Implemented policy:
+
+1. Dynamic RTK height is added back as a weak 1D vertical position factor.
+   Inside the 1D gate, `vertical_rtk_inside_gate_sigma_scale` inflates RTK height sigma
+   so small RTK drift does not dominate IMU continuity. Outside the gate, the configured
+   outside scale is used to keep a global height closure. This factor uses its own
+   Gaussian noise so the restored height closure is not completely suppressed by the
+   horizontal GNSS robust kernel.
+2. `ReweightedCombinedImuFactor` now applies configured specific-force axis sigmas to
+   the corresponding position/velocity covariance rows, so the IMU continuity setting is
+   active instead of diagnostic-only.
+3. Detected body-z jump windows inflate the `VerticalInsideKinematicFactor` noise by
+   `vertical_rtk_jump_inside_sigma_scale`, reducing trust in the sequential IMU reference
+   inside the abnormal window.
+4. `VerticalInsideBiasAdapter` now rejects outside-gate residuals instead of accepting a
+   temporary `10 * gate` band, preventing RTK drift/outliers from becoming low-frequency
+   accelerometer bias.
+
+Code-frame simplification:
+
+1. `VerticalHybridWeighting` centralizes the gate/jump weighting policy.
+2. `VerticalPositionFactor` and `GPInterpolatedVerticalPositionFactor` separate 1D height
+   closure from horizontal GNSS factors, so `OfflineBatchRunner` no longer has to encode
+   vertical closure as a special case of full GPS factors.
+
+The current config file `config/transformed1cut1_vertical_rtk_preintegration_feedback_z0200.cfg`
+has been retuned from the stress setup toward this hybrid policy:
+`vertical_acc_bias_sigma_mps2 = 9.80665e-5`,
+`enable_vertical_rtk_global_position_factor = true`,
+`vertical_rtk_inside_gate_sigma_scale = 4.0`, and
+`vertical_rtk_jump_inside_sigma_scale = 20.0`.
