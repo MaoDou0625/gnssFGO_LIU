@@ -69,6 +69,11 @@ void ResultWriter::WriteOutputs(
   if (!result.gnss_consistency_records.empty()) {
     WriteGnssConsistencyCsv(output_path / "gnss_consistency.csv", result.gnss_consistency_records);
   }
+  if (!result.vertical_envelope_diagnostics.empty()) {
+    WriteVerticalEnvelopeDiagnosticsCsv(
+      output_path / "vertical_envelope_diagnostics.csv",
+      result.vertical_envelope_diagnostics);
+  }
   if (!result.vertical_state_corrections.empty()) {
     WriteVerticalStateCorrectionCsv(
       output_path / "vertical_state_corrections.csv",
@@ -129,7 +134,8 @@ void ResultWriter::WriteOutputs(
     }
     alignment_stream << std::setprecision(17);
     alignment_stream
-      << "sample_index,raw_time_s,corrected_time_s,sync_status,factor_used,fix_type,trajectory_row_index_i,state_time_i_s,"
+      << "sample_index,raw_time_s,corrected_time_s,sync_status,factor_used,vertical_direct_position_factor_used,"
+         "fix_type,trajectory_row_index_i,state_time_i_s,"
          "trajectory_row_index_j,state_time_j_s,synchronized_trajectory_row_index,graph_state_index_i,graph_state_index_j,"
          "graph_synchronized_state_index,duration_from_state_i_s,meas_east_m,meas_north_m,meas_up_m,residual_m\n";
     for (const auto &record : result.gnss_factor_records) {
@@ -150,6 +156,7 @@ void ResultWriter::WriteOutputs(
                        << record.corrected_time_s << ','
                        << ToString(record.sync_status) << ','
                        << (record.factor_used ? 1 : 0) << ','
+                       << (record.vertical_direct_position_factor_used ? 1 : 0) << ','
                        << ToString(record.gnss_fix_type) << ','
                        << record.trajectory_row_index_i << ','
                        << record.state_time_i_s << ','

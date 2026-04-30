@@ -30,6 +30,11 @@ void PopulateGnssPostfitResiduals(
   std::vector<GnssConsistencyRecord> *gnss_consistency_records,
   std::vector<TrajectoryRow> *trajectory_rows);
 
+void PopulateVerticalEnvelopeDiagnostics(
+  const gtsam::Values &optimized_values,
+  const gp::GPWNOJInterpolator &base_interpolator,
+  std::vector<VerticalEnvelopeDiagnosticRow> &vertical_envelope_diagnostics);
+
 [[nodiscard]] ForwardDriftSummary ComputeFeedbackForwardDriftSummary(
   const std::vector<ImuSample> &imu_samples,
   const gtsam::Pose3 &start_pose,

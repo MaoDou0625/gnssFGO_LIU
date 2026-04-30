@@ -181,6 +181,7 @@ struct OfflineRunResult {
   std::vector<ImuRateIntervalDiagnostic> imu_rate_interval_diagnostics;
   std::vector<GnssFactorRecord> gnss_factor_records;
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
+  std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
   std::vector<VerticalStateCorrectionRow> vertical_state_corrections;
 };
 

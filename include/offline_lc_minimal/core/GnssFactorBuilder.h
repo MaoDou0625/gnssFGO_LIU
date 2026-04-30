@@ -11,6 +11,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Types.h"
+#include "offline_lc_minimal/core/VerticalConstraintPolicy.h"
 
 namespace offline_lc_minimal {
 
@@ -23,6 +24,7 @@ struct GnssFactorBuildRequest {
   RunSummary *run_summary = nullptr;
   std::vector<GnssFactorRecord> *factor_records = nullptr;
   std::vector<GnssConsistencyRecord> *consistency_records = nullptr;
+  std::vector<VerticalEnvelopeDiagnosticRow> *vertical_envelope_diagnostics = nullptr;
   bool collect_consistency_records = false;
   double dynamic_start_time_s = 0.0;
 
@@ -45,13 +47,17 @@ class GnssFactorBuilder {
   void AddSynchronizedFactors(
     const GnssSolutionSample &sample,
     std::size_t sample_index,
+    double corrected_time_s,
     const StateMeasSyncResult &sync_result,
-    const Eigen::Vector3d &sigma_m) const;
+    const Eigen::Vector3d &sigma_m,
+    const VerticalConstraintPolicy &vertical_policy) const;
   void AddInterpolatedFactors(
     const GnssSolutionSample &sample,
     std::size_t sample_index,
+    double corrected_time_s,
     const StateMeasSyncResult &sync_result,
-    const Eigen::Vector3d &sigma_m) const;
+    const Eigen::Vector3d &sigma_m,
+    const VerticalConstraintPolicy &vertical_policy) const;
   void UpdateTrajectoryRows(const GnssSolutionSample &sample, const GnssFactorRecord &record) const;
 
   GnssFactorBuildRequest request_;

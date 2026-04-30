@@ -784,6 +784,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.trajectory = base_dynamic_trajectory;
   run_result.gnss_factor_records.clear();
   run_result.gnss_consistency_records.clear();
+  run_result.vertical_envelope_diagnostics.clear();
   run_result.vertical_state_corrections.clear();
 
   gtsam::NonlinearFactorGraph graph_with_gnss = base_graph;
@@ -796,6 +797,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   gnss_request.run_summary = &run_result.run_summary;
   gnss_request.factor_records = &run_result.gnss_factor_records;
   gnss_request.consistency_records = &run_result.gnss_consistency_records;
+  gnss_request.vertical_envelope_diagnostics = &run_result.vertical_envelope_diagnostics;
   gnss_request.collect_consistency_records = collect_gnss_consistency;
   gnss_request.dynamic_start_time_s = dynamic_start_time_s;
   gnss_request.should_use_sample = [&](const GnssSolutionSample &sample) {
@@ -831,6 +833,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.gnss_factor_records,
     collect_gnss_consistency ? &run_result.gnss_consistency_records : nullptr,
     &run_result.trajectory);
+  PopulateVerticalEnvelopeDiagnostics(
+    optimized_values,
+    base_interpolator,
+    run_result.vertical_envelope_diagnostics);
 
   if (collect_reference_states) {
     const std::vector<ReferenceNodeState> optimized_reference_states =

@@ -111,6 +111,9 @@ struct OfflineRunnerConfig {
   GnssVerticalSigmaMode gnss_vertical_sigma_mode = GnssVerticalSigmaMode::kFixed;
   double gnss_vertical_fixed_sigma_m = 0.05;
   VerticalConstraintMode vertical_constraint_mode = VerticalConstraintMode::kDirectZ;
+  double vertical_envelope_gate_sigma_multiple = 2.0;
+  double vertical_envelope_min_half_width_m = 0.10;
+  double vertical_envelope_factor_sigma_m = 0.20;
   double gnss_sigma_scale_horizontal = 1.0;
   double gnss_sigma_scale_up = 1.0;
   GnssNoiseModel gnss_position_noise_model = GnssNoiseModel::kCauchy;

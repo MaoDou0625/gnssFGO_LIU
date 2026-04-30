@@ -10,6 +10,7 @@
 
 #include "offline_lc_minimal/core/ImuIntegrationUtils.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
+#include "offline_lc_minimal/factor/VerticalRtkFactors.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -157,7 +158,9 @@ void PopulateGnssPostfitResiduals(
       const auto pose = optimized_values.at<gtsam::Pose3>(X(record.synchronized_state_index));
       const Eigen::Vector3d residual_enu_m = ComputePositionResidualEnu(pose, record.measurement_enu_m);
       const bool use_vertical_direct_position =
-        consistency_record == nullptr || consistency_record->vertical_direct_position_factor_used;
+        consistency_record != nullptr
+          ? consistency_record->vertical_direct_position_factor_used
+          : record.vertical_direct_position_factor_used;
       record.residual_m =
         use_vertical_direct_position ? residual_enu_m.norm() : residual_enu_m.head<2>().norm();
       if (consistency_record != nullptr) {
@@ -197,7 +200,9 @@ void PopulateGnssPostfitResiduals(
         optimized_values.at<gtsam::Vector3>(W(record.state_index_j)));
       const Eigen::Vector3d residual_enu_m = ComputePositionResidualEnu(interpolated_pose, record.measurement_enu_m);
       const bool use_vertical_direct_position =
-        consistency_record == nullptr || consistency_record->vertical_direct_position_factor_used;
+        consistency_record != nullptr
+          ? consistency_record->vertical_direct_position_factor_used
+          : record.vertical_direct_position_factor_used;
       record.residual_m =
         use_vertical_direct_position ? residual_enu_m.norm() : residual_enu_m.head<2>().norm();
       if (consistency_record != nullptr) {
@@ -232,6 +237,45 @@ void PopulateGnssPostfitResiduals(
         }
       }
     }
+  }
+}
+
+void PopulateVerticalEnvelopeDiagnostics(
+  const gtsam::Values &optimized_values,
+  const gp::GPWNOJInterpolator &base_interpolator,
+  std::vector<VerticalEnvelopeDiagnosticRow> &vertical_envelope_diagnostics) {
+  for (auto &row : vertical_envelope_diagnostics) {
+    if (!row.factor_used) {
+      continue;
+    }
+
+    std::optional<double> predicted_up_m;
+    if (row.sync_status == StateMeasSyncStatus::kSynchronizedI ||
+        row.sync_status == StateMeasSyncStatus::kSynchronizedJ) {
+      const auto pose = optimized_values.at<gtsam::Pose3>(X(row.synchronized_state_index));
+      predicted_up_m = pose.translation().z();
+    } else if (row.sync_status == StateMeasSyncStatus::kInterpolated) {
+      gp::GPWNOJInterpolator interpolator = base_interpolator;
+      interpolator.Recalculate(
+        row.state_time_j_s - row.state_time_i_s,
+        row.duration_from_state_i_s);
+      const gtsam::Pose3 interpolated_pose = interpolator.InterpolatePose(
+        optimized_values.at<gtsam::Pose3>(X(row.state_index_i)),
+        optimized_values.at<gtsam::Vector3>(V(row.state_index_i)),
+        optimized_values.at<gtsam::Vector3>(W(row.state_index_i)),
+        optimized_values.at<gtsam::Pose3>(X(row.state_index_j)),
+        optimized_values.at<gtsam::Vector3>(V(row.state_index_j)),
+        optimized_values.at<gtsam::Vector3>(W(row.state_index_j)));
+      predicted_up_m = interpolated_pose.translation().z();
+    }
+
+    if (!predicted_up_m.has_value()) {
+      continue;
+    }
+    row.predicted_up_m = *predicted_up_m;
+    row.raw_residual_m = row.predicted_up_m - row.rtk_up_m;
+    row.violation_m = factor::VerticalEnvelopeResidual(row.raw_residual_m, row.half_width_m);
+    row.inside_envelope = std::abs(row.violation_m) <= 1e-12;
   }
 }
 

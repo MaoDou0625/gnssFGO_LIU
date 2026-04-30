@@ -232,6 +232,11 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.gnss_sigma_scale_up <= 0.0) {
     throw std::runtime_error("GNSS sigma settings are invalid");
   }
+  if (config.vertical_envelope_gate_sigma_multiple <= 0.0 ||
+      config.vertical_envelope_min_half_width_m <= 0.0 ||
+      config.vertical_envelope_factor_sigma_m <= 0.0) {
+    throw std::runtime_error("vertical envelope settings must be positive");
+  }
   if (config.gnss_position_robust_param <= 0.0) {
     throw std::runtime_error("gnss_position_robust_param must be positive");
   }
@@ -456,6 +461,12 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.gnss_vertical_fixed_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_constraint_mode") {
     config.vertical_constraint_mode = ParseVerticalConstraintMode(normalized_value);
+  } else if (normalized_key == "vertical_envelope_gate_sigma_multiple") {
+    config.vertical_envelope_gate_sigma_multiple = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_envelope_min_half_width_m") {
+    config.vertical_envelope_min_half_width_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_envelope_factor_sigma_m") {
+    config.vertical_envelope_factor_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "gnss_sigma_scale_horizontal") {
     config.gnss_sigma_scale_horizontal = ParseDouble(normalized_value);
   } else if (normalized_key == "gnss_sigma_scale_up") {
@@ -650,6 +661,9 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "gnss_vertical_sigma_mode=" << ToString(config.gnss_vertical_sigma_mode) << '\n'
     << "gnss_vertical_fixed_sigma_m=" << config.gnss_vertical_fixed_sigma_m << '\n'
     << "vertical_constraint_mode=" << ToString(config.vertical_constraint_mode) << '\n'
+    << "vertical_envelope_gate_sigma_multiple=" << config.vertical_envelope_gate_sigma_multiple << '\n'
+    << "vertical_envelope_min_half_width_m=" << config.vertical_envelope_min_half_width_m << '\n'
+    << "vertical_envelope_factor_sigma_m=" << config.vertical_envelope_factor_sigma_m << '\n'
     << "gnss_sigma_scale_horizontal=" << config.gnss_sigma_scale_horizontal << '\n'
     << "gnss_sigma_scale_up=" << config.gnss_sigma_scale_up << '\n'
     << "gnss_position_noise_model=" << ToString(config.gnss_position_noise_model) << '\n'

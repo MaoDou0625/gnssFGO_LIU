@@ -27,6 +27,7 @@ struct GnssFactorRecord {
   long long trajectory_row_index_j = -1;
   long long synchronized_trajectory_row_index = -1;
   bool factor_used = false;
+  bool vertical_direct_position_factor_used = true;
   GnssFixType gnss_fix_type = GnssFixType::kNoSolution;
   StateMeasSyncStatus sync_status = StateMeasSyncStatus::kDropped;
   Eigen::Vector3d measurement_enu_m = Eigen::Vector3d::Zero();
@@ -141,6 +142,27 @@ struct GnssConsistencyRecord {
   bool vertical_direct_position_factor_used = false;
   Eigen::Vector3d postfit_residual_enu_m = Eigen::Vector3d::Zero();
   double postfit_nis = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct VerticalEnvelopeDiagnosticRow {
+  std::size_t sample_index = 0;
+  double raw_time_s = std::numeric_limits<double>::quiet_NaN();
+  double corrected_time_s = std::numeric_limits<double>::quiet_NaN();
+  StateMeasSyncStatus sync_status = StateMeasSyncStatus::kDropped;
+  std::size_t state_index_i = 0;
+  std::size_t state_index_j = 0;
+  std::size_t synchronized_state_index = 0;
+  double state_time_i_s = std::numeric_limits<double>::quiet_NaN();
+  double state_time_j_s = std::numeric_limits<double>::quiet_NaN();
+  double duration_from_state_i_s = std::numeric_limits<double>::quiet_NaN();
+  bool factor_used = false;
+  double rtk_up_m = std::numeric_limits<double>::quiet_NaN();
+  double sigma_u_m = std::numeric_limits<double>::quiet_NaN();
+  double half_width_m = std::numeric_limits<double>::quiet_NaN();
+  double predicted_up_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_residual_m = std::numeric_limits<double>::quiet_NaN();
+  double violation_m = std::numeric_limits<double>::quiet_NaN();
+  bool inside_envelope = false;
 };
 
 struct VerticalStateCorrectionRow {

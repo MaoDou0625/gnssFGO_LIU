@@ -1,3 +1,4 @@
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -43,6 +44,26 @@ void TestDirectZSmokeConfigLoads() {
     "direct-z smoke config should select direct_z vertical constraints");
 }
 
+void TestEnvelopeSmokeConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase2.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(config.enable_body_z_jump_detection, "envelope smoke config should enable body-z detection");
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "envelope smoke config should select envelope vertical constraints");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_gate_sigma_multiple - 2.0) < 1e-12,
+    "envelope sigma gate should load");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_min_half_width_m - 0.10) < 1e-12,
+    "envelope min half-width should load");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_factor_sigma_m - 0.20) < 1e-12,
+    "envelope factor sigma should load");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -78,6 +99,7 @@ void TestBodyZRequiresGnssAfterOverrides() {
 int main() {
   try {
     RunTest("TestDirectZSmokeConfigLoads", TestDirectZSmokeConfigLoads);
+    RunTest("TestEnvelopeSmokeConfigLoads", TestEnvelopeSmokeConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

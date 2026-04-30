@@ -12,7 +12,6 @@
 
 #include "offline_lc_minimal/factor/GPInterpolatedHorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
-#include "offline_lc_minimal/factor/VerticalRtkFactors.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
 
 namespace offline_lc_minimal {
@@ -64,17 +63,6 @@ gtsam::SharedNoiseModel MakeHorizontalNoiseModel(
     sigma_m.x() * sigma_m.x(),
     sigma_m.y() * sigma_m.y());
   return WrapHorizontalNoiseModel(config, gtsam::noiseModel::Diagonal::Variances(variances));
-}
-
-gtsam::SharedNoiseModel MakeVerticalNoiseModel(const Eigen::Vector3d &sigma_m) {
-  return gtsam::noiseModel::Isotropic::Sigma(1, sigma_m.z());
-}
-
-void EnsureDirectVerticalConstraintMode(const OfflineRunnerConfig &config) {
-  if (config.vertical_constraint_mode == VerticalConstraintMode::kDirectZ) {
-    return;
-  }
-  throw std::runtime_error("vertical_constraint_mode=envelope is reserved for Phase 2 and is not implemented yet");
 }
 
 GnssFactorRecord MakeBaseFactorRecord(
@@ -134,13 +122,16 @@ void FillSyncFields(
 
 void FillSigmaFields(
   const Eigen::Vector3d &sigma_m,
+  const VerticalConstraintPolicy &vertical_policy,
+  GnssFactorRecord *factor_record,
   GnssConsistencyRecord *record) {
+  factor_record->vertical_direct_position_factor_used = vertical_policy.UsesDirectPositionFactor();
   record->sigma_e_m = sigma_m.x();
   record->sigma_n_m = sigma_m.y();
   record->sigma_u_m = sigma_m.z();
   record->effective_sigma_u_m = sigma_m.z();
-  record->vertical_sigma_u_used_m = sigma_m.z();
-  record->vertical_direct_position_factor_used = true;
+  record->vertical_sigma_u_used_m = vertical_policy.VerticalSigmaUsedM(sigma_m);
+  record->vertical_direct_position_factor_used = vertical_policy.UsesDirectPositionFactor();
 }
 
 }  // namespace
@@ -157,9 +148,12 @@ void GnssFactorBuilder::Validate() const {
       !request_.trajectory_row_index_for_state) {
     throw std::runtime_error("GnssFactorBuilder received an incomplete request");
   }
-  EnsureDirectVerticalConstraintMode(*request_.config);
   if (request_.collect_consistency_records && request_.consistency_records == nullptr) {
     throw std::runtime_error("GnssFactorBuilder consistency records requested without storage");
+  }
+  if (request_.config->vertical_constraint_mode == VerticalConstraintMode::kEnvelope &&
+      request_.vertical_envelope_diagnostics == nullptr) {
+    throw std::runtime_error("envelope vertical constraints requested without diagnostics storage");
   }
 }
 
@@ -168,6 +162,8 @@ void GnssFactorBuilder::Build() const {
   if (!request_.config->enable_gnss) {
     return;
   }
+  const std::unique_ptr<VerticalConstraintPolicy> vertical_policy =
+    CreateVerticalConstraintPolicy(*request_.config);
 
   const std::size_t first_sample =
     std::min(request_.navigation_start_index + 1U, request_.gnss_samples->size());
@@ -215,17 +211,17 @@ void GnssFactorBuilder::Build() const {
       const double alpha = 1.0 - (elapsed_s / request_.config->early_gnss_relaxation_duration_s);
       sigma_m *= 1.0 + alpha * (request_.config->early_gnss_relaxation_scale - 1.0);
     }
-    FillSigmaFields(sigma_m, &consistency_record);
+    FillSigmaFields(sigma_m, *vertical_policy, &factor_record, &consistency_record);
 
     bool factor_used = false;
     if (sync_result.status == StateMeasSyncStatus::kSynchronizedI ||
         sync_result.status == StateMeasSyncStatus::kSynchronizedJ) {
-      AddSynchronizedFactors(sample, sample_index, sync_result, sigma_m);
+      AddSynchronizedFactors(sample, sample_index, corrected_time_s, sync_result, sigma_m, *vertical_policy);
       factor_used = true;
       ++request_.run_summary->gnss_synced_factor_count;
     } else if (sync_result.status == StateMeasSyncStatus::kInterpolated &&
                request_.config->enable_gp_interpolated_gnss) {
-      AddInterpolatedFactors(sample, sample_index, sync_result, sigma_m);
+      AddInterpolatedFactors(sample, sample_index, corrected_time_s, sync_result, sigma_m, *vertical_policy);
       factor_used = true;
       ++request_.run_summary->gnss_interpolated_factor_count;
     } else if (sync_result.status == StateMeasSyncStatus::kCached) {
@@ -250,9 +246,11 @@ void GnssFactorBuilder::Build() const {
 
 void GnssFactorBuilder::AddSynchronizedFactors(
   const GnssSolutionSample &sample,
-  const std::size_t /*sample_index*/,
+  const std::size_t sample_index,
+  const double corrected_time_s,
   const StateMeasSyncResult &sync_result,
-  const Eigen::Vector3d &sigma_m) const {
+  const Eigen::Vector3d &sigma_m,
+  const VerticalConstraintPolicy &vertical_policy) const {
   const std::size_t state_index =
     sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i
                                                               : sync_result.key_index_j;
@@ -260,22 +258,23 @@ void GnssFactorBuilder::AddSynchronizedFactors(
     sample.enu_position_m.x(),
     sample.enu_position_m.y());
   const auto horizontal_noise = MakeHorizontalNoiseModel(*request_.config, sigma_m);
-  const auto vertical_noise = MakeVerticalNoiseModel(sigma_m);
   request_.graph->add(factor::HorizontalPositionFactor(
     symbol::X(state_index),
     horizontal_measurement,
     horizontal_noise));
-  request_.graph->add(factor::VerticalPositionFactor(
-    symbol::X(state_index),
-    sample.enu_position_m.z(),
-    vertical_noise));
+  VerticalConstraintPolicyContext context;
+  context.graph = request_.graph;
+  context.envelope_diagnostics = request_.vertical_envelope_diagnostics;
+  vertical_policy.AddSynchronized(sample, sample_index, corrected_time_s, sync_result, sigma_m, context);
 }
 
 void GnssFactorBuilder::AddInterpolatedFactors(
   const GnssSolutionSample &sample,
-  const std::size_t /*sample_index*/,
+  const std::size_t sample_index,
+  const double corrected_time_s,
   const StateMeasSyncResult &sync_result,
-  const Eigen::Vector3d &sigma_m) const {
+  const Eigen::Vector3d &sigma_m,
+  const VerticalConstraintPolicy &vertical_policy) const {
   const auto qc_model =
     gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(kInterpolatorQcVariance));
   const gp::GPWNOJInterpolator interpolator(
@@ -286,7 +285,6 @@ void GnssFactorBuilder::AddInterpolatedFactors(
     sample.enu_position_m.x(),
     sample.enu_position_m.y());
   const auto horizontal_noise = MakeHorizontalNoiseModel(*request_.config, sigma_m);
-  const auto vertical_noise = MakeVerticalNoiseModel(sigma_m);
   request_.graph->add(factor::GPInterpolatedHorizontalPositionFactor(
     symbol::X(sync_result.key_index_i),
     symbol::V(sync_result.key_index_i),
@@ -298,16 +296,10 @@ void GnssFactorBuilder::AddInterpolatedFactors(
     gtsam::Vector3::Zero(),
     horizontal_noise,
     interpolator));
-  request_.graph->add(factor::GPInterpolatedVerticalPositionFactor(
-    symbol::X(sync_result.key_index_i),
-    symbol::V(sync_result.key_index_i),
-    symbol::W(sync_result.key_index_i),
-    symbol::X(sync_result.key_index_j),
-    symbol::V(sync_result.key_index_j),
-    symbol::W(sync_result.key_index_j),
-    sample.enu_position_m.z(),
-    interpolator,
-    vertical_noise));
+  VerticalConstraintPolicyContext context;
+  context.graph = request_.graph;
+  context.envelope_diagnostics = request_.vertical_envelope_diagnostics;
+  vertical_policy.AddInterpolated(sample, sample_index, corrected_time_s, sync_result, sigma_m, interpolator, context);
 }
 
 void GnssFactorBuilder::UpdateTrajectoryRows(
