@@ -13,12 +13,10 @@
 #include "offline_lc_minimal/core/BodyZBidirectionalJumpDetector.h"
 #include "offline_lc_minimal/core/SequentialNhcJumpDetector.h"
 #include "offline_lc_minimal/core/SparseVerticalJumpPlanner.h"
-#include "offline_lc_minimal/core/VerticalHybridWeighting.h"
 #include "offline_lc_minimal/core/VerticalInsideBiasAdapter.h"
 #include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/VerticalInsideKinematicFactor.h"
-#include "offline_lc_minimal/factor/VerticalPositionFactor.h"
 #include "offline_lc_minimal/factor/VerticalRtkPreintegrationFeedbackFactor.h"
 
 namespace {
@@ -31,14 +29,11 @@ using offline_lc_minimal::LoadConfigFile;
 using offline_lc_minimal::ReferenceNodeState;
 using offline_lc_minimal::SequentialNhcJumpDetector;
 using offline_lc_minimal::SparseVerticalJumpPlanner;
-using offline_lc_minimal::ComputeVerticalHybridWeighting;
-using offline_lc_minimal::IsStateInsideBodyZJumpWindow;
 using offline_lc_minimal::VerticalInsideBiasAdapter;
 using offline_lc_minimal::VerticalVzReferenceSample;
 using offline_lc_minimal::factor::HorizontalPositionFactor;
 using offline_lc_minimal::factor::StaticVerticalSpecificForceFactor;
 using offline_lc_minimal::factor::VerticalInsideKinematicFactor;
-using offline_lc_minimal::factor::VerticalPositionFactor;
 using offline_lc_minimal::factor::VerticalRtkPreintegrationFeedbackFactor;
 
 template <typename Function>
@@ -264,10 +259,7 @@ void TestVerticalFeedbackRejectsNegativeMinInterval() {
 void TestSequentialRecoveryConfigLoads() {
   const auto config_path = WriteTempConfig(
     MakeVerticalFeedbackConfigPrefix()
-    + "enable_vertical_rtk_global_position_factor=true\n"
     + "vertical_local_recovery_max_iterations=6\n"
-      "vertical_rtk_feedback_sigma_vz_mps=0.04\n"
-      "vertical_rtk_jump_inside_sigma_scale=12.0\n"
       "vertical_global_vz_window_s=1.5\n"
       "vertical_global_vz_smooth_window_s=1.2\n"
       "vertical_jump_candidate_min_separation_s=1.1\n"
@@ -305,10 +297,7 @@ void TestSequentialRecoveryConfigLoads() {
     "vertical_rtk_sequential_recovery_loads.cfg");
   const auto config = LoadConfigFile(config_path.string(), DefaultConfig());
   std::filesystem::remove(config_path);
-  ExpectTrue(config.enable_vertical_rtk_global_position_factor, "global vertical RTK factor flag should load");
   ExpectNear(config.vertical_local_recovery_max_iterations, 6, 0.0, "local recovery iteration count should load");
-  ExpectNear(config.vertical_rtk_feedback_sigma_vz_mps, 0.04, 1e-12, "inside vz sigma should load");
-  ExpectNear(config.vertical_rtk_jump_inside_sigma_scale, 12.0, 1e-12, "jump inside sigma scale should load");
   ExpectNear(config.vertical_global_vz_window_s, 1.5, 1e-12, "global vz diff window should load");
   ExpectNear(config.vertical_global_vz_smooth_window_s, 1.2, 1e-12, "global vz smooth window should load");
   ExpectNear(
@@ -426,67 +415,6 @@ void TestHorizontalPositionFactorIgnoresVerticalTranslation() {
       pose,
       1e-6);
   ExpectMatrixNear(jacobian, numerical_jacobian, 5e-5, "horizontal factor Jacobian should match numerical derivative");
-}
-
-void TestVerticalPositionFactorUsesOnlyVerticalTranslation() {
-  const VerticalPositionFactor factor(
-    1,
-    3.0,
-    gtsam::noiseModel::Isotropic::Sigma(1, 0.2));
-  const gtsam::Pose3 pose(
-    gtsam::Rot3::RzRyRx(0.2, -0.1, 0.05),
-    gtsam::Point3(1.1, 1.8, 3.4));
-  gtsam::Matrix jacobian;
-  const gtsam::Vector residual = factor.evaluateError(pose, jacobian);
-  ExpectNear(residual[0], 0.4, 1e-12, "vertical factor should use up translation");
-  ExpectTrue(jacobian.rows() == 1 && jacobian.cols() == 6, "vertical factor Jacobian shape should be 1x6");
-  const auto numerical_jacobian =
-    gtsam::numericalDerivative11<gtsam::Vector, gtsam::Pose3>(
-      [&](const gtsam::Pose3 &value) { return factor.evaluateError(value); },
-      pose,
-      1e-6);
-  ExpectMatrixNear(jacobian, numerical_jacobian, 5e-5, "vertical factor Jacobian should match numerical derivative");
-}
-
-void TestVerticalHybridWeightingUsesGateAndJumpPolicy() {
-  auto config = DefaultConfig();
-  config.vertical_rtk_inside_gate_sigma_scale = 4.0;
-  config.vertical_rtk_outside_gate_sigma_scale = 1.5;
-  config.vertical_rtk_jump_inside_sigma_scale = 12.0;
-
-  BodyZJumpWindowCandidate window;
-  window.start_state_index = 3U;
-  window.end_state_index = 5U;
-  const std::vector<BodyZJumpWindowCandidate> windows{window};
-
-  const auto inside_weighting =
-    ComputeVerticalHybridWeighting(config, windows, 2U, 0.05, false, true);
-  ExpectNear(
-    inside_weighting.direct_vertical_sigma_m,
-    0.20,
-    1e-12,
-    "inside-gate RTK vertical sigma should be inflated");
-  ExpectNear(
-    inside_weighting.inside_kinematic_sigma_scale,
-    1.0,
-    1e-12,
-    "non-jump states should keep nominal inside kinematic weight");
-
-  const auto jump_weighting =
-    ComputeVerticalHybridWeighting(config, windows, 4U, 0.05, false, false);
-  ExpectNear(
-    jump_weighting.direct_vertical_sigma_m,
-    0.075,
-    1e-12,
-    "outside-gate RTK vertical sigma should use outside scale");
-  ExpectTrue(jump_weighting.inside_body_z_window, "state inside body-z window should be detected");
-  ExpectNear(
-    jump_weighting.inside_kinematic_sigma_scale,
-    12.0,
-    1e-12,
-    "body-z window should weaken the sequential IMU reference factor");
-  ExpectTrue(IsStateInsideBodyZJumpWindow(windows, 5U), "window end state should be included");
-  ExpectTrue(!IsStateInsideBodyZJumpWindow(windows, 6U), "state after window should not be included");
 }
 
 StaticVerticalSpecificForceFactor MakeStaticVerticalSpecificForceFactor(
@@ -1244,7 +1172,7 @@ void TestVerticalInsideBiasAdapterFiltersSmallInsideResiduals() {
     "inside bias measurement should reduce posterior covariance");
 }
 
-void TestVerticalInsideBiasAdapterRejectsOutsideGateResiduals() {
+void TestVerticalInsideBiasAdapterUsesBoundedOutsideGateResiduals() {
   auto config = DefaultConfig();
   config.enable_vertical_inside_bias_adaptation = true;
   config.vertical_acc_bias_sigma_mps2 = 1e-3;
@@ -1255,11 +1183,16 @@ void TestVerticalInsideBiasAdapterRejectsOutsideGateResiduals() {
   ExpectTrue(
     !adapter.ObserveInsideResidual(1U, 0.0, 0.0, 0.05, 0.1, 0.1, 0.0).has_value(),
     "first inside residual should only seed the bias adapter");
+  const auto bounded_update = adapter.ObserveInsideResidual(2U, 1.0, -0.12, 0.05, 0.1, 0.1, 0.0);
   ExpectTrue(
-    !adapter.ObserveInsideResidual(2U, 1.0, -0.12, 0.05, 0.1, 0.1, 0.0).has_value(),
-    "outside-gate residual should not update ba_z");
-  const auto inside_update = adapter.ObserveInsideResidual(3U, 2.0, -0.02, 0.05, 0.1, 0.1, 0.0);
-  ExpectTrue(inside_update.has_value(), "inside-gate residual should still update ba_z");
+    bounded_update.has_value(),
+    "bounded outside residual should be usable as a robust ba_z feedback observation");
+  ExpectTrue(
+    bounded_update->sigma_u_m > 0.05,
+    "outside residual should be down-weighted by inflating its effective sigma");
+  ExpectTrue(
+    !adapter.ObserveInsideResidual(3U, 2.0, -1.20, 0.05, 0.1, 0.1, 0.0).has_value(),
+    "large outside residual should still be ignored as a vertical outlier");
 }
 
 void TestVerticalInsideBiasAdapterRewindRestoresFilterState() {
@@ -1317,8 +1250,6 @@ int main() {
       "TestSequentialRecoveryRejectsInvalidNhcHistoryWindow",
       TestSequentialRecoveryRejectsInvalidNhcHistoryWindow);
     RunTest("TestHorizontalPositionFactorIgnoresVerticalTranslation", TestHorizontalPositionFactorIgnoresVerticalTranslation);
-    RunTest("TestVerticalPositionFactorUsesOnlyVerticalTranslation", TestVerticalPositionFactorUsesOnlyVerticalTranslation);
-    RunTest("TestVerticalHybridWeightingUsesGateAndJumpPolicy", TestVerticalHybridWeightingUsesGateAndJumpPolicy);
     RunTest(
       "TestStaticVerticalSpecificForceResidualNearZeroWhenBiasMatches",
       TestStaticVerticalSpecificForceResidualNearZeroWhenBiasMatches);
@@ -1379,8 +1310,8 @@ int main() {
       "TestVerticalInsideBiasAdapterFiltersSmallInsideResiduals",
       TestVerticalInsideBiasAdapterFiltersSmallInsideResiduals);
     RunTest(
-      "TestVerticalInsideBiasAdapterRejectsOutsideGateResiduals",
-      TestVerticalInsideBiasAdapterRejectsOutsideGateResiduals);
+      "TestVerticalInsideBiasAdapterUsesBoundedOutsideGateResiduals",
+      TestVerticalInsideBiasAdapterUsesBoundedOutsideGateResiduals);
     RunTest(
       "TestVerticalInsideBiasAdapterRewindRestoresFilterState",
       TestVerticalInsideBiasAdapterRewindRestoresFilterState);

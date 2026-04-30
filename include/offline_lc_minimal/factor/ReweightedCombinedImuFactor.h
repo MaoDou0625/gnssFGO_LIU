@@ -100,9 +100,9 @@ class ReweightedCombinedImuFactor
     const gtsam::PreintegratedCombinedMeasurements &preintegrated_measurements,
     const double attitude_sigma_rad,
     const gtsam::Vector3 &specific_force_sigma_mps2_by_axis) {
+    (void)specific_force_sigma_mps2_by_axis;
     gtsam::Matrix covariance = preintegrated_measurements.preintMeasCov();
     covariance = 0.5 * (covariance + covariance.transpose());
-    const double delta_time_s = std::max(preintegrated_measurements.deltaTij(), 1e-9);
 
     gtsam::Matrix scaling = gtsam::Matrix::Identity(15, 15);
     const auto tighten_axis = [&](const int row, const double target_sigma) {
@@ -116,14 +116,6 @@ class ReweightedCombinedImuFactor
 
     for (int axis = 0; axis < 3; ++axis) {
       tighten_axis(axis, attitude_sigma_rad);
-    }
-    for (int axis = 0; axis < 3; ++axis) {
-      const double specific_force_sigma = specific_force_sigma_mps2_by_axis[axis];
-      if (specific_force_sigma <= 0.0) {
-        continue;
-      }
-      tighten_axis(3 + axis, 0.5 * specific_force_sigma * delta_time_s * delta_time_s);
-      tighten_axis(6 + axis, specific_force_sigma * delta_time_s);
     }
 
     for (int axis = 0; axis < 15; ++axis) {

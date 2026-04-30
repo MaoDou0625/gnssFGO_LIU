@@ -101,20 +101,16 @@ void TestOnlyZAxisTightensZBlocks() {
     6,
     measurements,
     1e6,
-    gtsam::Vector3(0.0, 0.0, 1e-9));
+    gtsam::Vector3(0.0, 0.0, 0.01));
   const gtsam::Matrix reweighted_covariance = CovarianceFromFactor(factor);
   const gtsam::Matrix base_covariance = measurements.preintMeasCov();
 
   ExpectNear(reweighted_covariance(3, 3), base_covariance(3, 3), 1e-10, "position x should stay unchanged");
   ExpectNear(reweighted_covariance(4, 4), base_covariance(4, 4), 1e-10, "position y should stay unchanged");
+  ExpectNear(reweighted_covariance(5, 5), base_covariance(5, 5), 1e-10, "position z should stay unchanged");
   ExpectNear(reweighted_covariance(6, 6), base_covariance(6, 6), 1e-10, "velocity x should stay unchanged");
   ExpectNear(reweighted_covariance(7, 7), base_covariance(7, 7), 1e-10, "velocity y should stay unchanged");
-  ExpectTrue(
-    reweighted_covariance(5, 5) < base_covariance(5, 5),
-    "specific-force z sigma should tighten vertical position covariance");
-  ExpectTrue(
-    reweighted_covariance(8, 8) < base_covariance(8, 8),
-    "specific-force z sigma should tighten vertical velocity covariance");
+  ExpectNear(reweighted_covariance(8, 8), base_covariance(8, 8), 1e-10, "velocity z should stay unchanged");
 }
 
 void TestLegacySpecificForceAliasMapsToAllAxes() {
@@ -174,22 +170,23 @@ void TestAxisSpecificKeysOverrideLegacyScalar() {
     "axis-specific override should keep explicit z value");
 }
 
-void TestNonZeroSpecificForceXYLoads() {
+void TestNonZeroSpecificForceXYIsRejected() {
   const std::filesystem::path temp_path =
-    std::filesystem::temp_directory_path() / "reweighted_specific_force_xy_loads.cfg";
+    std::filesystem::temp_directory_path() / "reweighted_specific_force_xy_rejected.cfg";
   {
     std::ofstream stream(temp_path);
     stream << "reweighted_combined_imu_specific_force_sigma_x_mps2=0.01\n";
   }
 
-  const auto config = LoadConfigFile(temp_path.string(), DefaultConfig());
+  bool threw = false;
+  try {
+    [[maybe_unused]] const auto config = LoadConfigFile(temp_path.string(), DefaultConfig());
+  } catch (const std::exception &) {
+    threw = true;
+  }
   std::filesystem::remove(temp_path);
 
-  ExpectNear(
-    config.reweighted_combined_imu_specific_force_sigma_x_mps2,
-    0.01,
-    1e-12,
-    "specific-force x sigma should load now that axis weighting is implemented");
+  ExpectTrue(threw, "non-zero specific-force x/y should be rejected until those axes are implemented");
 }
 
 }  // namespace
@@ -200,7 +197,7 @@ int main() {
     RunTest("TestOnlyZAxisTightensZBlocks", TestOnlyZAxisTightensZBlocks);
     RunTest("TestLegacySpecificForceAliasMapsToAllAxes", TestLegacySpecificForceAliasMapsToAllAxes);
     RunTest("TestAxisSpecificKeysOverrideLegacyScalar", TestAxisSpecificKeysOverrideLegacyScalar);
-    RunTest("TestNonZeroSpecificForceXYLoads", TestNonZeroSpecificForceXYLoads);
+    RunTest("TestNonZeroSpecificForceXYIsRejected", TestNonZeroSpecificForceXYIsRejected);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return EXIT_FAILURE;

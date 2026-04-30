@@ -31,14 +31,12 @@
 #include "offline_lc_minimal/core/SequentialNhcJumpDetector.h"
 #include "offline_lc_minimal/core/SparseVerticalJumpPlanner.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
-#include "offline_lc_minimal/core/VerticalHybridWeighting.h"
 #include "offline_lc_minimal/core/VerticalInsideBiasAdapter.h"
 #include "offline_lc_minimal/core/VerticalLocalRecoveryUtils.h"
 #include "offline_lc_minimal/factor/AngularRateFactor.h"
 #include "offline_lc_minimal/factor/BiasGmTransitionFactor.h"
 #include "offline_lc_minimal/factor/GPInterpolatedGPSFactor.h"
 #include "offline_lc_minimal/factor/GPInterpolatedHorizontalPositionFactor.h"
-#include "offline_lc_minimal/factor/GPInterpolatedVerticalPositionFactor.h"
 #include "offline_lc_minimal/factor/GlobalAccelBiasFactor.h"
 #include "offline_lc_minimal/factor/GlobalGyroBiasFactor.h"
 #include "offline_lc_minimal/factor/GlobalPlanarAccelBiasFactor.h"
@@ -51,7 +49,6 @@
 #include "offline_lc_minimal/factor/StaticAttitudeDriftFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasGmTransitionFactor.h"
 #include "offline_lc_minimal/factor/VerticalInsideKinematicFactor.h"
-#include "offline_lc_minimal/factor/VerticalPositionFactor.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
 
 namespace offline_lc_minimal {
@@ -933,11 +930,6 @@ gtsam::SharedNoiseModel MakeHorizontalGnssNoiseModel(const OfflineRunnerConfig &
     sigma_m.x() * sigma_m.x(),
     sigma_m.y() * sigma_m.y());
   return WrapGnssNoiseModel(config, gtsam::noiseModel::Diagonal::Variances(variances));
-}
-
-gtsam::SharedNoiseModel MakeVerticalGnssNoiseModel(const OfflineRunnerConfig &config, const double sigma_u_m) {
-  (void)config;
-  return gtsam::noiseModel::Isotropic::Sigma(1, std::max(sigma_u_m, kNumericalSigmaFloorM));
 }
 
 void EnsureReferenceStatesValidUntil(
@@ -2561,6 +2553,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
             consistency_record.effective_sigma_u_m = consistency_base_sigma_m.z();
             consistency_record.vertical_gate_threshold_m =
               std::sqrt(vertical_gate_nis_threshold) * consistency_record.effective_sigma_u_m;
+            consistency_record.vertical_direct_position_factor_used = apply_initial_vertical_anchor;
+            consistency_record.vertical_sigma_u_used_m =
+              apply_initial_vertical_anchor ? consistency_base_sigma_m.z() : std::numeric_limits<double>::quiet_NaN();
             if (feedback_anchor_state.has_value()) {
               const std::size_t required_prefit_index = ResolvePrefitReferenceRightIndex(sync_result);
               std::size_t propagation_anchor_index =
@@ -4087,8 +4082,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                 const bool correction_improves_residual =
                   std::isfinite(corrected_vertical_nis) && std::isfinite(current_vertical_nis) &&
                   corrected_vertical_nis + 1e-9 < current_vertical_nis;
+                const bool bounded_bias_feedback_observation =
+                  std::abs(consistency_record.local_postfit_residual_u_m) <=
+                  10.0 * consistency_record.vertical_gate_threshold_m;
                 const bool correction_acceptable =
                   correction_keeps_inside ||
+                  bounded_bias_feedback_observation ||
                   (correction_improves_residual &&
                    std::abs(corrected_residual_enu_m.z()) <=
                      std::max(
@@ -4187,27 +4186,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
             consistency_record.vertical_gate_inside = std::numeric_limits<double>::quiet_NaN();
           }
 
-          VerticalHybridWeighting vertical_weighting;
-          bool use_direct_vertical_position_factor = !use_vertical_rtk_1d_nis_gate;
-          if (use_vertical_rtk_1d_nis_gate) {
-            const std::size_t weighting_state_index =
-              feedback_anchor_state.value_or(ResolvePrefitReferenceRightIndex(sync_result));
-            vertical_weighting = ComputeVerticalHybridWeighting(
-              config_,
-              body_z_seed_detection.windows,
-              weighting_state_index,
-              consistency_base_sigma_m.z(),
-              apply_initial_vertical_anchor,
-              inside_gate);
-            use_direct_vertical_position_factor =
-              apply_initial_vertical_anchor || config_.enable_vertical_rtk_global_position_factor;
-            consistency_record.vertical_direct_position_factor_used = use_direct_vertical_position_factor;
-            consistency_record.vertical_sigma_u_used_m =
-              use_direct_vertical_position_factor
-                ? vertical_weighting.direct_vertical_sigma_m
-                : std::numeric_limits<double>::quiet_NaN();
-          }
-
           if (iteration.failed) {
             consistency_record.factor_used = false;
             iteration.gnss_factor_records.push_back(record);
@@ -4225,20 +4203,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
             use_horizontal_only_position_factor
               ? MakeHorizontalGnssNoiseModel(config_, horizontal_sigma_m)
               : gtsam::SharedNoiseModel{};
-          const auto vertical_noise_model =
-            use_horizontal_only_position_factor && use_direct_vertical_position_factor
-              ? MakeVerticalGnssNoiseModel(config_, vertical_weighting.direct_vertical_sigma_m)
-              : gtsam::SharedNoiseModel{};
-          const double vertical_inside_sigma_scale =
-            use_vertical_rtk_1d_nis_gate ? vertical_weighting.inside_kinematic_sigma_scale : 1.0;
           const auto vertical_inside_kinematic_noise_model =
             use_horizontal_only_position_factor && feedback_anchor_state.has_value() &&
                 *feedback_anchor_state < iteration.gate_reference_states.size()
               ? gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4(
-                  config_.vertical_rtk_feedback_sigma_attitude_rad * vertical_inside_sigma_scale,
-                  config_.vertical_rtk_feedback_sigma_attitude_rad * vertical_inside_sigma_scale,
-                  config_.vertical_rtk_feedback_sigma_vz_mps * vertical_inside_sigma_scale,
-                  ResolveVerticalInsideBazSigmaMps2(config_) * vertical_inside_sigma_scale))
+                  config_.vertical_rtk_feedback_sigma_attitude_rad,
+                  config_.vertical_rtk_feedback_sigma_attitude_rad,
+                  0.05,
+                  std::max(ResolveVerticalAccBiasSigmaMps2(config_), 1e-12)))
               : gtsam::SharedNoiseModel{};
 
           switch (sync_result.status) {
@@ -4251,12 +4223,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   X(sync_state_index),
                   gtsam::Point2(record.measurement_enu_m.x(), record.measurement_enu_m.y()),
                   horizontal_noise_model));
-                if (use_direct_vertical_position_factor) {
-                  graph_with_gnss.add(factor::VerticalPositionFactor(
-                    X(sync_state_index),
-                    record.measurement_enu_m.z(),
-                    vertical_noise_model));
-                }
                 if (!inside_reference_states.empty() && sync_state_index < inside_reference_states.size()) {
                   const auto &reference_state = inside_reference_states[sync_state_index];
                   graph_with_gnss.add(factor::VerticalInsideKinematicFactor(
@@ -4313,19 +4279,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                   gtsam::Vector3::Zero(),
                   horizontal_noise_model,
                   interpolator));
-                if (use_direct_vertical_position_factor) {
-                  graph_with_gnss.add(factor::GPInterpolatedVerticalPositionFactor(
-                    X(sync_result.key_index_i),
-                    V(sync_result.key_index_i),
-                    W(sync_result.key_index_i),
-                    X(sync_result.key_index_j),
-                    V(sync_result.key_index_j),
-                    W(sync_result.key_index_j),
-                    record.measurement_enu_m.z(),
-                    gtsam::Vector3::Zero(),
-                    vertical_noise_model,
-                    interpolator));
-                }
                 if (!inside_reference_states.empty() &&
                     sync_result.key_index_j < inside_reference_states.size()) {
                   const auto &reference_state = inside_reference_states[sync_result.key_index_j];

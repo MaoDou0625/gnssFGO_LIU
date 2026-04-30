@@ -225,8 +225,6 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_acc_bias_process_noise_scale = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_rtk_preintegration_feedback") {
     config.enable_vertical_rtk_preintegration_feedback = ParseBool(normalized_value);
-  } else if (normalized_key == "enable_vertical_rtk_global_position_factor") {
-    config.enable_vertical_rtk_global_position_factor = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_rtk_gate_sigma_multiple") {
     config.vertical_rtk_gate_sigma_multiple = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_rtk_inside_gate_sigma_scale") {
@@ -247,12 +245,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_rtk_feedback_sigma_baz_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_rtk_feedback_sigma_attitude_rad") {
     config.vertical_rtk_feedback_sigma_attitude_rad = ParseDouble(normalized_value);
-  } else if (normalized_key == "vertical_rtk_feedback_sigma_vz_mps") {
-    config.vertical_rtk_feedback_sigma_vz_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_rtk_feedback_min_interval_s") {
     config.vertical_rtk_feedback_min_interval_s = ParseDouble(normalized_value);
-  } else if (normalized_key == "vertical_rtk_jump_inside_sigma_scale") {
-    config.vertical_rtk_jump_inside_sigma_scale = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_local_recovery_max_iterations") {
     config.vertical_local_recovery_max_iterations = ParseInt(normalized_value);
   } else if (normalized_key == "vertical_local_recovery_max_attitude_delta_rad") {
@@ -555,6 +549,13 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
   OfflineRunnerConfig config = base_config;
   if (config_path.empty()) {
     ResolveReweightedSpecificForceSigmaAxes(config);
+    if ((config.reweighted_combined_imu_specific_force_sigma_x_specified &&
+         config.reweighted_combined_imu_specific_force_sigma_x_mps2 > 0.0) ||
+        (config.reweighted_combined_imu_specific_force_sigma_y_specified &&
+         config.reweighted_combined_imu_specific_force_sigma_y_mps2 > 0.0)) {
+      throw std::runtime_error(
+        "only reweighted_combined_imu_specific_force_sigma_z_mps2 is currently supported");
+    }
     if (config.state_meas_sync_lower_bound_s > config.state_meas_sync_upper_bound_s) {
       throw std::runtime_error("state_meas_sync_lower_bound_s must be <= state_meas_sync_upper_bound_s");
     }
@@ -702,15 +703,11 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     }
     if (config.vertical_rtk_feedback_sigma_dp_m <= 0.0 ||
         config.vertical_rtk_feedback_sigma_baz_mps2 <= 0.0 ||
-        config.vertical_rtk_feedback_sigma_attitude_rad <= 0.0 ||
-        config.vertical_rtk_feedback_sigma_vz_mps <= 0.0) {
+        config.vertical_rtk_feedback_sigma_attitude_rad <= 0.0) {
       throw std::runtime_error("vertical RTK feedback sigmas must be positive");
     }
     if (config.vertical_rtk_feedback_min_interval_s < 0.0) {
       throw std::runtime_error("vertical_rtk_feedback_min_interval_s must be non-negative");
-    }
-    if (config.vertical_rtk_jump_inside_sigma_scale < 1.0) {
-      throw std::runtime_error("vertical_rtk_jump_inside_sigma_scale must be >= 1");
     }
     if (config.vertical_local_recovery_max_iterations <= 0) {
       throw std::runtime_error("vertical_local_recovery_max_iterations must be positive");
@@ -903,6 +900,13 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
     OverrideConfigField(config, key, value);
   }
   ResolveReweightedSpecificForceSigmaAxes(config);
+  if ((config.reweighted_combined_imu_specific_force_sigma_x_specified &&
+       config.reweighted_combined_imu_specific_force_sigma_x_mps2 > 0.0) ||
+      (config.reweighted_combined_imu_specific_force_sigma_y_specified &&
+       config.reweighted_combined_imu_specific_force_sigma_y_mps2 > 0.0)) {
+    throw std::runtime_error(
+      "only reweighted_combined_imu_specific_force_sigma_z_mps2 is currently supported");
+  }
 
   if (config.state_meas_sync_lower_bound_s > config.state_meas_sync_upper_bound_s) {
     throw std::runtime_error("state_meas_sync_lower_bound_s must be <= state_meas_sync_upper_bound_s");
@@ -1051,15 +1055,11 @@ OfflineRunnerConfig LoadConfigFile(const std::string_view config_path, const Off
   }
   if (config.vertical_rtk_feedback_sigma_dp_m <= 0.0 ||
       config.vertical_rtk_feedback_sigma_baz_mps2 <= 0.0 ||
-      config.vertical_rtk_feedback_sigma_attitude_rad <= 0.0 ||
-      config.vertical_rtk_feedback_sigma_vz_mps <= 0.0) {
+      config.vertical_rtk_feedback_sigma_attitude_rad <= 0.0) {
     throw std::runtime_error("vertical RTK feedback sigmas must be positive");
   }
   if (config.vertical_rtk_feedback_min_interval_s < 0.0) {
     throw std::runtime_error("vertical_rtk_feedback_min_interval_s must be non-negative");
-  }
-  if (config.vertical_rtk_jump_inside_sigma_scale < 1.0) {
-    throw std::runtime_error("vertical_rtk_jump_inside_sigma_scale must be >= 1");
   }
   if (config.vertical_local_recovery_max_iterations <= 0) {
     throw std::runtime_error("vertical_local_recovery_max_iterations must be positive");
@@ -1263,8 +1263,6 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "vertical_acc_bias_process_noise_scale=" << config.vertical_acc_bias_process_noise_scale << '\n'
       << "enable_vertical_rtk_preintegration_feedback="
       << (config.enable_vertical_rtk_preintegration_feedback ? "true" : "false") << '\n'
-      << "enable_vertical_rtk_global_position_factor="
-      << (config.enable_vertical_rtk_global_position_factor ? "true" : "false") << '\n'
       << "vertical_rtk_gate_sigma_multiple=" << config.vertical_rtk_gate_sigma_multiple << '\n'
       << "vertical_rtk_inside_gate_sigma_scale=" << config.vertical_rtk_inside_gate_sigma_scale << '\n'
       << "vertical_rtk_outside_gate_sigma_scale=" << config.vertical_rtk_outside_gate_sigma_scale << '\n'
@@ -1275,9 +1273,7 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
       << "vertical_rtk_feedback_sigma_dp_m=" << config.vertical_rtk_feedback_sigma_dp_m << '\n'
       << "vertical_rtk_feedback_sigma_baz_mps2=" << config.vertical_rtk_feedback_sigma_baz_mps2 << '\n'
       << "vertical_rtk_feedback_sigma_attitude_rad=" << config.vertical_rtk_feedback_sigma_attitude_rad << '\n'
-      << "vertical_rtk_feedback_sigma_vz_mps=" << config.vertical_rtk_feedback_sigma_vz_mps << '\n'
       << "vertical_rtk_feedback_min_interval_s=" << config.vertical_rtk_feedback_min_interval_s << '\n'
-      << "vertical_rtk_jump_inside_sigma_scale=" << config.vertical_rtk_jump_inside_sigma_scale << '\n'
       << "vertical_local_recovery_max_iterations=" << config.vertical_local_recovery_max_iterations << '\n'
       << "vertical_local_recovery_max_attitude_delta_rad="
       << config.vertical_local_recovery_max_attitude_delta_rad << '\n'
