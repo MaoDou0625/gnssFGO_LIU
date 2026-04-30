@@ -55,14 +55,12 @@ add_library(offline_lc_minimal_lib
   src/io/TextDatasetLoader.cpp
   src/core/InitialStaticConstraintBuilder.cpp
   src/core/BodyZBidirectionalJumpDetector.cpp
+  src/core/BodyZWindowPipeline.cpp
+  src/core/GnssFactorBuilder.cpp
   src/core/ImuIntegrationUtils.cpp
   src/core/ImuRateAvpReconstructor.cpp
   src/core/StaticImuAlignment.cpp
-  src/core/SequentialNhcJumpDetector.cpp
-  src/core/SparseVerticalJumpPlanner.cpp
   src/core/TrajectoryInitializer.cpp
-  src/core/VerticalInsideBiasAdapter.cpp
-  src/core/VerticalLocalRecoveryUtils.cpp
   src/core/OfflineBatchRunner.cpp
 )
 
@@ -113,33 +111,48 @@ endif()
 if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   enable_testing()
 
-  add_executable(reweighted_combined_imu_factor_test
-    tests/reweighted_combined_imu_factor_test.cpp
+  add_executable(vertical_rtk_factors_test
+    tests/vertical_rtk_factors_test.cpp
   )
 
-  add_executable(vertical_rtk_preintegration_feedback_test
-    tests/vertical_rtk_preintegration_feedback_test.cpp
+  add_executable(gnss_factor_builder_test
+    tests/gnss_factor_builder_test.cpp
   )
 
-  target_link_libraries(reweighted_combined_imu_factor_test
+  add_executable(body_z_bidirectional_jump_detector_test
+    tests/body_z_bidirectional_jump_detector_test.cpp
+  )
+
+  target_link_libraries(vertical_rtk_factors_test
     PRIVATE
       offline_lc_minimal_lib
   )
 
-  target_link_libraries(vertical_rtk_preintegration_feedback_test
+  target_link_libraries(gnss_factor_builder_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(body_z_bidirectional_jump_detector_test
     PRIVATE
       offline_lc_minimal_lib
   )
 
   if(OFFLINE_LC_MINIMAL_RUNTIME_RPATH)
     set_target_properties(
-      reweighted_combined_imu_factor_test
+      vertical_rtk_factors_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
     )
     set_target_properties(
-      vertical_rtk_preintegration_feedback_test
+      gnss_factor_builder_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      body_z_bidirectional_jump_detector_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -148,27 +161,38 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
 
   if(OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH)
     add_test(
-      NAME reweighted_combined_imu_factor_test
+      NAME vertical_rtk_factors_test
       COMMAND
         ${CMAKE_COMMAND} -E env
         "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
-        $<TARGET_FILE:reweighted_combined_imu_factor_test>
+        $<TARGET_FILE:vertical_rtk_factors_test>
     )
     add_test(
-      NAME vertical_rtk_preintegration_feedback_test
+      NAME body_z_bidirectional_jump_detector_test
       COMMAND
         ${CMAKE_COMMAND} -E env
         "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
-        $<TARGET_FILE:vertical_rtk_preintegration_feedback_test>
+        $<TARGET_FILE:body_z_bidirectional_jump_detector_test>
+    )
+    add_test(
+      NAME gnss_factor_builder_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:gnss_factor_builder_test>
     )
   else()
     add_test(
-      NAME reweighted_combined_imu_factor_test
-      COMMAND $<TARGET_FILE:reweighted_combined_imu_factor_test>
+      NAME vertical_rtk_factors_test
+      COMMAND $<TARGET_FILE:vertical_rtk_factors_test>
     )
     add_test(
-      NAME vertical_rtk_preintegration_feedback_test
-      COMMAND $<TARGET_FILE:vertical_rtk_preintegration_feedback_test>
+      NAME body_z_bidirectional_jump_detector_test
+      COMMAND $<TARGET_FILE:body_z_bidirectional_jump_detector_test>
+    )
+    add_test(
+      NAME gnss_factor_builder_test
+      COMMAND $<TARGET_FILE:gnss_factor_builder_test>
     )
   endif()
 endif()

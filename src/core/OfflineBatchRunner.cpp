@@ -10,45 +10,34 @@
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
-#include <gtsam/base/numericalDerivative.h>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
 #include <gtsam/navigation/CombinedImuFactor.h>
-#include <gtsam/navigation/GPSFactor.h>
 #include <gtsam/navigation/ImuFactor.h>
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/slam/PriorFactor.h>
 
+#include "offline_lc_minimal/core/BodyZWindowPipeline.h"
+#include "offline_lc_minimal/core/GnssFactorBuilder.h"
 #include "offline_lc_minimal/core/ImuIntegrationUtils.h"
 #include "offline_lc_minimal/core/InitialStaticConstraintBuilder.h"
-#include "offline_lc_minimal/core/BodyZBidirectionalJumpDetector.h"
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
-#include "offline_lc_minimal/core/SequentialNhcJumpDetector.h"
-#include "offline_lc_minimal/core/SparseVerticalJumpPlanner.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
-#include "offline_lc_minimal/core/VerticalInsideBiasAdapter.h"
-#include "offline_lc_minimal/core/VerticalLocalRecoveryUtils.h"
 #include "offline_lc_minimal/factor/AngularRateFactor.h"
 #include "offline_lc_minimal/factor/BiasGmTransitionFactor.h"
-#include "offline_lc_minimal/factor/GPInterpolatedGPSFactor.h"
-#include "offline_lc_minimal/factor/GPInterpolatedHorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/GlobalAccelBiasFactor.h"
 #include "offline_lc_minimal/factor/GlobalGyroBiasFactor.h"
 #include "offline_lc_minimal/factor/GlobalPlanarAccelBiasFactor.h"
-#include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
-#include "offline_lc_minimal/factor/ReweightedCombinedImuFactor.h"
 #include "offline_lc_minimal/factor/SegmentBiasFeedbackFactor.h"
 #include "offline_lc_minimal/factor/StaticZeroAngularRateFactor.h"
 #include "offline_lc_minimal/factor/StaticSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/StaticAttitudeDriftFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasGmTransitionFactor.h"
-#include "offline_lc_minimal/factor/VerticalInsideKinematicFactor.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
 
 namespace offline_lc_minimal {
@@ -63,7 +52,6 @@ using gtsam::symbol_shorthand::W;
 using gtsam::symbol_shorthand::X;
 
 constexpr double kTimeEpsilonS = 1e-9;
-constexpr double kChiSquareDegreesOfFreedom = 3.0;
 constexpr double kAngularRateSigmaRadps = 0.1;
 constexpr double kInterpolatorQcVariance = 10000.0;
 constexpr double kDisabledAccBiasPriorSigmaMps2 = 1e6;
@@ -93,58 +81,9 @@ struct SegmentGnssStatsAccumulator {
   std::size_t feedback_attitude_scale_count = 0;
 };
 
-struct VerticalRtkFeedbackWindowAccumulator {
-  std::optional<std::size_t> start_state_index;
-  double start_vertical_residual_m = 0.0;
-  double end_vertical_residual_m = 0.0;
-  double feedback_gain_scale_sum = 0.0;
-  std::size_t sample_count = 0;
-
-  void Start(const std::size_t anchor_state_index, const double vertical_residual_m, const double feedback_gain_scale) {
-    start_state_index = anchor_state_index;
-    start_vertical_residual_m = vertical_residual_m;
-    end_vertical_residual_m = vertical_residual_m;
-    feedback_gain_scale_sum = feedback_gain_scale;
-    sample_count = 1;
-  }
-
-  void UpdateStartAnchor(const double vertical_residual_m, const double feedback_gain_scale) {
-    start_vertical_residual_m = vertical_residual_m;
-    end_vertical_residual_m = vertical_residual_m;
-    feedback_gain_scale_sum = feedback_gain_scale;
-    sample_count = 1;
-  }
-
-  void AccumulateFutureAnchor(const double vertical_residual_m, const double feedback_gain_scale) {
-    end_vertical_residual_m = vertical_residual_m;
-    feedback_gain_scale_sum += feedback_gain_scale;
-    ++sample_count;
-  }
-
-  [[nodiscard]] bool HasSamples() const {
-    return sample_count > 0U;
-  }
-
-  [[nodiscard]] double ResidualDriftM() const {
-    return sample_count > 0U
-             ? end_vertical_residual_m - start_vertical_residual_m
-             : std::numeric_limits<double>::quiet_NaN();
-  }
-
-  [[nodiscard]] double MeanFeedbackGainScale() const {
-    return sample_count > 0U
-             ? feedback_gain_scale_sum / static_cast<double>(sample_count)
-             : std::numeric_limits<double>::quiet_NaN();
-  }
-};
-
 Eigen::Vector3d Rot3ToYpr(const gtsam::Rot3 &rotation) {
   const auto ypr = rotation.ypr();
   return Eigen::Vector3d(ypr.x(), ypr.y(), ypr.z());
-}
-
-double WrapAngleRad(const double angle_rad) {
-  return std::atan2(std::sin(angle_rad), std::cos(angle_rad));
 }
 
 ReferenceNodeState MakeReferenceNodeState(
@@ -221,6 +160,83 @@ std::vector<ReferenceNodeState> BuildReferenceStatesFromOptimizedValues(
       optimized_values.at<gtsam::Vector3>(W(state_index))));
   }
   return states;
+}
+
+gtsam::Rot3 InterpolateRotation(const gtsam::Rot3 &left, const gtsam::Rot3 &right, const double alpha) {
+  const gtsam::Vector3 delta = gtsam::Rot3::Logmap(left.between(right));
+  return left.compose(gtsam::Rot3::Expmap(alpha * delta));
+}
+
+ReferenceNodeState InterpolateReferenceState(
+  const std::vector<ReferenceNodeState> &reference_states,
+  const double time_s) {
+  if (reference_states.empty()) {
+    throw std::runtime_error("reference node state sequence is empty");
+  }
+  if (reference_states.size() == 1U || time_s <= reference_states.front().time_s + kTimeEpsilonS) {
+    return reference_states.front();
+  }
+  if (time_s >= reference_states.back().time_s - kTimeEpsilonS) {
+    return reference_states.back();
+  }
+
+  const auto upper_it = std::upper_bound(
+    reference_states.begin(),
+    reference_states.end(),
+    time_s,
+    [](const double timestamp_s, const ReferenceNodeState &state) { return timestamp_s < state.time_s; });
+  const std::size_t right_index = static_cast<std::size_t>(std::distance(reference_states.begin(), upper_it));
+  const std::size_t left_index = right_index - 1U;
+  const auto &left_state = reference_states[left_index];
+  const auto &right_state = reference_states[right_index];
+  const double alpha =
+    std::clamp((time_s - left_state.time_s) / (right_state.time_s - left_state.time_s), 0.0, 1.0);
+  const double dt_s = std::max(right_state.time_s - left_state.time_s, kTimeEpsilonS);
+
+  const double alpha2 = alpha * alpha;
+  const double alpha3 = alpha2 * alpha;
+  const double h00 = 2.0 * alpha3 - 3.0 * alpha2 + 1.0;
+  const double h10 = alpha3 - 2.0 * alpha2 + alpha;
+  const double h01 = -2.0 * alpha3 + 3.0 * alpha2;
+  const double h11 = alpha3 - alpha2;
+  const double interpolated_up_m =
+    h00 * left_state.pose.translation().z() +
+    h10 * dt_s * left_state.velocity.z() +
+    h01 * right_state.pose.translation().z() +
+    h11 * dt_s * right_state.velocity.z();
+  Eigen::Vector3d interpolated_velocity =
+    (1.0 - alpha) * left_state.velocity + alpha * right_state.velocity;
+  interpolated_velocity.z() =
+    ((6.0 * alpha2 - 6.0 * alpha) * left_state.pose.translation().z() +
+     (-6.0 * alpha2 + 6.0 * alpha) * right_state.pose.translation().z()) /
+      dt_s +
+    (3.0 * alpha2 - 4.0 * alpha + 1.0) * left_state.velocity.z() +
+    (3.0 * alpha2 - 2.0 * alpha) * right_state.velocity.z();
+
+  ReferenceNodeState interpolated;
+  interpolated.time_s = time_s;
+  interpolated.pose = gtsam::Pose3(
+    InterpolateRotation(left_state.pose.rotation(), right_state.pose.rotation(), alpha),
+    gtsam::Point3(
+      (1.0 - alpha) * left_state.pose.translation().x() + alpha * right_state.pose.translation().x(),
+      (1.0 - alpha) * left_state.pose.translation().y() + alpha * right_state.pose.translation().y(),
+      interpolated_up_m));
+  interpolated.velocity = interpolated_velocity;
+  interpolated.bias = gtsam::imuBias::ConstantBias(
+    (1.0 - alpha) * left_state.bias.accelerometer() + alpha * right_state.bias.accelerometer(),
+    (1.0 - alpha) * left_state.bias.gyroscope() + alpha * right_state.bias.gyroscope());
+  interpolated.omega = (1.0 - alpha) * left_state.omega + alpha * right_state.omega;
+  return interpolated;
+}
+
+Eigen::Vector3d ComputePositionResidualEnu(
+  const gtsam::Pose3 &pose,
+  const Eigen::Vector3d &measurement_enu_m) {
+  return Eigen::Vector3d(
+           pose.translation().x(),
+           pose.translation().y(),
+           pose.translation().z()) -
+         measurement_enu_m;
 }
 
 double ComputeNis(const Eigen::Vector3d &residual_enu_m, const Eigen::Vector3d &sigma_m);
@@ -345,84 +361,6 @@ double ComputeHorizontalNis(const Eigen::Vector3d &residual_enu_m, const Eigen::
          residual_enu_m.y() * residual_enu_m.y() / variances.y();
 }
 
-double InverseNormalCdf(const double probability) {
-  if (probability <= 0.0 || probability >= 1.0) {
-    throw std::runtime_error("inverse normal CDF requires probability in (0, 1)");
-  }
-
-  constexpr double a1 = -3.969683028665376e+01;
-  constexpr double a2 = 2.209460984245205e+02;
-  constexpr double a3 = -2.759285104469687e+02;
-  constexpr double a4 = 1.383577518672690e+02;
-  constexpr double a5 = -3.066479806614716e+01;
-  constexpr double a6 = 2.506628277459239e+00;
-  constexpr double b1 = -5.447609879822406e+01;
-  constexpr double b2 = 1.615858368580409e+02;
-  constexpr double b3 = -1.556989798598866e+02;
-  constexpr double b4 = 6.680131188771972e+01;
-  constexpr double b5 = -1.328068155288572e+01;
-  constexpr double c1 = -7.784894002430293e-03;
-  constexpr double c2 = -3.223964580411365e-01;
-  constexpr double c3 = -2.400758277161838e+00;
-  constexpr double c4 = -2.549732539343734e+00;
-  constexpr double c5 = 4.374664141464968e+00;
-  constexpr double c6 = 2.938163982698783e+00;
-  constexpr double d1 = 7.784695709041462e-03;
-  constexpr double d2 = 3.224671290700398e-01;
-  constexpr double d3 = 2.445134137142996e+00;
-  constexpr double d4 = 3.754408661907416e+00;
-  constexpr double p_low = 0.02425;
-  constexpr double p_high = 1.0 - p_low;
-
-  if (probability < p_low) {
-    const double q = std::sqrt(-2.0 * std::log(probability));
-    return (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
-           ((((d1 * q + d2) * q + d3) * q + d4) * q + 1.0);
-  }
-  if (probability > p_high) {
-    const double q = std::sqrt(-2.0 * std::log(1.0 - probability));
-    return -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
-           ((((d1 * q + d2) * q + d3) * q + d4) * q + 1.0);
-  }
-
-  const double q = probability - 0.5;
-  const double r = q * q;
-  return (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q /
-         (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1.0);
-}
-
-double ChiSquareQuantile1D(const double confidence) {
-  const double z = InverseNormalCdf(0.5 * (1.0 + confidence));
-  return z * z;
-}
-
-double ChiSquareQuantile3D(const double confidence) {
-  const double z = InverseNormalCdf(confidence);
-  const double term =
-    1.0 - (2.0 / (9.0 * kChiSquareDegreesOfFreedom)) +
-    z * std::sqrt(2.0 / (9.0 * kChiSquareDegreesOfFreedom));
-  return kChiSquareDegreesOfFreedom * term * term * term;
-}
-
-double ComputeConsistencyScale(
-  const GnssConsistencyGateMode gate_mode,
-  const double nis,
-  const double nis_threshold,
-  const double relaxed_threshold_ratio,
-  const double max_scale) {
-  if (gate_mode != GnssConsistencyGateMode::kNis || !std::isfinite(nis) || !std::isfinite(nis_threshold) ||
-      nis <= 0.0) {
-    return 1.0;
-  }
-  const double relaxed_threshold = std::max(relaxed_threshold_ratio * nis_threshold, 1e-6);
-  if (nis >= relaxed_threshold) {
-    return nis > nis_threshold
-             ? std::clamp(std::sqrt(nis / std::max(nis_threshold, 1e-9)), 1.0, max_scale)
-             : 1.0;
-  }
-  return std::clamp(std::sqrt(relaxed_threshold / std::max(nis, 1e-9)), 1.0, max_scale);
-}
-
 struct ScalarSummaryStats {
   double mean = std::numeric_limits<double>::quiet_NaN();
   double median = std::numeric_limits<double>::quiet_NaN();
@@ -495,25 +433,6 @@ std::optional<std::size_t> ResolveSegmentIndexForRecord(const GnssFactorRecord &
   }
   if (record.sync_status == StateMeasSyncStatus::kInterpolated) {
     return record.state_index_i;
-  }
-  return std::nullopt;
-}
-
-std::optional<std::size_t> ResolveVerticalFeedbackAnchorState(
-  const GnssFactorRecord &record,
-  const std::size_t dynamic_start_index) {
-  if (IsSynchronizedStatus(record.sync_status)) {
-    if (record.synchronized_state_index < dynamic_start_index) {
-      return std::nullopt;
-    }
-    return record.synchronized_state_index;
-  }
-  if (record.sync_status == StateMeasSyncStatus::kInterpolated &&
-      record.state_index_j > record.state_index_i) {
-    if (record.state_index_j < dynamic_start_index) {
-      return std::nullopt;
-    }
-    return record.state_index_j;
   }
   return std::nullopt;
 }
@@ -880,101 +799,6 @@ std::vector<SegmentErrorDiagnostic> BuildSegmentErrorDiagnostics(
     diagnostics.push_back(diagnostic);
   }
   return diagnostics;
-}
-
-gtsam::SharedNoiseModel WrapGnssNoiseModel(
-  const OfflineRunnerConfig &config,
-  const gtsam::SharedNoiseModel &gaussian_model) {
-  switch (config.gnss_position_noise_model) {
-    case GnssNoiseModel::kGaussian:
-      return gaussian_model;
-    case GnssNoiseModel::kCauchy:
-      return gtsam::noiseModel::Robust::Create(
-        gtsam::noiseModel::mEstimator::Cauchy::Create(config.gnss_position_robust_param),
-        gaussian_model);
-    case GnssNoiseModel::kHuber:
-      return gtsam::noiseModel::Robust::Create(
-        gtsam::noiseModel::mEstimator::Huber::Create(config.gnss_position_robust_param),
-        gaussian_model);
-    case GnssNoiseModel::kDcs:
-      return gtsam::noiseModel::Robust::Create(
-        gtsam::noiseModel::mEstimator::DCS::Create(config.gnss_position_robust_param),
-        gaussian_model);
-    case GnssNoiseModel::kTukey:
-      return gtsam::noiseModel::Robust::Create(
-        gtsam::noiseModel::mEstimator::Tukey::Create(config.gnss_position_robust_param),
-        gaussian_model);
-    case GnssNoiseModel::kGemanMcClure:
-      return gtsam::noiseModel::Robust::Create(
-        gtsam::noiseModel::mEstimator::GemanMcClure::Create(config.gnss_position_robust_param),
-        gaussian_model);
-    case GnssNoiseModel::kWelsch:
-      return gtsam::noiseModel::Robust::Create(
-        gtsam::noiseModel::mEstimator::Welsch::Create(config.gnss_position_robust_param),
-        gaussian_model);
-    default:
-      return gaussian_model;
-  }
-}
-
-gtsam::SharedNoiseModel MakeGnssNoiseModel(const OfflineRunnerConfig &config, const Eigen::Vector3d &sigma_m) {
-  const gtsam::Vector3 variances(
-    sigma_m.x() * sigma_m.x(),
-    sigma_m.y() * sigma_m.y(),
-    sigma_m.z() * sigma_m.z());
-  return WrapGnssNoiseModel(config, gtsam::noiseModel::Diagonal::Variances(variances));
-}
-
-gtsam::SharedNoiseModel MakeHorizontalGnssNoiseModel(const OfflineRunnerConfig &config, const Eigen::Vector2d &sigma_m) {
-  const gtsam::Vector2 variances(
-    sigma_m.x() * sigma_m.x(),
-    sigma_m.y() * sigma_m.y());
-  return WrapGnssNoiseModel(config, gtsam::noiseModel::Diagonal::Variances(variances));
-}
-
-void EnsureReferenceStatesValidUntil(
-  const std::vector<double> &state_timestamps,
-  const std::vector<ImuSample> &imu_samples,
-  const boost::shared_ptr<gtsam::PreintegrationCombinedParams> &imu_params,
-  std::vector<ReferenceNodeState> *reference_states,
-  std::size_t *valid_until_index,
-  const std::size_t required_index,
-  gtsam::Values *initial_values) {
-  if (reference_states == nullptr || valid_until_index == nullptr) {
-    throw std::runtime_error("reference state propagation requires valid storage");
-  }
-  if (reference_states->empty() || required_index >= reference_states->size()) {
-    throw std::runtime_error("reference state propagation requested an invalid index");
-  }
-  if (*valid_until_index >= required_index) {
-    return;
-  }
-
-  gtsam::NavState previous_nav_state(
-    (*reference_states)[*valid_until_index].pose,
-    (*reference_states)[*valid_until_index].velocity);
-  gtsam::imuBias::ConstantBias previous_bias = (*reference_states)[*valid_until_index].bias;
-  double previous_time_s = (*reference_states)[*valid_until_index].time_s;
-
-  for (std::size_t state_index = *valid_until_index + 1U; state_index <= required_index; ++state_index) {
-    const double current_time_s = state_timestamps[state_index];
-    const auto imu_window =
-      IntegrateImuWindow(imu_samples, previous_time_s, current_time_s, imu_params, previous_bias);
-    const gtsam::NavState predicted_state =
-      imu_window.preintegrated_measurements.predict(previous_nav_state, previous_bias);
-    (*reference_states)[state_index] = MakeReferenceNodeState(
-      current_time_s,
-      predicted_state,
-      previous_bias,
-      imu_window.end_gyro_radps);
-    if (initial_values != nullptr) {
-      UpsertReferenceStateInitialValues(state_index, (*reference_states)[state_index], initial_values);
-    }
-    previous_nav_state = predicted_state;
-    previous_time_s = current_time_s;
-  }
-
-  *valid_until_index = required_index;
 }
 
 std::vector<double> BuildStateTimestamps(
@@ -1680,22 +1504,15 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
     state_timestamp_map.emplace(index, state_timestamps[index]);
   }
-  SparseVerticalJumpPlanner sparse_vertical_jump_planner(config_);
-  const std::vector<VerticalVzReferenceSample> vertical_vz_reference_by_state =
-    sparse_vertical_jump_planner.BuildGlobalReference(
-      dataset.gnss_samples,
-      state_timestamps,
-      dynamic_start_time_s);
   const bool collect_error_diagnostics = config_.write_error_diagnostics;
   const bool collect_segment_error_diagnostics =
     config_.write_segment_error_diagnostics ||
-    config_.enable_segment_error_feedback ||
-    config_.enable_vertical_rtk_preintegration_feedback;
+    config_.enable_segment_error_feedback;
   const bool collect_reference_states =
     collect_error_diagnostics ||
     collect_segment_error_diagnostics ||
     config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone ||
-    config_.enable_vertical_rtk_preintegration_feedback;
+    config_.enable_body_z_seed_jump_windows;
   run_result.run_summary.error_state_count = 0;
 
   const auto imu_params = gtsam::PreintegrationCombinedParams::MakeSharedU(config_.gravity_mps2);
@@ -1871,20 +1688,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         V(state_index),
         B(state_index - 1U),
         imu_window.preintegrated_imu_measurements));
-    } else if (config_.enable_reweighted_combined_imu_factor) {
-      graph.add(factor::MakeReweightedCombinedImuFactor(
-        X(state_index - 1U),
-        V(state_index - 1U),
-        X(state_index),
-        V(state_index),
-        B(state_index - 1U),
-        B(state_index),
-        imu_window.preintegrated_measurements,
-        config_.reweighted_combined_imu_attitude_sigma_rad,
-        gtsam::Vector3(
-          config_.reweighted_combined_imu_specific_force_sigma_x_mps2,
-          config_.reweighted_combined_imu_specific_force_sigma_y_mps2,
-          config_.reweighted_combined_imu_specific_force_sigma_z_mps2)));
     } else {
       graph.add(gtsam::CombinedImuFactor(
         X(state_index - 1U),
@@ -2052,17 +1855,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   const bool collect_gnss_consistency =
     config_.enable_gnss &&
     (collect_error_diagnostics || collect_segment_error_diagnostics ||
-     config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone ||
-     config_.enable_vertical_rtk_preintegration_feedback);
-  const bool use_vertical_rtk_1d_nis_gate = config_.enable_vertical_rtk_preintegration_feedback;
-  const double gnss_nis_threshold =
-    config_.gnss_consistency_gate_mode == GnssConsistencyGateMode::kNis
-      ? ChiSquareQuantile3D(config_.gnss_nis_confidence)
-      : std::numeric_limits<double>::quiet_NaN();
-  const double vertical_gate_nis_threshold =
-    use_vertical_rtk_1d_nis_gate
-      ? ChiSquareQuantile1D(config_.gnss_nis_confidence)
-      : std::numeric_limits<double>::quiet_NaN();
+     config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone);
   const gp::GPWNOJInterpolator base_interpolator(
     gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(kInterpolatorQcVariance)));
   const gtsam::NonlinearFactorGraph base_graph = graph;
@@ -2074,2380 +1867,117 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   optimizer_params.lambdaInitial = config_.lm_lambda_initial;
   optimizer_params.setVerbosity(config_.verbose ? "ERROR" : "SILENT");
   optimizer_params.setVerbosityLM(config_.verbose ? "TRYLAMBDA" : "SILENT");
-  gtsam::Values gate_seed_values = base_initial_values;
-  std::vector<ReferenceNodeState> gate_seed_reference_states = reference_node_states;
-  if (use_vertical_rtk_1d_nis_gate) {
-    gtsam::LevenbergMarquardtOptimizer seed_optimizer(base_graph, base_initial_values, optimizer_params);
-    gate_seed_values = seed_optimizer.optimize();
-    gate_seed_reference_states = BuildReferenceStatesFromOptimizedValues(state_timestamps, gate_seed_values);
-  }
-  std::vector<ReferenceNodeState> body_z_seed_reference_states;
-  BodyZJumpDetectionResult body_z_seed_detection;
-  if (config_.enable_vertical_rtk_seed_pass) {
-    auto rtk_seed_graph = base_graph;
-    std::size_t rtk_seed_factor_count = 0U;
-    const auto rtk_seed_noise_model = [&](const GnssSolutionSample &sample) {
-      const Eigen::Vector3d sigma_m = ClampGnssSigma(sample);
-      return gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(sigma_m.x(), sigma_m.y(), sigma_m.z()));
+
+  if (config_.enable_body_z_seed_jump_windows) {
+    BodyZWindowPipelineRequest body_z_request;
+    body_z_request.config = &config_;
+    body_z_request.imu_samples = &dataset.imu_samples;
+    body_z_request.gnss_samples = &dataset.gnss_samples;
+    body_z_request.state_timestamps = &state_timestamps;
+    body_z_request.base_graph = &base_graph;
+    body_z_request.base_initial_values = &base_initial_values;
+    body_z_request.optimizer_params = optimizer_params;
+    body_z_request.navigation_start_index = navigation_start_index;
+    body_z_request.dynamic_start_time_s = dynamic_start_time_s;
+    body_z_request.end_time_s = state_timestamps.back();
+    body_z_request.passes_gnss_quality_filters = [&](const GnssSolutionSample &sample) {
+      return PassesGnssQualityFilters(sample);
     };
-    for (std::size_t sample_index = 0; sample_index < dataset.gnss_samples.size(); ++sample_index) {
-      if (sample_index <= navigation_start_index) {
-        continue;
-      }
-      const auto &gnss_sample = dataset.gnss_samples[sample_index];
-      if (config_.body_z_seed_jump_use_fix_only && gnss_sample.fix_type() != GnssFixType::kRtkFix) {
-        continue;
-      }
-      if (!PassesGnssQualityFilters(gnss_sample) || !gnss_sample.has_enu_position) {
-        continue;
-      }
-      const double corrected_time_s = CorrectedGnssTime(gnss_sample);
-      if (!IsWithinImuCoverage(dataset.imu_samples, corrected_time_s)) {
-        continue;
-      }
-      const StateMeasSyncResult sync_result =
-        FindStateForMeasurement(state_timestamp_map, corrected_time_s, config_);
-      if (sync_result.status == StateMeasSyncStatus::kSynchronizedI ||
-          sync_result.status == StateMeasSyncStatus::kSynchronizedJ) {
-        const std::size_t sync_state_index =
-          sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i : sync_result.key_index_j;
-        rtk_seed_graph.add(gtsam::GPSFactor(
-          X(sync_state_index),
-          gtsam::Point3(
-            gnss_sample.enu_position_m.x(),
-            gnss_sample.enu_position_m.y(),
-            gnss_sample.enu_position_m.z()),
-          rtk_seed_noise_model(gnss_sample)));
-        ++rtk_seed_factor_count;
-      } else if (
-        sync_result.status == StateMeasSyncStatus::kInterpolated &&
-        config_.enable_gp_interpolated_gnss &&
-        sync_result.state_j_exists()) {
-        gp::GPWNOJInterpolator interpolator = base_interpolator;
-        interpolator.Recalculate(
-          sync_result.timestamp_j_s - sync_result.timestamp_i_s,
-          sync_result.duration_from_state_i_s);
-        rtk_seed_graph.add(factor::GPInterpolatedGPSFactor(
-          X(sync_result.key_index_i),
-          V(sync_result.key_index_i),
-          W(sync_result.key_index_i),
-          X(sync_result.key_index_j),
-          V(sync_result.key_index_j),
-          W(sync_result.key_index_j),
-          gtsam::Point3(
-            gnss_sample.enu_position_m.x(),
-            gnss_sample.enu_position_m.y(),
-            gnss_sample.enu_position_m.z()),
-          gtsam::Vector3::Zero(),
-          rtk_seed_noise_model(gnss_sample),
-          interpolator));
-        ++rtk_seed_factor_count;
-      }
-    }
-    if (rtk_seed_factor_count > 0U) {
-      gtsam::LevenbergMarquardtOptimizer rtk_seed_optimizer(
-        rtk_seed_graph,
-        base_initial_values,
-        optimizer_params);
-      const gtsam::Values rtk_seed_values = rtk_seed_optimizer.optimize();
-      body_z_seed_reference_states = BuildReferenceStatesFromOptimizedValues(state_timestamps, rtk_seed_values);
-    }
+    body_z_request.is_within_imu_coverage = [&](const double corrected_time_s) {
+      return IsWithinImuCoverage(dataset.imu_samples, corrected_time_s);
+    };
+    body_z_request.corrected_time_s = [&](const GnssSolutionSample &sample) {
+      return CorrectedGnssTime(sample);
+    };
+    body_z_request.clamped_sigma_m = [&](const GnssSolutionSample &sample) {
+      return ClampGnssSigma(sample);
+    };
+    body_z_request.find_state_for_time_s = [&](const double corrected_time_s) {
+      return FindStateForMeasurement(state_timestamp_map, corrected_time_s, config_);
+    };
+    const BodyZWindowPipelineResult body_z_result = BodyZWindowPipeline(std::move(body_z_request)).Run();
+    run_result.seed_body_z_acc_diagnostics = body_z_result.imu_diagnostics;
+    run_result.body_z_seed_jump_windows = body_z_result.jump_windows;
   }
-  if (config_.enable_body_z_seed_jump_windows && !body_z_seed_reference_states.empty()) {
-    BodyZBidirectionalJumpDetector body_z_detector(config_);
-    body_z_seed_detection = body_z_detector.Detect(
-      dataset.imu_samples,
-      body_z_seed_reference_states,
-      state_timestamps,
-      dynamic_start_time_s,
-      state_timestamps.back());
-    run_result.seed_body_z_acc_diagnostics.reserve(body_z_seed_detection.signal.size());
-    for (const auto &sample : body_z_seed_detection.signal) {
-      BodyZSeedImuDiagnosticRow row;
-      row.time_s = sample.time_s;
-      row.relative_time_s = sample.relative_time_s;
-      row.body_z_specific_force_mps2 = sample.body_z_specific_force_mps2;
-      row.gravity_projection_z_mps2 = sample.gravity_projection_z_mps2;
-      row.body_z_acc_mps2 = sample.body_z_acc_mps2;
-      row.body_z_acc_1s_smooth_mps2 = sample.body_z_acc_1s_smooth_mps2;
-      row.integrated_body_z_velocity_mps = sample.integrated_body_z_velocity_mps;
-      row.integrated_body_z_velocity_0p2s_smooth_mps = sample.integrated_body_z_velocity_0p2s_smooth_mps;
-      row.integrated_body_z_velocity_1s_smooth_mps = sample.integrated_body_z_velocity_1s_smooth_mps;
-      row.signed_step_metric_mps = sample.signed_step_metric_mps;
-      row.downward_score_mps = sample.downward_score_mps;
-      row.upward_score_mps = sample.upward_score_mps;
-      row.body_z_axis_nav_z = sample.body_z_axis_nav_z;
-      run_result.seed_body_z_acc_diagnostics.push_back(row);
-    }
-    run_result.body_z_seed_jump_windows.reserve(body_z_seed_detection.windows.size());
-    for (const auto &window : body_z_seed_detection.windows) {
-      BodyZSeedJumpWindowRow row;
-      row.direction = window.direction;
-      row.selection_level = window.selection_level;
-      row.start_state_index = static_cast<long long>(window.start_state_index);
-      row.center_state_index = static_cast<long long>(window.center_state_index);
-      row.end_state_index = static_cast<long long>(window.end_state_index);
-      row.start_time_s = window.start_time_s;
-      row.center_time_s = window.center_time_s;
-      row.end_time_s = window.end_time_s;
-      row.start_relative_time_s = window.start_relative_time_s;
-      row.center_relative_time_s = window.center_relative_time_s;
-      row.end_relative_time_s = window.end_relative_time_s;
-      row.duration_s = window.duration_s;
-      row.pre_velocity_mps = window.pre_velocity_mps;
-      row.post_velocity_mps = window.post_velocity_mps;
-      row.signed_delta_velocity_mps = window.signed_delta_velocity_mps;
-      row.direction_score_mps = window.direction_score_mps;
-      row.signed_step_metric_mps = window.signed_step_metric_mps;
-      row.level_threshold_mps = window.level_threshold_mps;
-      row.level_max_peak_mps = window.level_max_peak_mps;
-      row.level_noise_floor_mps = window.level_noise_floor_mps;
-      row.min_acc_mps2 = window.min_acc_mps2;
-      row.max_acc_mps2 = window.max_acc_mps2;
-      row.mean_acc_mps2 = window.mean_acc_mps2;
-      row.body_z_axis_nav_z = window.body_z_axis_nav_z;
-      row.delta_vz_init_mps = window.delta_vz_init_mps;
-      run_result.body_z_seed_jump_windows.push_back(row);
-    }
-  }
-  struct VerticalGateIterationResult {
-    gtsam::Values optimized_values;
-    std::vector<GnssFactorRecord> gnss_factor_records;
-    std::vector<GnssConsistencyRecord> gnss_consistency_records;
-    std::vector<VerticalLocalRecoveryIterationRow> vertical_local_recovery_iterations;
-    std::vector<TrajectoryRow> trajectory;
-    std::vector<ReferenceNodeState> gate_reference_states;
-    RunSummary run_summary;
-    bool failed = false;
-    std::string failure_message;
+
+  run_result.run_summary = base_run_summary;
+  run_result.run_summary.gnss_factor_count = 0;
+  run_result.run_summary.gnss_synced_factor_count = 0;
+  run_result.run_summary.gnss_interpolated_factor_count = 0;
+  run_result.run_summary.gnss_dropped_count = 0;
+  run_result.run_summary.gnss_cached_count = 0;
+  run_result.run_summary.dropped_non_rtkfix_count = 0;
+  run_result.run_summary.dropped_no_solution_count = 0;
+  run_result.run_summary.dropped_nonfinite_sigma_count = 0;
+  run_result.run_summary.dropped_bad_status_count = 0;
+  run_result.run_summary.dropped_out_of_imu_coverage_count = 0;
+  run_result.run_summary.vertical_gate_inside_count = 0;
+  run_result.run_summary.vertical_gate_outside_count = 0;
+  run_result.run_summary.gnss_nis_mean = std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.gnss_nis_median = std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.gnss_nis_p95 = std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.axis_2sigma_pass_rate = std::numeric_limits<double>::quiet_NaN();
+  run_result.trajectory = base_dynamic_trajectory;
+  run_result.gnss_factor_records.clear();
+  run_result.gnss_consistency_records.clear();
+  run_result.vertical_local_recovery_iterations.clear();
+  run_result.vertical_state_corrections.clear();
+
+  gtsam::NonlinearFactorGraph graph_with_gnss = base_graph;
+  GnssFactorBuildRequest gnss_request;
+  gnss_request.config = &config_;
+  gnss_request.gnss_samples = &dataset.gnss_samples;
+  gnss_request.navigation_start_index = navigation_start_index;
+  gnss_request.graph = &graph_with_gnss;
+  gnss_request.trajectory = &run_result.trajectory;
+  gnss_request.run_summary = &run_result.run_summary;
+  gnss_request.factor_records = &run_result.gnss_factor_records;
+  gnss_request.consistency_records = &run_result.gnss_consistency_records;
+  gnss_request.collect_consistency_records = collect_gnss_consistency;
+  gnss_request.dynamic_start_time_s = dynamic_start_time_s;
+  gnss_request.should_use_sample = [&](const GnssSolutionSample &sample) {
+    return ShouldUseGnssFactor(sample, run_result.run_summary);
   };
+  gnss_request.is_within_imu_coverage = [&](const double corrected_time_s) {
+    return IsWithinImuCoverage(dataset.imu_samples, corrected_time_s);
+  };
+  gnss_request.corrected_time_s = [&](const GnssSolutionSample &sample) {
+    return CorrectedGnssTime(sample);
+  };
+  gnss_request.clamped_sigma_m = [&](const GnssSolutionSample &sample) {
+    return ClampGnssSigma(sample);
+  };
+  gnss_request.find_state_for_time_s = [&](const double corrected_time_s) {
+    return FindStateForMeasurement(state_timestamp_map, corrected_time_s, config_);
+  };
+  gnss_request.trajectory_row_index_for_state = graph_state_to_trajectory_row;
+  GnssFactorBuilder(std::move(gnss_request)).Build();
 
-  const auto run_vertical_gate_iteration =
-    [&](const std::vector<ReferenceNodeState> &gate_reference_states,
-        const gtsam::Values &optimizer_initial_values) -> VerticalGateIterationResult {
-      VerticalGateIterationResult iteration;
-      iteration.run_summary = base_run_summary;
-      iteration.run_summary.gnss_factor_count = 0;
-      iteration.run_summary.gnss_synced_factor_count = 0;
-      iteration.run_summary.gnss_interpolated_factor_count = 0;
-      iteration.run_summary.gnss_dropped_count = 0;
-      iteration.run_summary.gnss_cached_count = 0;
-      iteration.run_summary.dropped_non_rtkfix_count = 0;
-      iteration.run_summary.dropped_no_solution_count = 0;
-      iteration.run_summary.dropped_nonfinite_sigma_count = 0;
-      iteration.run_summary.dropped_bad_status_count = 0;
-      iteration.run_summary.dropped_out_of_imu_coverage_count = 0;
-      iteration.run_summary.vertical_gate_inside_count = 0;
-      iteration.run_summary.vertical_gate_outside_count = 0;
-      iteration.run_summary.gnss_nis_mean = std::numeric_limits<double>::quiet_NaN();
-      iteration.run_summary.gnss_nis_median = std::numeric_limits<double>::quiet_NaN();
-      iteration.run_summary.gnss_nis_p95 = std::numeric_limits<double>::quiet_NaN();
-      iteration.run_summary.axis_2sigma_pass_rate = std::numeric_limits<double>::quiet_NaN();
-      iteration.trajectory = base_dynamic_trajectory;
-      iteration.gate_reference_states = gate_reference_states;
-      gtsam::Values sequential_initial_values = optimizer_initial_values;
-      std::size_t sequential_reference_valid_until_index =
-        use_vertical_rtk_1d_nis_gate
-          ? std::min(graph_timeline.dynamic_start_index, iteration.gate_reference_states.size() > 0U
-                                                       ? iteration.gate_reference_states.size() - 1U
-                                                       : 0U)
-          : (iteration.gate_reference_states.empty() ? 0U : iteration.gate_reference_states.size() - 1U);
-      std::vector<ReferenceNodeState> inside_reference_states = iteration.gate_reference_states;
-      SequentialNhcJumpDetector nhc_jump_detector(config_);
-      SparseVerticalJumpPlanner iteration_sparse_jump_planner(config_);
-      VerticalInsideBiasAdapter inside_bias_adapter(config_);
-      if (use_vertical_rtk_1d_nis_gate && !iteration.gate_reference_states.empty() &&
-          graph_timeline.dynamic_start_index > 0U) {
-        nhc_jump_detector.SeedWithConfirmedStates(
-          iteration.gate_reference_states,
-          0U,
-          graph_timeline.dynamic_start_index);
-        iteration_sparse_jump_planner.SeedWithConfirmedStates(
-          iteration.gate_reference_states,
-          vertical_vz_reference_by_state,
-          0U,
-          graph_timeline.dynamic_start_index);
-      }
-      std::optional<std::size_t> confirmed_inside_state_index;
-      std::optional<std::size_t> history_reobserve_begin_state_index;
-      std::optional<std::size_t> inside_bias_adapter_reobserve_begin_state_index;
-      std::optional<SparseVerticalJumpWindowCandidate> active_interval_feedback_window;
-      std::optional<std::size_t> body_z_reference_propagation_anchor_state_index;
-      std::unordered_set<std::size_t> body_z_windows_with_velocity_correction;
-      std::unordered_set<std::size_t> body_z_windows_with_position_offset_correction;
-      std::unordered_map<std::size_t, int> body_z_window_velocity_feedback_counts;
-      std::unordered_map<std::size_t, double> body_z_window_tail_velocity_targets_mps;
-      double last_interval_feedback_time_s = -std::numeric_limits<double>::infinity();
-      bool vertical_initial_anchor_applied = false;
+  gtsam::LevenbergMarquardtOptimizer optimizer(
+    graph_with_gnss,
+    base_initial_values,
+    optimizer_params);
+  run_result.run_summary.initial_error = optimizer.error();
+  const gtsam::Values optimized_values = optimizer.optimize();
+  run_result.run_summary.final_error = graph_with_gnss.error(optimized_values);
 
-      const auto build_vertical_window_specs = [&](const std::size_t current_sample_index, const double window_s) {
-        std::vector<VerticalHoldWindowSpec> specs;
-        if (window_s <= 0.0) {
-          return specs;
-        }
-        const double window_end_time_s =
-          CorrectedGnssTime(dataset.gnss_samples[current_sample_index]) + window_s;
-        for (std::size_t future_sample_index = current_sample_index; future_sample_index < dataset.gnss_samples.size();
-             ++future_sample_index) {
-          if (future_sample_index <= navigation_start_index) {
-            continue;
-          }
-          const auto &future_sample = dataset.gnss_samples[future_sample_index];
-          const double corrected_time_s = CorrectedGnssTime(future_sample);
-          if (corrected_time_s > window_end_time_s + kTimeEpsilonS) {
-            break;
-          }
-          if (!PassesGnssQualityFilters(future_sample) || !future_sample.has_enu_position ||
-              !IsWithinImuCoverage(dataset.imu_samples, corrected_time_s)) {
-            continue;
-          }
-          const StateMeasSyncResult future_sync_result =
-            FindStateForMeasurement(state_timestamp_map, corrected_time_s, config_);
-          if (!IsSynchronizedStatus(future_sync_result.status) &&
-              future_sync_result.status != StateMeasSyncStatus::kInterpolated) {
-            continue;
-          }
-          Eigen::Vector3d measurement_enu_m = future_sample.enu_position_m;
-          if (config_.enable_gnss_vertical_drift_model &&
-              future_sample_index < gnss_vertical_reference_up_by_sample.size()) {
-            const double vertical_reference_up_m = gnss_vertical_reference_up_by_sample[future_sample_index];
-            if (std::isfinite(vertical_reference_up_m)) {
-              measurement_enu_m.z() = vertical_reference_up_m;
-            }
-          }
-          const Eigen::Vector3d hold_sigma_m = ClampGnssSigma(future_sample);
-          specs.push_back(VerticalHoldWindowSpec{
-            future_sample_index,
-            corrected_time_s,
-            measurement_enu_m,
-            hold_sigma_m.z(),
-            ResolvePrefitReferenceRightIndex(future_sync_result),
-            future_sync_result.status == StateMeasSyncStatus::kInterpolated,
-          });
-        }
-        return specs;
-      };
-      const auto build_vertical_window_specs_between_times = [&](const double window_start_time_s, const double window_end_time_s) {
-        std::vector<VerticalHoldWindowSpec> specs;
-        if (!std::isfinite(window_start_time_s) || !std::isfinite(window_end_time_s) ||
-            window_end_time_s < window_start_time_s - kTimeEpsilonS) {
-          return specs;
-        }
-        for (std::size_t future_sample_index = navigation_start_index + 1U;
-             future_sample_index < dataset.gnss_samples.size();
-             ++future_sample_index) {
-          const auto &future_sample = dataset.gnss_samples[future_sample_index];
-          const double corrected_time_s = CorrectedGnssTime(future_sample);
-          if (corrected_time_s < window_start_time_s - kTimeEpsilonS) {
-            continue;
-          }
-          if (corrected_time_s > window_end_time_s + kTimeEpsilonS) {
-            break;
-          }
-          if (future_sample.fix_type() != GnssFixType::kRtkFix ||
-              !PassesGnssQualityFilters(future_sample) ||
-              !future_sample.has_enu_position ||
-              !IsWithinImuCoverage(dataset.imu_samples, corrected_time_s)) {
-            continue;
-          }
-          const StateMeasSyncResult future_sync_result =
-            FindStateForMeasurement(state_timestamp_map, corrected_time_s, config_);
-          if (!IsSynchronizedStatus(future_sync_result.status) &&
-              future_sync_result.status != StateMeasSyncStatus::kInterpolated) {
-            continue;
-          }
-          Eigen::Vector3d measurement_enu_m = future_sample.enu_position_m;
-          if (config_.enable_gnss_vertical_drift_model &&
-              future_sample_index < gnss_vertical_reference_up_by_sample.size()) {
-            const double vertical_reference_up_m = gnss_vertical_reference_up_by_sample[future_sample_index];
-            if (std::isfinite(vertical_reference_up_m)) {
-              measurement_enu_m.z() = vertical_reference_up_m;
-            }
-          }
-          const Eigen::Vector3d hold_sigma_m = ClampGnssSigma(future_sample);
-          specs.push_back(VerticalHoldWindowSpec{
-            future_sample_index,
-            corrected_time_s,
-            measurement_enu_m,
-            hold_sigma_m.z(),
-            ResolvePrefitReferenceRightIndex(future_sync_result),
-            future_sync_result.status == StateMeasSyncStatus::kInterpolated,
-          });
-        }
-        return specs;
-      };
-      const auto build_hold_window_specs = [&](const std::size_t current_sample_index) {
-        return build_vertical_window_specs(current_sample_index, config_.vertical_jump_hold_window_s);
-      };
-      const auto build_future_trend_specs = [&](const std::size_t current_sample_index) {
-        return build_vertical_window_specs(current_sample_index, config_.vertical_jump_future_trend_window_s);
-      };
+  PopulateGnssPostfitResiduals(
+    optimized_values,
+    base_interpolator,
+    trajectory_row_index_by_state,
+    run_result.gnss_factor_records,
+    collect_gnss_consistency ? &run_result.gnss_consistency_records : nullptr,
+    &run_result.trajectory);
 
-      const auto refresh_local_postfit_residual =
-        [&](const GnssFactorRecord &gnss_record, GnssConsistencyRecord *gnss_consistency) {
-          if (gnss_consistency == nullptr ||
-              (!IsSynchronizedStatus(gnss_record.sync_status) &&
-               gnss_record.sync_status != StateMeasSyncStatus::kInterpolated)) {
-            return;
-          }
-          const ReferenceNodeState refreshed_state =
-            InterpolateReferenceState(iteration.gate_reference_states, gnss_record.corrected_time_s);
-          const Eigen::Vector3d refreshed_residual_enu_m =
-            ComputePositionResidualEnu(refreshed_state.pose, gnss_record.measurement_enu_m);
-          gnss_consistency->postfit_residual_enu_m = refreshed_residual_enu_m;
-          gnss_consistency->local_postfit_residual_u_m = refreshed_residual_enu_m.z();
-          gnss_consistency->prefit_residual_u_after_local_recovery_m = refreshed_residual_enu_m.z();
-          const double sigma_u_m =
-            std::isfinite(gnss_consistency->effective_sigma_u_m)
-              ? gnss_consistency->effective_sigma_u_m
-              : gnss_consistency->sigma_u_m;
-          if (std::isfinite(sigma_u_m) && sigma_u_m > 0.0) {
-            gnss_consistency->postfit_nis =
-              ComputeVerticalNis(refreshed_residual_enu_m.z(), sigma_u_m);
-            gnss_consistency->vertical_gate_inside =
-              gnss_consistency->postfit_nis <= vertical_gate_nis_threshold ? 1.0 : 0.0;
-          }
-        };
-
-      const auto refresh_local_postfit_residuals_between_times =
-        [&](const double window_start_time_s, const double window_end_time_s) {
-          if (!collect_gnss_consistency ||
-              iteration.gnss_factor_records.empty() ||
-              iteration.gnss_factor_records.size() != iteration.gnss_consistency_records.size()) {
-            return;
-          }
-          for (std::size_t record_index = 0; record_index < iteration.gnss_factor_records.size(); ++record_index) {
-            const auto &existing_record = iteration.gnss_factor_records[record_index];
-            auto &existing_consistency = iteration.gnss_consistency_records[record_index];
-            if (!existing_record.factor_used ||
-                existing_record.corrected_time_s < window_start_time_s - kTimeEpsilonS ||
-                existing_record.corrected_time_s > window_end_time_s + kTimeEpsilonS) {
-              continue;
-            }
-            refresh_local_postfit_residual(existing_record, &existing_consistency);
-          }
-        };
-
-      const auto compute_vz_reference_rms = [&](
-                                               const std::vector<ReferenceNodeState> &reference_states,
-                                               const std::size_t start_index,
-                                              const std::size_t end_index) {
-        if (reference_states.empty() || start_index >= reference_states.size() || end_index >= reference_states.size() ||
-            start_index > end_index) {
-          return std::numeric_limits<double>::quiet_NaN();
-        }
-        double squared_error_sum = 0.0;
-        std::size_t sample_count = 0U;
-        for (std::size_t state_index = start_index; state_index <= end_index; ++state_index) {
-          if (state_index >= vertical_vz_reference_by_state.size() ||
-              !vertical_vz_reference_by_state[state_index].valid ||
-              !std::isfinite(vertical_vz_reference_by_state[state_index].vz_ref_global_smoothed_mps)) {
-            continue;
-          }
-          const double error_mps =
-            reference_states[state_index].velocity.z() -
-            vertical_vz_reference_by_state[state_index].vz_ref_global_smoothed_mps;
-          squared_error_sum += error_mps * error_mps;
-          ++sample_count;
-        }
-        if (sample_count == 0U) {
-          return std::numeric_limits<double>::quiet_NaN();
-        }
-        return std::sqrt(squared_error_sum / static_cast<double>(sample_count));
-      };
-
-      auto graph_with_gnss = base_graph;
-      if (config_.enable_gnss) {
-        for (std::size_t sample_index = 0; sample_index < dataset.gnss_samples.size(); ++sample_index) {
-          if (sample_index <= navigation_start_index) {
-            continue;
-          }
-          const auto &gnss_sample = dataset.gnss_samples[sample_index];
-          GnssFactorRecord record;
-          record.sample_index = sample_index;
-          record.raw_time_s = gnss_sample.time_s;
-          record.corrected_time_s = CorrectedGnssTime(gnss_sample);
-          record.gnss_fix_type = gnss_sample.fix_type();
-          GnssConsistencyRecord consistency_record;
-          consistency_record.sample_index = sample_index;
-          consistency_record.raw_time_s = gnss_sample.time_s;
-          consistency_record.corrected_time_s = record.corrected_time_s;
-          consistency_record.gnss_fix_type = gnss_sample.fix_type();
-          consistency_record.raw_sigma_h_m = gnss_sample.sigma_h_m;
-          consistency_record.prefit_residual_enu_m = Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
-          consistency_record.postfit_residual_enu_m = Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
-          if (gnss_sample.has_enu_position) {
-            record.measurement_enu_m = gnss_sample.enu_position_m;
-          }
-
-          if (!ShouldUseGnssFactor(gnss_sample, iteration.run_summary)) {
-            record.sync_status = StateMeasSyncStatus::kDropped;
-            iteration.gnss_factor_records.push_back(record);
-            if (collect_gnss_consistency) {
-              consistency_record.sync_status = StateMeasSyncStatus::kDropped;
-              iteration.gnss_consistency_records.push_back(consistency_record);
-            }
-            continue;
-          }
-          if (!IsWithinImuCoverage(dataset.imu_samples, record.corrected_time_s)) {
-            ++iteration.run_summary.dropped_out_of_imu_coverage_count;
-            ++iteration.run_summary.gnss_dropped_count;
-            record.sync_status = StateMeasSyncStatus::kDropped;
-            iteration.gnss_factor_records.push_back(record);
-            if (collect_gnss_consistency) {
-              consistency_record.sync_status = StateMeasSyncStatus::kDropped;
-              iteration.gnss_consistency_records.push_back(consistency_record);
-            }
-            continue;
-          }
-
-          const StateMeasSyncResult sync_result =
-            FindStateForMeasurement(state_timestamp_map, record.corrected_time_s, config_);
-          record.sync_status = sync_result.status;
-          consistency_record.sync_status = sync_result.status;
-          record.state_index_i = sync_result.key_index_i;
-          record.state_index_j = sync_result.key_index_j;
-          record.trajectory_row_index_i = graph_state_to_trajectory_row(sync_result.key_index_i);
-          record.trajectory_row_index_j = graph_state_to_trajectory_row(sync_result.key_index_j);
-          record.state_time_i_s = sync_result.timestamp_i_s;
-          record.state_time_j_s = sync_result.timestamp_j_s;
-          record.duration_from_state_i_s = sync_result.duration_from_state_i_s;
-          if (sync_result.status == StateMeasSyncStatus::kSynchronizedI ||
-              sync_result.status == StateMeasSyncStatus::kSynchronizedJ) {
-            record.synchronized_state_index =
-              sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i : sync_result.key_index_j;
-            record.synchronized_trajectory_row_index = graph_state_to_trajectory_row(record.synchronized_state_index);
-          }
-
-          const double elapsed_s = record.corrected_time_s - dynamic_start_time_s;
-          if (config_.enable_gnss_vertical_drift_model && sample_index < gnss_vertical_reference_up_by_sample.size()) {
-            const double vertical_reference_up_m = gnss_vertical_reference_up_by_sample[sample_index];
-            if (std::isfinite(vertical_reference_up_m)) {
-              record.measurement_enu_m.z() = vertical_reference_up_m;
-              consistency_record.vertical_reference_up_m = vertical_reference_up_m;
-              consistency_record.vertical_reference_used = true;
-            }
-          }
-          const Eigen::Vector3d base_sigma_m = ClampGnssSigma(gnss_sample);
-          Eigen::Vector3d sigma_m = base_sigma_m;
-          if (!use_vertical_rtk_1d_nis_gate &&
-              config_.early_gnss_relaxation_duration_s > 0.0 &&
-              elapsed_s < config_.early_gnss_relaxation_duration_s) {
-            const double alpha = 1.0 - (elapsed_s / config_.early_gnss_relaxation_duration_s);
-            sigma_m *= 1.0 + alpha * (config_.early_gnss_relaxation_scale - 1.0);
-          }
-          consistency_record.sigma_e_m = sigma_m.x();
-          consistency_record.sigma_n_m = sigma_m.y();
-          consistency_record.sigma_u_m = sigma_m.z();
-          const Eigen::Vector3d consistency_base_sigma_m = sigma_m;
-          std::optional<gtsam::Pose3> prefit_pose;
-          bool inside_gate = false;
-          const auto feedback_anchor_state =
-            ResolveVerticalFeedbackAnchorState(record, graph_timeline.dynamic_start_index);
-          const bool apply_initial_vertical_anchor =
-            use_vertical_rtk_1d_nis_gate && !vertical_initial_anchor_applied && feedback_anchor_state.has_value();
-          consistency_record.confirmed_inside_before_sample = confirmed_inside_state_index.has_value() ? 1.0 : 0.0;
-
-          if (use_vertical_rtk_1d_nis_gate) {
-            sigma_m = consistency_base_sigma_m;
-            consistency_record.effective_sigma_u_m = consistency_base_sigma_m.z();
-            consistency_record.vertical_gate_threshold_m =
-              std::sqrt(vertical_gate_nis_threshold) * consistency_record.effective_sigma_u_m;
-            consistency_record.vertical_direct_position_factor_used = apply_initial_vertical_anchor;
-            consistency_record.vertical_sigma_u_used_m =
-              apply_initial_vertical_anchor ? consistency_base_sigma_m.z() : std::numeric_limits<double>::quiet_NaN();
-            if (feedback_anchor_state.has_value()) {
-              const std::size_t required_prefit_index = ResolvePrefitReferenceRightIndex(sync_result);
-              std::size_t propagation_anchor_index =
-                confirmed_inside_state_index.value_or(graph_timeline.dynamic_start_index);
-              if (body_z_reference_propagation_anchor_state_index.has_value()) {
-                propagation_anchor_index =
-                  std::max(propagation_anchor_index, *body_z_reference_propagation_anchor_state_index);
-              }
-              propagation_anchor_index = std::min(propagation_anchor_index, required_prefit_index);
-              if (sequential_reference_valid_until_index > propagation_anchor_index) {
-                sequential_reference_valid_until_index = propagation_anchor_index;
-              }
-              EnsureReferenceStatesValidUntil(
-                state_timestamps,
-                dataset.imu_samples,
-                imu_params,
-                &iteration.gate_reference_states,
-                &sequential_reference_valid_until_index,
-                required_prefit_index,
-                &sequential_initial_values);
-
-              const ReferenceNodeState prefit_reference_state =
-                sync_result.status == StateMeasSyncStatus::kInterpolated
-                  ? InterpolateReferenceState(iteration.gate_reference_states, record.corrected_time_s)
-                  : iteration.gate_reference_states[required_prefit_index];
-              prefit_pose = prefit_reference_state.pose;
-              const Eigen::Vector3d prefit_residual_enu_m =
-                ComputePositionResidualEnu(prefit_reference_state.pose, record.measurement_enu_m);
-              consistency_record.prefit_residual_enu_m = prefit_residual_enu_m;
-              consistency_record.local_prefit_residual_u_m = prefit_residual_enu_m.z();
-              consistency_record.local_postfit_residual_u_m = prefit_residual_enu_m.z();
-              consistency_record.prefit_residual_u_before_local_recovery_m = prefit_residual_enu_m.z();
-              consistency_record.prefit_residual_u_after_local_recovery_m = prefit_residual_enu_m.z();
-              consistency_record.prefit_nis = ComputeVerticalNis(prefit_residual_enu_m.z(), consistency_base_sigma_m.z());
-
-              const NhcThresholdSnapshot nhc_thresholds = nhc_jump_detector.CurrentThresholds(prefit_reference_state.time_s);
-              const ReferenceNodeState nhc_previous_reference_state =
-                required_prefit_index > propagation_anchor_index
-                  ? iteration.gate_reference_states[required_prefit_index - 1U]
-                  : prefit_reference_state;
-              const NhcStateEvaluation nhc_evaluation =
-                nhc_jump_detector.EvaluateTransition(
-                  nhc_previous_reference_state,
-                  prefit_reference_state,
-                  prefit_reference_state.time_s);
-              consistency_record.nhc_body_vy_mps = nhc_evaluation.body_vy_mps;
-              consistency_record.nhc_body_vz_mps = nhc_evaluation.body_vz_mps;
-              consistency_record.nhc_body_vz_baseline_mps = nhc_thresholds.body_vz_baseline_mps;
-              consistency_record.nhc_body_vz_residual_mps = nhc_evaluation.body_vz_residual_mps;
-              consistency_record.nhc_body_vz_jump_mps = nhc_evaluation.body_vz_jump_mps;
-              consistency_record.nhc_body_vy_threshold_mps = nhc_thresholds.body_vy_threshold_mps;
-              consistency_record.nhc_body_vz_threshold_mps = nhc_thresholds.body_vz_threshold_mps;
-              if (required_prefit_index < vertical_vz_reference_by_state.size() &&
-                  vertical_vz_reference_by_state[required_prefit_index].valid &&
-                  std::isfinite(vertical_vz_reference_by_state[required_prefit_index].vz_ref_global_smoothed_mps)) {
-                consistency_record.vz_ref_global_smoothed_mps =
-                  vertical_vz_reference_by_state[required_prefit_index].vz_ref_global_smoothed_mps;
-                consistency_record.vz_prefit_mps = prefit_reference_state.velocity.z();
-                consistency_record.vz_mismatch_mps =
-                  prefit_reference_state.velocity.z() -
-                  vertical_vz_reference_by_state[required_prefit_index].vz_ref_global_smoothed_mps;
-                if (required_prefit_index > propagation_anchor_index &&
-                    required_prefit_index - 1U < vertical_vz_reference_by_state.size() &&
-                    vertical_vz_reference_by_state[required_prefit_index - 1U].valid &&
-                    std::isfinite(vertical_vz_reference_by_state[required_prefit_index - 1U].vz_ref_global_smoothed_mps)) {
-                  const double previous_vz_mismatch_mps =
-                    iteration.gate_reference_states[required_prefit_index - 1U].velocity.z() -
-                    vertical_vz_reference_by_state[required_prefit_index - 1U].vz_ref_global_smoothed_mps;
-                  consistency_record.vz_mismatch_jump_mps =
-                    consistency_record.vz_mismatch_mps - previous_vz_mismatch_mps;
-                }
-              }
-
-              if (apply_initial_vertical_anchor) {
-                inside_gate = true;
-                consistency_record.local_postfit_residual_u_m = 0.0;
-                consistency_record.required_up_anchor_correction_m = 0.0;
-              } else {
-                inside_gate = consistency_record.prefit_nis <= vertical_gate_nis_threshold;
-                const std::optional<SparseVerticalJumpWindowCandidate> covering_body_z_window =
-                  config_.enable_body_z_seed_jump_windows && !body_z_seed_detection.windows.empty()
-                    ? FindCoveringBodyZSeedWindowCandidate(
-                        body_z_seed_detection.windows,
-                        state_timestamps,
-                        iteration.gate_reference_states,
-                        vertical_vz_reference_by_state,
-                        graph_timeline.dynamic_start_index,
-                        *feedback_anchor_state,
-                        record.corrected_time_s,
-                        config_.state_meas_sync_upper_bound_s)
-                    : std::nullopt;
-                if (covering_body_z_window.has_value()) {
-                  inside_gate = false;
-                }
-                bool interval_feedback_requested = false;
-                std::optional<std::size_t> interval_feedback_window_center_state_index;
-                double interval_feedback_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
-                std::optional<SparseVerticalJumpWindowCandidate> interval_feedback_window =
-                  active_interval_feedback_window;
-                if (config_.enable_body_z_seed_jump_windows && !body_z_seed_detection.windows.empty()) {
-                  const auto pending_body_z_window = FindLatestEndedBodyZSeedWindowCandidate(
-                    body_z_seed_detection.windows,
-                    state_timestamps,
-                    iteration.gate_reference_states,
-                    vertical_vz_reference_by_state,
-                    graph_timeline.dynamic_start_index,
-                    *feedback_anchor_state);
-                  if (pending_body_z_window.has_value() &&
-                      (!interval_feedback_window.has_value() ||
-                       pending_body_z_window->end_state_index >= interval_feedback_window->end_state_index)) {
-                    interval_feedback_window = *pending_body_z_window;
-                  }
-                }
-                constexpr double kIntervalFeedbackNearGateToleranceM = 0.03;
-                const bool interval_feedback_gate_eligible =
-                  inside_gate ||
-                  std::abs(prefit_residual_enu_m.z()) <=
-                    consistency_record.vertical_gate_threshold_m + kIntervalFeedbackNearGateToleranceM ||
-                  active_interval_feedback_window.has_value();
-                if (interval_feedback_gate_eligible && !apply_initial_vertical_anchor &&
-                    interval_feedback_window.has_value() &&
-                    record.corrected_time_s - last_interval_feedback_time_s >= 1.0 &&
-                    interval_feedback_window->end_state_index < iteration.gate_reference_states.size() &&
-                    *feedback_anchor_state > interval_feedback_window->end_state_index) {
-                  const double active_window_end_time_s =
-                    iteration.gate_reference_states[interval_feedback_window->end_state_index].time_s;
-                  double next_body_z_start_time_s = std::numeric_limits<double>::infinity();
-                  for (const auto &body_z_window : body_z_seed_detection.windows) {
-                    if (body_z_window.start_state_index > interval_feedback_window->end_state_index &&
-                        body_z_window.start_state_index < iteration.gate_reference_states.size()) {
-                      next_body_z_start_time_s = std::min(
-                        next_body_z_start_time_s,
-                        iteration.gate_reference_states[body_z_window.start_state_index].time_s);
-                    }
-                  }
-                  const bool safely_before_next_body_z_window =
-                    !std::isfinite(next_body_z_start_time_s) ||
-                    record.corrected_time_s < next_body_z_start_time_s - kTimeEpsilonS;
-                  if (safely_before_next_body_z_window) {
-                    auto interval_specs =
-                      build_vertical_window_specs_between_times(active_window_end_time_s, record.corrected_time_s);
-                    interval_specs =
-                      FilterVerticalHoldWindowSpecsAfterState(
-                        interval_specs,
-                        interval_feedback_window->end_state_index);
-                    if (interval_specs.size() >=
-                        static_cast<std::size_t>(std::max(config_.vertical_jump_future_trend_min_fix_count, 1))) {
-                      std::vector<double> interval_times_s;
-                      std::vector<double> interval_residuals_m;
-                      interval_times_s.reserve(interval_specs.size());
-                      interval_residuals_m.reserve(interval_specs.size());
-                      double max_abs_interval_residual_m = 0.0;
-                      bool interval_all_inside = true;
-                      for (const auto &interval_spec : interval_specs) {
-                        const ReferenceNodeState interval_state =
-                          ResolveReferenceStateForHoldWindowSpec(iteration.gate_reference_states, interval_spec);
-                        const Eigen::Vector3d residual_enu_m =
-                          ComputePositionResidualEnu(interval_state.pose, interval_spec.measurement_enu_m);
-                        const double tau_s = interval_spec.corrected_time_s - active_window_end_time_s;
-                        if (!std::isfinite(residual_enu_m.z()) || tau_s <= 0.1) {
-                          continue;
-                        }
-                        const double gate_threshold_m =
-                          std::sqrt(vertical_gate_nis_threshold) * interval_spec.sigma_u_m;
-                        if (std::abs(residual_enu_m.z()) >
-                            gate_threshold_m + kIntervalFeedbackNearGateToleranceM) {
-                          interval_all_inside = false;
-                        }
-                        max_abs_interval_residual_m =
-                          std::max(max_abs_interval_residual_m, std::abs(residual_enu_m.z()));
-                        interval_times_s.push_back(tau_s);
-                        interval_residuals_m.push_back(residual_enu_m.z());
-                      }
-                      const double interval_duration_s =
-                        interval_specs.back().corrected_time_s - interval_specs.front().corrected_time_s;
-                      const auto interval_trend = EvaluateVerticalFutureTrend(
-                        iteration.gate_reference_states,
-                        interval_specs,
-                        config_.vertical_jump_future_trend_min_fix_count,
-                        0.0,
-                        1.0);
-                      double residual_noise_m = std::numeric_limits<double>::quiet_NaN();
-                      double residual_trend_signal_m = std::numeric_limits<double>::quiet_NaN();
-                      double residual_trend_snr = std::numeric_limits<double>::quiet_NaN();
-                      if (interval_trend.valid &&
-                          interval_residuals_m.size() >=
-                            static_cast<std::size_t>(std::max(config_.vertical_jump_future_trend_min_fix_count, 1))) {
-                        const double mean_time_s =
-                          std::accumulate(interval_times_s.begin(), interval_times_s.end(), 0.0) /
-                          static_cast<double>(interval_times_s.size());
-                        const double mean_residual_m =
-                          std::accumulate(interval_residuals_m.begin(), interval_residuals_m.end(), 0.0) /
-                          static_cast<double>(interval_residuals_m.size());
-                        std::vector<double> detrended_residuals_m;
-                        detrended_residuals_m.reserve(interval_residuals_m.size());
-                        double residual_variance_sum_m2 = 0.0;
-                        for (std::size_t residual_index = 0U;
-                             residual_index < interval_residuals_m.size();
-                             ++residual_index) {
-                          const double fitted_residual_m =
-                            mean_residual_m +
-                            interval_trend.residual_slope_mps *
-                              (interval_times_s[residual_index] - mean_time_s);
-                          const double detrended_residual_m =
-                            interval_residuals_m[residual_index] - fitted_residual_m;
-                          detrended_residuals_m.push_back(detrended_residual_m);
-                          residual_variance_sum_m2 += detrended_residual_m * detrended_residual_m;
-                        }
-                        const double residual_std_m =
-                          interval_residuals_m.size() > 1U
-                            ? std::sqrt(
-                                residual_variance_sum_m2 /
-                                static_cast<double>(interval_residuals_m.size() - 1U))
-                            : 0.0;
-                        const double median_detrended_residual_m =
-                          MedianFinite(detrended_residuals_m);
-                        std::vector<double> abs_mad_residuals_m;
-                        abs_mad_residuals_m.reserve(detrended_residuals_m.size());
-                        for (const double detrended_residual_m : detrended_residuals_m) {
-                          abs_mad_residuals_m.push_back(
-                            std::abs(detrended_residual_m - median_detrended_residual_m));
-                        }
-                        const double residual_mad_sigma_m = 1.4826 * MedianFinite(abs_mad_residuals_m);
-                        residual_noise_m =
-                          std::max(
-                            {residual_std_m,
-                             residual_mad_sigma_m,
-                             config_.vertical_interval_feedback_noise_floor_m});
-                        residual_trend_signal_m =
-                          std::abs(interval_trend.residual_slope_mps) * interval_duration_s;
-                        residual_trend_snr =
-                          residual_noise_m > 1e-12 ? residual_trend_signal_m / residual_noise_m
-                                                    : std::numeric_limits<double>::infinity();
-                      }
-                      if ((interval_all_inside || !inside_gate) &&
-                          interval_duration_s >= config_.vertical_interval_feedback_min_duration_s &&
-                          interval_trend.valid &&
-                          std::isfinite(interval_trend.residual_slope_mps) &&
-                          std::isfinite(residual_trend_snr) &&
-                          residual_trend_snr >= config_.vertical_interval_feedback_snr_threshold &&
-                          std::abs(interval_trend.residual_slope_mps) >=
-                            config_.vertical_interval_feedback_min_slope_mps &&
-                          residual_trend_signal_m >= config_.vertical_interval_feedback_min_drift_m &&
-                          max_abs_interval_residual_m >=
-                            config_.vertical_interval_feedback_min_residual_m) {
-                        interval_feedback_requested = true;
-                        interval_feedback_window_center_state_index =
-                          interval_feedback_window->center_state_index;
-                        interval_feedback_delta_vz_mps =
-                          std::clamp(
-                              -config_.vertical_interval_feedback_gain *
-                                interval_trend.residual_slope_mps,
-                              -config_.vertical_interval_feedback_max_delta_vz_mps,
-                              config_.vertical_interval_feedback_max_delta_vz_mps);
-                      }
-                    }
-                  }
-                }
-
-                const bool ended_body_z_window_needs_initial_recovery =
-                  interval_feedback_window.has_value() &&
-                  interval_feedback_window->center_candidate.source == "BODY_Z_SEED_WINDOW" &&
-                  !body_z_windows_with_velocity_correction.contains(
-                    interval_feedback_window->center_state_index) &&
-                  !body_z_windows_with_position_offset_correction.contains(
-                    interval_feedback_window->center_state_index) &&
-                  interval_feedback_window->end_state_index < iteration.gate_reference_states.size() &&
-                  *feedback_anchor_state > interval_feedback_window->end_state_index;
-                const bool local_window_recovery_requested =
-                  covering_body_z_window.has_value() ||
-                  ended_body_z_window_needs_initial_recovery ||
-                  interval_feedback_requested;
-                if (local_window_recovery_requested) {
-                  std::size_t recovery_anchor_state_index =
-                    confirmed_inside_state_index.value_or(graph_timeline.dynamic_start_index);
-                  std::size_t nhc_search_start_state_index = recovery_anchor_state_index;
-                  const double nhc_search_start_time_s =
-                    record.corrected_time_s -
-                    std::max(
-                      {config_.vertical_jump_hold_window_s,
-                       config_.nhc_jump_recovery_lookback_s,
-                       1e-3});
-                  while (nhc_search_start_state_index > graph_timeline.dynamic_start_index &&
-                         state_timestamps[nhc_search_start_state_index] > nhc_search_start_time_s) {
-                    --nhc_search_start_state_index;
-                  }
-                  const double preferred_nhc_jump_sign = prefit_residual_enu_m.z();
-                  auto nhc_jump_anchor_state =
-                    nhc_jump_detector.FindRecentJumpAnchor(
-                      nhc_search_start_state_index,
-                      *feedback_anchor_state,
-                      preferred_nhc_jump_sign);
-                  if (!nhc_jump_anchor_state.has_value()) {
-                    nhc_jump_anchor_state =
-                      nhc_jump_detector.FindJumpAnchor(
-                        iteration.gate_reference_states,
-                        nhc_search_start_state_index,
-                        *feedback_anchor_state,
-                        preferred_nhc_jump_sign);
-                  }
-                  if (nhc_jump_anchor_state.has_value()) {
-                    consistency_record.nhc_jump_anchor_state_index =
-                      static_cast<long long>(*nhc_jump_anchor_state);
-                    std::size_t nhc_recovery_anchor_state_index = *nhc_jump_anchor_state;
-                    if (*nhc_jump_anchor_state > graph_timeline.dynamic_start_index + 1U) {
-                      nhc_recovery_anchor_state_index = *nhc_jump_anchor_state - 2U;
-                    } else if (*nhc_jump_anchor_state > graph_timeline.dynamic_start_index) {
-                      nhc_recovery_anchor_state_index = *nhc_jump_anchor_state - 1U;
-                    }
-                    recovery_anchor_state_index = nhc_recovery_anchor_state_index;
-                  }
-                  consistency_record.recovery_anchor_state_index =
-                    static_cast<long long>(recovery_anchor_state_index);
-                  const auto hold_window_specs = build_hold_window_specs(sample_index);
-                  const auto future_trend_specs = build_future_trend_specs(sample_index);
-                  const bool use_body_z_seed_window_candidates =
-                    config_.enable_body_z_seed_jump_windows && !body_z_seed_detection.windows.empty();
-                  const std::size_t hold_window_end_state_index =
-                    hold_window_specs.empty()
-                      ? *feedback_anchor_state
-                      : std::max_element(
-                          hold_window_specs.begin(),
-                          hold_window_specs.end(),
-                          [](const VerticalHoldWindowSpec &left, const VerticalHoldWindowSpec &right) {
-                            return left.reference_state_index < right.reference_state_index;
-                          })
-                          ->reference_state_index;
-                  const std::size_t future_trend_end_state_index =
-                    future_trend_specs.empty()
-                      ? hold_window_end_state_index
-                      : std::max_element(
-                          future_trend_specs.begin(),
-                          future_trend_specs.end(),
-                          [](const VerticalHoldWindowSpec &left, const VerticalHoldWindowSpec &right) {
-                            return left.reference_state_index < right.reference_state_index;
-                          })
-                          ->reference_state_index;
-                  const std::size_t recovery_scoring_end_state_index =
-                    std::max(hold_window_end_state_index, future_trend_end_state_index);
-                  const double local_gate_threshold_m =
-                    std::sqrt(vertical_gate_nis_threshold) * consistency_base_sigma_m.z();
-                  constexpr double kRecoveredGateToleranceM = 0.005;
-                  const auto recovered_current_inside = [&](const VerticalHoldWindowEvaluation &evaluation) {
-                    return evaluation.current_inside ||
-                           std::abs(evaluation.current_local_postfit_u_m) <=
-                             local_gate_threshold_m + kRecoveredGateToleranceM;
-                  };
-                  double iteration_prefit_u_m = prefit_residual_enu_m.z();
-                  long long pure_delta_up_anchor_start_iteration = -1;
-                  int local_recovery_attempt_count = 0;
-                  std::optional<VerticalLocalRecoveryResult> last_recovery_result;
-                  double last_velocity_recovery_postfit_u_m = std::numeric_limits<double>::quiet_NaN();
-                  bool hold_window_passed = false;
-                  constexpr double kNearGateNoRecoveryToleranceM = 0.05;
-                  bool defer_body_z_window_gate_until_post_window = false;
-                  bool pending_body_z_interval_feedback = false;
-                  bool accepted_body_z_velocity_feedback_pending = false;
-                  if (covering_body_z_window.has_value()) {
-                    defer_body_z_window_gate_until_post_window = true;
-                  }
-                  if (!inside_gate && !interval_feedback_requested &&
-                      !defer_body_z_window_gate_until_post_window &&
-                      interval_feedback_window.has_value() &&
-                      interval_feedback_window->end_state_index < iteration.gate_reference_states.size() &&
-                      *feedback_anchor_state > interval_feedback_window->end_state_index) {
-                    const double interval_window_end_time_s =
-                      iteration.gate_reference_states[interval_feedback_window->end_state_index].time_s;
-                    double next_body_z_start_time_s = std::numeric_limits<double>::infinity();
-                    for (const auto &body_z_window : body_z_seed_detection.windows) {
-                      if (body_z_window.start_state_index > interval_feedback_window->end_state_index &&
-                          body_z_window.start_state_index < iteration.gate_reference_states.size()) {
-                        next_body_z_start_time_s = std::min(
-                          next_body_z_start_time_s,
-                          iteration.gate_reference_states[body_z_window.start_state_index].time_s);
-                      }
-                    }
-                    auto pending_interval_specs =
-                      build_vertical_window_specs_between_times(interval_window_end_time_s, record.corrected_time_s);
-                    pending_interval_specs =
-                      FilterVerticalHoldWindowSpecsAfterState(
-                        pending_interval_specs,
-                        interval_feedback_window->end_state_index);
-                    const double observed_interval_duration_s =
-                      pending_interval_specs.size() >= 2U
-                        ? pending_interval_specs.back().corrected_time_s -
-                            pending_interval_specs.front().corrected_time_s
-                        : 0.0;
-                    const bool next_body_z_window_should_merge =
-                      std::isfinite(next_body_z_start_time_s) &&
-                      next_body_z_start_time_s - interval_window_end_time_s <=
-                        std::max(config_.body_z_jump_redundant_padding_s, config_.body_z_jump_merge_gap_s) +
-                          kTimeEpsilonS;
-                    const bool waiting_for_interval_feedback_cooldown =
-                      std::isfinite(last_interval_feedback_time_s) &&
-                      record.corrected_time_s - last_interval_feedback_time_s < 1.0;
-                    pending_body_z_interval_feedback =
-                      waiting_for_interval_feedback_cooldown ||
-                      observed_interval_duration_s < config_.vertical_interval_feedback_min_duration_s ||
-                      (next_body_z_window_should_merge &&
-                       record.corrected_time_s < next_body_z_start_time_s - kTimeEpsilonS);
-                    if (pending_body_z_interval_feedback) {
-                      defer_body_z_window_gate_until_post_window = true;
-                    }
-                  }
-                  if (defer_body_z_window_gate_until_post_window) {
-                    inside_gate = false;
-                    consistency_record.local_postfit_residual_u_m = iteration_prefit_u_m;
-                    consistency_record.prefit_residual_u_after_local_recovery_m = iteration_prefit_u_m;
-                    consistency_record.required_up_anchor_correction_m = 0.0;
-                    consistency_record.recovery_mode =
-                      pending_body_z_interval_feedback ? "BODY_Z_WINDOW_PENDING"
-                                                       : "BODY_Z_WINDOW_DEFERRED";
-                  } else if (std::abs(iteration_prefit_u_m) <= local_gate_threshold_m + kNearGateNoRecoveryToleranceM) {
-                    inside_gate = true;
-                    consistency_record.local_postfit_residual_u_m = iteration_prefit_u_m;
-                    consistency_record.prefit_residual_u_after_local_recovery_m = iteration_prefit_u_m;
-                    consistency_record.required_up_anchor_correction_m = 0.0;
-                  }
-                  std::unordered_set<std::size_t> nhc_supported_state_indices;
-                  for (std::size_t state_index = std::max<std::size_t>(recovery_anchor_state_index + 1U, 1U);
-                       state_index <= *feedback_anchor_state;
-                       ++state_index) {
-                    const NhcStateEvaluation nhc_candidate_evaluation =
-                      nhc_jump_detector.EvaluateTransition(
-                        iteration.gate_reference_states[state_index - 1U],
-                        iteration.gate_reference_states[state_index],
-                        iteration.gate_reference_states[state_index].time_s);
-                    if (nhc_candidate_evaluation.exceeds_threshold) {
-                      nhc_supported_state_indices.insert(state_index);
-                    }
-                  }
-                  if (nhc_jump_anchor_state.has_value()) {
-                    nhc_supported_state_indices.insert(*nhc_jump_anchor_state);
-                  }
-                  std::vector<std::size_t> selected_jump_window_center_indices;
-                  const int max_accepted_window_corrections =
-                    std::max(
-                      1,
-                      std::min(
-                        config_.vertical_jump_max_selected_points_per_segment,
-                        config_.vertical_jump_window_max_correction_attempts));
-
-                  for (int jump_selection_index = 0;
-                       jump_selection_index < max_accepted_window_corrections &&
-                       (ended_body_z_window_needs_initial_recovery || !inside_gate || interval_feedback_requested) &&
-                       !defer_body_z_window_gate_until_post_window;
-                       ++jump_selection_index) {
-                    auto current_scoring_reference_states = iteration.gate_reference_states;
-                    std::size_t current_scoring_valid_until_index = sequential_reference_valid_until_index;
-                    std::size_t current_scoring_required_index = recovery_scoring_end_state_index;
-                    if (config_.enable_body_z_seed_jump_windows && !body_z_seed_detection.windows.empty()) {
-                      for (const auto &body_z_window : body_z_seed_detection.windows) {
-                        if (body_z_window.end_state_index < graph_timeline.dynamic_start_index + 1U ||
-                            body_z_window.start_state_index > *feedback_anchor_state ||
-                            body_z_window.end_state_index >= state_timestamps.size()) {
-                          continue;
-                        }
-                        current_scoring_required_index =
-                          std::max(current_scoring_required_index, body_z_window.end_state_index);
-                      }
-                    }
-                    EnsureReferenceStatesValidUntil(
-                      state_timestamps,
-                      dataset.imu_samples,
-                      imu_params,
-                      &current_scoring_reference_states,
-                      &current_scoring_valid_until_index,
-                      current_scoring_required_index,
-                      nullptr);
-                    const auto current_hold_evaluation = EvaluateVerticalHoldWindow(
-                      current_scoring_reference_states,
-                      hold_window_specs,
-                      recovery_anchor_state_index,
-                      vertical_gate_nis_threshold);
-                    const double current_vz_reference_rms = compute_vz_reference_rms(
-                      current_scoring_reference_states,
-                      recovery_anchor_state_index,
-                      hold_window_end_state_index);
-                    const auto current_future_trend_evaluation = EvaluateVerticalFutureTrend(
-                      current_scoring_reference_states,
-                      future_trend_specs,
-                      config_.vertical_jump_future_trend_min_fix_count,
-                      config_.vertical_jump_future_trend_mean_weight,
-                      config_.vertical_jump_future_trend_slope_weight);
-                    const double current_objective =
-                      use_body_z_seed_window_candidates
-                        ? current_hold_evaluation.gate_excess_cost +
-                            0.02 * static_cast<double>(selected_jump_window_center_indices.size())
-                        : current_hold_evaluation.gate_excess_cost +
-                            config_.vertical_jump_window_ref_weight *
-                              (std::isfinite(current_vz_reference_rms)
-                                 ? current_vz_reference_rms * current_vz_reference_rms
-                                 : 0.0) +
-                            current_future_trend_evaluation.cost +
-                            0.02 * static_cast<double>(selected_jump_window_center_indices.size());
-
-                    std::vector<SparseVerticalJumpWindowCandidate> sparse_jump_windows;
-                    std::optional<std::size_t> covering_body_z_window_start_state_index;
-                    if (use_body_z_seed_window_candidates) {
-                      for (const auto &body_z_window : body_z_seed_detection.windows) {
-                        if (body_z_window.start_state_index <= *feedback_anchor_state &&
-                            *feedback_anchor_state <= body_z_window.end_state_index &&
-                            body_z_window.start_state_index >= graph_timeline.dynamic_start_index + 1U) {
-                          covering_body_z_window_start_state_index =
-                            covering_body_z_window_start_state_index.has_value()
-                              ? std::max(
-                                  *covering_body_z_window_start_state_index,
-                                  body_z_window.start_state_index)
-                              : std::optional<std::size_t>(body_z_window.start_state_index);
-                        }
-                      }
-                    }
-                    if (use_body_z_seed_window_candidates) {
-                      for (const auto &body_z_window : body_z_seed_detection.windows) {
-                        if (covering_body_z_window_start_state_index.has_value() &&
-                            body_z_window.start_state_index < *covering_body_z_window_start_state_index) {
-                          continue;
-                        }
-                        const auto window_candidate = BuildBodyZSeedSparseWindowCandidate(
-                          body_z_window,
-                          state_timestamps,
-                          current_scoring_reference_states,
-                          vertical_vz_reference_by_state,
-                          graph_timeline.dynamic_start_index,
-                          *feedback_anchor_state,
-                          interval_feedback_window_center_state_index,
-                          nhc_supported_state_indices);
-                        if (window_candidate.has_value()) {
-                          sparse_jump_windows.push_back(*window_candidate);
-                        }
-                      }
-                    }
-                    if (!use_body_z_seed_window_candidates) {
-                      auto fallback_sparse_jump_windows = iteration_sparse_jump_planner.BuildWindowCandidates(
-                        iteration.gate_reference_states,
-                        vertical_vz_reference_by_state,
-                        recovery_anchor_state_index,
-                        *feedback_anchor_state,
-                        [&](const std::size_t state_index) {
-                          return nhc_supported_state_indices.contains(state_index);
-                        });
-                      sparse_jump_windows.insert(
-                        sparse_jump_windows.end(),
-                        std::make_move_iterator(fallback_sparse_jump_windows.begin()),
-                        std::make_move_iterator(fallback_sparse_jump_windows.end()));
-                    }
-                    sparse_jump_windows.erase(
-                      std::remove_if(
-                        sparse_jump_windows.begin(),
-                        sparse_jump_windows.end(),
-                        [&](const SparseVerticalJumpWindowCandidate &window_candidate) {
-                          return !std::isfinite(window_candidate.center_candidate.vz_mismatch_jump_mps) ||
-                                 std::find(
-                                   selected_jump_window_center_indices.begin(),
-                                   selected_jump_window_center_indices.end(),
-                                   window_candidate.center_state_index) != selected_jump_window_center_indices.end();
-                        }),
-                      sparse_jump_windows.end());
-                    const bool has_body_z_seed_window_candidate =
-                      std::any_of(
-                        sparse_jump_windows.begin(),
-                        sparse_jump_windows.end(),
-                        [](const SparseVerticalJumpWindowCandidate &window_candidate) {
-                          return window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW";
-                        });
-                    if (sparse_jump_windows.empty()) {
-                      break;
-                    }
-                    std::stable_sort(
-                      sparse_jump_windows.begin(),
-                      sparse_jump_windows.end(),
-                      [&](const SparseVerticalJumpWindowCandidate &left,
-                          const SparseVerticalJumpWindowCandidate &right) {
-                        if (interval_feedback_window_center_state_index.has_value()) {
-                          const bool left_is_active =
-                            left.center_state_index == *interval_feedback_window_center_state_index;
-                          const bool right_is_active =
-                            right.center_state_index == *interval_feedback_window_center_state_index;
-                          if (left_is_active != right_is_active) {
-                            return left_is_active;
-                          }
-                        }
-                        return left.end_state_index > right.end_state_index;
-                      });
-
-                    double best_objective = std::numeric_limits<double>::infinity();
-                    std::optional<SparseVerticalJumpWindowCandidate> best_window;
-                    std::optional<VerticalVelocityWindowCorrection> best_window_correction;
-                    std::optional<VerticalLocalRecoveryResult> best_recovery_result;
-                    std::vector<ReferenceNodeState> best_reference_states;
-                    gtsam::Values best_initial_values;
-                    std::size_t best_valid_until_index = sequential_reference_valid_until_index;
-                    VerticalHoldWindowEvaluation best_hold_evaluation;
-
-                    for (const auto &window_candidate : sparse_jump_windows) {
-                      const bool body_z_seed_candidate =
-                        window_candidate.center_candidate.source == "BODY_Z_SEED_WINDOW";
-                      const bool current_sample_covered_by_body_z_window =
-                        body_z_seed_candidate &&
-                        (*feedback_anchor_state <= window_candidate.end_state_index ||
-                         record.corrected_time_s <=
-                           state_timestamps[window_candidate.end_state_index] +
-                             std::max(config_.state_meas_sync_upper_bound_s, kTimeEpsilonS));
-                      const bool body_z_position_offset_already_used =
-                        body_z_seed_candidate &&
-                        body_z_windows_with_position_offset_correction.contains(
-                          window_candidate.center_state_index);
-                      const bool body_z_velocity_already_used =
-                        body_z_seed_candidate &&
-                        body_z_windows_with_velocity_correction.contains(
-                          window_candidate.center_state_index);
-                      const int body_z_velocity_feedback_count =
-                        body_z_seed_candidate &&
-                            body_z_window_velocity_feedback_counts.contains(window_candidate.center_state_index)
-                          ? body_z_window_velocity_feedback_counts[window_candidate.center_state_index]
-                          : 0;
-                      const bool body_z_velocity_feedback_limit_reached =
-                        body_z_seed_candidate &&
-                        body_z_velocity_feedback_count >=
-                          std::max(config_.vertical_local_recovery_max_iterations - 1, 1);
-                      const bool body_z_velocity_feedback_for_window =
-                        body_z_seed_candidate &&
-                        interval_feedback_requested &&
-                        interval_feedback_window_center_state_index.has_value() &&
-                        window_candidate.center_state_index == *interval_feedback_window_center_state_index &&
-                        std::isfinite(interval_feedback_delta_vz_mps) &&
-                        !body_z_velocity_feedback_limit_reached;
-                      std::vector<double> forced_tail_delta_options_mps;
-                      if (!body_z_seed_candidate) {
-                        forced_tail_delta_options_mps.push_back(
-                          std::numeric_limits<double>::quiet_NaN());
-                        forced_tail_delta_options_mps.push_back(
-                          window_candidate.center_candidate.delta_vz_init_mps);
-                      } else {
-                        const auto stored_tail_velocity_it =
-                          body_z_window_tail_velocity_targets_mps.find(
-                            window_candidate.center_state_index);
-                        const double stored_tail_velocity_target_mps =
-                          stored_tail_velocity_it != body_z_window_tail_velocity_targets_mps.end()
-                            ? stored_tail_velocity_it->second
-                            : std::numeric_limits<double>::quiet_NaN();
-                        forced_tail_delta_options_mps = BuildBodyZTailVelocityTargetsMps(
-                          current_scoring_reference_states,
-                          window_candidate,
-                          body_z_velocity_already_used,
-                          body_z_velocity_feedback_for_window,
-                          interval_feedback_delta_vz_mps,
-                          stored_tail_velocity_target_mps,
-                          true);
-                      }
-                      if (!body_z_seed_candidate &&
-                          !current_sample_covered_by_body_z_window &&
-                          window_candidate.end_state_index < current_scoring_reference_states.size() &&
-                          std::isfinite(iteration_prefit_u_m)) {
-                        const double feedback_dt_s = std::max(
-                          std::abs(
-                            record.corrected_time_s -
-                            state_timestamps[window_candidate.end_state_index]),
-                          0.05);
-                        const double current_tail_vz_mps =
-                          current_scoring_reference_states[window_candidate.end_state_index].velocity.z();
-                        const double residual_feedback_delta_vz_mps =
-                          std::clamp(-iteration_prefit_u_m / feedback_dt_s, -0.5, 0.5);
-                        for (const double feedback_scale : {1.0, 0.75, 1.25, 0.5, 1.5}) {
-                          forced_tail_delta_options_mps.push_back(
-                            current_tail_vz_mps + feedback_scale * residual_feedback_delta_vz_mps);
-                        }
-                      }
-                      std::vector<double> forced_tail_delta_up_options_m =
-                        body_z_seed_candidate
-                          ? BuildBodyZTailPositionOffsetsM(
-                              current_scoring_reference_states,
-                              window_candidate,
-                              body_z_position_offset_already_used)
-                          : std::vector<double>{std::numeric_limits<double>::quiet_NaN()};
-                      if (body_z_seed_candidate &&
-                          body_z_velocity_already_used &&
-                          !body_z_velocity_feedback_for_window &&
-                          !current_sample_covered_by_body_z_window &&
-                          std::isfinite(iteration_prefit_u_m)) {
-                        const double base_tail_up_offset_m =
-                          forced_tail_delta_up_options_m.empty()
-                            ? 0.0
-                            : forced_tail_delta_up_options_m.front();
-                        for (const double up_delta_scale : {0.5, 0.75, 1.0, 1.25}) {
-                          PushUniqueCandidateValue(
-                            &forced_tail_delta_up_options_m,
-                            base_tail_up_offset_m - up_delta_scale * iteration_prefit_u_m);
-                        }
-                      }
-                      if (!body_z_seed_candidate &&
-                          window_candidate.start_state_index > 0U &&
-                          window_candidate.start_state_index - 1U < iteration.gate_reference_states.size() &&
-                          std::isfinite(iteration_prefit_u_m)) {
-                        const double residual_correction_dt_s = std::max(
-                          record.corrected_time_s -
-                            state_timestamps[window_candidate.start_state_index - 1U],
-                          0.05);
-                        forced_tail_delta_options_mps.push_back(
-                          std::clamp(-iteration_prefit_u_m / residual_correction_dt_s, -2.0, 2.0));
-                        for (const double up_delta_scale : {0.5, 0.75, 1.0, 1.25, 1.5, 2.0}) {
-                          forced_tail_delta_up_options_m.push_back(
-                            std::clamp(-iteration_prefit_u_m * up_delta_scale, -5.0, 5.0));
-                        }
-                      }
-                      if (!body_z_seed_candidate &&
-                          current_future_trend_evaluation.valid &&
-                          std::isfinite(current_future_trend_evaluation.residual_mean_m)) {
-                        for (const double up_delta_scale : {0.5, 1.0, 1.5}) {
-                          forced_tail_delta_up_options_m.push_back(
-                            std::clamp(
-                              -current_future_trend_evaluation.residual_mean_m * up_delta_scale,
-                              -5.0,
-                              5.0));
-                        }
-                      }
-
-                      std::size_t candidate_scoring_end_state_index = recovery_scoring_end_state_index;
-                      std::vector<VerticalHoldWindowSpec> body_z_segment_specs;
-                      std::vector<VerticalHoldWindowSpec> candidate_acceptance_hold_specs = hold_window_specs;
-                      if (current_sample_covered_by_body_z_window) {
-                        // The triggering RTK sample is synchronized inside the detected acceleration anomaly.
-                        // Do not reject the correction only because the abnormal window's internal height is
-                        // outside gate; score the candidate from the first post-window RTK evidence instead.
-                        candidate_acceptance_hold_specs =
-                          FilterVerticalHoldWindowSpecsAfterState(hold_window_specs, window_candidate.end_state_index);
-                      }
-                      if (body_z_seed_candidate) {
-                        std::size_t body_z_segment_end_state_index = recovery_scoring_end_state_index;
-                        std::optional<std::size_t> next_body_z_start_state_index;
-                        for (const auto &body_z_window : body_z_seed_detection.windows) {
-                          if (body_z_window.start_state_index <= window_candidate.end_state_index) {
-                            continue;
-                          }
-                          next_body_z_start_state_index =
-                            next_body_z_start_state_index.has_value()
-                              ? std::min(*next_body_z_start_state_index, body_z_window.start_state_index)
-                              : std::optional<std::size_t>(body_z_window.start_state_index);
-                        }
-                        if (next_body_z_start_state_index.has_value() &&
-                            *next_body_z_start_state_index > 0U) {
-                          body_z_segment_end_state_index =
-                            std::min(
-                              body_z_segment_end_state_index,
-                              *next_body_z_start_state_index - 1U);
-                        }
-                        body_z_segment_end_state_index =
-                          std::min(
-                            std::max(body_z_segment_end_state_index, window_candidate.end_state_index),
-                            iteration.gate_reference_states.size() - 1U);
-                        candidate_scoring_end_state_index =
-                          std::max(candidate_scoring_end_state_index, body_z_segment_end_state_index);
-                        body_z_segment_specs = build_vertical_window_specs_between_times(
-                          state_timestamps[window_candidate.end_state_index],
-                          state_timestamps[body_z_segment_end_state_index]);
-                        body_z_segment_specs = FilterVerticalHoldWindowSpecsAfterState(
-                          body_z_segment_specs, window_candidate.end_state_index);
-                        if (current_sample_covered_by_body_z_window &&
-                            candidate_acceptance_hold_specs.empty()) {
-                          candidate_acceptance_hold_specs = body_z_segment_specs;
-                        }
-                      }
-                      candidate_scoring_end_state_index =
-                        std::min(
-                          std::max(candidate_scoring_end_state_index, window_candidate.end_state_index),
-                          iteration.gate_reference_states.size() - 1U);
-                      if (current_sample_covered_by_body_z_window &&
-                          candidate_acceptance_hold_specs.empty()) {
-                        continue;
-                      }
-                      if (body_z_seed_candidate &&
-                          body_z_velocity_feedback_for_window &&
-                          !body_z_velocity_already_used &&
-                          !current_sample_covered_by_body_z_window) {
-                        auto provisional_reference_states = iteration.gate_reference_states;
-                        gtsam::Values provisional_initial_values = sequential_initial_values;
-                        std::size_t provisional_valid_until_index = sequential_reference_valid_until_index;
-                        EnsureReferenceStatesValidUntil(
-                          state_timestamps,
-                          dataset.imu_samples,
-                          imu_params,
-                          &provisional_reference_states,
-                          &provisional_valid_until_index,
-                          candidate_scoring_end_state_index,
-                          &provisional_initial_values);
-                        const double base_tail_up_offset_m =
-                          forced_tail_delta_up_options_m.empty()
-                            ? 0.0
-                            : forced_tail_delta_up_options_m.front();
-                        const auto provisional_default_correction = BuildVerticalVelocityWindowCorrection(
-                          config_,
-                          provisional_reference_states,
-                          vertical_vz_reference_by_state,
-                          window_candidate,
-                          candidate_scoring_end_state_index,
-                          1.0,
-                          std::numeric_limits<double>::quiet_NaN(),
-                          base_tail_up_offset_m);
-                        if (provisional_default_correction.has_value()) {
-                          ApplyVerticalVelocityWindowCorrection(
-                            *provisional_default_correction,
-                            &provisional_reference_states,
-                            &provisional_initial_values);
-                          provisional_valid_until_index =
-                            provisional_default_correction->end_state_index;
-                          EnsureReferenceStatesValidUntil(
-                            state_timestamps,
-                            dataset.imu_samples,
-                            imu_params,
-                            &provisional_reference_states,
-                            &provisional_valid_until_index,
-                            candidate_scoring_end_state_index,
-                            &provisional_initial_values);
-
-                          auto provisional_interval_specs =
-                            build_vertical_window_specs_between_times(
-                              state_timestamps[window_candidate.end_state_index],
-                              record.corrected_time_s);
-                          provisional_interval_specs =
-                            FilterVerticalHoldWindowSpecsAfterState(
-                              provisional_interval_specs,
-                              window_candidate.end_state_index);
-                          if (provisional_interval_specs.empty()) {
-                            provisional_interval_specs = candidate_acceptance_hold_specs;
-                          }
-                          const auto provisional_delta_vz_mps =
-                          EstimateIntervalVelocityFeedbackDelta(
-                            config_,
-                            provisional_reference_states,
-                            provisional_interval_specs,
-                            state_timestamps[window_candidate.end_state_index]);
-                          if (provisional_delta_vz_mps.has_value()) {
-                            PushUniqueCandidateValue(
-                              &forced_tail_delta_options_mps,
-                              provisional_default_correction->target_tail_vz_mps +
-                                *provisional_delta_vz_mps);
-                          }
-                        }
-                      }
-                      const std::vector<double> tail_delta_scales =
-                        body_z_seed_candidate
-                          ? std::vector<double>{1.0}
-                          : std::vector<double>{0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0};
-                      for (const double forced_tail_delta_mps : forced_tail_delta_options_mps) {
-                      for (const double tail_delta_scale : tail_delta_scales) {
-                      std::vector<double> candidate_forced_tail_delta_up_options_m =
-                        forced_tail_delta_up_options_m;
-                      if (body_z_seed_candidate &&
-                          !current_sample_covered_by_body_z_window) {
-                        const double base_tail_up_offset_m =
-                          candidate_forced_tail_delta_up_options_m.empty()
-                            ? 0.0
-                            : candidate_forced_tail_delta_up_options_m.front();
-                        if (body_z_velocity_feedback_limit_reached &&
-                            std::isfinite(iteration_prefit_u_m)) {
-                          PushUniqueCandidateValue(
-                            &candidate_forced_tail_delta_up_options_m,
-                            base_tail_up_offset_m - iteration_prefit_u_m);
-                        }
-                        auto provisional_reference_states = iteration.gate_reference_states;
-                        gtsam::Values provisional_initial_values = sequential_initial_values;
-                        std::size_t provisional_valid_until_index = sequential_reference_valid_until_index;
-                        EnsureReferenceStatesValidUntil(
-                          state_timestamps,
-                          dataset.imu_samples,
-                          imu_params,
-                          &provisional_reference_states,
-                          &provisional_valid_until_index,
-                          candidate_scoring_end_state_index,
-                          &provisional_initial_values);
-                        const auto provisional_window_correction = BuildVerticalVelocityWindowCorrection(
-                          config_,
-                          provisional_reference_states,
-                          vertical_vz_reference_by_state,
-                          window_candidate,
-                          candidate_scoring_end_state_index,
-                          tail_delta_scale,
-                          forced_tail_delta_mps,
-                          base_tail_up_offset_m);
-                        if (provisional_window_correction.has_value() &&
-                            std::isfinite(provisional_window_correction->delta_vz_tail_mps)) {
-                          ApplyVerticalVelocityWindowCorrection(
-                            *provisional_window_correction,
-                            &provisional_reference_states,
-                            &provisional_initial_values);
-                          provisional_valid_until_index =
-                            provisional_window_correction->end_state_index;
-                          EnsureReferenceStatesValidUntil(
-                            state_timestamps,
-                            dataset.imu_samples,
-                            imu_params,
-                            &provisional_reference_states,
-                            &provisional_valid_until_index,
-                            candidate_scoring_end_state_index,
-                            &provisional_initial_values);
-                          auto stable_offset_specs =
-                            build_vertical_window_specs_between_times(
-                              state_timestamps[window_candidate.end_state_index],
-                              record.corrected_time_s);
-                          stable_offset_specs =
-                            FilterVerticalHoldWindowSpecsAfterState(
-                              stable_offset_specs,
-                              window_candidate.end_state_index);
-                          if (stable_offset_specs.empty()) {
-                            stable_offset_specs = candidate_acceptance_hold_specs;
-                          }
-                          const auto provisional_stable_offset =
-                            EvaluateVerticalFutureTrend(
-                              provisional_reference_states,
-                              stable_offset_specs,
-                              config_.vertical_jump_future_trend_min_fix_count,
-                              1.0,
-                              1.0);
-                          constexpr double kStableOffsetSlopeLimitMps = 0.01;
-                          const bool stable_offset_observable =
-                            provisional_stable_offset.valid &&
-                            std::isfinite(provisional_stable_offset.residual_mean_m) &&
-                            std::isfinite(provisional_stable_offset.residual_slope_mps) &&
-                            std::abs(provisional_stable_offset.residual_mean_m) >=
-                              config_.vertical_interval_feedback_min_residual_m &&
-                            std::abs(provisional_stable_offset.residual_slope_mps) <=
-                              kStableOffsetSlopeLimitMps;
-                          if (stable_offset_observable) {
-                            const double requested_tail_up_delta_m =
-                              base_tail_up_offset_m - provisional_stable_offset.residual_mean_m;
-                            for (const double up_delta_scale : {0.5, 0.75, 1.0, 1.25}) {
-                              const double scaled_tail_up_delta_m =
-                                base_tail_up_offset_m +
-                                up_delta_scale *
-                                  (requested_tail_up_delta_m - base_tail_up_offset_m);
-                              if (std::abs(scaled_tail_up_delta_m) > 1e-4) {
-                                PushUniqueCandidateValue(
-                                  &candidate_forced_tail_delta_up_options_m,
-                                  scaled_tail_up_delta_m);
-                              }
-                            }
-                          }
-                        }
-                      }
-                      for (const double forced_tail_delta_up_m :
-                           candidate_forced_tail_delta_up_options_m) {
-                      auto candidate_reference_states = iteration.gate_reference_states;
-                      gtsam::Values candidate_initial_values = sequential_initial_values;
-                      std::size_t candidate_valid_until_index = sequential_reference_valid_until_index;
-                      EnsureReferenceStatesValidUntil(
-                        state_timestamps,
-                        dataset.imu_samples,
-                        imu_params,
-                        &candidate_reference_states,
-                        &candidate_valid_until_index,
-                        candidate_scoring_end_state_index,
-                        &candidate_initial_values);
-                      const auto window_correction = BuildVerticalVelocityWindowCorrection(
-                        config_,
-                        candidate_reference_states,
-                        vertical_vz_reference_by_state,
-                        window_candidate,
-                        candidate_scoring_end_state_index,
-                        tail_delta_scale,
-                        forced_tail_delta_mps,
-                        forced_tail_delta_up_m);
-                      if (!window_correction.has_value() ||
-                          !std::isfinite(window_correction->delta_vz_tail_mps) ||
-                          !std::isfinite(window_correction->delta_up_tail_m) ||
-                          (std::abs(window_correction->delta_vz_tail_mps) <= 1e-9 &&
-                           std::abs(window_correction->delta_up_tail_m) <= 1e-9)) {
-                        continue;
-                      }
-                      ApplyVerticalVelocityWindowCorrection(
-                        *window_correction,
-                        &candidate_reference_states,
-                        &candidate_initial_values);
-                      candidate_valid_until_index = window_correction->end_state_index;
-                      EnsureReferenceStatesValidUntil(
-                        state_timestamps,
-                        dataset.imu_samples,
-                        imu_params,
-                        &candidate_reference_states,
-                        &candidate_valid_until_index,
-                        candidate_scoring_end_state_index,
-                        &candidate_initial_values);
-
-                      const auto candidate_hold_evaluation = EvaluateVerticalHoldWindow(
-                        candidate_reference_states,
-                        candidate_acceptance_hold_specs,
-                        recovery_anchor_state_index,
-                        vertical_gate_nis_threshold);
-                      if (body_z_seed_candidate) {
-                        const bool velocity_feedback_candidate =
-                          body_z_velocity_feedback_for_window &&
-                          std::isfinite(forced_tail_delta_mps);
-                        const bool position_feedback_candidate =
-                          std::isfinite(forced_tail_delta_up_m) &&
-                          std::abs(forced_tail_delta_up_m) > 1e-4;
-                        const bool initial_body_z_window_candidate =
-                          !body_z_velocity_already_used &&
-                          std::isnan(forced_tail_delta_mps);
-                        if (!candidate_hold_evaluation.hold_window_passed &&
-                            !recovered_current_inside(candidate_hold_evaluation) &&
-                            !velocity_feedback_candidate &&
-                            !position_feedback_candidate &&
-                            !initial_body_z_window_candidate) {
-                          continue;
-                        }
-                      } else if (!recovered_current_inside(candidate_hold_evaluation)) {
-                        continue;
-                      }
-                      const double candidate_vz_reference_rms = compute_vz_reference_rms(
-                        candidate_reference_states,
-                        window_correction->end_state_index,
-                        hold_window_end_state_index);
-                      const auto candidate_future_trend_evaluation = EvaluateVerticalFutureTrend(
-                        candidate_reference_states,
-                        future_trend_specs,
-                        config_.vertical_jump_future_trend_min_fix_count,
-                        config_.vertical_jump_future_trend_mean_weight,
-                        config_.vertical_jump_future_trend_slope_weight);
-                      auto candidate_position_offset_trend_evaluation = candidate_future_trend_evaluation;
-                      if (body_z_seed_candidate && !body_z_segment_specs.empty()) {
-                        candidate_position_offset_trend_evaluation = EvaluateVerticalFutureTrend(
-                          candidate_reference_states,
-                          body_z_segment_specs,
-                          config_.vertical_jump_future_trend_min_fix_count,
-                          config_.vertical_jump_future_trend_mean_weight,
-                          config_.vertical_jump_future_trend_slope_weight);
-                      }
-                      constexpr double kStableOffsetSlopeLimitMps = 0.01;
-                      const bool candidate_position_feedback =
-                        body_z_seed_candidate &&
-                        std::isfinite(forced_tail_delta_up_m) &&
-                        std::abs(forced_tail_delta_up_m) > 1e-4;
-                      const bool stable_offset_prefers_position =
-                        body_z_seed_candidate &&
-                        !current_sample_covered_by_body_z_window &&
-                        candidate_position_offset_trend_evaluation.valid &&
-                        std::isfinite(candidate_position_offset_trend_evaluation.residual_mean_m) &&
-                        std::isfinite(candidate_position_offset_trend_evaluation.residual_slope_mps) &&
-                        std::abs(candidate_position_offset_trend_evaluation.residual_mean_m) >=
-                          config_.vertical_interval_feedback_min_residual_m &&
-                        std::abs(candidate_position_offset_trend_evaluation.residual_slope_mps) <=
-                          kStableOffsetSlopeLimitMps;
-                      if (body_z_seed_candidate &&
-                          std::abs(window_correction->delta_vz_tail_mps) <= 1e-6 &&
-                          std::abs(window_correction->delta_up_tail_m) > 1e-4) {
-                        if (!candidate_position_offset_trend_evaluation.valid ||
-                            !std::isfinite(candidate_position_offset_trend_evaluation.residual_slope_mps) ||
-                            std::abs(candidate_position_offset_trend_evaluation.residual_slope_mps) >
-                              kStableOffsetSlopeLimitMps) {
-                          continue;
-                        }
-                      }
-                      double body_z_segment_gate_cost = 0.0;
-                      if (!body_z_segment_specs.empty()) {
-                        const auto candidate_body_z_segment_evaluation = EvaluateVerticalHoldWindow(
-                          candidate_reference_states,
-                          body_z_segment_specs,
-                          window_correction->end_state_index,
-                          vertical_gate_nis_threshold);
-                        body_z_segment_gate_cost =
-                          100.0 * candidate_body_z_segment_evaluation.gate_excess_cost +
-                          (candidate_body_z_segment_evaluation.hold_window_passed ? 0.0 : 1.0);
-                      }
-                      // Body-z seed windows are pre-localized by the RTK seed attitude pass, so they should not
-                      // lose to later GNSS/NHC mismatch windows while any body-z candidate remains viable.
-                      const double candidate_objective =
-                        (has_body_z_seed_window_candidate &&
-                             window_candidate.center_candidate.source != "BODY_Z_SEED_WINDOW"
-                           ? 1.0e6
-                           : 0.0) +
-                        candidate_hold_evaluation.gate_excess_cost +
-                        (candidate_hold_evaluation.hold_window_passed ? 0.0 : 1.0) +
-                        (body_z_seed_candidate
-                           ? 0.0
-                           : config_.vertical_jump_window_ref_weight *
-                               (std::isfinite(candidate_vz_reference_rms)
-                                  ? candidate_vz_reference_rms * candidate_vz_reference_rms
-                                  : 0.0)) +
-                        config_.vertical_jump_window_velocity_smoothness_weight *
-                          window_correction->velocity_smooth_cost +
-                        config_.vertical_jump_window_height_integral_weight *
-                          window_correction->height_integral_delta_m *
-                          window_correction->height_integral_delta_m +
-                        body_z_segment_gate_cost +
-                        (body_z_seed_candidate ? 0.0 : candidate_future_trend_evaluation.cost) +
-                        (stable_offset_prefers_position && !candidate_position_feedback ? 5.0 : 0.0) +
-                        (stable_offset_prefers_position && candidate_position_feedback ? -0.5 : 0.0) +
-                        0.02 * static_cast<double>(selected_jump_window_center_indices.size() + 1U);
-                      if (!std::isfinite(candidate_objective) || candidate_objective >= best_objective) {
-                        continue;
-                      }
-
-                      VerticalLocalRecoveryResult scored_result;
-                      scored_result.recovered_anchor_state =
-                        candidate_reference_states[recovery_anchor_state_index];
-                      scored_result.local_postfit_u_m = candidate_hold_evaluation.current_local_postfit_u_m;
-                      scored_result.required_up_anchor_correction_m =
-                        ComputeRequiredUpAnchorCorrectionM(
-                          ResolveReferenceStateForHoldWindowSpec(
-                            candidate_reference_states,
-                            candidate_acceptance_hold_specs.front())
-                            .pose,
-                          candidate_acceptance_hold_specs.front().measurement_enu_m);
-                      scored_result.delta_vz_applied_mps = window_correction->delta_vz_tail_mps;
-                      scored_result.delta_roll_applied_rad = 0.0;
-                      scored_result.delta_pitch_applied_rad = 0.0;
-                      scored_result.delta_baz_applied_mps2 = 0.0;
-                      scored_result.selected_jump_state_index =
-                        static_cast<long long>(window_candidate.center_state_index);
-                      scored_result.selected_jump_delta_vz_mps =
-                        window_candidate.center_candidate.delta_vz_init_mps;
-                      scored_result.jump_candidate_score = window_candidate.center_candidate.score;
-                      scored_result.selected_jump_window_start_state_index =
-                        static_cast<long long>(window_candidate.start_state_index);
-                      scored_result.selected_jump_window_center_state_index =
-                        static_cast<long long>(window_candidate.center_state_index);
-                      scored_result.selected_jump_window_end_state_index =
-                        static_cast<long long>(window_candidate.end_state_index);
-                      scored_result.selected_jump_window_duration_s = window_candidate.duration_s;
-                      scored_result.selected_jump_window_point_count =
-                        static_cast<long long>(window_candidate.point_count);
-                      scored_result.selected_jump_delta_vz_tail_mps =
-                        window_correction->delta_vz_tail_mps;
-                      scored_result.window_velocity_smooth_cost =
-                        window_correction->velocity_smooth_cost;
-                      scored_result.window_height_integral_delta_m =
-                        window_correction->height_integral_delta_m;
-                      scored_result.future_trend_residual_mean_m =
-                        candidate_future_trend_evaluation.residual_mean_m;
-                      scored_result.future_trend_residual_slope_mps =
-                        candidate_future_trend_evaluation.residual_slope_mps;
-                      scored_result.future_trend_cost = candidate_future_trend_evaluation.cost;
-                      scored_result.future_trend_fix_count =
-                        static_cast<long long>(candidate_future_trend_evaluation.fix_count);
-                      if (candidate_position_feedback) {
-                        scored_result.recovery_mode = "SPARSE_WINDOW_POSITION";
-                      } else if (body_z_seed_candidate &&
-                                 std::abs(window_correction->delta_vz_tail_mps) > 1e-6) {
-                        scored_result.recovery_mode = "SPARSE_WINDOW_VELOCITY";
-                      } else {
-                        scored_result.recovery_mode = "SPARSE_WINDOW";
-                      }
-                      scored_result.hold_window_passed = candidate_hold_evaluation.hold_window_passed;
-                      best_objective = candidate_objective;
-                      best_window = window_candidate;
-                      best_window_correction = window_correction;
-                      best_recovery_result = scored_result;
-                      best_reference_states = std::move(candidate_reference_states);
-                      best_initial_values = std::move(candidate_initial_values);
-                      best_valid_until_index = candidate_valid_until_index;
-                      best_hold_evaluation = candidate_hold_evaluation;
-                      }
-                      }
-                      }
-                      if (body_z_seed_candidate &&
-                          best_window.has_value() &&
-                          best_window->center_state_index == window_candidate.center_state_index &&
-                          recovered_current_inside(best_hold_evaluation)) {
-                        break;
-                      }
-                    }
-
-                    if (!best_window.has_value() || !best_window_correction.has_value() ||
-                        !best_recovery_result.has_value()) {
-                      break;
-                    }
-                    const bool best_objective_improved = best_objective + 1e-9 < current_objective;
-                    const bool best_height_improved =
-                      std::abs(best_hold_evaluation.current_local_postfit_u_m) + 1e-4 <
-                      std::abs(iteration_prefit_u_m);
-                    if (!interval_feedback_requested && !best_objective_improved && !best_height_improved) {
-                      break;
-                    }
-                    if (!interval_feedback_requested &&
-                        !recovered_current_inside(best_hold_evaluation) &&
-                        std::abs(best_hold_evaluation.current_local_postfit_u_m) >=
-                          std::abs(iteration_prefit_u_m)) {
-                      break;
-                    }
-
-                    ++local_recovery_attempt_count;
-                    selected_jump_window_center_indices.push_back(best_window->center_state_index);
-                    iteration.gate_reference_states = std::move(best_reference_states);
-                    sequential_initial_values = std::move(best_initial_values);
-                    sequential_reference_valid_until_index = best_valid_until_index;
-                    inside_reference_states = iteration.gate_reference_states;
-                    history_reobserve_begin_state_index =
-                      history_reobserve_begin_state_index.has_value()
-                        ? std::min(*history_reobserve_begin_state_index, best_window->start_state_index)
-                        : std::optional<std::size_t>(best_window->start_state_index);
-                    inside_bias_adapter_reobserve_begin_state_index =
-                      inside_bias_adapter_reobserve_begin_state_index.has_value()
-                        ? std::min(*inside_bias_adapter_reobserve_begin_state_index, best_window->start_state_index)
-                        : std::optional<std::size_t>(best_window->start_state_index);
-                    last_recovery_result = best_recovery_result;
-                    last_velocity_recovery_postfit_u_m = best_hold_evaluation.current_local_postfit_u_m;
-                    hold_window_passed = best_hold_evaluation.hold_window_passed;
-                    inside_gate = recovered_current_inside(best_hold_evaluation);
-                    if (best_window->center_candidate.source == "BODY_Z_SEED_WINDOW") {
-                      active_interval_feedback_window = *best_window;
-                      body_z_reference_propagation_anchor_state_index =
-                        body_z_reference_propagation_anchor_state_index.has_value()
-                          ? std::max(
-                              *body_z_reference_propagation_anchor_state_index,
-                              best_window->end_state_index)
-                          : std::optional<std::size_t>(best_window->end_state_index);
-                      if (best_window_correction.has_value() &&
-                          std::isfinite(best_window_correction->delta_vz_tail_mps) &&
-                          std::abs(best_window_correction->delta_vz_tail_mps) > 1e-6) {
-                        body_z_windows_with_velocity_correction.insert(
-                          best_window->center_state_index);
-                        body_z_window_tail_velocity_targets_mps[best_window->center_state_index] =
-                          best_window_correction->target_tail_vz_mps;
-                        ++body_z_window_velocity_feedback_counts[best_window->center_state_index];
-                        if (!inside_gate) {
-                          accepted_body_z_velocity_feedback_pending = true;
-                        }
-                      }
-                      if (best_window_correction.has_value() &&
-                          std::isfinite(best_window_correction->delta_up_tail_m) &&
-                          std::abs(best_window_correction->delta_up_tail_m) > 1e-4) {
-                        body_z_windows_with_position_offset_correction.insert(
-                          best_window->center_state_index);
-                        if (!inside_gate) {
-                          accepted_body_z_velocity_feedback_pending = true;
-                        }
-                      }
-                    }
-                    consistency_record.prefit_residual_u_after_local_recovery_m =
-                      best_hold_evaluation.current_local_postfit_u_m;
-                    consistency_record.local_postfit_residual_u_m =
-                      best_hold_evaluation.current_local_postfit_u_m;
-                    consistency_record.required_up_anchor_correction_m =
-                      best_recovery_result->required_up_anchor_correction_m;
-                    consistency_record.delta_vz_applied_mps = best_recovery_result->delta_vz_applied_mps;
-                    consistency_record.delta_up_anchor_applied_m = std::numeric_limits<double>::quiet_NaN();
-                    consistency_record.delta_roll_applied_rad = best_recovery_result->delta_roll_applied_rad;
-                    consistency_record.delta_pitch_applied_rad = best_recovery_result->delta_pitch_applied_rad;
-                    consistency_record.delta_baz_applied_mps2 = best_recovery_result->delta_baz_applied_mps2;
-                    consistency_record.vz_ref_global_smoothed_mps =
-                      best_window->center_candidate.vz_ref_global_smoothed_mps;
-                    consistency_record.vz_prefit_mps = best_window->center_candidate.vz_prefit_mps;
-                    consistency_record.vz_mismatch_mps = best_window->center_candidate.vz_mismatch_mps;
-                    consistency_record.vz_mismatch_jump_mps = best_window->center_candidate.vz_mismatch_jump_mps;
-                    consistency_record.jump_candidate_score = best_window->center_candidate.score;
-                    consistency_record.candidate_source = best_window->center_candidate.source;
-                    consistency_record.body_z_jump_direction = best_window->center_candidate.body_z_direction;
-                    consistency_record.body_z_signed_delta_velocity_mps =
-                      best_window->center_candidate.body_z_signed_delta_velocity_mps;
-                    consistency_record.body_z_direction_score_mps =
-                      best_window->center_candidate.body_z_direction_score_mps;
-                    consistency_record.body_z_axis_nav_z = best_window->center_candidate.body_z_axis_nav_z;
-                    consistency_record.selected_jump_state_index =
-                      static_cast<long long>(best_window->center_state_index);
-                    consistency_record.selected_jump_delta_vz_mps =
-                      best_recovery_result->selected_jump_delta_vz_mps;
-                    consistency_record.selected_jump_window_start_state_index =
-                      best_recovery_result->selected_jump_window_start_state_index;
-                    consistency_record.selected_jump_window_center_state_index =
-                      best_recovery_result->selected_jump_window_center_state_index;
-                    consistency_record.selected_jump_window_end_state_index =
-                      best_recovery_result->selected_jump_window_end_state_index;
-                    consistency_record.selected_jump_window_duration_s =
-                      best_recovery_result->selected_jump_window_duration_s;
-                    consistency_record.selected_jump_window_point_count =
-                      best_recovery_result->selected_jump_window_point_count;
-                    consistency_record.selected_jump_delta_vz_tail_mps =
-                      best_recovery_result->selected_jump_delta_vz_tail_mps;
-                    consistency_record.window_velocity_smooth_cost =
-                      best_recovery_result->window_velocity_smooth_cost;
-                    consistency_record.window_height_integral_delta_m =
-                      best_recovery_result->window_height_integral_delta_m;
-                    consistency_record.future_trend_residual_mean_m =
-                      best_recovery_result->future_trend_residual_mean_m;
-                    consistency_record.future_trend_residual_slope_mps =
-                      best_recovery_result->future_trend_residual_slope_mps;
-                    consistency_record.future_trend_cost = best_recovery_result->future_trend_cost;
-                    consistency_record.future_trend_fix_count = best_recovery_result->future_trend_fix_count;
-                    consistency_record.recovery_mode = best_recovery_result->recovery_mode;
-                    consistency_record.hold_window_passed = hold_window_passed;
-                    if (best_window->start_state_index < iteration.gate_reference_states.size() &&
-                        best_window->end_state_index < iteration.gate_reference_states.size()) {
-                      refresh_local_postfit_residuals_between_times(
-                        iteration.gate_reference_states[best_window->start_state_index].time_s,
-                        std::max(
-                          iteration.gate_reference_states[best_window->end_state_index].time_s,
-                          record.corrected_time_s));
-                    }
-                    refresh_local_postfit_residual(record, &consistency_record);
-
-                    VerticalLocalRecoveryIterationRow iteration_row;
-                    iteration_row.sample_index = sample_index;
-                    iteration_row.corrected_time_s = record.corrected_time_s;
-                    iteration_row.recovery_anchor_state_index =
-                      static_cast<long long>(recovery_anchor_state_index);
-                    iteration_row.feedback_anchor_state_index =
-                      static_cast<long long>(*feedback_anchor_state);
-                    iteration_row.nhc_jump_anchor_state_index =
-                      nhc_jump_anchor_state.has_value() ? static_cast<long long>(*nhc_jump_anchor_state) : -1;
-                    iteration_row.iteration_index = static_cast<long long>(local_recovery_attempt_count);
-                    iteration_row.prefit_u_before_iteration_m = iteration_prefit_u_m;
-                    iteration_row.postfit_u_after_velocity_recovery_m =
-                      best_hold_evaluation.current_local_postfit_u_m;
-                    iteration_row.postfit_u_after_iteration_m =
-                      best_hold_evaluation.current_local_postfit_u_m;
-                    iteration_row.delta_vz_applied_mps = best_recovery_result->delta_vz_applied_mps;
-                    iteration_row.delta_up_anchor_applied_m = std::numeric_limits<double>::quiet_NaN();
-                    iteration_row.delta_roll_applied_rad = best_recovery_result->delta_roll_applied_rad;
-                    iteration_row.delta_pitch_applied_rad = best_recovery_result->delta_pitch_applied_rad;
-                    iteration_row.delta_baz_applied_mps2 = best_recovery_result->delta_baz_applied_mps2;
-                    iteration_row.required_up_anchor_correction_m =
-                      best_recovery_result->required_up_anchor_correction_m;
-                    iteration_row.vz_ref_global_smoothed_mps =
-                      best_window->center_candidate.vz_ref_global_smoothed_mps;
-                    iteration_row.vz_prefit_mps = best_window->center_candidate.vz_prefit_mps;
-                    iteration_row.vz_mismatch_mps = best_window->center_candidate.vz_mismatch_mps;
-                    iteration_row.vz_mismatch_jump_mps =
-                      best_window->center_candidate.vz_mismatch_jump_mps;
-                    iteration_row.jump_candidate_score = best_window->center_candidate.score;
-                    iteration_row.candidate_source = best_window->center_candidate.source;
-                    iteration_row.body_z_jump_direction = best_window->center_candidate.body_z_direction;
-                    iteration_row.body_z_signed_delta_velocity_mps =
-                      best_window->center_candidate.body_z_signed_delta_velocity_mps;
-                    iteration_row.body_z_direction_score_mps =
-                      best_window->center_candidate.body_z_direction_score_mps;
-                    iteration_row.body_z_axis_nav_z = best_window->center_candidate.body_z_axis_nav_z;
-                    iteration_row.selected_jump_state_index =
-                      static_cast<long long>(best_window->center_state_index);
-                    iteration_row.selected_jump_delta_vz_mps =
-                      best_recovery_result->selected_jump_delta_vz_mps;
-                    iteration_row.selected_jump_window_start_state_index =
-                      best_recovery_result->selected_jump_window_start_state_index;
-                    iteration_row.selected_jump_window_center_state_index =
-                      best_recovery_result->selected_jump_window_center_state_index;
-                    iteration_row.selected_jump_window_end_state_index =
-                      best_recovery_result->selected_jump_window_end_state_index;
-                    iteration_row.selected_jump_window_duration_s =
-                      best_recovery_result->selected_jump_window_duration_s;
-                    iteration_row.selected_jump_window_point_count =
-                      best_recovery_result->selected_jump_window_point_count;
-                    iteration_row.selected_jump_delta_vz_tail_mps =
-                      best_recovery_result->selected_jump_delta_vz_tail_mps;
-                    iteration_row.window_velocity_smooth_cost =
-                      best_recovery_result->window_velocity_smooth_cost;
-                    iteration_row.window_height_integral_delta_m =
-                      best_recovery_result->window_height_integral_delta_m;
-                    iteration_row.future_trend_residual_mean_m =
-                      best_recovery_result->future_trend_residual_mean_m;
-                    iteration_row.future_trend_residual_slope_mps =
-                      best_recovery_result->future_trend_residual_slope_mps;
-                    iteration_row.future_trend_cost = best_recovery_result->future_trend_cost;
-                    iteration_row.future_trend_fix_count = best_recovery_result->future_trend_fix_count;
-                    iteration_row.recovery_mode = best_recovery_result->recovery_mode;
-                    iteration_row.hold_window_passed = hold_window_passed;
-                    iteration_row.used_up_anchor_fallback = false;
-                    iteration_row.pure_delta_up_anchor_only = false;
-                    iteration_row.inside_after_velocity_recovery = best_hold_evaluation.current_inside;
-                    iteration_row.inside_after_iteration = inside_gate;
-                    iteration.vertical_local_recovery_iterations.push_back(iteration_row);
-                    iteration_prefit_u_m = best_hold_evaluation.current_local_postfit_u_m;
-                    if (interval_feedback_requested) {
-                      last_interval_feedback_time_s = record.corrected_time_s;
-                      interval_feedback_requested = false;
-                    }
-                  }
-
-                  if (!iteration.failed && !inside_gate &&
-                      config_.enable_vertical_local_up_anchor_fallback &&
-                      last_recovery_result.has_value() &&
-                      std::isfinite(last_recovery_result->required_up_anchor_correction_m) &&
-                      std::abs(last_recovery_result->required_up_anchor_correction_m) > 0.0) {
-                    const auto corrected_anchor_state = ApplyVerticalUpAnchorCorrection(
-                      iteration.gate_reference_states[recovery_anchor_state_index],
-                      last_recovery_result->required_up_anchor_correction_m);
-                    iteration.gate_reference_states[recovery_anchor_state_index] = corrected_anchor_state;
-                    UpsertReferenceStateInitialValues(
-                      recovery_anchor_state_index,
-                      corrected_anchor_state,
-                      &sequential_initial_values);
-                    sequential_reference_valid_until_index = recovery_anchor_state_index;
-                    EnsureReferenceStatesValidUntil(
-                      state_timestamps,
-                      dataset.imu_samples,
-                      imu_params,
-                      &iteration.gate_reference_states,
-                      &sequential_reference_valid_until_index,
-                      hold_window_end_state_index,
-                      &sequential_initial_values);
-                    const auto corrected_hold_evaluation = EvaluateVerticalHoldWindow(
-                      iteration.gate_reference_states,
-                      hold_window_specs,
-                      recovery_anchor_state_index,
-                      vertical_gate_nis_threshold);
-                    consistency_record.prefit_residual_u_after_local_recovery_m =
-                      corrected_hold_evaluation.current_local_postfit_u_m;
-                    consistency_record.local_postfit_residual_u_m =
-                      corrected_hold_evaluation.current_local_postfit_u_m;
-                    consistency_record.delta_up_anchor_applied_m =
-                      last_recovery_result->required_up_anchor_correction_m;
-                    consistency_record.recovery_mode = "UP_ANCHOR";
-                    hold_window_passed = corrected_hold_evaluation.hold_window_passed;
-                    consistency_record.hold_window_passed = hold_window_passed;
-                    inside_gate = corrected_hold_evaluation.current_inside;
-
-                    VerticalLocalRecoveryIterationRow fallback_iteration_row;
-                    fallback_iteration_row.sample_index = sample_index;
-                    fallback_iteration_row.corrected_time_s = record.corrected_time_s;
-                    fallback_iteration_row.recovery_anchor_state_index =
-                      static_cast<long long>(recovery_anchor_state_index);
-                    fallback_iteration_row.feedback_anchor_state_index =
-                      static_cast<long long>(*feedback_anchor_state);
-                    fallback_iteration_row.nhc_jump_anchor_state_index =
-                      nhc_jump_anchor_state.has_value() ? static_cast<long long>(*nhc_jump_anchor_state) : -1;
-                    fallback_iteration_row.iteration_index =
-                      static_cast<long long>(local_recovery_attempt_count + 1);
-                    fallback_iteration_row.prefit_u_before_iteration_m = iteration_prefit_u_m;
-                    fallback_iteration_row.postfit_u_after_velocity_recovery_m =
-                      last_velocity_recovery_postfit_u_m;
-                    fallback_iteration_row.postfit_u_after_iteration_m =
-                      corrected_hold_evaluation.current_local_postfit_u_m;
-                    fallback_iteration_row.delta_vz_applied_mps = 0.0;
-                    fallback_iteration_row.delta_up_anchor_applied_m =
-                      last_recovery_result->required_up_anchor_correction_m;
-                    fallback_iteration_row.delta_roll_applied_rad = 0.0;
-                    fallback_iteration_row.delta_pitch_applied_rad = 0.0;
-                    fallback_iteration_row.delta_baz_applied_mps2 = 0.0;
-                    fallback_iteration_row.required_up_anchor_correction_m =
-                      last_recovery_result->required_up_anchor_correction_m;
-                    fallback_iteration_row.vz_ref_global_smoothed_mps =
-                      consistency_record.vz_ref_global_smoothed_mps;
-                    fallback_iteration_row.vz_prefit_mps = consistency_record.vz_prefit_mps;
-                    fallback_iteration_row.vz_mismatch_mps = consistency_record.vz_mismatch_mps;
-                    fallback_iteration_row.vz_mismatch_jump_mps = consistency_record.vz_mismatch_jump_mps;
-                    fallback_iteration_row.jump_candidate_score = consistency_record.jump_candidate_score;
-                    fallback_iteration_row.candidate_source = consistency_record.candidate_source;
-                    fallback_iteration_row.body_z_jump_direction = consistency_record.body_z_jump_direction;
-                    fallback_iteration_row.body_z_signed_delta_velocity_mps =
-                      consistency_record.body_z_signed_delta_velocity_mps;
-                    fallback_iteration_row.body_z_direction_score_mps =
-                      consistency_record.body_z_direction_score_mps;
-                    fallback_iteration_row.body_z_axis_nav_z = consistency_record.body_z_axis_nav_z;
-                    fallback_iteration_row.selected_jump_state_index =
-                      consistency_record.selected_jump_state_index;
-                    fallback_iteration_row.selected_jump_delta_vz_mps =
-                      consistency_record.selected_jump_delta_vz_mps;
-                    fallback_iteration_row.recovery_mode = "UP_ANCHOR";
-                    fallback_iteration_row.hold_window_passed = hold_window_passed;
-                    fallback_iteration_row.used_up_anchor_fallback = true;
-                    fallback_iteration_row.pure_delta_up_anchor_only = true;
-                    fallback_iteration_row.inside_after_velocity_recovery = false;
-                    fallback_iteration_row.inside_after_iteration = inside_gate;
-                    iteration.vertical_local_recovery_iterations.push_back(fallback_iteration_row);
-                    pure_delta_up_anchor_start_iteration =
-                      static_cast<long long>(local_recovery_attempt_count + 1);
-                  }
-
-                  consistency_record.local_recovery_iteration_count =
-                    static_cast<long long>(local_recovery_attempt_count);
-                  consistency_record.pure_delta_up_anchor_start_iteration = pure_delta_up_anchor_start_iteration;
-                  if (accepted_body_z_velocity_feedback_pending && !inside_gate) {
-                    defer_body_z_window_gate_until_post_window = true;
-                  }
-
-                  // Over-gate residuals are no longer allowed to force a hard local
-                  // speed/height correction.  If a body-z window candidate cannot
-                  // recover the sample, keep the diagnostic residual and let the
-                  // low-frequency ba_z adapter absorb bounded drift in later
-                  // propagation.
-                }
-              }
-            }
-
-            consistency_record.vertical_gate_inside = inside_gate ? 1.0 : 0.0;
-            if (!iteration.failed && !apply_initial_vertical_anchor &&
-                feedback_anchor_state.has_value() &&
-                *feedback_anchor_state < iteration.gate_reference_states.size() &&
-                config_.enable_vertical_inside_bias_adaptation) {
-              const auto &inside_feedback_state = iteration.gate_reference_states[*feedback_anchor_state];
-              const Eigen::Vector3d inside_feedback_ypr =
-                Rot3ToYpr(inside_feedback_state.pose.rotation());
-              const auto inside_bias_update = inside_bias_adapter.ObserveInsideResidual(
-                *feedback_anchor_state,
-                record.corrected_time_s,
-                consistency_record.local_postfit_residual_u_m,
-                consistency_base_sigma_m.z(),
-                consistency_record.vertical_gate_threshold_m,
-                inside_feedback_ypr.y(),
-                inside_feedback_ypr.z());
-              if (inside_bias_update.has_value() &&
-                  inside_bias_update->anchor_state_index < iteration.gate_reference_states.size()) {
-                auto candidate_reference_states = iteration.gate_reference_states;
-                gtsam::Values candidate_initial_values = sequential_initial_values;
-                const std::size_t bias_anchor_state_index = inside_bias_update->anchor_state_index;
-                const auto corrected_bias_anchor_state = ApplyInsideLowFrequencyStateCorrection(
-                  candidate_reference_states[bias_anchor_state_index],
-                  *inside_bias_update);
-                candidate_reference_states[bias_anchor_state_index] = corrected_bias_anchor_state;
-                UpsertReferenceStateInitialValues(
-                  bias_anchor_state_index,
-                  corrected_bias_anchor_state,
-                  &candidate_initial_values);
-
-                std::size_t candidate_valid_until_index = bias_anchor_state_index;
-                const std::size_t required_prefit_index = ResolvePrefitReferenceRightIndex(sync_result);
-                EnsureReferenceStatesValidUntil(
-                  state_timestamps,
-                  dataset.imu_samples,
-                  imu_params,
-                  &candidate_reference_states,
-                  &candidate_valid_until_index,
-                  required_prefit_index,
-                  &candidate_initial_values);
-
-                const ReferenceNodeState corrected_prefit_reference_state =
-                  sync_result.status == StateMeasSyncStatus::kInterpolated
-                    ? InterpolateReferenceState(candidate_reference_states, record.corrected_time_s)
-                    : candidate_reference_states[required_prefit_index];
-                const Eigen::Vector3d corrected_residual_enu_m =
-                  ComputePositionResidualEnu(corrected_prefit_reference_state.pose, record.measurement_enu_m);
-                const double corrected_vertical_nis =
-                  ComputeVerticalNis(corrected_residual_enu_m.z(), consistency_base_sigma_m.z());
-                const double current_vertical_nis =
-                  ComputeVerticalNis(consistency_record.local_postfit_residual_u_m, consistency_base_sigma_m.z());
-                const bool correction_keeps_inside = corrected_vertical_nis <= vertical_gate_nis_threshold;
-                const bool correction_improves_residual =
-                  std::isfinite(corrected_vertical_nis) && std::isfinite(current_vertical_nis) &&
-                  corrected_vertical_nis + 1e-9 < current_vertical_nis;
-                const bool bounded_bias_feedback_observation =
-                  std::abs(consistency_record.local_postfit_residual_u_m) <=
-                  10.0 * consistency_record.vertical_gate_threshold_m;
-                const bool correction_acceptable =
-                  correction_keeps_inside ||
-                  bounded_bias_feedback_observation ||
-                  (correction_improves_residual &&
-                   std::abs(corrected_residual_enu_m.z()) <=
-                     std::max(
-                       std::abs(consistency_record.local_postfit_residual_u_m),
-                       consistency_record.vertical_gate_threshold_m + 0.02));
-                if (correction_acceptable) {
-                  inside_bias_adapter.AcceptUpdate(*inside_bias_update);
-                  iteration.gate_reference_states = std::move(candidate_reference_states);
-                  sequential_initial_values = std::move(candidate_initial_values);
-                  sequential_reference_valid_until_index = candidate_valid_until_index;
-                  inside_reference_states = iteration.gate_reference_states;
-                  body_z_reference_propagation_anchor_state_index =
-                    body_z_reference_propagation_anchor_state_index.has_value()
-                      ? std::max(*body_z_reference_propagation_anchor_state_index, bias_anchor_state_index)
-                      : std::optional<std::size_t>(bias_anchor_state_index);
-                  history_reobserve_begin_state_index =
-                    history_reobserve_begin_state_index.has_value()
-                      ? std::min(*history_reobserve_begin_state_index, bias_anchor_state_index)
-                      : std::optional<std::size_t>(bias_anchor_state_index);
-                  const std::size_t inside_bias_reobserve_begin_state_index = bias_anchor_state_index + 1U;
-                  inside_bias_adapter_reobserve_begin_state_index =
-                    inside_bias_adapter_reobserve_begin_state_index.has_value()
-                      ? std::min(
-                          *inside_bias_adapter_reobserve_begin_state_index,
-                          inside_bias_reobserve_begin_state_index)
-                      : std::optional<std::size_t>(inside_bias_reobserve_begin_state_index);
-                  consistency_record.inside_bias_delta_roll_applied_rad =
-                    inside_bias_update->delta_roll_rad;
-                  consistency_record.inside_bias_delta_pitch_applied_rad =
-                    inside_bias_update->delta_pitch_rad;
-                  consistency_record.inside_bias_delta_baz_applied_mps2 =
-                    inside_bias_update->delta_baz_mps2;
-                  consistency_record.inside_bias_equivalent_acc_mps2 =
-                    inside_bias_update->equivalent_acc_mps2;
-                  consistency_record.inside_bias_residual_delta_m =
-                    inside_bias_update->residual_delta_m;
-                  consistency_record.inside_bias_window_dt_s = inside_bias_update->window_dt_s;
-                  consistency_record.inside_bias_anchor_state_index =
-                    static_cast<long long>(inside_bias_update->anchor_state_index);
-                  consistency_record.inside_bias_observation_count =
-                    inside_bias_update->observation_count;
-                  consistency_record.local_postfit_residual_u_m = corrected_residual_enu_m.z();
-                  consistency_record.prefit_residual_u_after_local_recovery_m =
-                    corrected_residual_enu_m.z();
-                  inside_gate = correction_keeps_inside;
-                  consistency_record.vertical_gate_inside = correction_keeps_inside ? 1.0 : 0.0;
-                }
-              }
-            }
-          } else {
-            if (sync_result.status == StateMeasSyncStatus::kInterpolated) {
-              prefit_pose = InterpolateReferenceState(reference_node_states, record.corrected_time_s).pose;
-            } else if (IsSynchronizedStatus(sync_result.status)) {
-              const std::size_t prefit_state_index =
-                sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i : sync_result.key_index_j;
-              prefit_pose = reference_node_states[prefit_state_index].pose;
-            }
-
-            const Eigen::Vector3d prefit_residual_enu_m =
-              prefit_pose.has_value()
-                ? ComputePositionResidualEnu(*prefit_pose, record.measurement_enu_m)
-                : Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
-            consistency_record.prefit_residual_enu_m = prefit_residual_enu_m;
-            if (prefit_pose.has_value()) {
-              const double full_prefit_nis = ComputeNis(prefit_residual_enu_m, consistency_base_sigma_m);
-              consistency_record.prefit_nis = full_prefit_nis;
-              consistency_record.covariance_scale_e = ComputeConsistencyScale(
-                config_.gnss_consistency_gate_mode,
-                full_prefit_nis,
-                gnss_nis_threshold,
-                config_.gnss_consistency_relaxed_threshold_ratio,
-                config_.gnss_consistency_max_scale_horizontal);
-              consistency_record.covariance_scale_n = ComputeConsistencyScale(
-                config_.gnss_consistency_gate_mode,
-                full_prefit_nis,
-                gnss_nis_threshold,
-                config_.gnss_consistency_relaxed_threshold_ratio,
-                config_.gnss_consistency_max_scale_horizontal);
-              consistency_record.covariance_scale_u = ComputeConsistencyScale(
-                config_.gnss_consistency_gate_mode,
-                full_prefit_nis,
-                gnss_nis_threshold,
-                config_.gnss_consistency_relaxed_threshold_ratio,
-                config_.gnss_consistency_max_scale_up);
-              consistency_record.covariance_scale =
-                (consistency_record.covariance_scale_e + consistency_record.covariance_scale_n +
-                 consistency_record.covariance_scale_u) /
-                3.0;
-              sigma_m.x() *= consistency_record.covariance_scale_e;
-              sigma_m.y() *= consistency_record.covariance_scale_n;
-              sigma_m.z() *= consistency_record.covariance_scale_u;
-            }
-            consistency_record.effective_sigma_u_m = sigma_m.z();
-            consistency_record.vertical_direct_position_factor_used = true;
-            consistency_record.vertical_sigma_u_used_m = sigma_m.z();
-            consistency_record.vertical_gate_inside = std::numeric_limits<double>::quiet_NaN();
-          }
-
-          if (iteration.failed) {
-            consistency_record.factor_used = false;
-            iteration.gnss_factor_records.push_back(record);
-            if (collect_gnss_consistency) {
-              iteration.gnss_consistency_records.push_back(consistency_record);
-            }
-            break;
-          }
-
-          const bool use_horizontal_only_position_factor =
-            use_vertical_rtk_1d_nis_gate && !apply_initial_vertical_anchor;
-          const auto noise_model = MakeGnssNoiseModel(config_, sigma_m);
-          const Eigen::Vector2d horizontal_sigma_m(sigma_m.x(), sigma_m.y());
-          const auto horizontal_noise_model =
-            use_horizontal_only_position_factor
-              ? MakeHorizontalGnssNoiseModel(config_, horizontal_sigma_m)
-              : gtsam::SharedNoiseModel{};
-          const auto vertical_inside_kinematic_noise_model =
-            use_horizontal_only_position_factor && feedback_anchor_state.has_value() &&
-                *feedback_anchor_state < iteration.gate_reference_states.size()
-              ? gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector4(
-                  config_.vertical_rtk_feedback_sigma_attitude_rad,
-                  config_.vertical_rtk_feedback_sigma_attitude_rad,
-                  0.05,
-                  std::max(ResolveVerticalAccBiasSigmaMps2(config_), 1e-12)))
-              : gtsam::SharedNoiseModel{};
-
-          switch (sync_result.status) {
-            case StateMeasSyncStatus::kSynchronizedI:
-            case StateMeasSyncStatus::kSynchronizedJ: {
-              const std::size_t sync_state_index =
-                sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i : sync_result.key_index_j;
-              if (use_horizontal_only_position_factor) {
-                graph_with_gnss.add(factor::HorizontalPositionFactor(
-                  X(sync_state_index),
-                  gtsam::Point2(record.measurement_enu_m.x(), record.measurement_enu_m.y()),
-                  horizontal_noise_model));
-                if (!inside_reference_states.empty() && sync_state_index < inside_reference_states.size()) {
-                  const auto &reference_state = inside_reference_states[sync_state_index];
-                  graph_with_gnss.add(factor::VerticalInsideKinematicFactor(
-                    X(sync_state_index),
-                    V(sync_state_index),
-                    B(sync_state_index),
-                    reference_state.pose,
-                    reference_state.velocity,
-                    reference_state.bias,
-                    vertical_inside_kinematic_noise_model));
-                }
-              } else {
-                graph_with_gnss.add(gtsam::GPSFactor(
-                  X(sync_state_index),
-                  gtsam::Point3(
-                    record.measurement_enu_m.x(),
-                    record.measurement_enu_m.y(),
-                    record.measurement_enu_m.z()),
-                  noise_model));
-              }
-              ++iteration.run_summary.gnss_factor_count;
-              ++iteration.run_summary.gnss_synced_factor_count;
-              record.factor_used = true;
-              record.synchronized_state_index = sync_state_index;
-              record.synchronized_trajectory_row_index = graph_state_to_trajectory_row(sync_state_index);
-              if (sync_state_index < trajectory_row_index_by_state.size() &&
-                  trajectory_row_index_by_state[sync_state_index].has_value()) {
-                auto &row = iteration.trajectory[*trajectory_row_index_by_state[sync_state_index]];
-                row.gnss_factor_used = true;
-                if (row.gnss_fix_type == GnssFixType::kNoSolution) {
-                  row.gnss_fix_type = gnss_sample.fix_type();
-                }
-              }
-              break;
-            }
-            case StateMeasSyncStatus::kInterpolated: {
-              if (!config_.enable_gp_interpolated_gnss || !sync_result.state_j_exists()) {
-                ++iteration.run_summary.gnss_dropped_count;
-                break;
-              }
-              gp::GPWNOJInterpolator interpolator = base_interpolator;
-              interpolator.Recalculate(
-                sync_result.timestamp_j_s - sync_result.timestamp_i_s,
-                sync_result.duration_from_state_i_s);
-              if (use_horizontal_only_position_factor) {
-                graph_with_gnss.add(factor::GPInterpolatedHorizontalPositionFactor(
-                  X(sync_result.key_index_i),
-                  V(sync_result.key_index_i),
-                  W(sync_result.key_index_i),
-                  X(sync_result.key_index_j),
-                  V(sync_result.key_index_j),
-                  W(sync_result.key_index_j),
-                  gtsam::Point2(record.measurement_enu_m.x(), record.measurement_enu_m.y()),
-                  gtsam::Vector3::Zero(),
-                  horizontal_noise_model,
-                  interpolator));
-                if (!inside_reference_states.empty() &&
-                    sync_result.key_index_j < inside_reference_states.size()) {
-                  const auto &reference_state = inside_reference_states[sync_result.key_index_j];
-                  graph_with_gnss.add(factor::VerticalInsideKinematicFactor(
-                    X(sync_result.key_index_j),
-                    V(sync_result.key_index_j),
-                    B(sync_result.key_index_j),
-                    reference_state.pose,
-                    reference_state.velocity,
-                    reference_state.bias,
-                    vertical_inside_kinematic_noise_model));
-                }
-              } else {
-                graph_with_gnss.add(factor::GPInterpolatedGPSFactor(
-                  X(sync_result.key_index_i),
-                  V(sync_result.key_index_i),
-                  W(sync_result.key_index_i),
-                  X(sync_result.key_index_j),
-                  V(sync_result.key_index_j),
-                  W(sync_result.key_index_j),
-                  gtsam::Point3(
-                    record.measurement_enu_m.x(),
-                    record.measurement_enu_m.y(),
-                    record.measurement_enu_m.z()),
-                  gtsam::Vector3::Zero(),
-                  noise_model,
-                  interpolator));
-              }
-              ++iteration.run_summary.gnss_factor_count;
-              ++iteration.run_summary.gnss_interpolated_factor_count;
-              record.factor_used = true;
-              if (sync_result.key_index_i < trajectory_row_index_by_state.size() &&
-                  trajectory_row_index_by_state[sync_result.key_index_i].has_value()) {
-                auto &row_i = iteration.trajectory[*trajectory_row_index_by_state[sync_result.key_index_i]];
-                row_i.gnss_factor_used = true;
-                if (row_i.gnss_fix_type == GnssFixType::kNoSolution) {
-                  row_i.gnss_fix_type = gnss_sample.fix_type();
-                }
-              }
-              if (sync_result.key_index_j < trajectory_row_index_by_state.size() &&
-                  trajectory_row_index_by_state[sync_result.key_index_j].has_value()) {
-                auto &row_j = iteration.trajectory[*trajectory_row_index_by_state[sync_result.key_index_j]];
-                row_j.gnss_factor_used = true;
-                if (row_j.gnss_fix_type == GnssFixType::kNoSolution) {
-                  row_j.gnss_fix_type = gnss_sample.fix_type();
-                }
-              }
-              break;
-            }
-            case StateMeasSyncStatus::kCached:
-              ++iteration.run_summary.gnss_cached_count;
-              break;
-            case StateMeasSyncStatus::kDropped:
-            default:
-              ++iteration.run_summary.gnss_dropped_count;
-              break;
-          }
-
-          if (use_vertical_rtk_1d_nis_gate && record.factor_used && feedback_anchor_state.has_value()) {
-            if (apply_initial_vertical_anchor) {
-              const std::size_t anchor_state_index = *feedback_anchor_state;
-              if (anchor_state_index < iteration.gate_reference_states.size()) {
-                auto anchored_state = iteration.gate_reference_states[anchor_state_index];
-                anchored_state.pose = gtsam::Pose3(
-                  anchored_state.pose.rotation(),
-                  gtsam::Point3(
-                    anchored_state.pose.translation().x(),
-                    anchored_state.pose.translation().y(),
-                    record.measurement_enu_m.z()));
-                iteration.gate_reference_states[anchor_state_index] = anchored_state;
-                if (anchor_state_index < inside_reference_states.size()) {
-                  inside_reference_states[anchor_state_index] = anchored_state;
-                }
-                UpsertReferenceStateInitialValues(anchor_state_index, anchored_state, &sequential_initial_values);
-                sequential_reference_valid_until_index = anchor_state_index;
-              }
-              const std::size_t observe_begin = graph_timeline.dynamic_start_index;
-              if (observe_begin <= anchor_state_index) {
-                nhc_jump_detector.ObserveConfirmedWindow(
-                  iteration.gate_reference_states,
-                  observe_begin,
-                  anchor_state_index);
-                iteration_sparse_jump_planner.ObserveConfirmedWindow(
-                  iteration.gate_reference_states,
-                  vertical_vz_reference_by_state,
-                  observe_begin,
-                  anchor_state_index);
-              }
-              confirmed_inside_state_index = anchor_state_index;
-              vertical_initial_anchor_applied = true;
-            } else if (inside_gate) {
-              if (consistency_record.vertical_gate_inside >= 0.5) {
-                ++iteration.run_summary.vertical_gate_inside_count;
-              } else {
-                ++iteration.run_summary.vertical_gate_outside_count;
-              }
-              const std::size_t nominal_observe_begin =
-                confirmed_inside_state_index.has_value() ? *confirmed_inside_state_index + 1U : *feedback_anchor_state;
-              std::size_t observe_begin = nominal_observe_begin;
-              if (history_reobserve_begin_state_index.has_value()) {
-                const std::size_t reobserve_begin =
-                  std::min(*history_reobserve_begin_state_index, *feedback_anchor_state);
-                nhc_jump_detector.RewindFromStateIndex(reobserve_begin);
-                iteration_sparse_jump_planner.RewindFromStateIndex(reobserve_begin);
-                if (inside_bias_adapter_reobserve_begin_state_index.has_value() &&
-                    *inside_bias_adapter_reobserve_begin_state_index <= *feedback_anchor_state) {
-                  inside_bias_adapter.RewindFromStateIndex(
-                    std::min(*inside_bias_adapter_reobserve_begin_state_index, *feedback_anchor_state));
-                }
-                observe_begin = std::min(observe_begin, reobserve_begin);
-                history_reobserve_begin_state_index.reset();
-                inside_bias_adapter_reobserve_begin_state_index.reset();
-              }
-              if (observe_begin <= *feedback_anchor_state) {
-                nhc_jump_detector.ObserveConfirmedWindow(
-                  iteration.gate_reference_states,
-                  observe_begin,
-                  *feedback_anchor_state);
-                iteration_sparse_jump_planner.ObserveConfirmedWindow(
-                  iteration.gate_reference_states,
-                  vertical_vz_reference_by_state,
-                  observe_begin,
-                  *feedback_anchor_state);
-              }
-              confirmed_inside_state_index = *feedback_anchor_state;
-            } else {
-              ++iteration.run_summary.vertical_gate_outside_count;
-            }
-          }
-
-          consistency_record.factor_used = record.factor_used;
-          iteration.gnss_factor_records.push_back(record);
-          if (collect_gnss_consistency) {
-            iteration.gnss_consistency_records.push_back(consistency_record);
-          }
-        }
-      }
-
-      gtsam::LevenbergMarquardtOptimizer optimizer(graph_with_gnss, sequential_initial_values, optimizer_params);
-      iteration.run_summary.initial_error = optimizer.error();
-      iteration.optimized_values = optimizer.optimize();
-      iteration.run_summary.final_error = graph_with_gnss.error(iteration.optimized_values);
-      PopulateGnssPostfitResiduals(
-        iteration.optimized_values,
-        base_interpolator,
-        trajectory_row_index_by_state,
-        iteration.gnss_factor_records,
-        collect_gnss_consistency ? &iteration.gnss_consistency_records : nullptr,
-        &iteration.trajectory);
-      return iteration;
-    };
-
-  VerticalGateIterationResult final_iteration_result =
-    run_vertical_gate_iteration(gate_seed_reference_states, gate_seed_values);
-
-  run_result.run_summary = final_iteration_result.run_summary;
-  run_result.gnss_factor_records = std::move(final_iteration_result.gnss_factor_records);
-  run_result.gnss_consistency_records = std::move(final_iteration_result.gnss_consistency_records);
-  run_result.vertical_local_recovery_iterations =
-    std::move(final_iteration_result.vertical_local_recovery_iterations);
-  run_result.trajectory = std::move(final_iteration_result.trajectory);
   if (collect_reference_states) {
+    const std::vector<ReferenceNodeState> optimized_reference_states =
+      BuildReferenceStatesFromOptimizedValues(state_timestamps, optimized_values);
     run_result.reference_node_trajectory.clear();
-    run_result.reference_node_trajectory.reserve(final_iteration_result.gate_reference_states.size());
-    for (const auto &reference_state : final_iteration_result.gate_reference_states) {
+    run_result.reference_node_trajectory.reserve(optimized_reference_states.size());
+    for (const auto &reference_state : optimized_reference_states) {
       run_result.reference_node_trajectory.push_back(MakeReferenceNodeRow(reference_state));
     }
   }
-  const gtsam::Values optimized_values = final_iteration_result.optimized_values;
   AccumulateStaticConsistencyMetrics(optimized_values, graph_timeline, run_result.run_summary);
   run_result.error_state_trajectory.clear();
   if (graph_timeline.dynamic_start_index < state_timestamps.size()) {
@@ -4581,98 +2111,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   }
 
   if (config_.enable_gnss) {
-    const gp::GPWNOJInterpolator base_interpolator(
-      gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(kInterpolatorQcVariance)));
-
-    for (std::size_t record_index = 0; record_index < run_result.gnss_factor_records.size(); ++record_index) {
-      auto &record = run_result.gnss_factor_records[record_index];
-      GnssConsistencyRecord *consistency_record =
-        collect_gnss_consistency && record_index < run_result.gnss_consistency_records.size()
-          ? &run_result.gnss_consistency_records[record_index]
-          : nullptr;
-      if (!record.factor_used) {
-        continue;
-      }
-
-      if (record.sync_status == StateMeasSyncStatus::kSynchronizedI ||
-          record.sync_status == StateMeasSyncStatus::kSynchronizedJ) {
-        const auto pose = optimized_values.at<gtsam::Pose3>(X(record.synchronized_state_index));
-        const Eigen::Vector3d residual_enu_m = ComputePositionResidualEnu(pose, record.measurement_enu_m);
-        const bool use_vertical_direct_position =
-          consistency_record == nullptr || consistency_record->vertical_direct_position_factor_used;
-        record.residual_m =
-          use_vertical_direct_position ? residual_enu_m.norm() : residual_enu_m.head<2>().norm();
-        if (consistency_record != nullptr) {
-          consistency_record->postfit_residual_enu_m = residual_enu_m;
-          const Eigen::Vector2d scaled_horizontal_sigma_m(
-            consistency_record->sigma_e_m * consistency_record->covariance_scale_e,
-            consistency_record->sigma_n_m * consistency_record->covariance_scale_n);
-          if (use_vertical_direct_position) {
-            const Eigen::Vector3d scaled_sigma_m(
-              scaled_horizontal_sigma_m.x(),
-              scaled_horizontal_sigma_m.y(),
-              consistency_record->vertical_sigma_u_used_m);
-            consistency_record->postfit_nis = ComputeNis(residual_enu_m, scaled_sigma_m);
-          } else {
-            consistency_record->postfit_nis = ComputeHorizontalNis(residual_enu_m, scaled_horizontal_sigma_m);
-          }
-        }
-        if (record.synchronized_state_index < trajectory_row_index_by_state.size() &&
-            trajectory_row_index_by_state[record.synchronized_state_index].has_value()) {
-          auto &row = run_result.trajectory[*trajectory_row_index_by_state[record.synchronized_state_index]];
-          if (!std::isfinite(row.gnss_residual_m)) {
-            row.gnss_residual_m = record.residual_m;
-          }
-        }
-      } else if (record.sync_status == StateMeasSyncStatus::kInterpolated) {
-        gp::GPWNOJInterpolator interpolator = base_interpolator;
-        interpolator.Recalculate(
-          record.state_time_j_s - record.state_time_i_s,
-          record.duration_from_state_i_s);
-        const gtsam::Pose3 interpolated_pose = interpolator.InterpolatePose(
-          optimized_values.at<gtsam::Pose3>(X(record.state_index_i)),
-          optimized_values.at<gtsam::Vector3>(V(record.state_index_i)),
-          optimized_values.at<gtsam::Vector3>(W(record.state_index_i)),
-          optimized_values.at<gtsam::Pose3>(X(record.state_index_j)),
-          optimized_values.at<gtsam::Vector3>(V(record.state_index_j)),
-          optimized_values.at<gtsam::Vector3>(W(record.state_index_j)));
-        const Eigen::Vector3d residual_enu_m = ComputePositionResidualEnu(interpolated_pose, record.measurement_enu_m);
-        const bool use_vertical_direct_position =
-          consistency_record == nullptr || consistency_record->vertical_direct_position_factor_used;
-        record.residual_m =
-          use_vertical_direct_position ? residual_enu_m.norm() : residual_enu_m.head<2>().norm();
-        if (consistency_record != nullptr) {
-          consistency_record->postfit_residual_enu_m = residual_enu_m;
-          const Eigen::Vector2d scaled_horizontal_sigma_m(
-            consistency_record->sigma_e_m * consistency_record->covariance_scale_e,
-            consistency_record->sigma_n_m * consistency_record->covariance_scale_n);
-          if (use_vertical_direct_position) {
-            const Eigen::Vector3d scaled_sigma_m(
-              scaled_horizontal_sigma_m.x(),
-              scaled_horizontal_sigma_m.y(),
-              consistency_record->vertical_sigma_u_used_m);
-            consistency_record->postfit_nis = ComputeNis(residual_enu_m, scaled_sigma_m);
-          } else {
-            consistency_record->postfit_nis = ComputeHorizontalNis(residual_enu_m, scaled_horizontal_sigma_m);
-          }
-        }
-        if (record.state_index_i < trajectory_row_index_by_state.size() &&
-            trajectory_row_index_by_state[record.state_index_i].has_value()) {
-          auto &row_i = run_result.trajectory[*trajectory_row_index_by_state[record.state_index_i]];
-          if (!std::isfinite(row_i.gnss_residual_m)) {
-            row_i.gnss_residual_m = record.residual_m;
-          }
-        }
-        if (record.state_index_j < trajectory_row_index_by_state.size() &&
-            trajectory_row_index_by_state[record.state_index_j].has_value()) {
-          auto &row_j = run_result.trajectory[*trajectory_row_index_by_state[record.state_index_j]];
-          if (!std::isfinite(row_j.gnss_residual_m)) {
-            row_j.gnss_residual_m = record.residual_m;
-          }
-        }
-      }
-    }
-
     if (collect_gnss_consistency) {
       std::vector<double> postfit_nis_values;
       std::size_t axis_pass_count = 0U;
@@ -4756,23 +2194,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       row.optimized_roll_rad = optimized_ypr.z();
       row.optimized_baz_mps2 = optimized_state.bias.accelerometer().z();
 
-      if (!final_iteration_result.gate_reference_states.empty()) {
-        const ReferenceNodeState reference_state =
-          InterpolateReferenceState(final_iteration_result.gate_reference_states, record.corrected_time_s);
-        const Eigen::Vector3d reference_ypr = Rot3ToYpr(reference_state.pose.rotation());
-        row.reference_available = true;
-        row.reference_up_m = reference_state.pose.translation().z();
-        row.reference_vz_mps = reference_state.velocity.z();
-        row.reference_pitch_rad = reference_ypr.y();
-        row.reference_roll_rad = reference_ypr.z();
-        row.reference_baz_mps2 = reference_state.bias.accelerometer().z();
-        row.delta_up_m = row.optimized_up_m - row.reference_up_m;
-        row.delta_vz_mps = row.optimized_vz_mps - row.reference_vz_mps;
-        row.delta_pitch_rad = WrapAngleRad(row.optimized_pitch_rad - row.reference_pitch_rad);
-        row.delta_roll_rad = WrapAngleRad(row.optimized_roll_rad - row.reference_roll_rad);
-        row.delta_baz_mps2 = row.optimized_baz_mps2 - row.reference_baz_mps2;
-      }
-
       run_result.vertical_state_corrections.push_back(row);
     }
   }
@@ -4787,10 +2208,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       run_result.gnss_consistency_records,
       config_);
     run_result.run_summary.segment_error_count = run_result.segment_error_diagnostics.size();
-  }
-
-  if (final_iteration_result.failed) {
-    throw OfflineRunFailure(final_iteration_result.failure_message, std::move(run_result));
   }
 
   return run_result;
