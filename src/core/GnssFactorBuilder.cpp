@@ -70,6 +70,13 @@ gtsam::SharedNoiseModel MakeVerticalNoiseModel(const Eigen::Vector3d &sigma_m) {
   return gtsam::noiseModel::Isotropic::Sigma(1, sigma_m.z());
 }
 
+void EnsureDirectVerticalConstraintMode(const OfflineRunnerConfig &config) {
+  if (config.vertical_constraint_mode == VerticalConstraintMode::kDirectZ) {
+    return;
+  }
+  throw std::runtime_error("vertical_constraint_mode=envelope is reserved for Phase 2 and is not implemented yet");
+}
+
 GnssFactorRecord MakeBaseFactorRecord(
   const GnssSolutionSample &sample,
   std::size_t sample_index,
@@ -156,6 +163,7 @@ void GnssFactorBuilder::Validate() const {
       !request_.trajectory_row_index_for_state) {
     throw std::runtime_error("GnssFactorBuilder received an incomplete request");
   }
+  EnsureDirectVerticalConstraintMode(*request_.config);
   if (request_.collect_consistency_records && request_.consistency_records == nullptr) {
     throw std::runtime_error("GnssFactorBuilder consistency records requested without storage");
   }

@@ -127,6 +127,21 @@ GnssVerticalDriftReferenceMode ParseVerticalDriftReferenceMode(const std::string
   throw std::runtime_error("invalid GNSS vertical drift reference mode: " + value);
 }
 
+VerticalConstraintMode ParseVerticalConstraintMode(const std::string &value) {
+  std::string lowered = value;
+  std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](const unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+
+  if (lowered == "direct_z") {
+    return VerticalConstraintMode::kDirectZ;
+  }
+  if (lowered == "envelope") {
+    return VerticalConstraintMode::kEnvelope;
+  }
+  throw std::runtime_error("invalid vertical constraint mode: " + value);
+}
+
 void ResolveReweightedSpecificForceSigmaAxes(OfflineRunnerConfig &config) {
   const bool any_axis_specified =
     config.reweighted_combined_imu_specific_force_sigma_x_specified ||
@@ -488,6 +503,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.gnss_vertical_sigma_mode = ParseVerticalSigmaMode(normalized_value);
   } else if (normalized_key == "gnss_vertical_fixed_sigma_m") {
     config.gnss_vertical_fixed_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_constraint_mode") {
+    config.vertical_constraint_mode = ParseVerticalConstraintMode(normalized_value);
   } else if (normalized_key == "gnss_sigma_scale_horizontal") {
     config.gnss_sigma_scale_horizontal = ParseDouble(normalized_value);
   } else if (normalized_key == "gnss_sigma_scale_up") {
@@ -1417,6 +1434,7 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "position_sigma_ceiling_m=" << config.position_sigma_ceiling_m << '\n'
     << "gnss_vertical_sigma_mode=" << ToString(config.gnss_vertical_sigma_mode) << '\n'
     << "gnss_vertical_fixed_sigma_m=" << config.gnss_vertical_fixed_sigma_m << '\n'
+    << "vertical_constraint_mode=" << ToString(config.vertical_constraint_mode) << '\n'
     << "gnss_sigma_scale_horizontal=" << config.gnss_sigma_scale_horizontal << '\n'
     << "gnss_sigma_scale_up=" << config.gnss_sigma_scale_up << '\n'
     << "enable_gnss_vertical_drift_model=" << (config.enable_gnss_vertical_drift_model ? "true" : "false") << '\n'

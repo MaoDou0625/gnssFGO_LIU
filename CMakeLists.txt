@@ -50,6 +50,7 @@ endif()
 add_library(offline_lc_minimal_lib
   src/common/Config.cpp
   src/common/GeoUtils.cpp
+  src/common/ResultOutputWriters.cpp
   src/common/ResultWriter.cpp
   src/gp/Pose3Utils.cpp
   src/io/TextDatasetLoader.cpp
@@ -57,9 +58,12 @@ add_library(offline_lc_minimal_lib
   src/core/BodyZBidirectionalJumpDetector.cpp
   src/core/BodyZWindowPipeline.cpp
   src/core/GnssFactorBuilder.cpp
+  src/core/GraphTimelineBuilder.cpp
   src/core/ImuIntegrationUtils.cpp
   src/core/ImuRateAvpReconstructor.cpp
+  src/core/RunDiagnosticsBuilder.cpp
   src/core/StaticImuAlignment.cpp
+  src/core/TrajectoryResultBuilder.cpp
   src/core/TrajectoryInitializer.cpp
   src/core/OfflineBatchRunner.cpp
 )

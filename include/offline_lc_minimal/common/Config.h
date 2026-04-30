@@ -45,6 +45,9 @@ struct OfflineRunnerConfig {
   double vertical_acc_bias_tau_s = 100.0;
   double vertical_acc_bias_sigma_mps2 = 0.0;
   double vertical_acc_bias_process_noise_scale = 1.0;
+
+  // Legacy sequential vertical recovery knobs. They remain parseable for old
+  // experiment configs, but the Phase 1 main graph does not call that path.
   bool enable_vertical_rtk_preintegration_feedback = false;
   double vertical_rtk_gate_sigma_multiple = 2.0;
   double vertical_rtk_inside_gate_sigma_scale = 2.0;
@@ -122,6 +125,9 @@ struct OfflineRunnerConfig {
   double nhc_jump_min_separation_s = 0.5;
   double nhc_jump_recovery_lookback_s = 5.0;
   bool reserve_vertical_velocity_feedback_interface = false;
+
+  // Legacy z-reweighted IMU experiment knobs. Phase 1 always uses normal
+  // CombinedImuFactor in the main graph.
   bool enable_reweighted_combined_imu_factor = false;
   double reweighted_combined_imu_attitude_sigma_rad = 1e-3;
   double reweighted_combined_imu_specific_force_sigma_mps2 = 0.0;
@@ -179,6 +185,8 @@ struct OfflineRunnerConfig {
   double position_sigma_ceiling_m = 50.0;
   GnssVerticalSigmaMode gnss_vertical_sigma_mode = GnssVerticalSigmaMode::kFixed;
   double gnss_vertical_fixed_sigma_m = 0.05;
+  // Phase 2 will switch this to envelope; Phase 1 keeps direct_z only.
+  VerticalConstraintMode vertical_constraint_mode = VerticalConstraintMode::kDirectZ;
   double gnss_sigma_scale_horizontal = 1.0;
   double gnss_sigma_scale_up = 1.0;
   bool enable_gnss_vertical_drift_model = false;

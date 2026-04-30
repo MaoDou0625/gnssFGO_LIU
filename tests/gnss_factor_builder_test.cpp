@@ -115,6 +115,63 @@ void TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors() {
     "vertical Phase 1 factor should use plain Gaussian noise");
 }
 
+void TestEnvelopeModeRejectedBeforeGraphMutation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
+  config.early_gnss_relaxation_duration_s = 0.0;
+
+  std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeGnssSample(0.0),
+    MakeGnssSample(1.0),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  std::vector<offline_lc_minimal::TrajectoryRow> trajectory(2);
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::GnssFactorRecord> factor_records;
+  std::vector<offline_lc_minimal::GnssConsistencyRecord> consistency_records;
+
+  offline_lc_minimal::GnssFactorBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.navigation_start_index = 0;
+  request.graph = &graph;
+  request.trajectory = &trajectory;
+  request.run_summary = &summary;
+  request.factor_records = &factor_records;
+  request.consistency_records = &consistency_records;
+  request.collect_consistency_records = true;
+  request.dynamic_start_time_s = 1.0;
+  request.should_use_sample = [](const auto &) { return true; };
+  request.is_within_imu_coverage = [](double) { return true; };
+  request.corrected_time_s = [](const auto &sample) { return sample.time_s; };
+  request.clamped_sigma_m = [](const auto &) { return Eigen::Vector3d(0.1, 0.2, 0.3); };
+  request.find_state_for_time_s = [](double) {
+    offline_lc_minimal::StateMeasSyncResult result;
+    result.status = offline_lc_minimal::StateMeasSyncStatus::kSynchronizedI;
+    result.key_index_i = 1;
+    result.key_index_j = 1;
+    result.timestamp_i_s = 1.0;
+    result.timestamp_j_s = 1.0;
+    return result;
+  };
+  request.trajectory_row_index_for_state = [](std::size_t state_index) {
+    return static_cast<long long>(state_index);
+  };
+
+  bool threw = false;
+  try {
+    offline_lc_minimal::GnssFactorBuilder(std::move(request)).Build();
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical_constraint_mode=envelope") != std::string::npos;
+  }
+
+  ExpectTrue(threw, "envelope mode should be rejected in Phase 1");
+  ExpectNear(static_cast<double>(graph.size()), 0.0, 0.0, "rejected envelope mode should not mutate graph");
+  ExpectTrue(factor_records.empty(), "rejected envelope mode should not emit factor records");
+  ExpectTrue(consistency_records.empty(), "rejected envelope mode should not emit consistency records");
+  ExpectNear(static_cast<double>(summary.gnss_factor_count), 0.0, 0.0, "rejected envelope mode should not update summary");
+}
+
 }  // namespace
 
 int main() {
@@ -122,6 +179,9 @@ int main() {
     RunTest(
       "TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors",
       TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors);
+    RunTest(
+      "TestEnvelopeModeRejectedBeforeGraphMutation",
+      TestEnvelopeModeRejectedBeforeGraphMutation);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

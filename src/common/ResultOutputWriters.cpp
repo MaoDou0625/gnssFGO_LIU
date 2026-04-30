@@ -1,0 +1,568 @@
+#include "offline_lc_minimal/common/ResultOutputWriters.h"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <filesystem>
+#include <functional>
+#include <fstream>
+#include <iomanip>
+#include <limits>
+#include <numeric>
+#include <sstream>
+#include <stdexcept>
+
+namespace offline_lc_minimal {
+
+struct ScalarSeriesStats {
+  double range = std::numeric_limits<double>::quiet_NaN();
+  double mean = std::numeric_limits<double>::quiet_NaN();
+  double stddev = std::numeric_limits<double>::quiet_NaN();
+  double end_minus_start = std::numeric_limits<double>::quiet_NaN();
+  double total_variation = std::numeric_limits<double>::quiet_NaN();
+};
+
+ScalarSeriesStats ComputeScalarSeriesStats(const std::vector<double> &values) {
+  ScalarSeriesStats stats;
+  std::vector<double> finite_values;
+  finite_values.reserve(values.size());
+  for (const double value : values) {
+    if (std::isfinite(value)) {
+      finite_values.push_back(value);
+    }
+  }
+  if (finite_values.empty()) {
+    return stats;
+  }
+
+  const auto [min_it, max_it] = std::minmax_element(finite_values.begin(), finite_values.end());
+  stats.range = *max_it - *min_it;
+  stats.mean = std::accumulate(finite_values.begin(), finite_values.end(), 0.0) / static_cast<double>(finite_values.size());
+  if (finite_values.size() > 1U) {
+    double variance = 0.0;
+    double total_variation = 0.0;
+    for (std::size_t index = 0; index < finite_values.size(); ++index) {
+      const double centered = finite_values[index] - stats.mean;
+      variance += centered * centered;
+      if (index > 0U) {
+        total_variation += std::abs(finite_values[index] - finite_values[index - 1U]);
+      }
+    }
+    stats.stddev = std::sqrt(variance / static_cast<double>(finite_values.size()));
+    stats.total_variation = total_variation;
+  } else {
+    stats.stddev = 0.0;
+    stats.total_variation = 0.0;
+  }
+  stats.end_minus_start = finite_values.back() - finite_values.front();
+  return stats;
+}
+
+void WriteTextFile(const std::filesystem::path &path, const std::string &content) {
+  std::ofstream output_stream(path);
+  if (!output_stream.is_open()) {
+    throw std::runtime_error("failed to write file: " + path.string());
+  }
+  output_stream << content;
+}
+
+void WriteTrajectoryCsv(
+  const std::filesystem::path &path,
+  const std::vector<TrajectoryRow> &rows,
+  const GeoReference &geo_reference) {
+  std::ofstream trajectory_stream(path);
+  if (!trajectory_stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  trajectory_stream << std::setprecision(17);
+  trajectory_stream
+    << "time_s,east_m,north_m,up_m,vx_mps,vy_mps,vz_mps,yaw_rad,pitch_rad,roll_rad,bax,bay,baz,bgx,bgy,bgz,"
+       "gnss_factor_used,gnss_fix_type,gnss_residual_m,lat_rad,lon_rad,h_m\n";
+
+  for (const auto &row : rows) {
+    const auto llh = geo_reference.Reverse(row.enu_position_m);
+    trajectory_stream << row.time_s << ','
+                      << row.enu_position_m.x() << ','
+                      << row.enu_position_m.y() << ','
+                      << row.enu_position_m.z() << ','
+                      << row.enu_velocity_mps.x() << ','
+                      << row.enu_velocity_mps.y() << ','
+                      << row.enu_velocity_mps.z() << ','
+                      << row.ypr_rad.x() << ','
+                      << row.ypr_rad.y() << ','
+                      << row.ypr_rad.z() << ','
+                      << row.bias_acc.x() << ','
+                      << row.bias_acc.y() << ','
+                      << row.bias_acc.z() << ','
+                      << row.bias_gyro.x() << ','
+                      << row.bias_gyro.y() << ','
+                      << row.bias_gyro.z() << ','
+                      << (row.gnss_factor_used ? 1 : 0) << ','
+                      << ToString(row.gnss_fix_type) << ','
+                      << row.gnss_residual_m << ','
+                      << llh[0] << ','
+                      << llh[1] << ','
+                      << llh[2] << '\n';
+  }
+}
+
+void WriteReferenceNodeCsv(
+  const std::filesystem::path &path,
+  const std::vector<ReferenceNodeRow> &rows,
+  const GeoReference &geo_reference) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "time_s,east_m,north_m,up_m,vx_mps,vy_mps,vz_mps,yaw_rad,pitch_rad,roll_rad,bax,bay,baz,bgx,bgy,bgz,"
+       "lat_rad,lon_rad,h_m\n";
+
+  for (const auto &row : rows) {
+    const auto llh = geo_reference.Reverse(row.enu_position_m);
+    stream << row.time_s << ','
+           << row.enu_position_m.x() << ','
+           << row.enu_position_m.y() << ','
+           << row.enu_position_m.z() << ','
+           << row.enu_velocity_mps.x() << ','
+           << row.enu_velocity_mps.y() << ','
+           << row.enu_velocity_mps.z() << ','
+           << row.ypr_rad.x() << ','
+           << row.ypr_rad.y() << ','
+           << row.ypr_rad.z() << ','
+           << row.bias_acc.x() << ','
+           << row.bias_acc.y() << ','
+           << row.bias_acc.z() << ','
+           << row.bias_gyro.x() << ','
+           << row.bias_gyro.y() << ','
+           << row.bias_gyro.z() << ','
+           << llh[0] << ','
+           << llh[1] << ','
+           << llh[2] << '\n';
+  }
+}
+
+void WriteSeedBodyZAccDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<BodyZSeedImuDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "time_s,relative_time_s,body_z_specific_force_mps2,gravity_projection_z_mps2,body_z_acc_mps2,"
+       "body_z_acc_1s_smooth_mps2,integrated_body_z_velocity_mps,"
+       "integrated_body_z_velocity_0p2s_smooth_mps,integrated_body_z_velocity_1s_smooth_mps,"
+       "signed_step_metric_mps,downward_score_mps,upward_score_mps,body_z_axis_nav_z\n";
+  for (const auto &row : rows) {
+    stream << row.time_s << ','
+           << row.relative_time_s << ','
+           << row.body_z_specific_force_mps2 << ','
+           << row.gravity_projection_z_mps2 << ','
+           << row.body_z_acc_mps2 << ','
+           << row.body_z_acc_1s_smooth_mps2 << ','
+           << row.integrated_body_z_velocity_mps << ','
+           << row.integrated_body_z_velocity_0p2s_smooth_mps << ','
+           << row.integrated_body_z_velocity_1s_smooth_mps << ','
+           << row.signed_step_metric_mps << ','
+           << row.downward_score_mps << ','
+           << row.upward_score_mps << ','
+           << row.body_z_axis_nav_z << '\n';
+  }
+}
+
+void WriteBodyZSeedJumpWindowCsv(
+  const std::filesystem::path &path,
+  const std::vector<BodyZSeedJumpWindowRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "direction,selection_level,start_state_index,center_state_index,end_state_index,"
+       "start_time_s,center_time_s,end_time_s,start_relative_time_s,center_relative_time_s,end_relative_time_s,"
+       "duration_s,pre_velocity_mps,post_velocity_mps,signed_delta_velocity_mps,direction_score_mps,"
+       "signed_step_metric_mps,level_threshold_mps,level_max_peak_mps,level_noise_floor_mps,"
+       "min_acc_mps2,max_acc_mps2,mean_acc_mps2,body_z_axis_nav_z,delta_vz_init_mps\n";
+  for (const auto &row : rows) {
+    stream << row.direction << ','
+           << row.selection_level << ','
+           << row.start_state_index << ','
+           << row.center_state_index << ','
+           << row.end_state_index << ','
+           << row.start_time_s << ','
+           << row.center_time_s << ','
+           << row.end_time_s << ','
+           << row.start_relative_time_s << ','
+           << row.center_relative_time_s << ','
+           << row.end_relative_time_s << ','
+           << row.duration_s << ','
+           << row.pre_velocity_mps << ','
+           << row.post_velocity_mps << ','
+           << row.signed_delta_velocity_mps << ','
+           << row.direction_score_mps << ','
+           << row.signed_step_metric_mps << ','
+           << row.level_threshold_mps << ','
+           << row.level_max_peak_mps << ','
+           << row.level_noise_floor_mps << ','
+           << row.min_acc_mps2 << ','
+           << row.max_acc_mps2 << ','
+           << row.mean_acc_mps2 << ','
+           << row.body_z_axis_nav_z << ','
+           << row.delta_vz_init_mps << '\n';
+  }
+}
+
+void WriteErrorStateCsv(const std::filesystem::path &path, const std::vector<ErrorStateRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "time_s,dtheta_x_rad,dtheta_y_rad,dtheta_z_rad,dv_x_mps,dv_y_mps,dv_z_mps,dp_x_m,dp_y_m,dp_z_m,"
+       "dbg_x_radps,dbg_y_radps,dbg_z_radps,dba_x_mps2,dba_y_mps2,dba_z_mps2\n";
+  for (const auto &row : rows) {
+    stream << row.time_s;
+    for (Eigen::Index index = 0; index < row.state.size(); ++index) {
+      stream << ',' << row.state[index];
+    }
+    stream << '\n';
+  }
+}
+
+void WriteSegmentErrorCsv(const std::filesystem::path &path, const std::vector<SegmentErrorDiagnostic> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "segment_index,start_time_s,end_time_s,dtheta_x_rad,dtheta_y_rad,dtheta_z_rad,dv_x_mps,dv_y_mps,dv_z_mps,"
+       "dp_x_m,dp_y_m,dp_z_m,dbg_x_radps,dbg_y_radps,dbg_z_radps,dba_x_mps2,dba_y_mps2,dba_z_mps2,"
+       "gnss_factor_count,mean_prefit_nis,mean_postfit_nis,mean_covariance_scale,"
+       "segment_vertical_rtk_residual_m,segment_vertical_gate_inside,segment_target_baz_mps2,"
+       "segment_feedback_attitude_scale\n";
+  for (const auto &row : rows) {
+    stream << row.segment_index << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.dtheta_rad.x() << ','
+           << row.dtheta_rad.y() << ','
+           << row.dtheta_rad.z() << ','
+           << row.dv_mps.x() << ','
+           << row.dv_mps.y() << ','
+           << row.dv_mps.z() << ','
+           << row.dp_m.x() << ','
+           << row.dp_m.y() << ','
+           << row.dp_m.z() << ','
+           << row.dbg_radps.x() << ','
+           << row.dbg_radps.y() << ','
+           << row.dbg_radps.z() << ','
+           << row.dba_mps2.x() << ','
+           << row.dba_mps2.y() << ','
+           << row.dba_mps2.z() << ','
+           << row.gnss_factor_count << ','
+           << row.mean_prefit_nis << ','
+           << row.mean_postfit_nis << ','
+           << row.mean_covariance_scale << ','
+           << row.segment_vertical_rtk_residual_m << ','
+           << row.segment_vertical_gate_inside << ','
+           << row.segment_target_baz_mps2 << ','
+           << row.segment_feedback_attitude_scale << '\n';
+  }
+}
+
+std::string BuildSegmentErrorSummaryText(const std::vector<SegmentErrorDiagnostic> &rows) {
+  std::ostringstream stream;
+  stream << std::setprecision(17);
+  if (rows.empty()) {
+    stream << "segment_error_count=0\n";
+    return stream.str();
+  }
+
+  const std::vector<std::pair<std::string, std::function<double(const SegmentErrorDiagnostic &)>>> series = {
+    {"dtheta_x_rad", [](const SegmentErrorDiagnostic &row) { return row.dtheta_rad.x(); }},
+    {"dtheta_y_rad", [](const SegmentErrorDiagnostic &row) { return row.dtheta_rad.y(); }},
+    {"dtheta_z_rad", [](const SegmentErrorDiagnostic &row) { return row.dtheta_rad.z(); }},
+    {"dv_x_mps", [](const SegmentErrorDiagnostic &row) { return row.dv_mps.x(); }},
+    {"dv_y_mps", [](const SegmentErrorDiagnostic &row) { return row.dv_mps.y(); }},
+    {"dv_z_mps", [](const SegmentErrorDiagnostic &row) { return row.dv_mps.z(); }},
+    {"dp_x_m", [](const SegmentErrorDiagnostic &row) { return row.dp_m.x(); }},
+    {"dp_y_m", [](const SegmentErrorDiagnostic &row) { return row.dp_m.y(); }},
+    {"dp_z_m", [](const SegmentErrorDiagnostic &row) { return row.dp_m.z(); }},
+    {"dbg_x_radps", [](const SegmentErrorDiagnostic &row) { return row.dbg_radps.x(); }},
+    {"dbg_y_radps", [](const SegmentErrorDiagnostic &row) { return row.dbg_radps.y(); }},
+    {"dbg_z_radps", [](const SegmentErrorDiagnostic &row) { return row.dbg_radps.z(); }},
+    {"dba_x_mps2", [](const SegmentErrorDiagnostic &row) { return row.dba_mps2.x(); }},
+    {"dba_y_mps2", [](const SegmentErrorDiagnostic &row) { return row.dba_mps2.y(); }},
+    {"dba_z_mps2", [](const SegmentErrorDiagnostic &row) { return row.dba_mps2.z(); }},
+    {"segment_vertical_rtk_residual_m", [](const SegmentErrorDiagnostic &row) {
+      return row.segment_vertical_rtk_residual_m;
+    }},
+    {"segment_vertical_gate_inside", [](const SegmentErrorDiagnostic &row) {
+      return row.segment_vertical_gate_inside;
+    }},
+    {"segment_target_baz_mps2", [](const SegmentErrorDiagnostic &row) {
+      return row.segment_target_baz_mps2;
+    }},
+    {"segment_feedback_attitude_scale", [](const SegmentErrorDiagnostic &row) {
+      return row.segment_feedback_attitude_scale;
+    }},
+  };
+
+  stream << "segment_error_count=" << rows.size() << '\n';
+  for (const auto &[label, accessor] : series) {
+    std::vector<double> values;
+    values.reserve(rows.size());
+    for (const auto &row : rows) {
+      values.push_back(accessor(row));
+    }
+    const ScalarSeriesStats stats = ComputeScalarSeriesStats(values);
+    stream << label << ".range=" << stats.range << '\n'
+           << label << ".mean=" << stats.mean << '\n'
+           << label << ".std=" << stats.stddev << '\n'
+           << label << ".end_minus_start=" << stats.end_minus_start << '\n'
+           << label << ".total_variation=" << stats.total_variation << '\n';
+  }
+  return stream.str();
+}
+
+void WriteGnssConsistencyCsv(
+  const std::filesystem::path &path,
+  const std::vector<GnssConsistencyRecord> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "sample_index,raw_time_s,corrected_time_s,factor_used,fix_type,sync_status,raw_sigma_h_m,"
+       "sigma_e_m,sigma_n_m,sigma_u_m,effective_sigma_u_m,vertical_gate_threshold_m,vertical_gate_inside,"
+       "vertical_sigma_u_used_m,vertical_direct_position_factor_used,"
+       "vertical_feedback_target_baz_mps2,vertical_feedback_attitude_scale,"
+       "vertical_reference_up_m,vertical_reference_used,local_prefit_residual_u_m,local_postfit_residual_u_m,"
+       "confirmed_inside_before_sample,recovery_anchor_state_index,nhc_jump_anchor_state_index,"
+       "nhc_body_vy_mps,nhc_body_vz_mps,nhc_body_vz_baseline_mps,nhc_body_vz_residual_mps,nhc_body_vz_jump_mps,"
+       "nhc_body_vy_threshold_mps,nhc_body_vz_threshold_mps,"
+       "delta_vz_applied_mps,delta_up_anchor_applied_m,delta_roll_applied_rad,delta_pitch_applied_rad,delta_baz_applied_mps2,"
+       "inside_bias_delta_roll_applied_rad,inside_bias_delta_pitch_applied_rad,"
+       "inside_bias_delta_baz_applied_mps2,inside_bias_equivalent_acc_mps2,inside_bias_residual_delta_m,"
+       "inside_bias_window_dt_s,inside_bias_anchor_state_index,inside_bias_observation_count,"
+       "vz_ref_global_smoothed_mps,vz_prefit_mps,vz_mismatch_mps,vz_mismatch_jump_mps,jump_candidate_score,"
+       "candidate_source,body_z_jump_direction,body_z_signed_delta_velocity_mps,body_z_direction_score_mps,body_z_axis_nav_z,"
+       "selected_jump_state_index,selected_jump_delta_vz_mps,"
+       "selected_jump_window_start_state_index,selected_jump_window_center_state_index,"
+       "selected_jump_window_end_state_index,selected_jump_window_duration_s,selected_jump_window_point_count,"
+       "selected_jump_delta_vz_tail_mps,window_velocity_smooth_cost,window_height_integral_delta_m,"
+       "future_trend_residual_mean_m,future_trend_residual_slope_mps,future_trend_cost,future_trend_fix_count,"
+       "recovery_mode,hold_window_passed,"
+       "required_up_anchor_correction_m,local_recovery_iteration_count,pure_delta_up_anchor_start_iteration,"
+       "covariance_scale,covariance_scale_e,covariance_scale_n,covariance_scale_u,"
+       "prefit_residual_u_before_local_recovery_m,prefit_residual_u_after_local_recovery_m,"
+       "prefit_residual_e_m,prefit_residual_n_m,prefit_residual_u_m,postfit_residual_e_m,"
+       "postfit_residual_n_m,postfit_residual_u_m,prefit_nis,postfit_nis\n";
+  for (const auto &row : rows) {
+    stream << row.sample_index << ','
+           << row.raw_time_s << ','
+           << row.corrected_time_s << ','
+           << (row.factor_used ? 1 : 0) << ','
+           << ToString(row.gnss_fix_type) << ','
+           << ToString(row.sync_status) << ','
+           << row.raw_sigma_h_m << ','
+           << row.sigma_e_m << ','
+           << row.sigma_n_m << ','
+           << row.sigma_u_m << ','
+           << row.effective_sigma_u_m << ','
+           << row.vertical_gate_threshold_m << ','
+           << row.vertical_gate_inside << ','
+           << row.vertical_sigma_u_used_m << ','
+           << (row.vertical_direct_position_factor_used ? 1 : 0) << ','
+           << row.vertical_feedback_target_baz_mps2 << ','
+           << row.vertical_feedback_attitude_scale << ','
+           << row.vertical_reference_up_m << ','
+           << (row.vertical_reference_used ? 1 : 0) << ','
+           << row.local_prefit_residual_u_m << ','
+           << row.local_postfit_residual_u_m << ','
+           << row.confirmed_inside_before_sample << ','
+           << row.recovery_anchor_state_index << ','
+           << row.nhc_jump_anchor_state_index << ','
+           << row.nhc_body_vy_mps << ','
+           << row.nhc_body_vz_mps << ','
+           << row.nhc_body_vz_baseline_mps << ','
+           << row.nhc_body_vz_residual_mps << ','
+           << row.nhc_body_vz_jump_mps << ','
+           << row.nhc_body_vy_threshold_mps << ','
+           << row.nhc_body_vz_threshold_mps << ','
+           << row.delta_vz_applied_mps << ','
+           << row.delta_up_anchor_applied_m << ','
+           << row.delta_roll_applied_rad << ','
+           << row.delta_pitch_applied_rad << ','
+           << row.delta_baz_applied_mps2 << ','
+           << row.inside_bias_delta_roll_applied_rad << ','
+           << row.inside_bias_delta_pitch_applied_rad << ','
+           << row.inside_bias_delta_baz_applied_mps2 << ','
+           << row.inside_bias_equivalent_acc_mps2 << ','
+           << row.inside_bias_residual_delta_m << ','
+           << row.inside_bias_window_dt_s << ','
+           << row.inside_bias_anchor_state_index << ','
+           << row.inside_bias_observation_count << ','
+           << row.vz_ref_global_smoothed_mps << ','
+           << row.vz_prefit_mps << ','
+           << row.vz_mismatch_mps << ','
+           << row.vz_mismatch_jump_mps << ','
+           << row.jump_candidate_score << ','
+           << row.candidate_source << ','
+           << row.body_z_jump_direction << ','
+           << row.body_z_signed_delta_velocity_mps << ','
+           << row.body_z_direction_score_mps << ','
+           << row.body_z_axis_nav_z << ','
+           << row.selected_jump_state_index << ','
+           << row.selected_jump_delta_vz_mps << ','
+           << row.selected_jump_window_start_state_index << ','
+           << row.selected_jump_window_center_state_index << ','
+           << row.selected_jump_window_end_state_index << ','
+           << row.selected_jump_window_duration_s << ','
+           << row.selected_jump_window_point_count << ','
+           << row.selected_jump_delta_vz_tail_mps << ','
+           << row.window_velocity_smooth_cost << ','
+           << row.window_height_integral_delta_m << ','
+           << row.future_trend_residual_mean_m << ','
+           << row.future_trend_residual_slope_mps << ','
+           << row.future_trend_cost << ','
+           << row.future_trend_fix_count << ','
+           << row.recovery_mode << ','
+           << (row.hold_window_passed ? 1 : 0) << ','
+           << row.required_up_anchor_correction_m << ','
+           << row.local_recovery_iteration_count << ','
+           << row.pure_delta_up_anchor_start_iteration << ','
+           << row.covariance_scale << ','
+           << row.covariance_scale_e << ','
+           << row.covariance_scale_n << ','
+           << row.covariance_scale_u << ','
+           << row.prefit_residual_u_before_local_recovery_m << ','
+           << row.prefit_residual_u_after_local_recovery_m << ','
+           << row.prefit_residual_enu_m.x() << ','
+           << row.prefit_residual_enu_m.y() << ','
+           << row.prefit_residual_enu_m.z() << ','
+           << row.postfit_residual_enu_m.x() << ','
+           << row.postfit_residual_enu_m.y() << ','
+           << row.postfit_residual_enu_m.z() << ','
+           << row.prefit_nis << ','
+           << row.postfit_nis << '\n';
+  }
+}
+
+void WriteVerticalStateCorrectionCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalStateCorrectionRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "sample_index,raw_time_s,corrected_time_s,sync_status,state_index,state_time_s,factor_used,"
+       "reference_available,vertical_gate_inside,vertical_direct_position_factor_used,measurement_up_m,"
+       "reference_up_m,optimized_up_m,delta_up_m,reference_vz_mps,optimized_vz_mps,delta_vz_mps,"
+       "reference_pitch_rad,optimized_pitch_rad,delta_pitch_rad,reference_roll_rad,optimized_roll_rad,"
+       "delta_roll_rad,reference_baz_mps2,optimized_baz_mps2,delta_baz_mps2,prefit_residual_u_m,"
+       "postfit_residual_u_m\n";
+  for (const auto &row : rows) {
+    stream << row.sample_index << ','
+           << row.raw_time_s << ','
+           << row.corrected_time_s << ','
+           << ToString(row.sync_status) << ','
+           << row.state_index << ','
+           << row.state_time_s << ','
+           << (row.factor_used ? 1 : 0) << ','
+           << (row.reference_available ? 1 : 0) << ','
+           << row.vertical_gate_inside << ','
+           << (row.vertical_direct_position_factor_used ? 1 : 0) << ','
+           << row.measurement_up_m << ','
+           << row.reference_up_m << ','
+           << row.optimized_up_m << ','
+           << row.delta_up_m << ','
+           << row.reference_vz_mps << ','
+           << row.optimized_vz_mps << ','
+           << row.delta_vz_mps << ','
+           << row.reference_pitch_rad << ','
+           << row.optimized_pitch_rad << ','
+           << row.delta_pitch_rad << ','
+           << row.reference_roll_rad << ','
+           << row.optimized_roll_rad << ','
+           << row.delta_roll_rad << ','
+           << row.reference_baz_mps2 << ','
+           << row.optimized_baz_mps2 << ','
+           << row.delta_baz_mps2 << ','
+           << row.prefit_residual_u_m << ','
+           << row.postfit_residual_u_m << '\n';
+  }
+}
+
+void WriteInitialDynamicConsistencyCsv(
+  const std::filesystem::path &path,
+  const std::vector<TrajectoryRow> &rows,
+  const RunSummary &run_summary) {
+  if (rows.empty()) {
+    return;
+  }
+
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "time_s,relative_time_s,up_m,vz_mps,yaw_rad,pitch_rad,roll_rad,baz_mps2,bgz_radps,initial_baz_mps2,"
+       "initial_bgz_radps,static_baz_mps2,static_bgz_radps,optimized_last_static_baz_mps2,"
+       "optimized_last_static_bgz_radps,optimized_first_dynamic_baz_mps2,optimized_first_dynamic_bgz_radps\n";
+
+  const double start_time_s = rows.front().time_s;
+  for (const auto &row : rows) {
+    if (row.time_s > start_time_s + 30.0) {
+      break;
+    }
+    stream << row.time_s << ','
+           << (row.time_s - start_time_s) << ','
+           << row.enu_position_m.z() << ','
+           << row.enu_velocity_mps.z() << ','
+           << row.ypr_rad.x() << ','
+           << row.ypr_rad.y() << ','
+           << row.ypr_rad.z() << ','
+           << row.bias_acc.z() << ','
+           << row.bias_gyro.z() << ','
+           << run_summary.initial_baz_mps2 << ','
+           << run_summary.initial_bgz_radps << ','
+           << run_summary.static_baz_mps2 << ','
+           << run_summary.static_bgz_radps << ','
+           << run_summary.optimized_last_static_baz_mps2 << ','
+           << run_summary.optimized_last_static_bgz_radps << ','
+           << run_summary.optimized_first_dynamic_baz_mps2 << ','
+           << run_summary.optimized_first_dynamic_bgz_radps << '\n';
+  }
+}
+
+std::vector<TrajectoryRow> FilterDynamicTrajectoryRows(
+  const std::vector<TrajectoryRow> &rows,
+  const double dynamic_start_time_s) {
+  if (!std::isfinite(dynamic_start_time_s)) {
+    return rows;
+  }
+
+  auto it = std::find_if(
+    rows.begin(),
+    rows.end(),
+    [dynamic_start_time_s](const TrajectoryRow &row) {
+      return row.time_s + 1e-9 >= dynamic_start_time_s;
+    });
+  if (it == rows.end()) {
+    return rows;
+  }
+  return std::vector<TrajectoryRow>(it, rows.end());
+}
+
+}  // namespace offline_lc_minimal
