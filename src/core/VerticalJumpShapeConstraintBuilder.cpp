@@ -13,6 +13,7 @@
 
 #include "offline_lc_minimal/factor/VerticalPositionRampFactor.h"
 #include "offline_lc_minimal/factor/VerticalPositionVelocityConsistencyFactor.h"
+#include "offline_lc_minimal/factor/VerticalVelocityContextMeanContinuityFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityHeightSlopeFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityMeanFactor.h"
@@ -129,12 +130,15 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
   const bool add_position_ramp = request_.config->enable_vertical_jump_position_ramp_smoothing;
   const bool add_velocity_continuity = request_.config->enable_vertical_jump_velocity_continuity;
   const bool add_velocity_context_mean = request_.config->enable_vertical_jump_velocity_context_mean;
+  const bool add_context_mean_continuity =
+    request_.config->enable_vertical_jump_context_mean_continuity;
   const bool add_position_velocity_consistency =
     request_.config->enable_vertical_jump_position_velocity_consistency;
   const bool add_velocity_height_slope =
     request_.config->enable_vertical_jump_velocity_height_slope_constraint;
   if (!add_velocity_ramp && !add_position_ramp && !add_velocity_continuity &&
-      !add_velocity_context_mean && !add_position_velocity_consistency && !add_velocity_height_slope) {
+      !add_velocity_context_mean && !add_context_mean_continuity &&
+      !add_position_velocity_consistency && !add_velocity_height_slope) {
     return;
   }
 
@@ -159,6 +163,9 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
       }
       if (add_velocity_context_mean) {
         ++request_.run_summary->vertical_jump_velocity_context_skipped_count;
+      }
+      if (add_context_mean_continuity) {
+        ++request_.run_summary->vertical_jump_context_mean_continuity_skipped_count;
       }
       request_.diagnostics->push_back(row);
       continue;
@@ -199,6 +206,32 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
         }
         return factor_count;
       };
+    const auto add_context_mean_continuity_factor =
+      [this](const std::vector<std::size_t> &pre_context_state_indices,
+             const std::vector<std::size_t> &post_context_state_indices) {
+        if (pre_context_state_indices.empty() || post_context_state_indices.empty()) {
+          return false;
+        }
+        std::vector<gtsam::Key> pre_context_velocity_keys;
+        pre_context_velocity_keys.reserve(pre_context_state_indices.size());
+        for (const std::size_t state_index : pre_context_state_indices) {
+          pre_context_velocity_keys.push_back(symbol::V(state_index));
+        }
+        std::vector<gtsam::Key> post_context_velocity_keys;
+        post_context_velocity_keys.reserve(post_context_state_indices.size());
+        for (const std::size_t state_index : post_context_state_indices) {
+          post_context_velocity_keys.push_back(symbol::V(state_index));
+        }
+        const auto noise = gtsam::noiseModel::Isotropic::Sigma(
+          1,
+          request_.config->vertical_jump_context_mean_continuity_sigma_mps);
+        request_.graph->add(factor::VerticalVelocityContextMeanContinuityFactor(
+          std::move(pre_context_velocity_keys),
+          std::move(post_context_velocity_keys),
+          noise));
+        ++request_.run_summary->vertical_jump_context_mean_continuity_factor_count;
+        return true;
+      };
     const auto add_boundary_position_velocity_factor =
       [this, &boundary_position_velocity_consistency_noise](const std::size_t state_i, const std::size_t state_j) {
         const double dt_s = (*request_.state_timestamps)[state_j] - (*request_.state_timestamps)[state_i];
@@ -216,7 +249,8 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
         return true;
       };
 
-    if (add_velocity_continuity || add_velocity_context_mean || add_position_velocity_consistency) {
+    if (add_velocity_continuity || add_velocity_context_mean ||
+        add_context_mean_continuity || add_position_velocity_consistency) {
       VerticalJumpContinuityDiagnosticRow continuity_row;
       continuity_row.window_index = span.window_index;
       continuity_row.start_state_index = span.state_indices.front();
@@ -307,12 +341,21 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
           ++request_.run_summary->vertical_jump_velocity_context_skipped_count;
         }
       }
+      if (add_context_mean_continuity) {
+        continuity_row.context_mean_continuity_factor_added = add_context_mean_continuity_factor(
+          span.pre_context_state_indices,
+          span.post_context_state_indices);
+        if (!continuity_row.context_mean_continuity_factor_added) {
+          ++request_.run_summary->vertical_jump_context_mean_continuity_skipped_count;
+        }
+      }
       const bool any_boundary_factor_added =
         continuity_row.entry_factor_added ||
         continuity_row.exit_factor_added ||
         continuity_row.entry_position_velocity_factor_added ||
         continuity_row.exit_position_velocity_factor_added ||
-        continuity_row.velocity_context_factor_count > 0U;
+        continuity_row.velocity_context_factor_count > 0U ||
+        continuity_row.context_mean_continuity_factor_added;
       continuity_row.skip_reason = any_boundary_factor_added ? "ADDED" : "MISSING_ANCHORS_OR_CONTEXT";
       request_.continuity_diagnostics->push_back(continuity_row);
     }
@@ -590,6 +633,12 @@ void PopulateVerticalJumpContinuityDiagnostics(
         if (max_residual.has_value()) {
           row.max_post_context_residual_mps = *max_residual;
         }
+      }
+    }
+    if (std::isfinite(row.pre_context_mean_vz_mps) && std::isfinite(row.post_context_mean_vz_mps)) {
+      row.context_mean_delta_vz_mps = row.post_context_mean_vz_mps - row.pre_context_mean_vz_mps;
+      if (row.context_mean_continuity_factor_added) {
+        row.context_mean_continuity_residual_mps = row.context_mean_delta_vz_mps;
       }
     }
     std::vector<double> inside_vz;

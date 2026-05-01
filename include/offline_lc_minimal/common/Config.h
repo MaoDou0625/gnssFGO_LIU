@@ -130,6 +130,8 @@ struct OfflineRunnerConfig {
   bool enable_vertical_jump_velocity_context_mean = false;
   double vertical_jump_velocity_context_window_s = 1.0;
   double vertical_jump_velocity_context_mean_sigma_mps = 0.03;
+  bool enable_vertical_jump_context_mean_continuity = false;
+  double vertical_jump_context_mean_continuity_sigma_mps = 0.02;
   bool enable_vertical_jump_position_velocity_consistency = false;
   double vertical_jump_position_velocity_consistency_sigma_m = 0.08;
   double vertical_jump_boundary_position_velocity_consistency_sigma_m = 0.01;

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -251,6 +252,7 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
        config.enable_vertical_jump_position_ramp_smoothing ||
        config.enable_vertical_jump_velocity_continuity ||
        config.enable_vertical_jump_velocity_context_mean ||
+       config.enable_vertical_jump_context_mean_continuity ||
        config.enable_vertical_jump_position_velocity_consistency ||
        config.enable_vertical_jump_velocity_height_slope_constraint) &&
       !config.enable_body_z_jump_detection) {
@@ -267,6 +269,8 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_jump_velocity_context_window_s <= 0.0 ||
       !std::isfinite(config.vertical_jump_velocity_context_mean_sigma_mps) ||
       config.vertical_jump_velocity_context_mean_sigma_mps <= 0.0 ||
+      !std::isfinite(config.vertical_jump_context_mean_continuity_sigma_mps) ||
+      config.vertical_jump_context_mean_continuity_sigma_mps <= 0.0 ||
       config.vertical_jump_position_velocity_consistency_sigma_m <= 0.0 ||
       config.vertical_jump_boundary_position_velocity_consistency_sigma_m <= 0.0 ||
       config.vertical_jump_velocity_height_slope_sigma_mps <= 0.0) {
@@ -534,6 +538,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_jump_velocity_context_window_s = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_velocity_context_mean_sigma_mps") {
     config.vertical_jump_velocity_context_mean_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_jump_context_mean_continuity") {
+    config.enable_vertical_jump_context_mean_continuity = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_jump_context_mean_continuity_sigma_mps") {
+    config.vertical_jump_context_mean_continuity_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_jump_position_velocity_consistency") {
     config.enable_vertical_jump_position_velocity_consistency = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_jump_position_velocity_consistency_sigma_m") {
@@ -765,6 +773,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "vertical_jump_velocity_context_window_s=" << config.vertical_jump_velocity_context_window_s << '\n'
     << "vertical_jump_velocity_context_mean_sigma_mps="
     << config.vertical_jump_velocity_context_mean_sigma_mps << '\n'
+    << "enable_vertical_jump_context_mean_continuity="
+    << (config.enable_vertical_jump_context_mean_continuity ? "true" : "false") << '\n'
+    << "vertical_jump_context_mean_continuity_sigma_mps="
+    << config.vertical_jump_context_mean_continuity_sigma_mps << '\n'
     << "enable_vertical_jump_position_velocity_consistency="
     << (config.enable_vertical_jump_position_velocity_consistency ? "true" : "false") << '\n'
     << "vertical_jump_position_velocity_consistency_sigma_m="

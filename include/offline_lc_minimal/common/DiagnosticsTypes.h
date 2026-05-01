@@ -229,6 +229,7 @@ struct VerticalJumpContinuityDiagnosticRow {
   std::size_t pre_context_state_count = 0;
   std::size_t post_context_state_count = 0;
   std::size_t velocity_context_factor_count = 0;
+  bool context_mean_continuity_factor_added = false;
   double start_time_s = std::numeric_limits<double>::quiet_NaN();
   double end_time_s = std::numeric_limits<double>::quiet_NaN();
   bool entry_factor_added = false;
@@ -248,6 +249,8 @@ struct VerticalJumpContinuityDiagnosticRow {
   double exit_zv_mismatch_m = std::numeric_limits<double>::quiet_NaN();
   double pre_context_mean_vz_mps = std::numeric_limits<double>::quiet_NaN();
   double post_context_mean_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double context_mean_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double context_mean_continuity_residual_mps = std::numeric_limits<double>::quiet_NaN();
   double max_pre_context_residual_mps = std::numeric_limits<double>::quiet_NaN();
   double max_post_context_residual_mps = std::numeric_limits<double>::quiet_NaN();
   double max_inside_vz_range_mps = std::numeric_limits<double>::quiet_NaN();

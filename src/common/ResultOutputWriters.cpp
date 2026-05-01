@@ -481,12 +481,14 @@ void WriteVerticalJumpContinuityDiagnosticsCsv(
     << "window_index,start_state,end_state,pre_anchor,post_anchor,start_time_s,end_time_s,"
        "pre_context_start_state,pre_context_end_state,post_context_start_state,post_context_end_state,"
        "pre_context_state_count,post_context_state_count,velocity_context_factor_count,"
+       "context_mean_continuity_factor_added,"
        "entry_factor_added,exit_factor_added,skip_reason,entry_delta_vz_mps,exit_delta_vz_mps,"
        "entry_residual_mps,exit_residual_mps,"
        "entry_position_velocity_factor_added,exit_position_velocity_factor_added,"
        "entry_delta_z_m,entry_velocity_integral_m,entry_zv_mismatch_m,"
        "exit_delta_z_m,exit_velocity_integral_m,exit_zv_mismatch_m,"
        "pre_context_mean_vz_mps,post_context_mean_vz_mps,"
+       "context_mean_delta_vz_mps,context_mean_continuity_residual_mps,"
        "max_pre_context_residual_mps,max_post_context_residual_mps,"
        "max_inside_vz_range_mps,max_boundary_step_mps,max_boundary_zv_mismatch_m,"
        "max_position_velocity_residual_m\n";
@@ -505,6 +507,7 @@ void WriteVerticalJumpContinuityDiagnosticsCsv(
            << row.pre_context_state_count << ','
            << row.post_context_state_count << ','
            << row.velocity_context_factor_count << ','
+           << (row.context_mean_continuity_factor_added ? 1 : 0) << ','
            << (row.entry_factor_added ? 1 : 0) << ','
            << (row.exit_factor_added ? 1 : 0) << ','
            << row.skip_reason << ','
@@ -522,6 +525,8 @@ void WriteVerticalJumpContinuityDiagnosticsCsv(
            << row.exit_zv_mismatch_m << ','
            << row.pre_context_mean_vz_mps << ','
            << row.post_context_mean_vz_mps << ','
+           << row.context_mean_delta_vz_mps << ','
+           << row.context_mean_continuity_residual_mps << ','
            << row.max_pre_context_residual_mps << ','
            << row.max_post_context_residual_mps << ','
            << row.max_inside_vz_range_mps << ','

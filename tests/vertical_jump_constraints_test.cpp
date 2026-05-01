@@ -17,6 +17,7 @@
 #include "offline_lc_minimal/factor/VerticalMaskedCombinedImuFactor.h"
 #include "offline_lc_minimal/factor/VerticalPositionRampFactor.h"
 #include "offline_lc_minimal/factor/VerticalPositionVelocityConsistencyFactor.h"
+#include "offline_lc_minimal/factor/VerticalVelocityContextMeanContinuityFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityHeightSlopeFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityMeanFactor.h"
@@ -336,6 +337,38 @@ void TestVerticalVelocityMeanFactor() {
   ExpectNear(factor.unwhitenedError(values)(0), 0.5, 1e-12, "vertical mean residual is wrong");
 }
 
+void TestVerticalVelocityContextMeanContinuityFactor() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
+  const offline_lc_minimal::factor::VerticalVelocityContextMeanContinuityFactor factor(
+    std::vector<gtsam::Key>{symbol::V(0), symbol::V(1)},
+    std::vector<gtsam::Key>{symbol::V(2), symbol::V(3), symbol::V(4)},
+    noise);
+
+  gtsam::Values values;
+  values.insert(symbol::V(0), gtsam::Vector3(10.0, -20.0, 1.0));
+  values.insert(symbol::V(1), gtsam::Vector3(30.0, 40.0, 3.0));
+  values.insert(symbol::V(2), gtsam::Vector3(-50.0, 60.0, 0.0));
+  values.insert(symbol::V(3), gtsam::Vector3(70.0, -80.0, 2.0));
+  values.insert(symbol::V(4), gtsam::Vector3(90.0, 100.0, 4.0));
+  ExpectNear(factor.unwhitenedError(values)(0), 0.0, 1e-12, "context means should match");
+
+  values.update(symbol::V(4), gtsam::Vector3(-90.0, -100.0, 5.5));
+  ExpectNear(factor.unwhitenedError(values)(0), 0.5, 1e-12, "context mean continuity residual is wrong");
+
+  std::vector<gtsam::Matrix> jacobians;
+  (void)factor.unwhitenedError(values, jacobians);
+  ExpectNear(static_cast<double>(jacobians.size()), 5.0, 0.0, "context mean Jacobian count is wrong");
+  for (const auto &jacobian : jacobians) {
+    ExpectNear(jacobian(0, 0), 0.0, 1e-12, "context mean Jacobian should not touch vx");
+    ExpectNear(jacobian(0, 1), 0.0, 1e-12, "context mean Jacobian should not touch vy");
+  }
+  ExpectNear(jacobians[0](0, 2), -0.5, 1e-12, "pre context Jacobian is wrong");
+  ExpectNear(jacobians[1](0, 2), -0.5, 1e-12, "pre context Jacobian is wrong");
+  ExpectNear(jacobians[2](0, 2), 1.0 / 3.0, 1e-12, "post context Jacobian is wrong");
+  ExpectNear(jacobians[3](0, 2), 1.0 / 3.0, 1e-12, "post context Jacobian is wrong");
+  ExpectNear(jacobians[4](0, 2), 1.0 / 3.0, 1e-12, "post context Jacobian is wrong");
+}
+
 void TestVerticalJumpShapeConstraintBuilder() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -607,6 +640,108 @@ void TestVerticalJumpShapeConstraintBuilderVelocityContextMean() {
     1.0,
     1e-12,
     "post context residual is wrong");
+}
+
+void TestVerticalJumpShapeConstraintBuilderContextMeanContinuity() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_context_mean_continuity = true;
+  config.vertical_jump_masked_imu_padding_s = 0.25;
+  config.vertical_jump_velocity_context_window_s = 1.0;
+  config.vertical_jump_context_mean_continuity_sigma_mps = 0.01;
+  const std::vector<double> state_timestamps{0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0};
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(1.25, 1.75)};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpVelocityRampDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::VerticalJumpContinuityDiagnosticRow> continuity_diagnostics;
+
+  offline_lc_minimal::VerticalJumpShapeConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  request.continuity_diagnostics = &continuity_diagnostics;
+  offline_lc_minimal::VerticalJumpShapeConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "one context mean continuity factor should be added");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_context_mean_continuity_factor_count),
+    1.0,
+    0.0,
+    "context mean continuity count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_context_mean_continuity_skipped_count),
+    0.0,
+    0.0,
+    "context mean continuity should not skip when both contexts exist");
+  ExpectNear(static_cast<double>(continuity_diagnostics.size()), 1.0, 0.0, "context mean diagnostic missing");
+  ExpectTrue(
+    continuity_diagnostics.front().context_mean_continuity_factor_added,
+    "diagnostic should mark context mean continuity factor");
+
+  gtsam::Values values;
+  const std::array<double, 7> vz_values{1.0, 3.0, 2.1, 0.0, -1.1, -2.0, 0.0};
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    values.insert(symbol::X(index), gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(0.0, 0.0, 0.0)));
+    values.insert(symbol::V(index), gtsam::Vector3(0.0, 0.0, vz_values[index]));
+  }
+  offline_lc_minimal::PopulateVerticalJumpContinuityDiagnostics(
+    values,
+    state_timestamps,
+    continuity_diagnostics);
+  ExpectNear(
+    continuity_diagnostics.front().context_mean_delta_vz_mps,
+    -3.0,
+    1e-12,
+    "context mean delta diagnostic is wrong");
+  ExpectNear(
+    continuity_diagnostics.front().context_mean_continuity_residual_mps,
+    -3.0,
+    1e-12,
+    "context mean residual diagnostic is wrong");
+}
+
+void TestVerticalJumpShapeConstraintBuilderContextMeanContinuityMissingSideSkips() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_context_mean_continuity = true;
+  config.vertical_jump_masked_imu_padding_s = 0.25;
+  config.vertical_jump_velocity_context_window_s = 1.0;
+  const std::vector<double> state_timestamps{1.0, 1.5, 2.0, 2.5, 3.0};
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(1.25, 1.75)};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpVelocityRampDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::VerticalJumpContinuityDiagnosticRow> continuity_diagnostics;
+
+  offline_lc_minimal::VerticalJumpShapeConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  request.continuity_diagnostics = &continuity_diagnostics;
+  offline_lc_minimal::VerticalJumpShapeConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 0.0, 0.0, "missing pre context should add no mean factor");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_context_mean_continuity_factor_count),
+    0.0,
+    0.0,
+    "missing pre context should not count as added");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_context_mean_continuity_skipped_count),
+    1.0,
+    0.0,
+    "missing pre context should count as skipped");
+  ExpectNear(static_cast<double>(continuity_diagnostics.size()), 1.0, 0.0, "missing side diagnostic missing");
+  ExpectTrue(
+    !continuity_diagnostics.front().context_mean_continuity_factor_added,
+    "missing pre context should not mark factor added");
 }
 
 void TestVerticalJumpShapeConstraintBuilderVelocityContextUsesPaddedSpanBoundary() {
@@ -903,6 +1038,7 @@ int main() {
     RunTest("TestVerticalVelocityHeightSlopeFactor", TestVerticalVelocityHeightSlopeFactor);
     RunTest("TestVerticalPositionVelocityConsistencyFactor", TestVerticalPositionVelocityConsistencyFactor);
     RunTest("TestVerticalVelocityMeanFactor", TestVerticalVelocityMeanFactor);
+    RunTest("TestVerticalVelocityContextMeanContinuityFactor", TestVerticalVelocityContextMeanContinuityFactor);
     RunTest("TestVerticalJumpShapeConstraintBuilder", TestVerticalJumpShapeConstraintBuilder);
     RunTest("TestVerticalJumpShapeConstraintBuilderPositionOnly", TestVerticalJumpShapeConstraintBuilderPositionOnly);
     RunTest(
@@ -911,6 +1047,12 @@ int main() {
     RunTest(
       "TestVerticalJumpShapeConstraintBuilderVelocityContextMean",
       TestVerticalJumpShapeConstraintBuilderVelocityContextMean);
+    RunTest(
+      "TestVerticalJumpShapeConstraintBuilderContextMeanContinuity",
+      TestVerticalJumpShapeConstraintBuilderContextMeanContinuity);
+    RunTest(
+      "TestVerticalJumpShapeConstraintBuilderContextMeanContinuityMissingSideSkips",
+      TestVerticalJumpShapeConstraintBuilderContextMeanContinuityMissingSideSkips);
     RunTest(
       "TestVerticalJumpShapeConstraintBuilderVelocityContextUsesPaddedSpanBoundary",
       TestVerticalJumpShapeConstraintBuilderVelocityContextUsesPaddedSpanBoundary);

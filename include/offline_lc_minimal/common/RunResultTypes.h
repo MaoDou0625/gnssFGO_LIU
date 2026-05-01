@@ -49,9 +49,11 @@ struct RunSummary {
   std::size_t vertical_jump_velocity_height_slope_factor_count = 0;
   std::size_t vertical_jump_velocity_continuity_factor_count = 0;
   std::size_t vertical_jump_velocity_context_factor_count = 0;
+  std::size_t vertical_jump_context_mean_continuity_factor_count = 0;
   std::size_t vertical_jump_position_velocity_consistency_factor_count = 0;
   std::size_t vertical_jump_continuity_skipped_count = 0;
   std::size_t vertical_jump_velocity_context_skipped_count = 0;
+  std::size_t vertical_jump_context_mean_continuity_skipped_count = 0;
   std::size_t vertical_jump_velocity_ramp_skipped_count = 0;
   double initial_static_velocity_norm_mean_mps = 0.0;
   double initial_static_velocity_norm_std_mps = 0.0;
@@ -152,11 +154,15 @@ struct RunSummary {
         << vertical_jump_velocity_continuity_factor_count << '\n'
         << "vertical_jump_velocity_context_factor_count="
         << vertical_jump_velocity_context_factor_count << '\n'
+        << "vertical_jump_context_mean_continuity_factor_count="
+        << vertical_jump_context_mean_continuity_factor_count << '\n'
         << "vertical_jump_position_velocity_consistency_factor_count="
         << vertical_jump_position_velocity_consistency_factor_count << '\n'
         << "vertical_jump_continuity_skipped_count=" << vertical_jump_continuity_skipped_count << '\n'
         << "vertical_jump_velocity_context_skipped_count="
         << vertical_jump_velocity_context_skipped_count << '\n'
+        << "vertical_jump_context_mean_continuity_skipped_count="
+        << vertical_jump_context_mean_continuity_skipped_count << '\n'
         << "vertical_jump_velocity_ramp_skipped_count=" << vertical_jump_velocity_ramp_skipped_count << '\n'
         << "initial_static_velocity_norm_mean_mps=" << initial_static_velocity_norm_mean_mps << '\n'
         << "initial_static_velocity_norm_std_mps=" << initial_static_velocity_norm_std_mps << '\n'

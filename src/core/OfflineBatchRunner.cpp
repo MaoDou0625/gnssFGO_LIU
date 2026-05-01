@@ -898,6 +898,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       config_.enable_vertical_jump_position_ramp_smoothing ||
       config_.enable_vertical_jump_velocity_continuity ||
       config_.enable_vertical_jump_velocity_context_mean ||
+      config_.enable_vertical_jump_context_mean_continuity ||
       config_.enable_vertical_jump_position_velocity_consistency ||
       config_.enable_vertical_jump_velocity_height_slope_constraint) {
     VerticalJumpShapeConstraintBuildRequest vertical_ramp_request;

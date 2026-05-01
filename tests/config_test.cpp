@@ -165,6 +165,26 @@ void TestPhase5SmokeConfigLoads() {
     "phase5 should disable velocity height slope constraint");
 }
 
+void TestPhase6SmokeConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase6_context_mean_continuity.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(config.enable_body_z_jump_detection, "phase6 config should enable body-z detection");
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase6 config should use envelope constraints");
+  ExpectTrue(config.enable_vertical_velocity_delta_constraint, "phase6 should keep velocity delta constraints");
+  ExpectTrue(config.enable_vertical_jump_masked_imu, "phase6 should keep vertical masked IMU");
+  ExpectTrue(config.enable_vertical_jump_velocity_context_mean, "phase6 should keep velocity context mean");
+  ExpectTrue(
+    config.enable_vertical_jump_context_mean_continuity,
+    "phase6 should enable context mean continuity");
+  ExpectTrue(
+    std::abs(config.vertical_jump_context_mean_continuity_sigma_mps - 0.01) < 1e-12,
+    "phase6 context mean continuity sigma should load");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -301,6 +321,17 @@ void TestVerticalJumpConfigValidation() {
   ExpectTrue(threw, "vertical jump velocity context mean should require body-z detection");
 
   config = offline_lc_minimal::DefaultConfig();
+  config.enable_vertical_jump_context_mean_continuity = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump constraints require enable_body_z_jump_detection") !=
+            std::string::npos;
+  }
+  ExpectTrue(threw, "vertical jump context mean continuity should require body-z detection");
+
+  config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
   config.enable_vertical_jump_masked_imu = true;
   config.enable_segment_error_feedback = true;
@@ -422,6 +453,30 @@ void TestVerticalJumpConfigValidation() {
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_context_mean_continuity = true;
+  config.vertical_jump_context_mean_continuity_sigma_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive context mean continuity sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_context_mean_continuity = true;
+  config.vertical_jump_context_mean_continuity_sigma_mps = std::numeric_limits<double>::infinity();
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "infinite context mean continuity sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
   config.enable_vertical_jump_position_velocity_consistency = true;
   config.vertical_jump_position_velocity_consistency_sigma_m = 0.0;
   threw = false;
@@ -454,6 +509,7 @@ int main() {
     RunTest("TestPhase3SmokeConfigLoads", TestPhase3SmokeConfigLoads);
     RunTest("TestPhase4SmokeConfigLoads", TestPhase4SmokeConfigLoads);
     RunTest("TestPhase5SmokeConfigLoads", TestPhase5SmokeConfigLoads);
+    RunTest("TestPhase6SmokeConfigLoads", TestPhase6SmokeConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
