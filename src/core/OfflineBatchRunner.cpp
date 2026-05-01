@@ -29,6 +29,7 @@
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
+#include "offline_lc_minimal/core/VerticalMotionConstraintBuilder.h"
 #include "offline_lc_minimal/factor/AngularRateFactor.h"
 #include "offline_lc_minimal/factor/BiasGmTransitionFactor.h"
 #include "offline_lc_minimal/factor/GlobalAccelBiasFactor.h"
@@ -511,6 +512,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   gtsam::imuBias::ConstantBias previous_bias = initial_bias;
   double previous_time_s = state_timestamps.front();
   std::vector<std::optional<std::size_t>> trajectory_row_index_by_state(state_timestamps.size(), std::nullopt);
+  std::vector<VerticalVelocityDeltaPropagationRecord> vertical_velocity_delta_records;
+  vertical_velocity_delta_records.reserve(state_timestamps.size() > 0U ? state_timestamps.size() - 1U : 0U);
   run_result.trajectory.reserve(state_timestamps.size());
   const auto graph_state_to_trajectory_row = [&](const std::size_t state_index) -> long long {
     if (state_index >= trajectory_row_index_by_state.size()) {
@@ -569,6 +572,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       config_.enable_segment_error_feedback
         ? imu_window.preintegrated_imu_measurements.predict(previous_nav_state, previous_bias)
         : imu_window.preintegrated_measurements.predict(previous_nav_state, previous_bias);
+    vertical_velocity_delta_records.push_back(VerticalVelocityDeltaPropagationRecord{
+      state_index - 1U,
+      state_index,
+      previous_time_s,
+      current_time_s,
+      predicted_state.v().z() - previous_nav_state.v().z()});
     initial_values.insert(X(state_index), predicted_state.pose());
     initial_values.insert(V(state_index), predicted_state.v());
     initial_values.insert(B(state_index), previous_bias);
@@ -781,10 +790,18 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.gnss_nis_median = std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.gnss_nis_p95 = std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.axis_2sigma_pass_rate = std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.vertical_velocity_delta_factor_count = 0;
+  run_result.run_summary.vertical_velocity_delta_skipped_disabled_count = 0;
+  run_result.run_summary.vertical_velocity_delta_skipped_static_count = 0;
+  run_result.run_summary.vertical_velocity_delta_skipped_jump_count = 0;
+  run_result.run_summary.vertical_velocity_delta_skipped_gnss_support_count = 0;
+  run_result.run_summary.vertical_velocity_delta_skipped_invalid_count = 0;
+  run_result.run_summary.vertical_velocity_delta_target_clamped_count = 0;
   run_result.trajectory = base_dynamic_trajectory;
   run_result.gnss_factor_records.clear();
   run_result.gnss_consistency_records.clear();
   run_result.vertical_envelope_diagnostics.clear();
+  run_result.vertical_velocity_delta_diagnostics.clear();
   run_result.vertical_state_corrections.clear();
 
   gtsam::NonlinearFactorGraph graph_with_gnss = base_graph;
@@ -818,6 +835,30 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   gnss_request.trajectory_row_index_for_state = graph_state_to_trajectory_row;
   GnssFactorBuilder(std::move(gnss_request)).Build();
 
+  std::optional<double> vertical_velocity_delta_support_end_time_s;
+  for (const auto &record : run_result.gnss_factor_records) {
+    if (!record.factor_used || !std::isfinite(record.corrected_time_s)) {
+      continue;
+    }
+    if (!vertical_velocity_delta_support_end_time_s.has_value()) {
+      vertical_velocity_delta_support_end_time_s = record.corrected_time_s;
+      continue;
+    }
+    vertical_velocity_delta_support_end_time_s =
+      std::max(*vertical_velocity_delta_support_end_time_s, record.corrected_time_s);
+  }
+
+  VerticalMotionConstraintBuildRequest vertical_motion_request;
+  vertical_motion_request.config = &config_;
+  vertical_motion_request.propagation_records = &vertical_velocity_delta_records;
+  vertical_motion_request.jump_windows = &run_result.body_z_seed_jump_windows;
+  vertical_motion_request.gnss_support_end_time_s = vertical_velocity_delta_support_end_time_s;
+  vertical_motion_request.dynamic_start_index = graph_timeline.dynamic_start_index;
+  vertical_motion_request.graph = &graph_with_gnss;
+  vertical_motion_request.run_summary = &run_result.run_summary;
+  vertical_motion_request.diagnostics = &run_result.vertical_velocity_delta_diagnostics;
+  VerticalMotionConstraintBuilder(std::move(vertical_motion_request)).Build();
+
   gtsam::LevenbergMarquardtOptimizer optimizer(
     graph_with_gnss,
     base_initial_values,
@@ -837,6 +878,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     optimized_values,
     base_interpolator,
     run_result.vertical_envelope_diagnostics);
+  PopulateVerticalVelocityDeltaDiagnostics(
+    optimized_values,
+    run_result.vertical_velocity_delta_diagnostics);
 
   if (collect_reference_states) {
     const std::vector<ReferenceNodeState> optimized_reference_states =

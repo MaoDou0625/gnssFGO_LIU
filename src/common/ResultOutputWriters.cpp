@@ -380,6 +380,36 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
   }
 }
 
+void WriteVerticalVelocityDeltaDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalVelocityDeltaDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "state_i,state_j,start_time_s,end_time_s,dt_s,factor_added,skip_reason,in_jump_padding,"
+       "target_clamped,raw_target_delta_vz_mps,"
+       "target_delta_vz_mps,optimized_delta_vz_mps,residual_mps,sigma_mps\n";
+  for (const auto &row : rows) {
+    stream << row.state_index_i << ','
+           << row.state_index_j << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.dt_s << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << (row.in_jump_padding ? 1 : 0) << ','
+           << (row.target_clamped ? 1 : 0) << ','
+           << row.raw_target_delta_vz_mps << ','
+           << row.target_delta_vz_mps << ','
+           << row.optimized_delta_vz_mps << ','
+           << row.residual_mps << ','
+           << row.sigma_mps << '\n';
+  }
+}
+
 void WriteVerticalStateCorrectionCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalStateCorrectionRow> &rows) {

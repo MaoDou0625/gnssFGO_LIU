@@ -74,6 +74,11 @@ void ResultWriter::WriteOutputs(
       output_path / "vertical_envelope_diagnostics.csv",
       result.vertical_envelope_diagnostics);
   }
+  if (!result.vertical_velocity_delta_diagnostics.empty()) {
+    WriteVerticalVelocityDeltaDiagnosticsCsv(
+      output_path / "vertical_velocity_delta_diagnostics.csv",
+      result.vertical_velocity_delta_diagnostics);
+  }
   if (!result.vertical_state_corrections.empty()) {
     WriteVerticalStateCorrectionCsv(
       output_path / "vertical_state_corrections.csv",

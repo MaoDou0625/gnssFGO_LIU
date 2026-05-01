@@ -35,6 +35,13 @@ struct RunSummary {
   std::size_t initial_static_constraint_sample_count = 0;
   std::size_t error_state_count = 0;
   std::size_t segment_error_count = 0;
+  std::size_t vertical_velocity_delta_factor_count = 0;
+  std::size_t vertical_velocity_delta_skipped_disabled_count = 0;
+  std::size_t vertical_velocity_delta_skipped_static_count = 0;
+  std::size_t vertical_velocity_delta_skipped_jump_count = 0;
+  std::size_t vertical_velocity_delta_skipped_gnss_support_count = 0;
+  std::size_t vertical_velocity_delta_skipped_invalid_count = 0;
+  std::size_t vertical_velocity_delta_target_clamped_count = 0;
   double initial_static_velocity_norm_mean_mps = 0.0;
   double initial_static_velocity_norm_std_mps = 0.0;
   double initial_static_velocity_norm_max_mps = 0.0;
@@ -110,6 +117,15 @@ struct RunSummary {
         << "initial_static_constraint_sample_count=" << initial_static_constraint_sample_count << '\n'
         << "error_state_count=" << error_state_count << '\n'
         << "segment_error_count=" << segment_error_count << '\n'
+        << "vertical_velocity_delta_factor_count=" << vertical_velocity_delta_factor_count << '\n'
+        << "vertical_velocity_delta_skipped_disabled_count=" << vertical_velocity_delta_skipped_disabled_count << '\n'
+        << "vertical_velocity_delta_skipped_static_count=" << vertical_velocity_delta_skipped_static_count << '\n'
+        << "vertical_velocity_delta_skipped_jump_count=" << vertical_velocity_delta_skipped_jump_count << '\n'
+        << "vertical_velocity_delta_skipped_gnss_support_count="
+        << vertical_velocity_delta_skipped_gnss_support_count << '\n'
+        << "vertical_velocity_delta_skipped_invalid_count=" << vertical_velocity_delta_skipped_invalid_count << '\n'
+        << "vertical_velocity_delta_target_clamped_count="
+        << vertical_velocity_delta_target_clamped_count << '\n'
         << "initial_static_velocity_norm_mean_mps=" << initial_static_velocity_norm_mean_mps << '\n'
         << "initial_static_velocity_norm_std_mps=" << initial_static_velocity_norm_std_mps << '\n'
         << "initial_static_velocity_norm_max_mps=" << initial_static_velocity_norm_max_mps << '\n'
@@ -182,6 +198,7 @@ struct OfflineRunResult {
   std::vector<GnssFactorRecord> gnss_factor_records;
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
+  std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;
   std::vector<VerticalStateCorrectionRow> vertical_state_corrections;
 };
 

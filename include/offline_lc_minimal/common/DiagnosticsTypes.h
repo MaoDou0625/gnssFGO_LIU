@@ -165,6 +165,23 @@ struct VerticalEnvelopeDiagnosticRow {
   bool inside_envelope = false;
 };
 
+struct VerticalVelocityDeltaDiagnosticRow {
+  std::size_t state_index_i = 0;
+  std::size_t state_index_j = 0;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double dt_s = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+  bool in_jump_padding = false;
+  bool target_clamped = false;
+  double raw_target_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double target_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double sigma_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct VerticalStateCorrectionRow {
   std::size_t sample_index = 0;
   double raw_time_s = std::numeric_limits<double>::quiet_NaN();
