@@ -119,6 +119,13 @@ struct OfflineRunnerConfig {
   double vertical_velocity_delta_min_sigma_mps = 0.02;
   double vertical_velocity_delta_jump_padding_s = 0.25;
   double vertical_velocity_delta_target_acc_limit_mps2 = 0.85;
+  bool enable_vertical_jump_masked_imu = false;
+  double vertical_jump_masked_imu_padding_s = 0.25;
+  bool enable_vertical_jump_velocity_ramp_smoothing = false;
+  double vertical_jump_velocity_ramp_sigma_mps = 0.08;
+  bool enable_vertical_jump_position_ramp_smoothing = false;
+  double vertical_jump_position_ramp_sigma_m = 0.10;
+  double vertical_jump_velocity_height_slope_sigma_mps = 0.50;
   double gnss_sigma_scale_horizontal = 1.0;
   double gnss_sigma_scale_up = 1.0;
   GnssNoiseModel gnss_position_noise_model = GnssNoiseModel::kCauchy;

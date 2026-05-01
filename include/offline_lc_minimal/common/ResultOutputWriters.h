@@ -50,6 +50,14 @@ void WriteVerticalVelocityDeltaDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalVelocityDeltaDiagnosticRow> &rows);
 
+void WriteVerticalJumpMaskedImuDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalJumpMaskedImuDiagnosticRow> &rows);
+
+void WriteVerticalJumpVelocityRampDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalJumpVelocityRampDiagnosticRow> &rows);
+
 void WriteVerticalStateCorrectionCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalStateCorrectionRow> &rows);

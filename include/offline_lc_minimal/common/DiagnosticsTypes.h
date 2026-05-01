@@ -182,6 +182,40 @@ struct VerticalVelocityDeltaDiagnosticRow {
   double sigma_mps = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct VerticalJumpMaskedImuDiagnosticRow {
+  std::size_t state_index_i = 0;
+  std::size_t state_index_j = 0;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  std::string factor_type = "UNSET";
+  bool overlap_jump_padding = false;
+  bool masked_z_position = false;
+  bool masked_vz = false;
+};
+
+struct VerticalJumpVelocityRampDiagnosticRow {
+  std::size_t window_index = 0;
+  std::size_t start_state_index = 0;
+  std::size_t end_state_index = 0;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  std::size_t factor_count = 0;
+  std::string skip_reason = "UNSET";
+  double pre_vz_mean_mps = std::numeric_limits<double>::quiet_NaN();
+  double post_vz_mean_mps = std::numeric_limits<double>::quiet_NaN();
+  double jump_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double inside_vz_min_mps = std::numeric_limits<double>::quiet_NaN();
+  double inside_vz_max_mps = std::numeric_limits<double>::quiet_NaN();
+  double inside_vz_range_mps = std::numeric_limits<double>::quiet_NaN();
+  double ramp_residual_max_mps = std::numeric_limits<double>::quiet_NaN();
+  double ramp_residual_p95_mps = std::numeric_limits<double>::quiet_NaN();
+  double inside_up_min_m = std::numeric_limits<double>::quiet_NaN();
+  double inside_up_max_m = std::numeric_limits<double>::quiet_NaN();
+  double inside_up_range_m = std::numeric_limits<double>::quiet_NaN();
+  double position_ramp_residual_max_m = std::numeric_limits<double>::quiet_NaN();
+  double position_ramp_residual_p95_m = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct VerticalStateCorrectionRow {
   std::size_t sample_index = 0;
   double raw_time_s = std::numeric_limits<double>::quiet_NaN();

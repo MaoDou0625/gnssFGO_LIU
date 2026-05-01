@@ -246,6 +246,21 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_velocity_delta_target_acc_limit_mps2 <= 0.0) {
     throw std::runtime_error("vertical velocity delta settings must be positive");
   }
+  if ((config.enable_vertical_jump_masked_imu ||
+       config.enable_vertical_jump_velocity_ramp_smoothing ||
+       config.enable_vertical_jump_position_ramp_smoothing) &&
+      !config.enable_body_z_jump_detection) {
+    throw std::runtime_error("vertical jump constraints require enable_body_z_jump_detection");
+  }
+  if (config.enable_vertical_jump_masked_imu && config.enable_segment_error_feedback) {
+    throw std::runtime_error("enable_vertical_jump_masked_imu requires CombinedImuFactor mode");
+  }
+  if (config.vertical_jump_masked_imu_padding_s <= 0.0 ||
+      config.vertical_jump_velocity_ramp_sigma_mps <= 0.0 ||
+      config.vertical_jump_position_ramp_sigma_m <= 0.0 ||
+      config.vertical_jump_velocity_height_slope_sigma_mps <= 0.0) {
+    throw std::runtime_error("vertical jump settings must be positive");
+  }
   if (config.gnss_position_robust_param <= 0.0) {
     throw std::runtime_error("gnss_position_robust_param must be positive");
   }
@@ -486,6 +501,20 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_velocity_delta_jump_padding_s = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_target_acc_limit_mps2") {
     config.vertical_velocity_delta_target_acc_limit_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_jump_masked_imu") {
+    config.enable_vertical_jump_masked_imu = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_jump_masked_imu_padding_s") {
+    config.vertical_jump_masked_imu_padding_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_jump_velocity_ramp_smoothing") {
+    config.enable_vertical_jump_velocity_ramp_smoothing = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_jump_velocity_ramp_sigma_mps") {
+    config.vertical_jump_velocity_ramp_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_jump_position_ramp_smoothing") {
+    config.enable_vertical_jump_position_ramp_smoothing = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_jump_position_ramp_sigma_m") {
+    config.vertical_jump_position_ramp_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_velocity_height_slope_sigma_mps") {
+    config.vertical_jump_velocity_height_slope_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "gnss_sigma_scale_horizontal") {
     config.gnss_sigma_scale_horizontal = ParseDouble(normalized_value);
   } else if (normalized_key == "gnss_sigma_scale_up") {
@@ -690,6 +719,16 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "vertical_velocity_delta_jump_padding_s=" << config.vertical_velocity_delta_jump_padding_s << '\n'
     << "vertical_velocity_delta_target_acc_limit_mps2="
     << config.vertical_velocity_delta_target_acc_limit_mps2 << '\n'
+    << "enable_vertical_jump_masked_imu=" << (config.enable_vertical_jump_masked_imu ? "true" : "false") << '\n'
+    << "vertical_jump_masked_imu_padding_s=" << config.vertical_jump_masked_imu_padding_s << '\n'
+    << "enable_vertical_jump_velocity_ramp_smoothing="
+    << (config.enable_vertical_jump_velocity_ramp_smoothing ? "true" : "false") << '\n'
+    << "vertical_jump_velocity_ramp_sigma_mps=" << config.vertical_jump_velocity_ramp_sigma_mps << '\n'
+    << "enable_vertical_jump_position_ramp_smoothing="
+    << (config.enable_vertical_jump_position_ramp_smoothing ? "true" : "false") << '\n'
+    << "vertical_jump_position_ramp_sigma_m=" << config.vertical_jump_position_ramp_sigma_m << '\n'
+    << "vertical_jump_velocity_height_slope_sigma_mps="
+    << config.vertical_jump_velocity_height_slope_sigma_mps << '\n'
     << "gnss_sigma_scale_horizontal=" << config.gnss_sigma_scale_horizontal << '\n'
     << "gnss_sigma_scale_up=" << config.gnss_sigma_scale_up << '\n'
     << "gnss_position_noise_model=" << ToString(config.gnss_position_noise_model) << '\n'

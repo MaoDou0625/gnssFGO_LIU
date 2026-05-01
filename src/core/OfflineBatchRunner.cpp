@@ -29,6 +29,8 @@
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
+#include "offline_lc_minimal/core/VerticalJumpImuMasker.h"
+#include "offline_lc_minimal/core/VerticalJumpShapeConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalMotionConstraintBuilder.h"
 #include "offline_lc_minimal/factor/AngularRateFactor.h"
 #include "offline_lc_minimal/factor/BiasGmTransitionFactor.h"
@@ -514,6 +516,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   std::vector<std::optional<std::size_t>> trajectory_row_index_by_state(state_timestamps.size(), std::nullopt);
   std::vector<VerticalVelocityDeltaPropagationRecord> vertical_velocity_delta_records;
   vertical_velocity_delta_records.reserve(state_timestamps.size() > 0U ? state_timestamps.size() - 1U : 0U);
+  std::vector<VerticalJumpImuIntervalRecord> vertical_jump_imu_interval_records;
+  vertical_jump_imu_interval_records.reserve(state_timestamps.size() > 0U ? state_timestamps.size() - 1U : 0U);
   run_result.trajectory.reserve(state_timestamps.size());
   const auto graph_state_to_trajectory_row = [&](const std::size_t state_index) -> long long {
     if (state_index >= trajectory_row_index_by_state.size()) {
@@ -549,6 +553,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     const auto imu_window =
       IntegrateImuWindow(dataset.imu_samples, previous_time_s, current_time_s, imu_params, previous_bias);
 
+    const std::size_t imu_factor_index = graph.size();
     if (config_.enable_segment_error_feedback) {
       graph.add(gtsam::ImuFactor(
         X(state_index - 1U),
@@ -566,6 +571,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         B(state_index - 1U),
         B(state_index),
         imu_window.preintegrated_measurements));
+      vertical_jump_imu_interval_records.push_back(VerticalJumpImuIntervalRecord{
+        state_index - 1U,
+        state_index,
+        previous_time_s,
+        current_time_s,
+        imu_factor_index,
+        imu_window.preintegrated_measurements});
     }
 
     const gtsam::NavState predicted_state =
@@ -797,14 +809,33 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.vertical_velocity_delta_skipped_gnss_support_count = 0;
   run_result.run_summary.vertical_velocity_delta_skipped_invalid_count = 0;
   run_result.run_summary.vertical_velocity_delta_target_clamped_count = 0;
+  run_result.run_summary.vertical_jump_combined_imu_factor_count = 0;
+  run_result.run_summary.vertical_jump_masked_imu_factor_count = 0;
+  run_result.run_summary.vertical_jump_velocity_ramp_factor_count = 0;
+  run_result.run_summary.vertical_jump_position_ramp_factor_count = 0;
+  run_result.run_summary.vertical_jump_velocity_height_slope_factor_count = 0;
+  run_result.run_summary.vertical_jump_velocity_ramp_skipped_count = 0;
   run_result.trajectory = base_dynamic_trajectory;
   run_result.gnss_factor_records.clear();
   run_result.gnss_consistency_records.clear();
   run_result.vertical_envelope_diagnostics.clear();
   run_result.vertical_velocity_delta_diagnostics.clear();
+  run_result.vertical_jump_masked_imu_diagnostics.clear();
+  run_result.vertical_jump_velocity_ramp_diagnostics.clear();
   run_result.vertical_state_corrections.clear();
 
   gtsam::NonlinearFactorGraph graph_with_gnss = base_graph;
+  if (config_.enable_vertical_jump_masked_imu) {
+    VerticalJumpImuMaskRequest vertical_jump_mask_request;
+    vertical_jump_mask_request.config = &config_;
+    vertical_jump_mask_request.intervals = &vertical_jump_imu_interval_records;
+    vertical_jump_mask_request.jump_windows = &run_result.body_z_seed_jump_windows;
+    vertical_jump_mask_request.graph = &graph_with_gnss;
+    vertical_jump_mask_request.run_summary = &run_result.run_summary;
+    vertical_jump_mask_request.diagnostics = &run_result.vertical_jump_masked_imu_diagnostics;
+    VerticalJumpImuMasker(std::move(vertical_jump_mask_request)).Apply();
+  }
+
   GnssFactorBuildRequest gnss_request;
   gnss_request.config = &config_;
   gnss_request.gnss_samples = &dataset.gnss_samples;
@@ -859,6 +890,18 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   vertical_motion_request.diagnostics = &run_result.vertical_velocity_delta_diagnostics;
   VerticalMotionConstraintBuilder(std::move(vertical_motion_request)).Build();
 
+  if (config_.enable_vertical_jump_velocity_ramp_smoothing ||
+      config_.enable_vertical_jump_position_ramp_smoothing) {
+    VerticalJumpShapeConstraintBuildRequest vertical_ramp_request;
+    vertical_ramp_request.config = &config_;
+    vertical_ramp_request.state_timestamps = &state_timestamps;
+    vertical_ramp_request.jump_windows = &run_result.body_z_seed_jump_windows;
+    vertical_ramp_request.graph = &graph_with_gnss;
+    vertical_ramp_request.run_summary = &run_result.run_summary;
+    vertical_ramp_request.diagnostics = &run_result.vertical_jump_velocity_ramp_diagnostics;
+    VerticalJumpShapeConstraintBuilder(std::move(vertical_ramp_request)).Build();
+  }
+
   gtsam::LevenbergMarquardtOptimizer optimizer(
     graph_with_gnss,
     base_initial_values,
@@ -881,6 +924,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateVerticalVelocityDeltaDiagnostics(
     optimized_values,
     run_result.vertical_velocity_delta_diagnostics);
+  PopulateVerticalJumpVelocityRampDiagnostics(
+    optimized_values,
+    run_result.vertical_jump_velocity_ramp_diagnostics);
 
   if (collect_reference_states) {
     const std::vector<ReferenceNodeState> optimized_reference_states =

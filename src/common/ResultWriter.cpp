@@ -79,6 +79,16 @@ void ResultWriter::WriteOutputs(
       output_path / "vertical_velocity_delta_diagnostics.csv",
       result.vertical_velocity_delta_diagnostics);
   }
+  if (!result.vertical_jump_masked_imu_diagnostics.empty()) {
+    WriteVerticalJumpMaskedImuDiagnosticsCsv(
+      output_path / "vertical_jump_masked_imu_diagnostics.csv",
+      result.vertical_jump_masked_imu_diagnostics);
+  }
+  if (!result.vertical_jump_velocity_ramp_diagnostics.empty()) {
+    WriteVerticalJumpVelocityRampDiagnosticsCsv(
+      output_path / "vertical_jump_velocity_ramp_diagnostics.csv",
+      result.vertical_jump_velocity_ramp_diagnostics);
+  }
   if (!result.vertical_state_corrections.empty()) {
     WriteVerticalStateCorrectionCsv(
       output_path / "vertical_state_corrections.csv",

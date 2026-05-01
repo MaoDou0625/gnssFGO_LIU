@@ -52,6 +52,7 @@ add_library(offline_lc_minimal_lib
   src/common/GeoUtils.cpp
   src/common/ResultOutputWriters.cpp
   src/common/ResultWriter.cpp
+  src/factor/VerticalMaskedCombinedImuFactor.cpp
   src/gp/Pose3Utils.cpp
   src/io/TextDatasetLoader.cpp
   src/core/InitialStaticConstraintBuilder.cpp
@@ -66,6 +67,8 @@ add_library(offline_lc_minimal_lib
   src/core/TrajectoryResultBuilder.cpp
   src/core/TrajectoryInitializer.cpp
   src/core/VerticalConstraintPolicy.cpp
+  src/core/VerticalJumpImuMasker.cpp
+  src/core/VerticalJumpShapeConstraintBuilder.cpp
   src/core/VerticalMotionConstraintBuilder.cpp
   src/core/OfflineBatchRunner.cpp
 )
@@ -137,6 +140,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     tests/vertical_velocity_delta_constraint_test.cpp
   )
 
+  add_executable(vertical_jump_constraints_test
+    tests/vertical_jump_constraints_test.cpp
+  )
+
   target_compile_definitions(config_test
     PRIVATE
       OFFLINE_LC_MINIMAL_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
@@ -163,6 +170,11 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(vertical_velocity_delta_constraint_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(vertical_jump_constraints_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -194,6 +206,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       vertical_velocity_delta_constraint_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      vertical_jump_constraints_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -236,6 +254,13 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
         $<TARGET_FILE:vertical_velocity_delta_constraint_test>
     )
+    add_test(
+      NAME vertical_jump_constraints_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:vertical_jump_constraints_test>
+    )
   else()
     add_test(
       NAME vertical_rtk_factors_test
@@ -256,6 +281,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     add_test(
       NAME vertical_velocity_delta_constraint_test
       COMMAND $<TARGET_FILE:vertical_velocity_delta_constraint_test>
+    )
+    add_test(
+      NAME vertical_jump_constraints_test
+      COMMAND $<TARGET_FILE:vertical_jump_constraints_test>
     )
   endif()
 endif()

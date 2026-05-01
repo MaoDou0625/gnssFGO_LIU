@@ -410,6 +410,65 @@ void WriteVerticalVelocityDeltaDiagnosticsCsv(
   }
 }
 
+void WriteVerticalJumpMaskedImuDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalJumpMaskedImuDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "state_i,state_j,start_time_s,end_time_s,factor_type,overlap_jump_padding,masked_z_position,masked_vz\n";
+  for (const auto &row : rows) {
+    stream << row.state_index_i << ','
+           << row.state_index_j << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.factor_type << ','
+           << (row.overlap_jump_padding ? 1 : 0) << ','
+           << (row.masked_z_position ? 1 : 0) << ','
+           << (row.masked_vz ? 1 : 0) << '\n';
+  }
+}
+
+void WriteVerticalJumpVelocityRampDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalJumpVelocityRampDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,start_state_index,end_state_index,start_time_s,end_time_s,factor_count,skip_reason,"
+       "pre_vz_mean_mps,post_vz_mean_mps,jump_delta_vz_mps,inside_vz_min_mps,inside_vz_max_mps,"
+       "inside_vz_range_mps,ramp_residual_max_mps,ramp_residual_p95_mps,inside_up_min_m,inside_up_max_m,"
+       "inside_up_range_m,position_ramp_residual_max_m,position_ramp_residual_p95_m\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.start_state_index << ','
+           << row.end_state_index << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.factor_count << ','
+           << row.skip_reason << ','
+           << row.pre_vz_mean_mps << ','
+           << row.post_vz_mean_mps << ','
+           << row.jump_delta_vz_mps << ','
+           << row.inside_vz_min_mps << ','
+           << row.inside_vz_max_mps << ','
+           << row.inside_vz_range_mps << ','
+           << row.ramp_residual_max_mps << ','
+           << row.ramp_residual_p95_mps << ','
+           << row.inside_up_min_m << ','
+           << row.inside_up_max_m << ','
+           << row.inside_up_range_m << ','
+           << row.position_ramp_residual_max_m << ','
+           << row.position_ramp_residual_p95_m << '\n';
+  }
+}
+
 void WriteVerticalStateCorrectionCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalStateCorrectionRow> &rows) {
