@@ -114,9 +114,44 @@ void TestPhase4SmokeConfigLoads() {
   ExpectTrue(
     std::abs(config.vertical_jump_position_ramp_sigma_m - 0.10) < 1e-12,
     "vertical jump position ramp sigma should load");
+  ExpectTrue(!config.enable_vertical_jump_velocity_continuity, "phase4 should keep velocity continuity disabled");
+  ExpectTrue(
+    !config.enable_vertical_jump_position_velocity_consistency,
+    "phase4 should keep position-velocity consistency disabled");
+  ExpectTrue(
+    config.enable_vertical_jump_velocity_height_slope_constraint,
+    "phase4 should preserve velocity height slope constraint");
   ExpectTrue(
     std::abs(config.vertical_jump_velocity_height_slope_sigma_mps - 0.50) < 1e-12,
     "vertical jump velocity height slope sigma should load");
+}
+
+void TestPhase5SmokeConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase5_continuous_vz.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(config.enable_body_z_jump_detection, "phase5 config should enable body-z detection");
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase5 config should use envelope constraints");
+  ExpectTrue(config.enable_vertical_velocity_delta_constraint, "phase5 should keep velocity delta constraints");
+  ExpectTrue(config.enable_vertical_jump_masked_imu, "phase5 should keep vertical masked IMU");
+  ExpectTrue(config.enable_vertical_jump_velocity_ramp_smoothing, "phase5 should enable velocity ramp");
+  ExpectTrue(config.enable_vertical_jump_position_ramp_smoothing, "phase5 should enable position ramp");
+  ExpectTrue(config.enable_vertical_jump_velocity_continuity, "phase5 should enable velocity continuity");
+  ExpectTrue(
+    std::abs(config.vertical_jump_velocity_continuity_sigma_mps - 0.02) < 1e-12,
+    "phase5 velocity continuity sigma should load");
+  ExpectTrue(
+    config.enable_vertical_jump_position_velocity_consistency,
+    "phase5 should enable position-velocity consistency");
+  ExpectTrue(
+    std::abs(config.vertical_jump_position_velocity_consistency_sigma_m - 0.08) < 1e-12,
+    "phase5 position-velocity consistency sigma should load");
+  ExpectTrue(
+    !config.enable_vertical_jump_velocity_height_slope_constraint,
+    "phase5 should disable velocity height slope constraint");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
@@ -233,6 +268,17 @@ void TestVerticalJumpConfigValidation() {
   ExpectTrue(threw, "vertical jump position ramp should require body-z detection");
 
   config = offline_lc_minimal::DefaultConfig();
+  config.enable_vertical_jump_velocity_continuity = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump constraints require enable_body_z_jump_detection") !=
+            std::string::npos;
+  }
+  ExpectTrue(threw, "vertical jump velocity continuity should require body-z detection");
+
+  config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
   config.enable_vertical_jump_masked_imu = true;
   config.enable_segment_error_feedback = true;
@@ -291,6 +337,30 @@ void TestVerticalJumpConfigValidation() {
     threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive velocity height slope sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_velocity_continuity = true;
+  config.vertical_jump_velocity_continuity_sigma_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive velocity continuity sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_position_velocity_consistency = true;
+  config.vertical_jump_position_velocity_consistency_sigma_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive position-velocity consistency sigma should be rejected");
 }
 
 }  // namespace
@@ -301,6 +371,7 @@ int main() {
     RunTest("TestEnvelopeSmokeConfigLoads", TestEnvelopeSmokeConfigLoads);
     RunTest("TestPhase3SmokeConfigLoads", TestPhase3SmokeConfigLoads);
     RunTest("TestPhase4SmokeConfigLoads", TestPhase4SmokeConfigLoads);
+    RunTest("TestPhase5SmokeConfigLoads", TestPhase5SmokeConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

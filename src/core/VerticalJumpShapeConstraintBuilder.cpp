@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -11,6 +12,8 @@
 #include <gtsam/linear/NoiseModel.h>
 
 #include "offline_lc_minimal/factor/VerticalPositionRampFactor.h"
+#include "offline_lc_minimal/factor/VerticalPositionVelocityConsistencyFactor.h"
+#include "offline_lc_minimal/factor/VerticalVelocityDeltaFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityHeightSlopeFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityRampFactor.h"
 
@@ -36,6 +39,14 @@ double Percentile(std::vector<double> values, const double ratio) {
   return values[index];
 }
 
+bool SpansOverlapOrTouch(
+  const double left_start_s,
+  const double left_end_s,
+  const double right_start_s,
+  const double right_end_s) {
+  return left_start_s <= right_end_s && right_start_s <= left_end_s;
+}
+
 }  // namespace
 
 VerticalJumpShapeConstraintBuilder::VerticalJumpShapeConstraintBuilder(
@@ -45,47 +56,92 @@ VerticalJumpShapeConstraintBuilder::VerticalJumpShapeConstraintBuilder(
 void VerticalJumpShapeConstraintBuilder::Build() const {
   if (request_.config == nullptr || request_.state_timestamps == nullptr ||
       request_.jump_windows == nullptr || request_.graph == nullptr ||
-      request_.run_summary == nullptr || request_.diagnostics == nullptr) {
+      request_.run_summary == nullptr || request_.diagnostics == nullptr ||
+      request_.continuity_diagnostics == nullptr) {
     throw std::runtime_error("VerticalJumpShapeConstraintBuilder received an incomplete request");
   }
 
-  request_.diagnostics->reserve(request_.diagnostics->size() + request_.jump_windows->size());
-  for (std::size_t window_index = 0; window_index < request_.jump_windows->size(); ++window_index) {
-    const auto &window = (*request_.jump_windows)[window_index];
+  const bool add_velocity_ramp = request_.config->enable_vertical_jump_velocity_ramp_smoothing;
+  const bool add_position_ramp = request_.config->enable_vertical_jump_position_ramp_smoothing;
+  const bool add_velocity_continuity = request_.config->enable_vertical_jump_velocity_continuity;
+  const bool add_position_velocity_consistency =
+    request_.config->enable_vertical_jump_position_velocity_consistency;
+  const bool add_velocity_height_slope =
+    request_.config->enable_vertical_jump_velocity_height_slope_constraint;
+  if (!add_velocity_ramp && !add_position_ramp && !add_velocity_continuity &&
+      !add_position_velocity_consistency && !add_velocity_height_slope) {
+    return;
+  }
+
+  const std::vector<Span> spans = BuildMergedSpans();
+  request_.diagnostics->reserve(request_.diagnostics->size() + spans.size());
+  request_.continuity_diagnostics->reserve(request_.continuity_diagnostics->size() + spans.size());
+  for (const auto &span : spans) {
     VerticalJumpVelocityRampDiagnosticRow row;
-    row.window_index = window_index;
-    row.start_time_s = window.start_time_s;
-    row.end_time_s = window.end_time_s;
+    row.window_index = span.window_index;
+    row.start_time_s = span.start_time_s;
+    row.end_time_s = span.end_time_s;
+    row.start_state_index = span.state_indices.empty() ? 0U : span.state_indices.front();
+    row.end_state_index = span.state_indices.empty() ? 0U : span.state_indices.back();
 
-    const bool add_velocity_ramp = request_.config->enable_vertical_jump_velocity_ramp_smoothing;
-    const bool add_position_ramp = request_.config->enable_vertical_jump_position_ramp_smoothing;
-    if (!add_velocity_ramp && !add_position_ramp) {
-      row.skip_reason = "DISABLED";
-      request_.diagnostics->push_back(row);
-      continue;
-    }
-    if (!std::isfinite(window.start_time_s) || !std::isfinite(window.end_time_s)) {
-      row.skip_reason = "INVALID_WINDOW";
-      ++request_.run_summary->vertical_jump_velocity_ramp_skipped_count;
-      request_.diagnostics->push_back(row);
-      continue;
-    }
-
-    const double padded_start_s = window.start_time_s - request_.config->vertical_jump_masked_imu_padding_s;
-    const double padded_end_s = window.end_time_s + request_.config->vertical_jump_masked_imu_padding_s;
-    const std::vector<std::size_t> state_indices = StateIndicesInWindow(padded_start_s, padded_end_s);
-    row.start_state_index = state_indices.empty() ? 0U : state_indices.front();
-    row.end_state_index = state_indices.empty() ? 0U : state_indices.back();
-
-    if (state_indices.size() < 3U) {
+    if (span.state_indices.empty()) {
       row.skip_reason = "INSUFFICIENT_STATES";
       ++request_.run_summary->vertical_jump_velocity_ramp_skipped_count;
       request_.diagnostics->push_back(row);
       continue;
     }
 
-    const double start_time_s = (*request_.state_timestamps)[state_indices.front()];
-    const double end_time_s = (*request_.state_timestamps)[state_indices.back()];
+    const auto velocity_continuity_noise = gtsam::noiseModel::Isotropic::Sigma(
+      1,
+      request_.config->vertical_jump_velocity_continuity_sigma_mps);
+    if (add_velocity_continuity) {
+      VerticalJumpContinuityDiagnosticRow continuity_row;
+      continuity_row.window_index = span.window_index;
+      continuity_row.start_state_index = span.state_indices.front();
+      continuity_row.end_state_index = span.state_indices.back();
+      continuity_row.pre_anchor_state_index = span.pre_anchor_state_index.value_or(0U);
+      continuity_row.post_anchor_state_index = span.post_anchor_state_index.value_or(0U);
+      continuity_row.start_time_s = span.start_time_s;
+      continuity_row.end_time_s = span.end_time_s;
+      if (span.pre_anchor_state_index.has_value()) {
+        request_.graph->add(factor::VerticalVelocityDeltaFactor(
+          symbol::V(*span.pre_anchor_state_index),
+          symbol::V(span.state_indices.front()),
+          0.0,
+          velocity_continuity_noise));
+        ++request_.run_summary->vertical_jump_velocity_continuity_factor_count;
+        continuity_row.entry_factor_added = true;
+      } else {
+        ++request_.run_summary->vertical_jump_continuity_skipped_count;
+      }
+      if (span.post_anchor_state_index.has_value()) {
+        request_.graph->add(factor::VerticalVelocityDeltaFactor(
+          symbol::V(span.state_indices.back()),
+          symbol::V(*span.post_anchor_state_index),
+          0.0,
+          velocity_continuity_noise));
+        ++request_.run_summary->vertical_jump_velocity_continuity_factor_count;
+        continuity_row.exit_factor_added = true;
+      } else {
+        ++request_.run_summary->vertical_jump_continuity_skipped_count;
+      }
+      continuity_row.skip_reason =
+        continuity_row.entry_factor_added || continuity_row.exit_factor_added ? "ADDED" : "MISSING_ANCHORS";
+      request_.continuity_diagnostics->push_back(continuity_row);
+    }
+
+    if (span.state_indices.size() < 2U) {
+      row.skip_reason = "INSUFFICIENT_STATES_FOR_SHAPE";
+      if (add_velocity_ramp || add_position_ramp || add_position_velocity_consistency ||
+          add_velocity_height_slope) {
+        ++request_.run_summary->vertical_jump_velocity_ramp_skipped_count;
+      }
+      request_.diagnostics->push_back(row);
+      continue;
+    }
+
+    const double start_time_s = (*request_.state_timestamps)[span.state_indices.front()];
+    const double end_time_s = (*request_.state_timestamps)[span.state_indices.back()];
     const double duration_s = end_time_s - start_time_s;
     if (duration_s <= 0.0) {
       row.skip_reason = "INVALID_DURATION";
@@ -100,30 +156,54 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
     const auto position_noise = gtsam::noiseModel::Isotropic::Sigma(
       1,
       request_.config->vertical_jump_position_ramp_sigma_m);
+    const auto position_velocity_consistency_noise = gtsam::noiseModel::Isotropic::Sigma(
+      1,
+      request_.config->vertical_jump_position_velocity_consistency_sigma_m);
     const auto velocity_height_slope_noise = gtsam::noiseModel::Isotropic::Sigma(
       1,
       request_.config->vertical_jump_velocity_height_slope_sigma_mps);
-    if (add_velocity_ramp) {
-      for (std::size_t offset = 1; offset + 1U < state_indices.size(); ++offset) {
-        const std::size_t state_index = state_indices[offset];
+
+    if (add_velocity_height_slope) {
+      for (std::size_t offset = 1; offset + 1U < span.state_indices.size(); ++offset) {
+        const std::size_t state_index = span.state_indices[offset];
         request_.graph->add(factor::VerticalVelocityHeightSlopeFactor(
-          symbol::X(state_indices.front()),
+          symbol::X(span.state_indices.front()),
           symbol::V(state_index),
-          symbol::X(state_indices.back()),
+          symbol::X(span.state_indices.back()),
           duration_s,
           velocity_height_slope_noise));
         ++row.factor_count;
         ++request_.run_summary->vertical_jump_velocity_height_slope_factor_count;
       }
     }
-    for (std::size_t offset = 1; offset + 1U < state_indices.size(); ++offset) {
-      const std::size_t state_index = state_indices[offset];
+    if (add_position_velocity_consistency) {
+      for (std::size_t offset = 0; offset + 1U < span.state_indices.size(); ++offset) {
+        const std::size_t state_i = span.state_indices[offset];
+        const std::size_t state_j = span.state_indices[offset + 1U];
+        const double dt_s = (*request_.state_timestamps)[state_j] - (*request_.state_timestamps)[state_i];
+        if (dt_s <= 0.0) {
+          ++request_.run_summary->vertical_jump_continuity_skipped_count;
+          continue;
+        }
+        request_.graph->add(factor::VerticalPositionVelocityConsistencyFactor(
+          symbol::X(state_i),
+          symbol::V(state_i),
+          symbol::X(state_j),
+          symbol::V(state_j),
+          dt_s,
+          position_velocity_consistency_noise));
+        ++row.factor_count;
+        ++request_.run_summary->vertical_jump_position_velocity_consistency_factor_count;
+      }
+    }
+    for (std::size_t offset = 1; offset + 1U < span.state_indices.size(); ++offset) {
+      const std::size_t state_index = span.state_indices[offset];
       const double alpha = ((*request_.state_timestamps)[state_index] - start_time_s) / duration_s;
       if (add_velocity_ramp) {
         request_.graph->add(factor::VerticalVelocityRampFactor(
-          symbol::V(state_indices.front()),
+          symbol::V(span.state_indices.front()),
           symbol::V(state_index),
-          symbol::V(state_indices.back()),
+          symbol::V(span.state_indices.back()),
           alpha,
           velocity_noise));
         ++row.factor_count;
@@ -131,9 +211,9 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
       }
       if (add_position_ramp) {
         request_.graph->add(factor::VerticalPositionRampFactor(
-          symbol::X(state_indices.front()),
+          symbol::X(span.state_indices.front()),
           symbol::X(state_index),
-          symbol::X(state_indices.back()),
+          symbol::X(span.state_indices.back()),
           alpha,
           position_noise));
         ++row.factor_count;
@@ -144,6 +224,55 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
     row.skip_reason = "ADDED";
     request_.diagnostics->push_back(row);
   }
+}
+
+std::vector<VerticalJumpShapeConstraintBuilder::Span>
+VerticalJumpShapeConstraintBuilder::BuildMergedSpans() const {
+  std::vector<Span> spans;
+  spans.reserve(request_.jump_windows->size());
+  for (std::size_t window_index = 0; window_index < request_.jump_windows->size(); ++window_index) {
+    const auto &window = (*request_.jump_windows)[window_index];
+    if (!std::isfinite(window.start_time_s) || !std::isfinite(window.end_time_s)) {
+      continue;
+    }
+    Span span;
+    span.window_index = window_index;
+    span.start_time_s = window.start_time_s - request_.config->vertical_jump_masked_imu_padding_s;
+    span.end_time_s = window.end_time_s + request_.config->vertical_jump_masked_imu_padding_s;
+    spans.push_back(std::move(span));
+  }
+  std::sort(spans.begin(), spans.end(), [](const Span &left, const Span &right) {
+    return left.start_time_s < right.start_time_s;
+  });
+
+  std::vector<Span> merged_spans;
+  for (const auto &span : spans) {
+    if (merged_spans.empty() ||
+        !SpansOverlapOrTouch(
+          merged_spans.back().start_time_s,
+          merged_spans.back().end_time_s,
+          span.start_time_s,
+          span.end_time_s)) {
+      merged_spans.push_back(span);
+      continue;
+    }
+    merged_spans.back().end_time_s = std::max(merged_spans.back().end_time_s, span.end_time_s);
+  }
+
+  for (auto &span : merged_spans) {
+    span.state_indices = StateIndicesInWindow(span.start_time_s, span.end_time_s);
+    if (!span.state_indices.empty()) {
+      const std::size_t first_state_index = span.state_indices.front();
+      const std::size_t last_state_index = span.state_indices.back();
+      if (first_state_index > 0U) {
+        span.pre_anchor_state_index = first_state_index - 1U;
+      }
+      if (last_state_index + 1U < request_.state_timestamps->size()) {
+        span.post_anchor_state_index = last_state_index + 1U;
+      }
+    }
+  }
+  return merged_spans;
 }
 
 std::vector<std::size_t> VerticalJumpShapeConstraintBuilder::StateIndicesInWindow(
@@ -157,6 +286,62 @@ std::vector<std::size_t> VerticalJumpShapeConstraintBuilder::StateIndicesInWindo
     }
   }
   return indices;
+}
+
+void PopulateVerticalJumpContinuityDiagnostics(
+  const gtsam::Values &optimized_values,
+  const std::vector<double> &state_timestamps,
+  std::vector<VerticalJumpContinuityDiagnosticRow> &diagnostics) {
+  for (auto &row : diagnostics) {
+    if (row.end_state_index < row.start_state_index) {
+      continue;
+    }
+    const double first_inside_vz = optimized_values.at<gtsam::Vector3>(symbol::V(row.start_state_index)).z();
+    const double last_inside_vz = optimized_values.at<gtsam::Vector3>(symbol::V(row.end_state_index)).z();
+    if (row.entry_factor_added) {
+      const double pre_vz = optimized_values.at<gtsam::Vector3>(symbol::V(row.pre_anchor_state_index)).z();
+      row.entry_delta_vz_mps = first_inside_vz - pre_vz;
+      row.entry_residual_mps = row.entry_delta_vz_mps;
+    }
+    if (row.exit_factor_added) {
+      const double post_vz = optimized_values.at<gtsam::Vector3>(symbol::V(row.post_anchor_state_index)).z();
+      row.exit_delta_vz_mps = post_vz - last_inside_vz;
+      row.exit_residual_mps = row.exit_delta_vz_mps;
+    }
+    std::vector<double> inside_vz;
+    inside_vz.reserve(row.end_state_index - row.start_state_index + 1U);
+    for (std::size_t state_index = row.start_state_index; state_index <= row.end_state_index; ++state_index) {
+      inside_vz.push_back(optimized_values.at<gtsam::Vector3>(symbol::V(state_index)).z());
+    }
+    if (!inside_vz.empty()) {
+      const auto [min_it, max_it] = std::minmax_element(inside_vz.begin(), inside_vz.end());
+      row.max_inside_vz_range_mps = *max_it - *min_it;
+    }
+    row.max_boundary_step_mps = std::max(
+      std::isfinite(row.entry_delta_vz_mps) ? std::abs(row.entry_delta_vz_mps) : 0.0,
+      std::isfinite(row.exit_delta_vz_mps) ? std::abs(row.exit_delta_vz_mps) : 0.0);
+
+    double max_position_velocity_residual_m = 0.0;
+    bool has_position_velocity_residual = false;
+    for (std::size_t state_index = row.start_state_index; state_index < row.end_state_index; ++state_index) {
+      const double dt_s = state_timestamps[state_index + 1U] - state_timestamps[state_index];
+      if (dt_s <= 0.0) {
+        continue;
+      }
+      const double z_i = optimized_values.at<gtsam::Pose3>(symbol::X(state_index)).translation().z();
+      const double z_j = optimized_values.at<gtsam::Pose3>(symbol::X(state_index + 1U)).translation().z();
+      const double vz_i = optimized_values.at<gtsam::Vector3>(symbol::V(state_index)).z();
+      const double vz_j = optimized_values.at<gtsam::Vector3>(symbol::V(state_index + 1U)).z();
+      const double residual_m = (z_j - z_i) - 0.5 * dt_s * (vz_i + vz_j);
+      max_position_velocity_residual_m =
+        std::max(max_position_velocity_residual_m, std::abs(residual_m));
+      has_position_velocity_residual = true;
+    }
+    row.max_position_velocity_residual_m =
+      has_position_velocity_residual
+        ? max_position_velocity_residual_m
+        : std::numeric_limits<double>::quiet_NaN();
+  }
 }
 
 void PopulateVerticalJumpVelocityRampDiagnostics(

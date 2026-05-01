@@ -16,6 +16,8 @@
 #include "offline_lc_minimal/core/VerticalJumpShapeConstraintBuilder.h"
 #include "offline_lc_minimal/factor/VerticalMaskedCombinedImuFactor.h"
 #include "offline_lc_minimal/factor/VerticalPositionRampFactor.h"
+#include "offline_lc_minimal/factor/VerticalPositionVelocityConsistencyFactor.h"
+#include "offline_lc_minimal/factor/VerticalVelocityDeltaFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityHeightSlopeFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityRampFactor.h"
 
@@ -283,11 +285,44 @@ void TestVerticalVelocityHeightSlopeFactor() {
     "vertical velocity slope residual is wrong");
 }
 
+void TestVerticalPositionVelocityConsistencyFactor() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
+  const offline_lc_minimal::factor::VerticalPositionVelocityConsistencyFactor factor(
+    1,
+    2,
+    3,
+    4,
+    2.0,
+    noise);
+  const gtsam::Pose3 pose_i(gtsam::Rot3(), gtsam::Point3(3.0, -5.0, 1.0));
+  const gtsam::Pose3 pose_j(gtsam::Rot3(), gtsam::Point3(-7.0, 9.0, 5.0));
+
+  ExpectNear(
+    factor.evaluateError(
+      pose_i,
+      gtsam::Vector3(100.0, -50.0, 1.5),
+      pose_j,
+      gtsam::Vector3(-60.0, 70.0, 2.5))(0),
+    0.0,
+    1e-12,
+    "trapezoid vertical motion should have zero residual");
+  ExpectNear(
+    factor.evaluateError(
+      pose_i,
+      gtsam::Vector3(100.0, -50.0, 1.5),
+      pose_j,
+      gtsam::Vector3(-60.0, 70.0, 3.5))(0),
+    -1.0,
+    1e-12,
+    "vertical position-velocity residual is wrong");
+}
+
 void TestVerticalJumpShapeConstraintBuilder() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
   config.enable_vertical_jump_velocity_ramp_smoothing = true;
   config.enable_vertical_jump_position_ramp_smoothing = true;
+  config.enable_vertical_jump_velocity_height_slope_constraint = true;
   config.vertical_jump_masked_imu_padding_s = 0.25;
   config.vertical_jump_velocity_ramp_sigma_mps = 0.08;
   config.vertical_jump_position_ramp_sigma_m = 0.10;
@@ -297,6 +332,7 @@ void TestVerticalJumpShapeConstraintBuilder() {
   gtsam::NonlinearFactorGraph graph;
   offline_lc_minimal::RunSummary summary;
   std::vector<offline_lc_minimal::VerticalJumpVelocityRampDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::VerticalJumpContinuityDiagnosticRow> continuity_diagnostics;
 
   offline_lc_minimal::VerticalJumpShapeConstraintBuildRequest request;
   request.config = &config;
@@ -305,6 +341,7 @@ void TestVerticalJumpShapeConstraintBuilder() {
   request.graph = &graph;
   request.run_summary = &summary;
   request.diagnostics = &diagnostics;
+  request.continuity_diagnostics = &continuity_diagnostics;
   offline_lc_minimal::VerticalJumpShapeConstraintBuilder(std::move(request)).Build();
 
   ExpectNear(
@@ -355,6 +392,7 @@ void TestVerticalJumpShapeConstraintBuilderPositionOnly() {
   gtsam::NonlinearFactorGraph graph;
   offline_lc_minimal::RunSummary summary;
   std::vector<offline_lc_minimal::VerticalJumpVelocityRampDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::VerticalJumpContinuityDiagnosticRow> continuity_diagnostics;
 
   offline_lc_minimal::VerticalJumpShapeConstraintBuildRequest request;
   request.config = &config;
@@ -363,6 +401,7 @@ void TestVerticalJumpShapeConstraintBuilderPositionOnly() {
   request.graph = &graph;
   request.run_summary = &summary;
   request.diagnostics = &diagnostics;
+  request.continuity_diagnostics = &continuity_diagnostics;
   offline_lc_minimal::VerticalJumpShapeConstraintBuilder(std::move(request)).Build();
 
   ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "one position ramp factor should be added");
@@ -383,6 +422,158 @@ void TestVerticalJumpShapeConstraintBuilderPositionOnly() {
     "position-only builder should not add velocity-height slope factors");
 }
 
+void TestVerticalJumpShapeConstraintBuilderContinuityAndConsistency() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_velocity_ramp_smoothing = true;
+  config.enable_vertical_jump_position_ramp_smoothing = true;
+  config.enable_vertical_jump_velocity_continuity = true;
+  config.enable_vertical_jump_position_velocity_consistency = true;
+  config.enable_vertical_jump_velocity_height_slope_constraint = false;
+  config.vertical_jump_masked_imu_padding_s = 0.25;
+  const std::vector<double> state_timestamps{0.0, 0.5, 1.0, 1.5, 2.0};
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(0.75, 1.25)};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpVelocityRampDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::VerticalJumpContinuityDiagnosticRow> continuity_diagnostics;
+
+  offline_lc_minimal::VerticalJumpShapeConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  request.continuity_diagnostics = &continuity_diagnostics;
+  offline_lc_minimal::VerticalJumpShapeConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(summary.vertical_jump_velocity_continuity_factor_count), 2.0, 0.0, "continuity count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_position_velocity_consistency_factor_count),
+    2.0,
+    0.0,
+    "position-velocity consistency count is wrong");
+  ExpectNear(static_cast<double>(summary.vertical_jump_velocity_ramp_factor_count), 1.0, 0.0, "velocity ramp count is wrong");
+  ExpectNear(static_cast<double>(summary.vertical_jump_position_ramp_factor_count), 1.0, 0.0, "position ramp count is wrong");
+  ExpectNear(static_cast<double>(graph.size()), 6.0, 0.0, "phase5 builder factor count is wrong");
+  ExpectNear(static_cast<double>(continuity_diagnostics.size()), 1.0, 0.0, "continuity diagnostics count is wrong");
+  ExpectNear(static_cast<double>(continuity_diagnostics.front().pre_anchor_state_index), 0.0, 0.0, "pre anchor is wrong");
+  ExpectNear(static_cast<double>(continuity_diagnostics.front().post_anchor_state_index), 4.0, 0.0, "post anchor is wrong");
+
+  gtsam::Values values;
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    values.insert(symbol::X(index), gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(0.0, 0.0, static_cast<double>(index))));
+    values.insert(symbol::V(index), gtsam::Vector3(0.0, 0.0, 2.0));
+  }
+  offline_lc_minimal::PopulateVerticalJumpContinuityDiagnostics(
+    values,
+    state_timestamps,
+    continuity_diagnostics);
+  ExpectNear(continuity_diagnostics.front().entry_delta_vz_mps, 0.0, 1e-12, "entry continuity residual is wrong");
+  ExpectNear(continuity_diagnostics.front().exit_delta_vz_mps, 0.0, 1e-12, "exit continuity residual is wrong");
+  ExpectNear(
+    continuity_diagnostics.front().max_position_velocity_residual_m,
+    0.0,
+    1e-12,
+    "position-velocity diagnostic residual is wrong");
+}
+
+void TestVerticalJumpShapeConstraintBuilderMergesOverlappingSpans() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_velocity_continuity = true;
+  config.vertical_jump_masked_imu_padding_s = 0.25;
+  const std::vector<double> state_timestamps{0.0, 0.5, 1.0, 1.5, 2.0, 2.5};
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{
+    MakeJumpWindow(0.75, 1.25),
+    MakeJumpWindow(1.30, 1.60),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpVelocityRampDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::VerticalJumpContinuityDiagnosticRow> continuity_diagnostics;
+
+  offline_lc_minimal::VerticalJumpShapeConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  request.continuity_diagnostics = &continuity_diagnostics;
+  offline_lc_minimal::VerticalJumpShapeConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(summary.vertical_jump_velocity_continuity_factor_count), 2.0, 0.0, "merged continuity count is wrong");
+  ExpectNear(static_cast<double>(continuity_diagnostics.size()), 1.0, 0.0, "overlapping windows should share one continuity span");
+}
+
+void TestVerticalJumpShapeConstraintBuilderMissingAnchorSkipsBoundary() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_velocity_continuity = true;
+  config.vertical_jump_masked_imu_padding_s = 0.25;
+  const std::vector<double> state_timestamps{0.0, 0.5, 1.0};
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(0.25, 0.50)};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpVelocityRampDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::VerticalJumpContinuityDiagnosticRow> continuity_diagnostics;
+
+  offline_lc_minimal::VerticalJumpShapeConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  request.continuity_diagnostics = &continuity_diagnostics;
+  offline_lc_minimal::VerticalJumpShapeConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(summary.vertical_jump_velocity_continuity_factor_count), 1.0, 0.0, "one boundary should be constrained");
+  ExpectNear(static_cast<double>(summary.vertical_jump_continuity_skipped_count), 1.0, 0.0, "one missing anchor should be skipped");
+  ExpectTrue(!continuity_diagnostics.front().entry_factor_added, "entry anchor should be missing");
+  ExpectTrue(continuity_diagnostics.front().exit_factor_added, "exit anchor should be constrained");
+}
+
+void TestVerticalJumpShapeConstraintBuilderOneStateSpanStillAddsContinuity() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_velocity_continuity = true;
+  config.vertical_jump_masked_imu_padding_s = 0.10;
+  const std::vector<double> state_timestamps{0.0, 1.0, 2.0};
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(1.0, 1.0)};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpVelocityRampDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::VerticalJumpContinuityDiagnosticRow> continuity_diagnostics;
+
+  offline_lc_minimal::VerticalJumpShapeConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  request.continuity_diagnostics = &continuity_diagnostics;
+  offline_lc_minimal::VerticalJumpShapeConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_velocity_continuity_factor_count),
+    2.0,
+    0.0,
+    "single-state span should constrain both continuity boundaries");
+  ExpectNear(static_cast<double>(graph.size()), 2.0, 0.0, "single-state span continuity factor count is wrong");
+  ExpectNear(static_cast<double>(continuity_diagnostics.size()), 1.0, 0.0, "single-state continuity diagnostic missing");
+  ExpectTrue(continuity_diagnostics.front().entry_factor_added, "single-state entry continuity should be constrained");
+  ExpectTrue(continuity_diagnostics.front().exit_factor_added, "single-state exit continuity should be constrained");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_velocity_ramp_skipped_count),
+    0.0,
+    0.0,
+    "continuity-only single-state span should not count as a ramp skip");
+}
+
 }  // namespace
 
 int main() {
@@ -395,8 +586,21 @@ int main() {
     RunTest("TestVerticalVelocityRampFactor", TestVerticalVelocityRampFactor);
     RunTest("TestVerticalPositionRampFactor", TestVerticalPositionRampFactor);
     RunTest("TestVerticalVelocityHeightSlopeFactor", TestVerticalVelocityHeightSlopeFactor);
+    RunTest("TestVerticalPositionVelocityConsistencyFactor", TestVerticalPositionVelocityConsistencyFactor);
     RunTest("TestVerticalJumpShapeConstraintBuilder", TestVerticalJumpShapeConstraintBuilder);
     RunTest("TestVerticalJumpShapeConstraintBuilderPositionOnly", TestVerticalJumpShapeConstraintBuilderPositionOnly);
+    RunTest(
+      "TestVerticalJumpShapeConstraintBuilderContinuityAndConsistency",
+      TestVerticalJumpShapeConstraintBuilderContinuityAndConsistency);
+    RunTest(
+      "TestVerticalJumpShapeConstraintBuilderMergesOverlappingSpans",
+      TestVerticalJumpShapeConstraintBuilderMergesOverlappingSpans);
+    RunTest(
+      "TestVerticalJumpShapeConstraintBuilderMissingAnchorSkipsBoundary",
+      TestVerticalJumpShapeConstraintBuilderMissingAnchorSkipsBoundary);
+    RunTest(
+      "TestVerticalJumpShapeConstraintBuilderOneStateSpanStillAddsContinuity",
+      TestVerticalJumpShapeConstraintBuilderOneStateSpanStillAddsContinuity);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

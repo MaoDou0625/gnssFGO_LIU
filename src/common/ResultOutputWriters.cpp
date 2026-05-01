@@ -469,6 +469,40 @@ void WriteVerticalJumpVelocityRampDiagnosticsCsv(
   }
 }
 
+void WriteVerticalJumpContinuityDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalJumpContinuityDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,start_state,end_state,pre_anchor,post_anchor,start_time_s,end_time_s,"
+       "entry_factor_added,exit_factor_added,skip_reason,entry_delta_vz_mps,exit_delta_vz_mps,"
+       "entry_residual_mps,exit_residual_mps,max_inside_vz_range_mps,max_boundary_step_mps,"
+       "max_position_velocity_residual_m\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.start_state_index << ','
+           << row.end_state_index << ','
+           << row.pre_anchor_state_index << ','
+           << row.post_anchor_state_index << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << (row.entry_factor_added ? 1 : 0) << ','
+           << (row.exit_factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << row.entry_delta_vz_mps << ','
+           << row.exit_delta_vz_mps << ','
+           << row.entry_residual_mps << ','
+           << row.exit_residual_mps << ','
+           << row.max_inside_vz_range_mps << ','
+           << row.max_boundary_step_mps << ','
+           << row.max_position_velocity_residual_m << '\n';
+  }
+}
+
 void WriteVerticalStateCorrectionCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalStateCorrectionRow> &rows) {

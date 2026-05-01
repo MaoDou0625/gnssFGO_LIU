@@ -814,6 +814,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.vertical_jump_velocity_ramp_factor_count = 0;
   run_result.run_summary.vertical_jump_position_ramp_factor_count = 0;
   run_result.run_summary.vertical_jump_velocity_height_slope_factor_count = 0;
+  run_result.run_summary.vertical_jump_velocity_continuity_factor_count = 0;
+  run_result.run_summary.vertical_jump_position_velocity_consistency_factor_count = 0;
+  run_result.run_summary.vertical_jump_continuity_skipped_count = 0;
   run_result.run_summary.vertical_jump_velocity_ramp_skipped_count = 0;
   run_result.trajectory = base_dynamic_trajectory;
   run_result.gnss_factor_records.clear();
@@ -822,6 +825,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.vertical_velocity_delta_diagnostics.clear();
   run_result.vertical_jump_masked_imu_diagnostics.clear();
   run_result.vertical_jump_velocity_ramp_diagnostics.clear();
+  run_result.vertical_jump_continuity_diagnostics.clear();
   run_result.vertical_state_corrections.clear();
 
   gtsam::NonlinearFactorGraph graph_with_gnss = base_graph;
@@ -891,7 +895,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   VerticalMotionConstraintBuilder(std::move(vertical_motion_request)).Build();
 
   if (config_.enable_vertical_jump_velocity_ramp_smoothing ||
-      config_.enable_vertical_jump_position_ramp_smoothing) {
+      config_.enable_vertical_jump_position_ramp_smoothing ||
+      config_.enable_vertical_jump_velocity_continuity ||
+      config_.enable_vertical_jump_position_velocity_consistency ||
+      config_.enable_vertical_jump_velocity_height_slope_constraint) {
     VerticalJumpShapeConstraintBuildRequest vertical_ramp_request;
     vertical_ramp_request.config = &config_;
     vertical_ramp_request.state_timestamps = &state_timestamps;
@@ -899,6 +906,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     vertical_ramp_request.graph = &graph_with_gnss;
     vertical_ramp_request.run_summary = &run_result.run_summary;
     vertical_ramp_request.diagnostics = &run_result.vertical_jump_velocity_ramp_diagnostics;
+    vertical_ramp_request.continuity_diagnostics = &run_result.vertical_jump_continuity_diagnostics;
     VerticalJumpShapeConstraintBuilder(std::move(vertical_ramp_request)).Build();
   }
 
@@ -927,6 +935,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateVerticalJumpVelocityRampDiagnostics(
     optimized_values,
     run_result.vertical_jump_velocity_ramp_diagnostics);
+  PopulateVerticalJumpContinuityDiagnostics(
+    optimized_values,
+    state_timestamps,
+    run_result.vertical_jump_continuity_diagnostics);
 
   if (collect_reference_states) {
     const std::vector<ReferenceNodeState> optimized_reference_states =

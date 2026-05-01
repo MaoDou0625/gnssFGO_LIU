@@ -58,6 +58,10 @@ void WriteVerticalJumpVelocityRampDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpVelocityRampDiagnosticRow> &rows);
 
+void WriteVerticalJumpContinuityDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalJumpContinuityDiagnosticRow> &rows);
+
 void WriteVerticalStateCorrectionCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalStateCorrectionRow> &rows);

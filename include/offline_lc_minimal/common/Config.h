@@ -125,6 +125,11 @@ struct OfflineRunnerConfig {
   double vertical_jump_velocity_ramp_sigma_mps = 0.08;
   bool enable_vertical_jump_position_ramp_smoothing = false;
   double vertical_jump_position_ramp_sigma_m = 0.10;
+  bool enable_vertical_jump_velocity_continuity = false;
+  double vertical_jump_velocity_continuity_sigma_mps = 0.02;
+  bool enable_vertical_jump_position_velocity_consistency = false;
+  double vertical_jump_position_velocity_consistency_sigma_m = 0.08;
+  bool enable_vertical_jump_velocity_height_slope_constraint = false;
   double vertical_jump_velocity_height_slope_sigma_mps = 0.50;
   double gnss_sigma_scale_horizontal = 1.0;
   double gnss_sigma_scale_up = 1.0;

@@ -89,6 +89,11 @@ void ResultWriter::WriteOutputs(
       output_path / "vertical_jump_velocity_ramp_diagnostics.csv",
       result.vertical_jump_velocity_ramp_diagnostics);
   }
+  if (!result.vertical_jump_continuity_diagnostics.empty()) {
+    WriteVerticalJumpContinuityDiagnosticsCsv(
+      output_path / "vertical_jump_continuity_diagnostics.csv",
+      result.vertical_jump_continuity_diagnostics);
+  }
   if (!result.vertical_state_corrections.empty()) {
     WriteVerticalStateCorrectionCsv(
       output_path / "vertical_state_corrections.csv",

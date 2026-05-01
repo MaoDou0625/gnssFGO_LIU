@@ -216,6 +216,26 @@ struct VerticalJumpVelocityRampDiagnosticRow {
   double position_ramp_residual_p95_m = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct VerticalJumpContinuityDiagnosticRow {
+  std::size_t window_index = 0;
+  std::size_t start_state_index = 0;
+  std::size_t end_state_index = 0;
+  std::size_t pre_anchor_state_index = 0;
+  std::size_t post_anchor_state_index = 0;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  bool entry_factor_added = false;
+  bool exit_factor_added = false;
+  std::string skip_reason = "UNSET";
+  double entry_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double exit_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double entry_residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double exit_residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double max_inside_vz_range_mps = std::numeric_limits<double>::quiet_NaN();
+  double max_boundary_step_mps = std::numeric_limits<double>::quiet_NaN();
+  double max_position_velocity_residual_m = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct VerticalStateCorrectionRow {
   std::size_t sample_index = 0;
   double raw_time_s = std::numeric_limits<double>::quiet_NaN();
