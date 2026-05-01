@@ -150,6 +150,9 @@ void TestPhase5SmokeConfigLoads() {
     std::abs(config.vertical_jump_position_velocity_consistency_sigma_m - 0.08) < 1e-12,
     "phase5 position-velocity consistency sigma should load");
   ExpectTrue(
+    std::abs(config.vertical_jump_boundary_position_velocity_consistency_sigma_m - 0.01) < 1e-12,
+    "phase5 boundary position-velocity consistency sigma should load");
+  ExpectTrue(
     !config.enable_vertical_jump_velocity_height_slope_constraint,
     "phase5 should disable velocity height slope constraint");
 }
@@ -361,6 +364,18 @@ void TestVerticalJumpConfigValidation() {
     threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive position-velocity consistency sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_position_velocity_consistency = true;
+  config.vertical_jump_boundary_position_velocity_consistency_sigma_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &) {
+    threw = true;
+  }
+  ExpectTrue(threw, "non-positive boundary position-velocity consistency sigma should be rejected");
 }
 
 }  // namespace

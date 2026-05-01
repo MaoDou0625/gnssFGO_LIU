@@ -263,6 +263,7 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_jump_position_ramp_sigma_m <= 0.0 ||
       config.vertical_jump_velocity_continuity_sigma_mps <= 0.0 ||
       config.vertical_jump_position_velocity_consistency_sigma_m <= 0.0 ||
+      config.vertical_jump_boundary_position_velocity_consistency_sigma_m <= 0.0 ||
       config.vertical_jump_velocity_height_slope_sigma_mps <= 0.0) {
     throw std::runtime_error("vertical jump settings must be positive");
   }
@@ -526,6 +527,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_vertical_jump_position_velocity_consistency = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_jump_position_velocity_consistency_sigma_m") {
     config.vertical_jump_position_velocity_consistency_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_boundary_position_velocity_consistency_sigma_m") {
+    config.vertical_jump_boundary_position_velocity_consistency_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_jump_velocity_height_slope_constraint") {
     config.enable_vertical_jump_velocity_height_slope_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_jump_velocity_height_slope_sigma_mps") {
@@ -750,6 +753,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.enable_vertical_jump_position_velocity_consistency ? "true" : "false") << '\n'
     << "vertical_jump_position_velocity_consistency_sigma_m="
     << config.vertical_jump_position_velocity_consistency_sigma_m << '\n'
+    << "vertical_jump_boundary_position_velocity_consistency_sigma_m="
+    << config.vertical_jump_boundary_position_velocity_consistency_sigma_m << '\n'
     << "enable_vertical_jump_velocity_height_slope_constraint="
     << (config.enable_vertical_jump_velocity_height_slope_constraint ? "true" : "false") << '\n'
     << "vertical_jump_velocity_height_slope_sigma_mps="

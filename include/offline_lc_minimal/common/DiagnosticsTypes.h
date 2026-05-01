@@ -231,8 +231,17 @@ struct VerticalJumpContinuityDiagnosticRow {
   double exit_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
   double entry_residual_mps = std::numeric_limits<double>::quiet_NaN();
   double exit_residual_mps = std::numeric_limits<double>::quiet_NaN();
+  bool entry_position_velocity_factor_added = false;
+  bool exit_position_velocity_factor_added = false;
+  double entry_delta_z_m = std::numeric_limits<double>::quiet_NaN();
+  double entry_velocity_integral_m = std::numeric_limits<double>::quiet_NaN();
+  double entry_zv_mismatch_m = std::numeric_limits<double>::quiet_NaN();
+  double exit_delta_z_m = std::numeric_limits<double>::quiet_NaN();
+  double exit_velocity_integral_m = std::numeric_limits<double>::quiet_NaN();
+  double exit_zv_mismatch_m = std::numeric_limits<double>::quiet_NaN();
   double max_inside_vz_range_mps = std::numeric_limits<double>::quiet_NaN();
   double max_boundary_step_mps = std::numeric_limits<double>::quiet_NaN();
+  double max_boundary_zv_mismatch_m = std::numeric_limits<double>::quiet_NaN();
   double max_position_velocity_residual_m = std::numeric_limits<double>::quiet_NaN();
 };
 

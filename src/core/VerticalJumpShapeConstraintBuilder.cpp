@@ -47,6 +47,35 @@ bool SpansOverlapOrTouch(
   return left_start_s <= right_end_s && right_start_s <= left_end_s;
 }
 
+struct PositionVelocityConsistencyMetrics {
+  double delta_z_m = std::numeric_limits<double>::quiet_NaN();
+  double velocity_integral_m = std::numeric_limits<double>::quiet_NaN();
+  double mismatch_m = std::numeric_limits<double>::quiet_NaN();
+};
+
+std::optional<PositionVelocityConsistencyMetrics> ComputePositionVelocityConsistencyMetrics(
+  const gtsam::Values &values,
+  const std::vector<double> &state_timestamps,
+  const std::size_t state_i,
+  const std::size_t state_j) {
+  if (state_i >= state_timestamps.size() || state_j >= state_timestamps.size()) {
+    return std::nullopt;
+  }
+  const double dt_s = state_timestamps[state_j] - state_timestamps[state_i];
+  if (dt_s <= 0.0) {
+    return std::nullopt;
+  }
+  const double z_i = values.at<gtsam::Pose3>(symbol::X(state_i)).translation().z();
+  const double z_j = values.at<gtsam::Pose3>(symbol::X(state_j)).translation().z();
+  const double vz_i = values.at<gtsam::Vector3>(symbol::V(state_i)).z();
+  const double vz_j = values.at<gtsam::Vector3>(symbol::V(state_j)).z();
+  PositionVelocityConsistencyMetrics metrics;
+  metrics.delta_z_m = z_j - z_i;
+  metrics.velocity_integral_m = 0.5 * dt_s * (vz_i + vz_j);
+  metrics.mismatch_m = metrics.delta_z_m - metrics.velocity_integral_m;
+  return metrics;
+}
+
 }  // namespace
 
 VerticalJumpShapeConstraintBuilder::VerticalJumpShapeConstraintBuilder(
@@ -94,7 +123,27 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
     const auto velocity_continuity_noise = gtsam::noiseModel::Isotropic::Sigma(
       1,
       request_.config->vertical_jump_velocity_continuity_sigma_mps);
-    if (add_velocity_continuity) {
+    const auto boundary_position_velocity_consistency_noise = gtsam::noiseModel::Isotropic::Sigma(
+      1,
+      request_.config->vertical_jump_boundary_position_velocity_consistency_sigma_m);
+    const auto add_boundary_position_velocity_factor =
+      [this, &boundary_position_velocity_consistency_noise](const std::size_t state_i, const std::size_t state_j) {
+        const double dt_s = (*request_.state_timestamps)[state_j] - (*request_.state_timestamps)[state_i];
+        if (dt_s <= 0.0) {
+          return false;
+        }
+        request_.graph->add(factor::VerticalPositionVelocityConsistencyFactor(
+          symbol::X(state_i),
+          symbol::V(state_i),
+          symbol::X(state_j),
+          symbol::V(state_j),
+          dt_s,
+          boundary_position_velocity_consistency_noise));
+        ++request_.run_summary->vertical_jump_position_velocity_consistency_factor_count;
+        return true;
+      };
+
+    if (add_velocity_continuity || add_position_velocity_consistency) {
       VerticalJumpContinuityDiagnosticRow continuity_row;
       continuity_row.window_index = span.window_index;
       continuity_row.start_state_index = span.state_indices.front();
@@ -104,36 +153,59 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
       continuity_row.start_time_s = span.start_time_s;
       continuity_row.end_time_s = span.end_time_s;
       if (span.pre_anchor_state_index.has_value()) {
-        request_.graph->add(factor::VerticalVelocityDeltaFactor(
-          symbol::V(*span.pre_anchor_state_index),
-          symbol::V(span.state_indices.front()),
-          0.0,
-          velocity_continuity_noise));
-        ++request_.run_summary->vertical_jump_velocity_continuity_factor_count;
-        continuity_row.entry_factor_added = true;
+        const std::size_t pre_anchor = *span.pre_anchor_state_index;
+        if (add_velocity_continuity) {
+          request_.graph->add(factor::VerticalVelocityDeltaFactor(
+            symbol::V(pre_anchor),
+            symbol::V(span.state_indices.front()),
+            0.0,
+            velocity_continuity_noise));
+          ++request_.run_summary->vertical_jump_velocity_continuity_factor_count;
+          continuity_row.entry_factor_added = true;
+        }
+        if (add_position_velocity_consistency) {
+          continuity_row.entry_position_velocity_factor_added =
+            add_boundary_position_velocity_factor(pre_anchor, span.state_indices.front());
+          if (!continuity_row.entry_position_velocity_factor_added) {
+            ++request_.run_summary->vertical_jump_continuity_skipped_count;
+          }
+        }
       } else {
         ++request_.run_summary->vertical_jump_continuity_skipped_count;
       }
       if (span.post_anchor_state_index.has_value()) {
-        request_.graph->add(factor::VerticalVelocityDeltaFactor(
-          symbol::V(span.state_indices.back()),
-          symbol::V(*span.post_anchor_state_index),
-          0.0,
-          velocity_continuity_noise));
-        ++request_.run_summary->vertical_jump_velocity_continuity_factor_count;
-        continuity_row.exit_factor_added = true;
+        const std::size_t post_anchor = *span.post_anchor_state_index;
+        if (add_velocity_continuity) {
+          request_.graph->add(factor::VerticalVelocityDeltaFactor(
+            symbol::V(span.state_indices.back()),
+            symbol::V(post_anchor),
+            0.0,
+            velocity_continuity_noise));
+          ++request_.run_summary->vertical_jump_velocity_continuity_factor_count;
+          continuity_row.exit_factor_added = true;
+        }
+        if (add_position_velocity_consistency) {
+          continuity_row.exit_position_velocity_factor_added =
+            add_boundary_position_velocity_factor(span.state_indices.back(), post_anchor);
+          if (!continuity_row.exit_position_velocity_factor_added) {
+            ++request_.run_summary->vertical_jump_continuity_skipped_count;
+          }
+        }
       } else {
         ++request_.run_summary->vertical_jump_continuity_skipped_count;
       }
-      continuity_row.skip_reason =
-        continuity_row.entry_factor_added || continuity_row.exit_factor_added ? "ADDED" : "MISSING_ANCHORS";
+      const bool any_boundary_factor_added =
+        continuity_row.entry_factor_added ||
+        continuity_row.exit_factor_added ||
+        continuity_row.entry_position_velocity_factor_added ||
+        continuity_row.exit_position_velocity_factor_added;
+      continuity_row.skip_reason = any_boundary_factor_added ? "ADDED" : "MISSING_ANCHORS";
       request_.continuity_diagnostics->push_back(continuity_row);
     }
 
     if (span.state_indices.size() < 2U) {
       row.skip_reason = "INSUFFICIENT_STATES_FOR_SHAPE";
-      if (add_velocity_ramp || add_position_ramp || add_position_velocity_consistency ||
-          add_velocity_height_slope) {
+      if (add_velocity_ramp || add_position_ramp || add_velocity_height_slope) {
         ++request_.run_summary->vertical_jump_velocity_ramp_skipped_count;
       }
       request_.diagnostics->push_back(row);
@@ -308,6 +380,30 @@ void PopulateVerticalJumpContinuityDiagnostics(
       row.exit_delta_vz_mps = post_vz - last_inside_vz;
       row.exit_residual_mps = row.exit_delta_vz_mps;
     }
+    if (row.entry_position_velocity_factor_added) {
+      const auto entry_metrics = ComputePositionVelocityConsistencyMetrics(
+        optimized_values,
+        state_timestamps,
+        row.pre_anchor_state_index,
+        row.start_state_index);
+      if (entry_metrics.has_value()) {
+        row.entry_delta_z_m = entry_metrics->delta_z_m;
+        row.entry_velocity_integral_m = entry_metrics->velocity_integral_m;
+        row.entry_zv_mismatch_m = entry_metrics->mismatch_m;
+      }
+    }
+    if (row.exit_position_velocity_factor_added) {
+      const auto exit_metrics = ComputePositionVelocityConsistencyMetrics(
+        optimized_values,
+        state_timestamps,
+        row.end_state_index,
+        row.post_anchor_state_index);
+      if (exit_metrics.has_value()) {
+        row.exit_delta_z_m = exit_metrics->delta_z_m;
+        row.exit_velocity_integral_m = exit_metrics->velocity_integral_m;
+        row.exit_zv_mismatch_m = exit_metrics->mismatch_m;
+      }
+    }
     std::vector<double> inside_vz;
     inside_vz.reserve(row.end_state_index - row.start_state_index + 1U);
     for (std::size_t state_index = row.start_state_index; state_index <= row.end_state_index; ++state_index) {
@@ -317,24 +413,32 @@ void PopulateVerticalJumpContinuityDiagnostics(
       const auto [min_it, max_it] = std::minmax_element(inside_vz.begin(), inside_vz.end());
       row.max_inside_vz_range_mps = *max_it - *min_it;
     }
-    row.max_boundary_step_mps = std::max(
+    const double max_boundary_step_mps = std::max(
       std::isfinite(row.entry_delta_vz_mps) ? std::abs(row.entry_delta_vz_mps) : 0.0,
       std::isfinite(row.exit_delta_vz_mps) ? std::abs(row.exit_delta_vz_mps) : 0.0);
+    if (std::isfinite(row.entry_delta_vz_mps) || std::isfinite(row.exit_delta_vz_mps)) {
+      row.max_boundary_step_mps = max_boundary_step_mps;
+    }
+    const double max_boundary_zv_mismatch_m = std::max(
+      std::isfinite(row.entry_zv_mismatch_m) ? std::abs(row.entry_zv_mismatch_m) : 0.0,
+      std::isfinite(row.exit_zv_mismatch_m) ? std::abs(row.exit_zv_mismatch_m) : 0.0);
+    if (std::isfinite(row.entry_zv_mismatch_m) || std::isfinite(row.exit_zv_mismatch_m)) {
+      row.max_boundary_zv_mismatch_m = max_boundary_zv_mismatch_m;
+    }
 
     double max_position_velocity_residual_m = 0.0;
     bool has_position_velocity_residual = false;
     for (std::size_t state_index = row.start_state_index; state_index < row.end_state_index; ++state_index) {
-      const double dt_s = state_timestamps[state_index + 1U] - state_timestamps[state_index];
-      if (dt_s <= 0.0) {
+      const auto metrics = ComputePositionVelocityConsistencyMetrics(
+        optimized_values,
+        state_timestamps,
+        state_index,
+        state_index + 1U);
+      if (!metrics.has_value()) {
         continue;
       }
-      const double z_i = optimized_values.at<gtsam::Pose3>(symbol::X(state_index)).translation().z();
-      const double z_j = optimized_values.at<gtsam::Pose3>(symbol::X(state_index + 1U)).translation().z();
-      const double vz_i = optimized_values.at<gtsam::Vector3>(symbol::V(state_index)).z();
-      const double vz_j = optimized_values.at<gtsam::Vector3>(symbol::V(state_index + 1U)).z();
-      const double residual_m = (z_j - z_i) - 0.5 * dt_s * (vz_i + vz_j);
       max_position_velocity_residual_m =
-        std::max(max_position_velocity_residual_m, std::abs(residual_m));
+        std::max(max_position_velocity_residual_m, std::abs(metrics->mismatch_m));
       has_position_velocity_residual = true;
     }
     row.max_position_velocity_residual_m =

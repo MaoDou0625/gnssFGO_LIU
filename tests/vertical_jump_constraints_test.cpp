@@ -451,15 +451,21 @@ void TestVerticalJumpShapeConstraintBuilderContinuityAndConsistency() {
   ExpectNear(static_cast<double>(summary.vertical_jump_velocity_continuity_factor_count), 2.0, 0.0, "continuity count is wrong");
   ExpectNear(
     static_cast<double>(summary.vertical_jump_position_velocity_consistency_factor_count),
-    2.0,
+    4.0,
     0.0,
     "position-velocity consistency count is wrong");
   ExpectNear(static_cast<double>(summary.vertical_jump_velocity_ramp_factor_count), 1.0, 0.0, "velocity ramp count is wrong");
   ExpectNear(static_cast<double>(summary.vertical_jump_position_ramp_factor_count), 1.0, 0.0, "position ramp count is wrong");
-  ExpectNear(static_cast<double>(graph.size()), 6.0, 0.0, "phase5 builder factor count is wrong");
+  ExpectNear(static_cast<double>(graph.size()), 8.0, 0.0, "phase5 builder factor count is wrong");
   ExpectNear(static_cast<double>(continuity_diagnostics.size()), 1.0, 0.0, "continuity diagnostics count is wrong");
   ExpectNear(static_cast<double>(continuity_diagnostics.front().pre_anchor_state_index), 0.0, 0.0, "pre anchor is wrong");
   ExpectNear(static_cast<double>(continuity_diagnostics.front().post_anchor_state_index), 4.0, 0.0, "post anchor is wrong");
+  ExpectTrue(
+    continuity_diagnostics.front().entry_position_velocity_factor_added,
+    "entry boundary position-velocity factor should be added");
+  ExpectTrue(
+    continuity_diagnostics.front().exit_position_velocity_factor_added,
+    "exit boundary position-velocity factor should be added");
 
   gtsam::Values values;
   for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
@@ -477,12 +483,34 @@ void TestVerticalJumpShapeConstraintBuilderContinuityAndConsistency() {
     0.0,
     1e-12,
     "position-velocity diagnostic residual is wrong");
+  ExpectNear(
+    continuity_diagnostics.front().max_boundary_zv_mismatch_m,
+    0.0,
+    1e-12,
+    "boundary position-velocity diagnostic residual is wrong");
+
+  values.update(symbol::X(0), gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(0.0, 0.0, 0.25)));
+  offline_lc_minimal::PopulateVerticalJumpContinuityDiagnostics(
+    values,
+    state_timestamps,
+    continuity_diagnostics);
+  ExpectNear(
+    continuity_diagnostics.front().entry_zv_mismatch_m,
+    -0.25,
+    1e-12,
+    "non-zero entry boundary position-velocity diagnostic residual is wrong");
+  ExpectNear(
+    continuity_diagnostics.front().max_boundary_zv_mismatch_m,
+    0.25,
+    1e-12,
+    "non-zero boundary position-velocity max diagnostic residual is wrong");
 }
 
 void TestVerticalJumpShapeConstraintBuilderMergesOverlappingSpans() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
   config.enable_vertical_jump_velocity_continuity = true;
+  config.enable_vertical_jump_position_velocity_consistency = true;
   config.vertical_jump_masked_imu_padding_s = 0.25;
   const std::vector<double> state_timestamps{0.0, 0.5, 1.0, 1.5, 2.0, 2.5};
   const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{
@@ -505,6 +533,12 @@ void TestVerticalJumpShapeConstraintBuilderMergesOverlappingSpans() {
   offline_lc_minimal::VerticalJumpShapeConstraintBuilder(std::move(request)).Build();
 
   ExpectNear(static_cast<double>(summary.vertical_jump_velocity_continuity_factor_count), 2.0, 0.0, "merged continuity count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_position_velocity_consistency_factor_count),
+    4.0,
+    0.0,
+    "merged position-velocity consistency count is wrong");
+  ExpectNear(static_cast<double>(graph.size()), 6.0, 0.0, "merged span should not duplicate boundary factors");
   ExpectNear(static_cast<double>(continuity_diagnostics.size()), 1.0, 0.0, "overlapping windows should share one continuity span");
 }
 
@@ -512,6 +546,7 @@ void TestVerticalJumpShapeConstraintBuilderMissingAnchorSkipsBoundary() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
   config.enable_vertical_jump_velocity_continuity = true;
+  config.enable_vertical_jump_position_velocity_consistency = true;
   config.vertical_jump_masked_imu_padding_s = 0.25;
   const std::vector<double> state_timestamps{0.0, 0.5, 1.0};
   const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(0.25, 0.50)};
@@ -531,15 +566,28 @@ void TestVerticalJumpShapeConstraintBuilderMissingAnchorSkipsBoundary() {
   offline_lc_minimal::VerticalJumpShapeConstraintBuilder(std::move(request)).Build();
 
   ExpectNear(static_cast<double>(summary.vertical_jump_velocity_continuity_factor_count), 1.0, 0.0, "one boundary should be constrained");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_position_velocity_consistency_factor_count),
+    2.0,
+    0.0,
+    "one boundary and one internal position-velocity factor should be added");
+  ExpectNear(static_cast<double>(graph.size()), 3.0, 0.0, "missing-anchor graph factor count is wrong");
   ExpectNear(static_cast<double>(summary.vertical_jump_continuity_skipped_count), 1.0, 0.0, "one missing anchor should be skipped");
   ExpectTrue(!continuity_diagnostics.front().entry_factor_added, "entry anchor should be missing");
   ExpectTrue(continuity_diagnostics.front().exit_factor_added, "exit anchor should be constrained");
+  ExpectTrue(
+    !continuity_diagnostics.front().entry_position_velocity_factor_added,
+    "entry position-velocity anchor should be missing");
+  ExpectTrue(
+    continuity_diagnostics.front().exit_position_velocity_factor_added,
+    "exit position-velocity boundary should be constrained");
 }
 
 void TestVerticalJumpShapeConstraintBuilderOneStateSpanStillAddsContinuity() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
   config.enable_vertical_jump_velocity_continuity = true;
+  config.enable_vertical_jump_position_velocity_consistency = true;
   config.vertical_jump_masked_imu_padding_s = 0.10;
   const std::vector<double> state_timestamps{0.0, 1.0, 2.0};
   const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(1.0, 1.0)};
@@ -563,15 +611,48 @@ void TestVerticalJumpShapeConstraintBuilderOneStateSpanStillAddsContinuity() {
     2.0,
     0.0,
     "single-state span should constrain both continuity boundaries");
-  ExpectNear(static_cast<double>(graph.size()), 2.0, 0.0, "single-state span continuity factor count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_position_velocity_consistency_factor_count),
+    2.0,
+    0.0,
+    "single-state span should constrain both position-velocity boundaries");
+  ExpectNear(static_cast<double>(graph.size()), 4.0, 0.0, "single-state span continuity factor count is wrong");
   ExpectNear(static_cast<double>(continuity_diagnostics.size()), 1.0, 0.0, "single-state continuity diagnostic missing");
   ExpectTrue(continuity_diagnostics.front().entry_factor_added, "single-state entry continuity should be constrained");
   ExpectTrue(continuity_diagnostics.front().exit_factor_added, "single-state exit continuity should be constrained");
+  ExpectTrue(
+    continuity_diagnostics.front().entry_position_velocity_factor_added,
+    "single-state entry position-velocity should be constrained");
+  ExpectTrue(
+    continuity_diagnostics.front().exit_position_velocity_factor_added,
+    "single-state exit position-velocity should be constrained");
   ExpectNear(
     static_cast<double>(summary.vertical_jump_velocity_ramp_skipped_count),
     0.0,
     0.0,
     "continuity-only single-state span should not count as a ramp skip");
+
+  gtsam::Values values;
+  values.insert(symbol::X(0), gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(0.0, 0.0, 0.0)));
+  values.insert(symbol::X(1), gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(10.0, -5.0, 1.0)));
+  values.insert(symbol::X(2), gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(-8.0, 3.0, 2.0)));
+  values.insert(symbol::V(0), gtsam::Vector3(30.0, 40.0, 1.0));
+  values.insert(symbol::V(1), gtsam::Vector3(-20.0, 50.0, 1.0));
+  values.insert(symbol::V(2), gtsam::Vector3(10.0, -30.0, 1.0));
+  offline_lc_minimal::PopulateVerticalJumpContinuityDiagnostics(
+    values,
+    state_timestamps,
+    continuity_diagnostics);
+  ExpectNear(
+    continuity_diagnostics.front().entry_zv_mismatch_m,
+    0.0,
+    1e-12,
+    "single-state entry z-v mismatch should be zero");
+  ExpectNear(
+    continuity_diagnostics.front().exit_zv_mismatch_m,
+    0.0,
+    1e-12,
+    "single-state exit z-v mismatch should be zero");
 }
 
 }  // namespace
