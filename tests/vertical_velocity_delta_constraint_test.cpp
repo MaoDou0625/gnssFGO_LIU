@@ -76,7 +76,7 @@ std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> MakeJumpWindows() {
   return {window};
 }
 
-void TestBuilderAddsOnlyDynamicNonJumpIntervals() {
+void TestBuilderAddsDynamicBoundaryAndDynamicNonJumpIntervals() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
   config.enable_vertical_velocity_delta_constraint = true;
@@ -99,13 +99,84 @@ void TestBuilderAddsOnlyDynamicNonJumpIntervals() {
   request.diagnostics = &diagnostics;
   offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
 
-  ExpectNear(static_cast<double>(graph.size()), 2.0, 0.0, "only two intervals should receive factors");
-  ExpectNear(static_cast<double>(summary.vertical_velocity_delta_factor_count), 2.0, 0.0, "factor count is wrong");
-  ExpectNear(static_cast<double>(summary.vertical_velocity_delta_skipped_static_count), 1.0, 0.0, "static skip count is wrong");
+  ExpectNear(static_cast<double>(graph.size()), 3.0, 0.0, "three intervals should receive factors");
+  ExpectNear(static_cast<double>(summary.vertical_velocity_delta_factor_count), 3.0, 0.0, "factor count is wrong");
+  ExpectNear(static_cast<double>(summary.vertical_velocity_delta_skipped_static_count), 0.0, 0.0, "static skip count is wrong");
   ExpectNear(static_cast<double>(summary.vertical_velocity_delta_skipped_jump_count), 2.0, 0.0, "jump skip count is wrong");
+  ExpectTrue(diagnostics[0].factor_added, "static-to-dynamic boundary should receive a factor");
   ExpectNear(diagnostics[1].sigma_mps, 0.25, 1e-12, "sigma should use acc_sigma * dt");
   ExpectTrue(diagnostics[2].in_jump_padding, "padding-overlapped interval should be marked");
   ExpectTrue(diagnostics[3].in_jump_padding, "jump interval should be marked");
+}
+
+void TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.5;
+  config.vertical_velocity_delta_min_sigma_mps = 0.02;
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {0, 1, 0.0, 0.5, 0.01},
+    {1, 2, 0.5, 1.0, 0.02},
+    {2, 3, 1.0, 1.5, 0.03},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.dynamic_start_index = 2;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 2.0, 0.0, "boundary and dynamic intervals should receive factors");
+  ExpectNear(static_cast<double>(summary.vertical_velocity_delta_factor_count), 2.0, 0.0, "factor count is wrong");
+  ExpectNear(static_cast<double>(summary.vertical_velocity_delta_skipped_static_count), 1.0, 0.0, "static skip count is wrong");
+  ExpectTrue(diagnostics[0].skip_reason == "STATIC_INTERIOR", "static interior interval should be skipped");
+  ExpectTrue(diagnostics[1].factor_added, "last static to first dynamic interval should receive a factor");
+  ExpectTrue(diagnostics[1].skip_reason == "ADDED", "boundary interval should be marked as added");
+}
+
+void TestBuilderSkipsStaticDynamicBoundaryInsideJumpPadding() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.5;
+  config.vertical_velocity_delta_min_sigma_mps = 0.02;
+  config.vertical_velocity_delta_jump_padding_s = 0.10;
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {1, 2, 0.5, 1.0, 0.02},
+  };
+  offline_lc_minimal::BodyZSeedJumpWindowRow window;
+  window.start_time_s = 0.75;
+  window.end_time_s = 0.80;
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows{window};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.dynamic_start_index = 2;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.empty(), "boundary interval inside jump padding should not receive a factor");
+  ExpectNear(static_cast<double>(summary.vertical_velocity_delta_factor_count), 0.0, 0.0, "factor count is wrong");
+  ExpectNear(static_cast<double>(summary.vertical_velocity_delta_skipped_static_count), 0.0, 0.0, "static skip count is wrong");
+  ExpectNear(static_cast<double>(summary.vertical_velocity_delta_skipped_jump_count), 1.0, 0.0, "jump skip count is wrong");
+  ExpectTrue(diagnostics.front().in_jump_padding, "boundary interval should be marked as jump padding");
+  ExpectTrue(diagnostics.front().skip_reason == "JUMP_PADDING", "boundary interval should be skipped by jump padding");
 }
 
 void TestBuilderDisabledDoesNotMutateGraph() {
@@ -161,7 +232,7 @@ void TestBuilderSkipsIntervalsAfterGnssSupport() {
   request.diagnostics = &diagnostics;
   offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
 
-  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "only supported interval should receive a factor");
+  ExpectNear(static_cast<double>(graph.size()), 2.0, 0.0, "supported boundary and dynamic intervals should receive factors");
   ExpectNear(
     static_cast<double>(summary.vertical_velocity_delta_skipped_gnss_support_count),
     3.0,
@@ -214,7 +285,15 @@ void TestBuilderClampsVelocityDeltaTarget() {
 int main() {
   try {
     RunTest("TestVerticalVelocityDeltaFactorUsesOnlyZ", TestVerticalVelocityDeltaFactorUsesOnlyZ);
-    RunTest("TestBuilderAddsOnlyDynamicNonJumpIntervals", TestBuilderAddsOnlyDynamicNonJumpIntervals);
+    RunTest(
+      "TestBuilderAddsDynamicBoundaryAndDynamicNonJumpIntervals",
+      TestBuilderAddsDynamicBoundaryAndDynamicNonJumpIntervals);
+    RunTest(
+      "TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary",
+      TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary);
+    RunTest(
+      "TestBuilderSkipsStaticDynamicBoundaryInsideJumpPadding",
+      TestBuilderSkipsStaticDynamicBoundaryInsideJumpPadding);
     RunTest("TestBuilderDisabledDoesNotMutateGraph", TestBuilderDisabledDoesNotMutateGraph);
     RunTest("TestBuilderSkipsIntervalsAfterGnssSupport", TestBuilderSkipsIntervalsAfterGnssSupport);
     RunTest("TestBuilderClampsVelocityDeltaTarget", TestBuilderClampsVelocityDeltaTarget);

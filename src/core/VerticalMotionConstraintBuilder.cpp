@@ -69,8 +69,8 @@ void VerticalMotionConstraintBuilder::Build() const {
       request_.diagnostics->push_back(row);
       continue;
     }
-    if (record.state_index_i < request_.dynamic_start_index) {
-      row.skip_reason = "STATIC_OR_BOUNDARY";
+    if (record.state_index_j < request_.dynamic_start_index) {
+      row.skip_reason = "STATIC_INTERIOR";
       ++request_.run_summary->vertical_velocity_delta_skipped_static_count;
       request_.diagnostics->push_back(row);
       continue;
