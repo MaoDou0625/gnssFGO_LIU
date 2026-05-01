@@ -479,11 +479,15 @@ void WriteVerticalJumpContinuityDiagnosticsCsv(
   stream << std::setprecision(17);
   stream
     << "window_index,start_state,end_state,pre_anchor,post_anchor,start_time_s,end_time_s,"
+       "pre_context_start_state,pre_context_end_state,post_context_start_state,post_context_end_state,"
+       "pre_context_state_count,post_context_state_count,velocity_context_factor_count,"
        "entry_factor_added,exit_factor_added,skip_reason,entry_delta_vz_mps,exit_delta_vz_mps,"
        "entry_residual_mps,exit_residual_mps,"
        "entry_position_velocity_factor_added,exit_position_velocity_factor_added,"
        "entry_delta_z_m,entry_velocity_integral_m,entry_zv_mismatch_m,"
        "exit_delta_z_m,exit_velocity_integral_m,exit_zv_mismatch_m,"
+       "pre_context_mean_vz_mps,post_context_mean_vz_mps,"
+       "max_pre_context_residual_mps,max_post_context_residual_mps,"
        "max_inside_vz_range_mps,max_boundary_step_mps,max_boundary_zv_mismatch_m,"
        "max_position_velocity_residual_m\n";
   for (const auto &row : rows) {
@@ -494,6 +498,13 @@ void WriteVerticalJumpContinuityDiagnosticsCsv(
            << row.post_anchor_state_index << ','
            << row.start_time_s << ','
            << row.end_time_s << ','
+           << row.pre_context_start_state_index << ','
+           << row.pre_context_end_state_index << ','
+           << row.post_context_start_state_index << ','
+           << row.post_context_end_state_index << ','
+           << row.pre_context_state_count << ','
+           << row.post_context_state_count << ','
+           << row.velocity_context_factor_count << ','
            << (row.entry_factor_added ? 1 : 0) << ','
            << (row.exit_factor_added ? 1 : 0) << ','
            << row.skip_reason << ','
@@ -509,6 +520,10 @@ void WriteVerticalJumpContinuityDiagnosticsCsv(
            << row.exit_delta_z_m << ','
            << row.exit_velocity_integral_m << ','
            << row.exit_zv_mismatch_m << ','
+           << row.pre_context_mean_vz_mps << ','
+           << row.post_context_mean_vz_mps << ','
+           << row.max_pre_context_residual_mps << ','
+           << row.max_post_context_residual_mps << ','
            << row.max_inside_vz_range_mps << ','
            << row.max_boundary_step_mps << ','
            << row.max_boundary_zv_mismatch_m << ','
@@ -563,7 +578,9 @@ void WriteInitialDynamicConsistencyCsv(
   stream
     << "time_s,relative_time_s,up_m,vz_mps,yaw_rad,pitch_rad,roll_rad,baz_mps2,bgz_radps,initial_baz_mps2,"
        "initial_bgz_radps,static_baz_mps2,static_bgz_radps,optimized_last_static_baz_mps2,"
-       "optimized_last_static_bgz_radps,optimized_first_dynamic_baz_mps2,optimized_first_dynamic_bgz_radps\n";
+       "optimized_last_static_bgz_radps,optimized_first_static_baz_mps2,optimized_first_static_bgz_radps,"
+       "optimized_first_dynamic_baz_mps2,optimized_first_dynamic_bgz_radps,"
+       "bootstrap_to_optimized_first_dynamic_baz_delta_mps2,static_to_dynamic_baz_delta_mps2\n";
 
   const double start_time_s = rows.front().time_s;
   for (const auto &row : rows) {
@@ -585,8 +602,12 @@ void WriteInitialDynamicConsistencyCsv(
            << run_summary.static_bgz_radps << ','
            << run_summary.optimized_last_static_baz_mps2 << ','
            << run_summary.optimized_last_static_bgz_radps << ','
+           << run_summary.optimized_first_static_baz_mps2 << ','
+           << run_summary.optimized_first_static_bgz_radps << ','
            << run_summary.optimized_first_dynamic_baz_mps2 << ','
-           << run_summary.optimized_first_dynamic_bgz_radps << '\n';
+           << run_summary.optimized_first_dynamic_bgz_radps << ','
+           << run_summary.bootstrap_to_optimized_first_dynamic_baz_delta_mps2 << ','
+           << run_summary.static_to_dynamic_baz_delta_mps2 << '\n';
   }
 }
 

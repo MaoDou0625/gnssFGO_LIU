@@ -48,8 +48,10 @@ struct RunSummary {
   std::size_t vertical_jump_position_ramp_factor_count = 0;
   std::size_t vertical_jump_velocity_height_slope_factor_count = 0;
   std::size_t vertical_jump_velocity_continuity_factor_count = 0;
+  std::size_t vertical_jump_velocity_context_factor_count = 0;
   std::size_t vertical_jump_position_velocity_consistency_factor_count = 0;
   std::size_t vertical_jump_continuity_skipped_count = 0;
+  std::size_t vertical_jump_velocity_context_skipped_count = 0;
   std::size_t vertical_jump_velocity_ramp_skipped_count = 0;
   double initial_static_velocity_norm_mean_mps = 0.0;
   double initial_static_velocity_norm_std_mps = 0.0;
@@ -64,8 +66,13 @@ struct RunSummary {
   double static_bgz_radps = std::numeric_limits<double>::quiet_NaN();
   double optimized_last_static_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
   double optimized_last_static_bgz_radps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first_static_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double optimized_first_static_bgz_radps = std::numeric_limits<double>::quiet_NaN();
   double optimized_first_dynamic_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
   double optimized_first_dynamic_bgz_radps = std::numeric_limits<double>::quiet_NaN();
+  double bootstrap_to_optimized_first_dynamic_baz_delta_mps2 =
+    std::numeric_limits<double>::quiet_NaN();
+  double static_to_dynamic_baz_delta_mps2 = std::numeric_limits<double>::quiet_NaN();
   double initial_static_horizontal_drift_max_m = 0.0;
   double initial_static_up_drift_max_m = 0.0;
   double initial_static_3d_drift_max_m = 0.0;
@@ -143,9 +150,13 @@ struct RunSummary {
         << vertical_jump_velocity_height_slope_factor_count << '\n'
         << "vertical_jump_velocity_continuity_factor_count="
         << vertical_jump_velocity_continuity_factor_count << '\n'
+        << "vertical_jump_velocity_context_factor_count="
+        << vertical_jump_velocity_context_factor_count << '\n'
         << "vertical_jump_position_velocity_consistency_factor_count="
         << vertical_jump_position_velocity_consistency_factor_count << '\n'
         << "vertical_jump_continuity_skipped_count=" << vertical_jump_continuity_skipped_count << '\n'
+        << "vertical_jump_velocity_context_skipped_count="
+        << vertical_jump_velocity_context_skipped_count << '\n'
         << "vertical_jump_velocity_ramp_skipped_count=" << vertical_jump_velocity_ramp_skipped_count << '\n'
         << "initial_static_velocity_norm_mean_mps=" << initial_static_velocity_norm_mean_mps << '\n'
         << "initial_static_velocity_norm_std_mps=" << initial_static_velocity_norm_std_mps << '\n'
@@ -160,8 +171,13 @@ struct RunSummary {
         << "static_bgz_radps=" << static_bgz_radps << '\n'
         << "optimized_last_static_baz_mps2=" << optimized_last_static_baz_mps2 << '\n'
         << "optimized_last_static_bgz_radps=" << optimized_last_static_bgz_radps << '\n'
+        << "optimized_first_static_baz_mps2=" << optimized_first_static_baz_mps2 << '\n'
+        << "optimized_first_static_bgz_radps=" << optimized_first_static_bgz_radps << '\n'
         << "optimized_first_dynamic_baz_mps2=" << optimized_first_dynamic_baz_mps2 << '\n'
         << "optimized_first_dynamic_bgz_radps=" << optimized_first_dynamic_bgz_radps << '\n'
+        << "bootstrap_to_optimized_first_dynamic_baz_delta_mps2="
+        << bootstrap_to_optimized_first_dynamic_baz_delta_mps2 << '\n'
+        << "static_to_dynamic_baz_delta_mps2=" << static_to_dynamic_baz_delta_mps2 << '\n'
         << "initial_static_horizontal_drift_max_m=" << initial_static_horizontal_drift_max_m << '\n'
         << "initial_static_up_drift_max_m=" << initial_static_up_drift_max_m << '\n'
         << "initial_static_3d_drift_max_m=" << initial_static_3d_drift_max_m << '\n'

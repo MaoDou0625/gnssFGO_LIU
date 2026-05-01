@@ -34,6 +34,8 @@ class VerticalJumpShapeConstraintBuilder {
     double start_time_s = 0.0;
     double end_time_s = 0.0;
     std::vector<std::size_t> state_indices;
+    std::vector<std::size_t> pre_context_state_indices;
+    std::vector<std::size_t> post_context_state_indices;
     std::optional<std::size_t> pre_anchor_state_index;
     std::optional<std::size_t> post_anchor_state_index;
   };

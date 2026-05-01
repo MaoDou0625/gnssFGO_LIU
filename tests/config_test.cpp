@@ -1,5 +1,6 @@
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -143,6 +144,13 @@ void TestPhase5SmokeConfigLoads() {
   ExpectTrue(
     std::abs(config.vertical_jump_velocity_continuity_sigma_mps - 0.02) < 1e-12,
     "phase5 velocity continuity sigma should load");
+  ExpectTrue(config.enable_vertical_jump_velocity_context_mean, "phase5 should enable velocity context mean");
+  ExpectTrue(
+    std::abs(config.vertical_jump_velocity_context_window_s - 1.0) < 1e-12,
+    "phase5 velocity context window should load");
+  ExpectTrue(
+    std::abs(config.vertical_jump_velocity_context_mean_sigma_mps - 0.03) < 1e-12,
+    "phase5 velocity context sigma should load");
   ExpectTrue(
     config.enable_vertical_jump_position_velocity_consistency,
     "phase5 should enable position-velocity consistency");
@@ -282,6 +290,17 @@ void TestVerticalJumpConfigValidation() {
   ExpectTrue(threw, "vertical jump velocity continuity should require body-z detection");
 
   config = offline_lc_minimal::DefaultConfig();
+  config.enable_vertical_jump_velocity_context_mean = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump constraints require enable_body_z_jump_detection") !=
+            std::string::npos;
+  }
+  ExpectTrue(threw, "vertical jump velocity context mean should require body-z detection");
+
+  config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
   config.enable_vertical_jump_masked_imu = true;
   config.enable_segment_error_feedback = true;
@@ -352,6 +371,54 @@ void TestVerticalJumpConfigValidation() {
     threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive velocity continuity sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_velocity_context_mean = true;
+  config.vertical_jump_velocity_context_window_s = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive velocity context window should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_velocity_context_mean = true;
+  config.vertical_jump_velocity_context_mean_sigma_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive velocity context sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_velocity_context_mean = true;
+  config.vertical_jump_velocity_context_window_s = std::numeric_limits<double>::quiet_NaN();
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "NaN velocity context window should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_velocity_context_mean = true;
+  config.vertical_jump_velocity_context_mean_sigma_mps = std::numeric_limits<double>::infinity();
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "infinite velocity context sigma should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;

@@ -399,6 +399,12 @@ void AccumulateInitialDynamicConsistencyMetrics(
 
   run_summary.optimized_first_dynamic_baz_mps2 = trajectory_rows.front().bias_acc.z();
   run_summary.optimized_first_dynamic_bgz_radps = trajectory_rows.front().bias_gyro.z();
+  run_summary.bootstrap_to_optimized_first_dynamic_baz_delta_mps2 =
+    run_summary.optimized_first_dynamic_baz_mps2 - run_summary.initial_baz_mps2;
+  if (std::isfinite(run_summary.optimized_last_static_baz_mps2)) {
+    run_summary.static_to_dynamic_baz_delta_mps2 =
+      run_summary.optimized_first_dynamic_baz_mps2 - run_summary.optimized_last_static_baz_mps2;
+  }
   const double start_time_s = trajectory_rows.front().time_s;
   const double end_time_s = start_time_s + 30.0;
   std::vector<double> baz_values;
@@ -542,6 +548,9 @@ void AccumulateStaticConsistencyMetrics(
   }
 
   const gtsam::Pose3 reference_pose = optimized_values.at<gtsam::Pose3>(X(0));
+  const auto first_static_bias = optimized_values.at<gtsam::imuBias::ConstantBias>(B(0));
+  run_summary.optimized_first_static_baz_mps2 = first_static_bias.accelerometer().z();
+  run_summary.optimized_first_static_bgz_radps = first_static_bias.gyroscope().z();
   const Eigen::Vector3d reference_position(
     reference_pose.translation().x(),
     reference_pose.translation().y(),
