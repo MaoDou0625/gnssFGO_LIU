@@ -235,7 +235,8 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   }
   if (config.vertical_envelope_gate_sigma_multiple <= 0.0 ||
       config.vertical_envelope_min_half_width_m <= 0.0 ||
-      config.vertical_envelope_factor_sigma_m <= 0.0) {
+      config.vertical_envelope_factor_sigma_m <= 0.0 ||
+      config.vertical_envelope_center_sigma_m <= 0.0) {
     throw std::runtime_error("vertical envelope settings must be positive");
   }
   if (config.enable_vertical_velocity_delta_constraint && !config.enable_body_z_jump_detection) {
@@ -506,6 +507,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_envelope_min_half_width_m = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_envelope_factor_sigma_m") {
     config.vertical_envelope_factor_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_envelope_center_pull") {
+    config.enable_vertical_envelope_center_pull = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_envelope_center_sigma_m") {
+    config.vertical_envelope_center_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_velocity_delta_constraint") {
     config.enable_vertical_velocity_delta_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_acc_sigma_mps2") {
@@ -749,6 +754,9 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "vertical_envelope_gate_sigma_multiple=" << config.vertical_envelope_gate_sigma_multiple << '\n'
     << "vertical_envelope_min_half_width_m=" << config.vertical_envelope_min_half_width_m << '\n'
     << "vertical_envelope_factor_sigma_m=" << config.vertical_envelope_factor_sigma_m << '\n'
+    << "enable_vertical_envelope_center_pull="
+    << (config.enable_vertical_envelope_center_pull ? "true" : "false") << '\n'
+    << "vertical_envelope_center_sigma_m=" << config.vertical_envelope_center_sigma_m << '\n'
     << "enable_vertical_velocity_delta_constraint="
     << (config.enable_vertical_velocity_delta_constraint ? "true" : "false") << '\n'
     << "vertical_velocity_delta_acc_sigma_mps2=" << config.vertical_velocity_delta_acc_sigma_mps2 << '\n'

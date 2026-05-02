@@ -183,6 +183,24 @@ void TestPhase6SmokeConfigLoads() {
   ExpectTrue(
     std::abs(config.vertical_jump_context_mean_continuity_sigma_mps - 0.01) < 1e-12,
     "phase6 context mean continuity sigma should load");
+  ExpectTrue(!config.enable_vertical_envelope_center_pull, "phase6 should leave center pull disabled");
+}
+
+void TestPhase7SmokeConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase7_center_pull.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(config.enable_body_z_jump_detection, "phase7 config should enable body-z detection");
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase7 config should use envelope constraints");
+  ExpectTrue(config.enable_vertical_velocity_delta_constraint, "phase7 should keep velocity delta constraints");
+  ExpectTrue(config.enable_vertical_jump_masked_imu, "phase7 should keep vertical masked IMU");
+  ExpectTrue(config.enable_vertical_envelope_center_pull, "phase7 should enable center pull");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_center_sigma_m - 0.60) < 1e-12,
+    "phase7 center pull sigma should load");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
@@ -273,6 +291,18 @@ void TestVerticalVelocityDeltaConfigValidation() {
     threw = std::string(exception.what()).find("requires enable_body_z_jump_detection") != std::string::npos;
   }
   ExpectTrue(threw, "velocity delta constraints should require body-z jump detection");
+}
+
+void TestVerticalEnvelopeCenterPullConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_envelope_center_sigma_m = 0.0;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical envelope settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive center pull sigma should be rejected");
 }
 
 void TestVerticalJumpConfigValidation() {
@@ -510,9 +540,11 @@ int main() {
     RunTest("TestPhase4SmokeConfigLoads", TestPhase4SmokeConfigLoads);
     RunTest("TestPhase5SmokeConfigLoads", TestPhase5SmokeConfigLoads);
     RunTest("TestPhase6SmokeConfigLoads", TestPhase6SmokeConfigLoads);
+    RunTest("TestPhase7SmokeConfigLoads", TestPhase7SmokeConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
+    RunTest("TestVerticalEnvelopeCenterPullConfigValidation", TestVerticalEnvelopeCenterPullConfigValidation);
     RunTest("TestVerticalVelocityDeltaConfigValidation", TestVerticalVelocityDeltaConfigValidation);
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);
   } catch (const std::exception &exception) {

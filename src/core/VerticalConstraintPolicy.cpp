@@ -18,6 +18,8 @@ struct EnvelopePolicyParams {
   double gate_sigma_multiple = 2.0;
   double min_half_width_m = 0.10;
   double factor_sigma_m = 0.20;
+  bool enable_center_pull = false;
+  double center_sigma_m = 0.60;
 };
 
 gtsam::SharedNoiseModel MakeDirectVerticalNoiseModel(const Eigen::Vector3d &sigma_m) {
@@ -26,6 +28,10 @@ gtsam::SharedNoiseModel MakeDirectVerticalNoiseModel(const Eigen::Vector3d &sigm
 
 gtsam::SharedNoiseModel MakeEnvelopeNoiseModel(const EnvelopePolicyParams &params) {
   return gtsam::noiseModel::Isotropic::Sigma(1, params.factor_sigma_m);
+}
+
+gtsam::SharedNoiseModel MakeEnvelopeCenterNoiseModel(const EnvelopePolicyParams &params) {
+  return gtsam::noiseModel::Isotropic::Sigma(1, params.center_sigma_m);
 }
 
 double ComputeEnvelopeHalfWidthM(const EnvelopePolicyParams &params, const Eigen::Vector3d &sigma_m) {
@@ -40,7 +46,8 @@ VerticalEnvelopeDiagnosticRow MakeEnvelopeDiagnosticRow(
   const double corrected_time_s,
   const StateMeasSyncResult &sync_result,
   const Eigen::Vector3d &sigma_m,
-  const double half_width_m) {
+  const double half_width_m,
+  const EnvelopePolicyParams &params) {
   VerticalEnvelopeDiagnosticRow row;
   row.sample_index = sample_index;
   row.raw_time_s = sample.time_s;
@@ -62,6 +69,10 @@ VerticalEnvelopeDiagnosticRow MakeEnvelopeDiagnosticRow(
   row.rtk_up_m = sample.enu_position_m.z();
   row.sigma_u_m = sigma_m.z();
   row.half_width_m = half_width_m;
+  row.center_pull_factor_used = params.enable_center_pull;
+  if (params.enable_center_pull) {
+    row.center_pull_sigma_m = params.center_sigma_m;
+  }
   return row;
 }
 
@@ -127,7 +138,9 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
       : params_{
           config.vertical_envelope_gate_sigma_multiple,
           config.vertical_envelope_min_half_width_m,
-          config.vertical_envelope_factor_sigma_m} {}
+          config.vertical_envelope_factor_sigma_m,
+          config.enable_vertical_envelope_center_pull,
+          config.vertical_envelope_center_sigma_m} {}
 
   [[nodiscard]] bool UsesDirectPositionFactor() const override { return false; }
 
@@ -156,8 +169,15 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
       sample.enu_position_m.z(),
       half_width_m,
       MakeEnvelopeNoiseModel(params_)));
+    if (params_.enable_center_pull) {
+      context.graph->add(factor::VerticalEnvelopeCenterPullFactor(
+        symbol::X(state_index),
+        sample.enu_position_m.z(),
+        half_width_m,
+        MakeEnvelopeCenterNoiseModel(params_)));
+    }
     context.envelope_diagnostics->push_back(
-      MakeEnvelopeDiagnosticRow(sample, sample_index, corrected_time_s, sync_result, sigma_m, half_width_m));
+      MakeEnvelopeDiagnosticRow(sample, sample_index, corrected_time_s, sync_result, sigma_m, half_width_m, params_));
   }
 
   void AddInterpolated(
@@ -184,8 +204,21 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
       half_width_m,
       interpolator,
       MakeEnvelopeNoiseModel(params_)));
+    if (params_.enable_center_pull) {
+      context.graph->add(factor::GPInterpolatedVerticalEnvelopeCenterPullFactor(
+        symbol::X(sync_result.key_index_i),
+        symbol::V(sync_result.key_index_i),
+        symbol::W(sync_result.key_index_i),
+        symbol::X(sync_result.key_index_j),
+        symbol::V(sync_result.key_index_j),
+        symbol::W(sync_result.key_index_j),
+        sample.enu_position_m.z(),
+        half_width_m,
+        interpolator,
+        MakeEnvelopeCenterNoiseModel(params_)));
+    }
     context.envelope_diagnostics->push_back(
-      MakeEnvelopeDiagnosticRow(sample, sample_index, corrected_time_s, sync_result, sigma_m, half_width_m));
+      MakeEnvelopeDiagnosticRow(sample, sample_index, corrected_time_s, sync_result, sigma_m, half_width_m, params_));
   }
 
  private:

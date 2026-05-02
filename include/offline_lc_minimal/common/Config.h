@@ -114,6 +114,8 @@ struct OfflineRunnerConfig {
   double vertical_envelope_gate_sigma_multiple = 2.0;
   double vertical_envelope_min_half_width_m = 0.10;
   double vertical_envelope_factor_sigma_m = 0.20;
+  bool enable_vertical_envelope_center_pull = false;
+  double vertical_envelope_center_sigma_m = 0.60;
   bool enable_vertical_velocity_delta_constraint = false;
   double vertical_velocity_delta_acc_sigma_mps2 = 0.50;
   double vertical_velocity_delta_min_sigma_mps = 0.02;
