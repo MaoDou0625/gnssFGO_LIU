@@ -11,6 +11,48 @@ SCRIPT_SPEC.loader.exec_module(plot_nav_vs_rtk)
 
 
 class PlotNavVsRtkTests(unittest.TestCase):
+    def test_match_pairs_applies_error_deadband(self) -> None:
+        trajectory_rows = [
+            {
+                "time_s": 0.0,
+                "east_m": 0.03,
+                "north_m": 0.0,
+                "up_m": -0.015,
+            }
+        ]
+        rtk_rows = [{"time_s": 0.0, "east_m": 0.0, "north_m": 0.0, "up_m": 0.0}]
+
+        pairs = plot_nav_vs_rtk.match_pairs(
+            trajectory_rows,
+            rtk_rows,
+            tolerance_s=0.1,
+            error_deadband_m=0.02,
+        )
+
+        self.assertEqual(len(pairs), 1)
+        self.assertAlmostEqual(pairs[0]["east_error_eval_m"], 0.01)
+        self.assertAlmostEqual(pairs[0]["north_error_eval_m"], 0.0)
+        self.assertAlmostEqual(pairs[0]["up_error_eval_m"], 0.0)
+        self.assertAlmostEqual(pairs[0]["horizontal_error_eval_m"], 0.01)
+
+    def test_stats_text_reports_eval_deadband(self) -> None:
+        pairs = [
+            {
+                "horizontal_error_m": 0.03,
+                "position_error_m": 0.03,
+                "up_error_m": -0.015,
+                "horizontal_error_eval_m": 0.01,
+                "position_error_eval_m": 0.01,
+                "up_error_eval_m": 0.0,
+            }
+        ]
+
+        stats_text = plot_nav_vs_rtk.build_stats_text(pairs, error_deadband_m=0.02)
+
+        self.assertIn("eval deadband=0.020 m", stats_text)
+        self.assertIn("eval horiz rms=0.010 m", stats_text)
+        self.assertIn("eval up rms=0.000 m", stats_text)
+
     def test_make_plot_writes_png(self) -> None:
         trajectory_rows = [
             {
@@ -65,6 +107,7 @@ class PlotNavVsRtkTests(unittest.TestCase):
                 pairs,
                 output_path,
                 "Test nav plot",
+                error_deadband_m=0.02,
             )
             self.assertTrue(output_path.exists())
             self.assertGreater(output_path.stat().st_size, 0)

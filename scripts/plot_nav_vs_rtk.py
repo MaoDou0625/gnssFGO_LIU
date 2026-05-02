@@ -21,6 +21,7 @@ except ImportError as exc:  # pragma: no cover - runtime dependency guard
 WGS84_A = 6378137.0
 WGS84_F = 1.0 / 298.257223563
 WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
+DEFAULT_ERROR_DEADBAND_M = 0.02
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,6 +49,15 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.12,
         help="Maximum allowed timestamp mismatch when pairing RTK and navigation points",
+    )
+    parser.add_argument(
+        "--error-deadband-m",
+        type=float,
+        default=DEFAULT_ERROR_DEADBAND_M,
+        help=(
+            "Evaluation deadband in meters. Navigation/RTK differences within this "
+            "distance are counted as zero in eval metrics. Use 0 for raw metrics only."
+        ),
     )
     parser.add_argument(
         "--title",
@@ -222,7 +232,11 @@ def match_pairs(
     trajectory_rows: list[dict[str, object]],
     rtk_rows: list[dict[str, float]],
     tolerance_s: float,
+    error_deadband_m: float = 0.0,
 ) -> list[dict[str, float]]:
+    if error_deadband_m < 0.0:
+        raise ValueError("error_deadband_m must be non-negative")
+
     trajectory_times = [float(row["time_s"]) for row in trajectory_rows]
     pairs: list[dict[str, float]] = []
     for rtk in rtk_rows:
@@ -249,6 +263,13 @@ def match_pairs(
             + north_error * north_error
             + up_error * up_error
         )
+        east_error_eval = apply_signed_deadband(east_error, error_deadband_m)
+        north_error_eval = apply_signed_deadband(north_error, error_deadband_m)
+        up_error_eval = apply_signed_deadband(up_error, error_deadband_m)
+        horizontal_error_eval = apply_magnitude_deadband(
+            horizontal_error, error_deadband_m
+        )
+        position_error_eval = apply_magnitude_deadband(position_error, error_deadband_m)
         pairs.append(
             {
                 "time_s": time_s,
@@ -263,6 +284,11 @@ def match_pairs(
                 "up_error_m": up_error,
                 "horizontal_error_m": horizontal_error,
                 "position_error_m": position_error,
+                "east_error_eval_m": east_error_eval,
+                "north_error_eval_m": north_error_eval,
+                "up_error_eval_m": up_error_eval,
+                "horizontal_error_eval_m": horizontal_error_eval,
+                "position_error_eval_m": position_error_eval,
             }
         )
     if not pairs:
@@ -274,22 +300,100 @@ def rms(values: list[float]) -> float:
     return math.sqrt(sum(value * value for value in values) / len(values))
 
 
-def build_stats_text(pairs: list[dict[str, float]]) -> str:
+def apply_signed_deadband(value: float, deadband_m: float) -> float:
+    if deadband_m <= 0.0:
+        return value
+    magnitude = max(abs(value) - deadband_m, 0.0)
+    if magnitude == 0.0:
+        return 0.0
+    return math.copysign(magnitude, value)
+
+
+def apply_magnitude_deadband(value: float, deadband_m: float) -> float:
+    if deadband_m <= 0.0:
+        return value
+    return max(value - deadband_m, 0.0)
+
+
+def eval_value(
+    row: dict[str, float],
+    eval_key: str,
+    raw_key: str,
+    error_deadband_m: float,
+    *,
+    signed: bool,
+) -> float:
+    if eval_key in row:
+        return row[eval_key]
+    raw_value = row[raw_key]
+    if signed:
+        return apply_signed_deadband(raw_value, error_deadband_m)
+    return apply_magnitude_deadband(raw_value, error_deadband_m)
+
+
+def build_stats_text(
+    pairs: list[dict[str, float]],
+    error_deadband_m: float = 0.0,
+) -> str:
     horizontal = [row["horizontal_error_m"] for row in pairs]
     position = [row["position_error_m"] for row in pairs]
     up = [row["up_error_m"] for row in pairs]
-    return "\n".join(
-        [
-            f"matched={len(pairs)}",
-            f"horiz mean={statistics.mean(horizontal):.3f} m",
-            f"horiz rms={rms(horizontal):.3f} m",
-            f"horiz max={max(horizontal):.3f} m",
-            f"3d mean={statistics.mean(position):.3f} m",
-            f"3d rms={rms(position):.3f} m",
-            f"3d max={max(position):.3f} m",
-            f"up rms={rms(up):.3f} m",
+    lines = [
+        f"matched={len(pairs)}",
+        f"raw horiz mean={statistics.mean(horizontal):.3f} m",
+        f"raw horiz rms={rms(horizontal):.3f} m",
+        f"raw horiz max={max(horizontal):.3f} m",
+        f"raw 3d mean={statistics.mean(position):.3f} m",
+        f"raw 3d rms={rms(position):.3f} m",
+        f"raw 3d max={max(position):.3f} m",
+        f"raw up rms={rms(up):.3f} m",
+    ]
+
+    if error_deadband_m > 0.0:
+        horizontal_eval = [
+            eval_value(
+                row,
+                "horizontal_error_eval_m",
+                "horizontal_error_m",
+                error_deadband_m,
+                signed=False,
+            )
+            for row in pairs
         ]
-    )
+        position_eval = [
+            eval_value(
+                row,
+                "position_error_eval_m",
+                "position_error_m",
+                error_deadband_m,
+                signed=False,
+            )
+            for row in pairs
+        ]
+        up_eval = [
+            eval_value(
+                row,
+                "up_error_eval_m",
+                "up_error_m",
+                error_deadband_m,
+                signed=True,
+            )
+            for row in pairs
+        ]
+        lines.extend(
+            [
+                f"eval deadband={error_deadband_m:.3f} m",
+                f"eval horiz mean={statistics.mean(horizontal_eval):.3f} m",
+                f"eval horiz rms={rms(horizontal_eval):.3f} m",
+                f"eval horiz max={max(horizontal_eval):.3f} m",
+                f"eval 3d mean={statistics.mean(position_eval):.3f} m",
+                f"eval 3d rms={rms(position_eval):.3f} m",
+                f"eval 3d max={max(position_eval):.3f} m",
+                f"eval up rms={rms(up_eval):.3f} m",
+            ]
+        )
+
+    return "\n".join(lines)
 
 
 def make_plot(
@@ -298,6 +402,7 @@ def make_plot(
     pairs: list[dict[str, float]],
     output_path: Path,
     title: str,
+    error_deadband_m: float = 0.0,
 ) -> None:
     nav_time = [float(row["time_s"]) for row in trajectory_rows]
     nav_east = [float(row["east_m"]) for row in trajectory_rows]
@@ -314,6 +419,26 @@ def make_plot(
     up_error = [row["up_error_m"] for row in pairs]
     horizontal_error = [row["horizontal_error_m"] for row in pairs]
     position_error = [row["position_error_m"] for row in pairs]
+    horizontal_error_eval = [
+        eval_value(
+            row,
+            "horizontal_error_eval_m",
+            "horizontal_error_m",
+            error_deadband_m,
+            signed=False,
+        )
+        for row in pairs
+    ]
+    position_error_eval = [
+        eval_value(
+            row,
+            "position_error_eval_m",
+            "position_error_m",
+            error_deadband_m,
+            signed=False,
+        )
+        for row in pairs
+    ]
 
     fig, axes = plt.subplots(2, 2, figsize=(16, 10), constrained_layout=True)
     fig.suptitle(title, fontsize=16)
@@ -348,6 +473,15 @@ def make_plot(
     ax_error.plot(pair_time, east_error, linewidth=1.0, label="east error")
     ax_error.plot(pair_time, north_error, linewidth=1.0, label="north error")
     ax_error.plot(pair_time, up_error, linewidth=1.0, label="up error")
+    if error_deadband_m > 0.0:
+        ax_error.axhspan(
+            -error_deadband_m,
+            error_deadband_m,
+            color="#7f7f7f",
+            alpha=0.12,
+            label="ignored band",
+            zorder=0,
+        )
     ax_error.set_title("Navigation minus RTKFIX")
     ax_error.set_xlabel("Time [s]")
     ax_error.set_ylabel("Error [m]")
@@ -357,6 +491,31 @@ def make_plot(
     ax_norm = axes[1][1]
     ax_norm.plot(pair_time, horizontal_error, color="#2ca02c", linewidth=1.2, label="horizontal error")
     ax_norm.plot(pair_time, position_error, color="#d62728", linewidth=1.2, label="3D error")
+    if error_deadband_m > 0.0:
+        ax_norm.axhspan(
+            0.0,
+            error_deadband_m,
+            color="#7f7f7f",
+            alpha=0.12,
+            label="ignored band",
+            zorder=0,
+        )
+        ax_norm.plot(
+            pair_time,
+            horizontal_error_eval,
+            color="#2ca02c",
+            linewidth=1.0,
+            linestyle="--",
+            label="horizontal eval",
+        )
+        ax_norm.plot(
+            pair_time,
+            position_error_eval,
+            color="#d62728",
+            linewidth=1.0,
+            linestyle="--",
+            label="3D eval",
+        )
     ax_norm.set_title("Error magnitude")
     ax_norm.set_xlabel("Time [s]")
     ax_norm.set_ylabel("Magnitude [m]")
@@ -365,7 +524,7 @@ def make_plot(
     ax_norm.text(
         0.02,
         0.98,
-        build_stats_text(pairs),
+        build_stats_text(pairs, error_deadband_m),
         transform=ax_norm.transAxes,
         va="top",
         ha="left",
@@ -380,6 +539,9 @@ def make_plot(
 
 def main() -> int:
     args = parse_args()
+    if args.error_deadband_m < 0.0:
+        raise ValueError("--error-deadband-m must be non-negative")
+
     trajectory_path = Path(args.trajectory)
     gnss_path = Path(args.gnss)
     summary_path = Path(args.summary) if args.summary else Path()
@@ -391,10 +553,22 @@ def main() -> int:
         summary, trajectory_rows, gnss_path
     )
     rtk_rows = read_rtk_points(gnss_path, origin_lat_rad, origin_lon_rad, origin_h_m)
-    pairs = match_pairs(trajectory_rows, rtk_rows, args.time_tolerance_s)
-    make_plot(trajectory_rows, rtk_rows, pairs, output_path, args.title)
+    pairs = match_pairs(
+        trajectory_rows,
+        rtk_rows,
+        args.time_tolerance_s,
+        args.error_deadband_m,
+    )
+    make_plot(
+        trajectory_rows,
+        rtk_rows,
+        pairs,
+        output_path,
+        args.title,
+        args.error_deadband_m,
+    )
 
-    stats_text = build_stats_text(pairs)
+    stats_text = build_stats_text(pairs, args.error_deadband_m)
     print(f"plot_saved={output_path}")
     print(stats_text)
     return 0
