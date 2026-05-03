@@ -266,6 +266,7 @@ void TestEnvelopeModeAddsCenterPullFactorWhenEnabled() {
   ExpectNear(static_cast<double>(envelope_diagnostics.size()), 1.0, 0.0, "envelope diagnostics should stay one row per sample");
   ExpectTrue(envelope_diagnostics.front().center_pull_factor_used, "diagnostic should mark center pull");
   ExpectNear(envelope_diagnostics.front().center_pull_sigma_m, 0.60, 1e-12, "center pull sigma should be recorded");
+  ExpectNear(envelope_diagnostics.front().center_pull_deadband_m, 0.01, 1e-12, "center pull deadband should be recorded");
 
   gtsam::Values optimized_values;
   optimized_values.insert(
@@ -280,9 +281,9 @@ void TestEnvelopeModeAddsCenterPullFactorWhenEnabled() {
   ExpectNear(envelope_diagnostics.front().raw_residual_m, 0.25, 1e-12, "raw residual should be populated");
   ExpectNear(
     envelope_diagnostics.front().center_pull_residual_m,
-    0.25,
+    0.24,
     1e-12,
-    "center pull diagnostic should use the center residual");
+    "center pull diagnostic should subtract the deadband");
 }
 
 void TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled() {

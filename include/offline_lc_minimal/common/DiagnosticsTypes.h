@@ -165,6 +165,7 @@ struct VerticalEnvelopeDiagnosticRow {
   bool inside_envelope = false;
   bool center_pull_factor_used = false;
   double center_pull_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double center_pull_deadband_m = std::numeric_limits<double>::quiet_NaN();
   double center_pull_residual_m = std::numeric_limits<double>::quiet_NaN();
 };
 

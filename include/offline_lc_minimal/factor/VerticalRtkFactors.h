@@ -22,8 +22,16 @@ inline double VerticalEnvelopeResidual(const double raw_residual_m, const double
   return 0.0;
 }
 
-inline double VerticalEnvelopeCenterResidual(const double raw_residual_m, const double half_width_m) {
-  return std::clamp(raw_residual_m, -half_width_m, half_width_m);
+inline double VerticalEnvelopeCenterResidual(
+  const double raw_residual_m,
+  const double half_width_m,
+  const double deadband_m) {
+  const double signed_clamped_m = std::clamp(raw_residual_m, -half_width_m, half_width_m);
+  const double magnitude_m = std::max(std::abs(signed_clamped_m) - deadband_m, 0.0);
+  if (magnitude_m == 0.0) {
+    return 0.0;
+  }
+  return std::copysign(magnitude_m, signed_clamped_m);
 }
 
 class VerticalPositionFactor final : public gtsam::NoiseModelFactor1<gtsam::Pose3> {
@@ -103,10 +111,12 @@ class VerticalEnvelopeCenterPullFactor final : public gtsam::NoiseModelFactor1<g
     gtsam::Key pose_key,
     double measured_up,
     double half_width_m,
+    double deadband_m,
     const gtsam::SharedNoiseModel &model)
       : gtsam::NoiseModelFactor1<gtsam::Pose3>(model, pose_key),
         measured_up_(measured_up),
-        half_width_m_(half_width_m) {}
+        half_width_m_(half_width_m),
+        deadband_m_(deadband_m) {}
 
   [[nodiscard]] gtsam::NonlinearFactor::shared_ptr clone() const override {
     return boost::static_pointer_cast<gtsam::NonlinearFactor>(
@@ -129,11 +139,12 @@ class VerticalEnvelopeCenterPullFactor final : public gtsam::NoiseModelFactor1<g
  private:
   [[nodiscard]] gtsam::Vector1 EvaluateErrorNoJacobians(const gtsam::Pose3 &pose) const {
     const double raw_residual_m = pose.translation().z() - measured_up_;
-    return gtsam::Vector1(VerticalEnvelopeCenterResidual(raw_residual_m, half_width_m_));
+    return gtsam::Vector1(VerticalEnvelopeCenterResidual(raw_residual_m, half_width_m_, deadband_m_));
   }
 
   double measured_up_ = 0.0;
   double half_width_m_ = 0.0;
+  double deadband_m_ = 0.0;
 };
 
 class GPInterpolatedVerticalPositionFactor final
@@ -370,6 +381,7 @@ class GPInterpolatedVerticalEnvelopeCenterPullFactor final
     gtsam::Key omega_j_key,
     double measured_up,
     double half_width_m,
+    double deadband_m,
     const offline_lc_minimal::gp::GPWNOJInterpolator &interpolator,
     const gtsam::SharedNoiseModel &model)
       : gtsam::NoiseModelFactor6<gtsam::Pose3, gtsam::Vector3, gtsam::Vector3,
@@ -377,6 +389,7 @@ class GPInterpolatedVerticalEnvelopeCenterPullFactor final
           model, pose_i_key, vel_i_key, omega_i_key, pose_j_key, vel_j_key, omega_j_key),
         measured_up_(measured_up),
         half_width_m_(half_width_m),
+        deadband_m_(deadband_m),
         interpolator_(interpolator) {}
 
   [[nodiscard]] gtsam::NonlinearFactor::shared_ptr clone() const override {
@@ -467,11 +480,12 @@ class GPInterpolatedVerticalEnvelopeCenterPullFactor final
     const gtsam::Pose3 interpolated_pose =
       interpolator_.InterpolatePose(pose_i, vel_i, omega_i, pose_j, vel_j, omega_j);
     const double raw_residual_m = interpolated_pose.translation().z() - measured_up_;
-    return gtsam::Vector1(VerticalEnvelopeCenterResidual(raw_residual_m, half_width_m_));
+    return gtsam::Vector1(VerticalEnvelopeCenterResidual(raw_residual_m, half_width_m_, deadband_m_));
   }
 
   double measured_up_ = 0.0;
   double half_width_m_ = 0.0;
+  double deadband_m_ = 0.0;
   offline_lc_minimal::gp::GPWNOJInterpolator interpolator_;
 };
 

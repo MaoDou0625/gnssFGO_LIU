@@ -53,15 +53,17 @@ void TestVerticalEnvelopeFactorUsesSoftGate() {
 
 void TestVerticalEnvelopeCenterPullFactorUsesClampedCenterResidual() {
   const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
-  const offline_lc_minimal::factor::VerticalEnvelopeCenterPullFactor factor(1, 3.0, 0.10, noise);
+  const offline_lc_minimal::factor::VerticalEnvelopeCenterPullFactor factor(1, 3.0, 0.10, 0.01, noise);
 
+  const gtsam::Pose3 deadband_pose(gtsam::Rot3::RzRyRx(0.0, 0.0, 0.0), gtsam::Point3(10.0, -20.0, 3.005));
   const gtsam::Pose3 inside_pose(gtsam::Rot3::RzRyRx(0.0, 0.0, 0.0), gtsam::Point3(10.0, -20.0, 3.05));
   const gtsam::Pose3 high_pose(gtsam::Rot3::RzRyRx(0.0, 0.0, 0.0), gtsam::Point3(10.0, -20.0, 3.25));
   const gtsam::Pose3 low_pose(gtsam::Rot3::RzRyRx(0.0, 0.0, 0.0), gtsam::Point3(10.0, -20.0, 2.75));
 
-  ExpectNear(factor.evaluateError(inside_pose)(0), 0.05, 1e-12, "inside gate center residual should equal raw residual");
-  ExpectNear(factor.evaluateError(high_pose)(0), 0.10, 1e-12, "positive center residual should clamp at half-width");
-  ExpectNear(factor.evaluateError(low_pose)(0), -0.10, 1e-12, "negative center residual should clamp at half-width");
+  ExpectNear(factor.evaluateError(deadband_pose)(0), 0.0, 1e-12, "center residual should ignore deadband");
+  ExpectNear(factor.evaluateError(inside_pose)(0), 0.04, 1e-12, "inside gate center residual should subtract deadband");
+  ExpectNear(factor.evaluateError(high_pose)(0), 0.09, 1e-12, "positive center residual should clamp at half-width minus deadband");
+  ExpectNear(factor.evaluateError(low_pose)(0), -0.09, 1e-12, "negative center residual should clamp at half-width minus deadband");
 }
 
 void TestGpInterpolatedVerticalFactorMatchesInterpolator() {
@@ -134,20 +136,20 @@ void TestGpInterpolatedVerticalEnvelopeCenterPullFactorMatchesInterpolator() {
   const gtsam::Pose3 interpolated_pose =
     interpolator.InterpolatePose(pose_i, vel_i, omega_i, pose_j, vel_j, omega_j);
   const offline_lc_minimal::factor::GPInterpolatedVerticalEnvelopeCenterPullFactor inside_factor(
-    1, 2, 3, 4, 5, 6, interpolated_pose.translation().z() - 0.05, 0.10, interpolator, noise);
+    1, 2, 3, 4, 5, 6, interpolated_pose.translation().z() - 0.05, 0.10, 0.01, interpolator, noise);
   const offline_lc_minimal::factor::GPInterpolatedVerticalEnvelopeCenterPullFactor outside_factor(
-    1, 2, 3, 4, 5, 6, interpolated_pose.translation().z() - 0.30, 0.10, interpolator, noise);
+    1, 2, 3, 4, 5, 6, interpolated_pose.translation().z() - 0.30, 0.10, 0.01, interpolator, noise);
 
   ExpectNear(
     inside_factor.evaluateError(pose_i, vel_i, omega_i, pose_j, vel_j, omega_j)(0),
-    0.05,
+    0.04,
     1e-10,
-    "interpolated center residual inside gate should equal raw residual");
+    "interpolated center residual inside gate should subtract deadband");
   ExpectNear(
     outside_factor.evaluateError(pose_i, vel_i, omega_i, pose_j, vel_j, omega_j)(0),
-    0.10,
+    0.09,
     1e-10,
-    "interpolated center residual outside gate should clamp at half-width");
+    "interpolated center residual outside gate should clamp at half-width minus deadband");
 }
 
 }  // namespace

@@ -357,7 +357,8 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
     << "sample_index,raw_time_s,corrected_time_s,sync_status,state_index_i,state_index_j,"
        "synchronized_state_index,state_time_i_s,state_time_j_s,duration_from_state_i_s,"
        "factor_used,rtk_up_m,sigma_u_m,half_width_m,predicted_up_m,raw_residual_m,"
-       "violation_m,inside_envelope,center_pull_factor_used,center_pull_sigma_m,center_pull_residual_m\n";
+       "violation_m,inside_envelope,center_pull_factor_used,center_pull_sigma_m,"
+       "center_pull_deadband_m,center_pull_residual_m\n";
   for (const auto &row : rows) {
     stream << row.sample_index << ','
            << row.raw_time_s << ','
@@ -379,6 +380,7 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
            << (row.inside_envelope ? 1 : 0) << ','
            << (row.center_pull_factor_used ? 1 : 0) << ','
            << row.center_pull_sigma_m << ','
+           << row.center_pull_deadband_m << ','
            << row.center_pull_residual_m << '\n';
   }
 }

@@ -201,6 +201,9 @@ void TestPhase7SmokeConfigLoads() {
   ExpectTrue(
     std::abs(config.vertical_envelope_center_sigma_m - 0.60) < 1e-12,
     "phase7 center pull sigma should load");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_center_deadband_m - 0.01) < 1e-12,
+    "phase7 center pull deadband should load");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
@@ -303,6 +306,27 @@ void TestVerticalEnvelopeCenterPullConfigValidation() {
     threw = std::string(exception.what()).find("vertical envelope settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive center pull sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.vertical_envelope_center_deadband_m = -1.0e-3;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical envelope settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "negative center pull deadband should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.vertical_envelope_min_half_width_m = 0.10;
+  config.vertical_envelope_center_deadband_m = 0.10;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("center deadband") != std::string::npos;
+  }
+  ExpectTrue(threw, "center pull deadband should be smaller than the envelope minimum half-width");
 }
 
 void TestVerticalJumpConfigValidation() {

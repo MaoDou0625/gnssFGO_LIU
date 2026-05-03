@@ -20,6 +20,7 @@ struct EnvelopePolicyParams {
   double factor_sigma_m = 0.20;
   bool enable_center_pull = false;
   double center_sigma_m = 0.60;
+  double center_deadband_m = 0.01;
 };
 
 gtsam::SharedNoiseModel MakeDirectVerticalNoiseModel(const Eigen::Vector3d &sigma_m) {
@@ -72,6 +73,7 @@ VerticalEnvelopeDiagnosticRow MakeEnvelopeDiagnosticRow(
   row.center_pull_factor_used = params.enable_center_pull;
   if (params.enable_center_pull) {
     row.center_pull_sigma_m = params.center_sigma_m;
+    row.center_pull_deadband_m = params.center_deadband_m;
   }
   return row;
 }
@@ -140,7 +142,8 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
           config.vertical_envelope_min_half_width_m,
           config.vertical_envelope_factor_sigma_m,
           config.enable_vertical_envelope_center_pull,
-          config.vertical_envelope_center_sigma_m} {}
+          config.vertical_envelope_center_sigma_m,
+          config.vertical_envelope_center_deadband_m} {}
 
   [[nodiscard]] bool UsesDirectPositionFactor() const override { return false; }
 
@@ -174,6 +177,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
         symbol::X(state_index),
         sample.enu_position_m.z(),
         half_width_m,
+        params_.center_deadband_m,
         MakeEnvelopeCenterNoiseModel(params_)));
     }
     context.envelope_diagnostics->push_back(
@@ -214,6 +218,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
         symbol::W(sync_result.key_index_j),
         sample.enu_position_m.z(),
         half_width_m,
+        params_.center_deadband_m,
         interpolator,
         MakeEnvelopeCenterNoiseModel(params_)));
     }
