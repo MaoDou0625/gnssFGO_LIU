@@ -204,6 +204,9 @@ void TestPhase7SmokeConfigLoads() {
   ExpectTrue(
     std::abs(config.vertical_envelope_center_deadband_m - 0.01) < 1e-12,
     "phase7 center pull deadband should load");
+  ExpectTrue(
+    std::abs(config.vertical_acc_bias_sigma_mps2 - 0.01) < 1e-12,
+    "phase7 should tighten vertical accelerometer bias GM sigma");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
