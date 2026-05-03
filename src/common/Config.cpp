@@ -210,6 +210,7 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.initial_static_zaru_sigma_radps <= 0.0 ||
       config.initial_static_specific_force_sigma_mps2 <= 0.0 ||
       config.initial_static_vertical_specific_force_sigma_mps2 <= 0.0 ||
+      config.initial_static_vertical_bias_sigma_mps2 <= 0.0 ||
       config.initial_static_state_frequency_hz <= 0.0 ||
       config.initial_static_attitude_drift_sigma_rad <= 0.0) {
     throw std::runtime_error("initial static constraint settings must be positive");
@@ -217,9 +218,18 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if ((config.enable_initial_static_zupt_zaru ||
        config.enable_initial_static_zero_specific_force ||
        config.enable_initial_static_vertical_specific_force ||
+       config.enable_initial_static_vertical_bias_soft_prior ||
        config.enable_initial_static_subgraph) &&
       config.static_alignment_duration_s <= 0.0) {
     throw std::runtime_error("initial static constraints require static_alignment_duration_s > 0");
+  }
+  if (config.enable_initial_static_vertical_bias_soft_prior &&
+      (!config.enable_global_acc_bias || !config.enable_vertical_acc_bias_gm_process)) {
+    throw std::runtime_error(
+      "initial static vertical bias soft prior requires global accelerometer bias and vertical GM bias process");
+  }
+  if (config.enable_initial_static_vertical_bias_soft_prior && !config.enable_initial_static_subgraph) {
+    throw std::runtime_error("initial static vertical bias soft prior requires initial static subgraph");
   }
   if (config.early_gnss_relaxation_duration_s < 0.0 || config.early_gnss_relaxation_scale <= 0.0) {
     throw std::runtime_error("early GNSS relaxation settings are invalid");
@@ -475,6 +485,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.initial_static_specific_force_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "initial_static_vertical_specific_force_sigma_mps2") {
     config.initial_static_vertical_specific_force_sigma_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_initial_static_vertical_bias_soft_prior") {
+    config.enable_initial_static_vertical_bias_soft_prior = ParseBool(normalized_value);
+  } else if (normalized_key == "initial_static_vertical_bias_sigma_mps2") {
+    config.initial_static_vertical_bias_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_initial_static_subgraph") {
     config.enable_initial_static_subgraph = ParseBool(normalized_value);
   } else if (normalized_key == "initial_static_state_frequency_hz") {
@@ -743,6 +757,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "initial_static_specific_force_sigma_mps2=" << config.initial_static_specific_force_sigma_mps2 << '\n'
     << "initial_static_vertical_specific_force_sigma_mps2="
     << config.initial_static_vertical_specific_force_sigma_mps2 << '\n'
+    << "enable_initial_static_vertical_bias_soft_prior="
+    << (config.enable_initial_static_vertical_bias_soft_prior ? "true" : "false") << '\n'
+    << "initial_static_vertical_bias_sigma_mps2="
+    << config.initial_static_vertical_bias_sigma_mps2 << '\n'
     << "enable_initial_static_subgraph=" << (config.enable_initial_static_subgraph ? "true" : "false") << '\n'
     << "initial_static_state_frequency_hz=" << config.initial_static_state_frequency_hz << '\n'
     << "initial_static_attitude_drift_sigma_rad=" << config.initial_static_attitude_drift_sigma_rad << '\n'

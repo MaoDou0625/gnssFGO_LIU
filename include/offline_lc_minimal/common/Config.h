@@ -95,6 +95,8 @@ struct OfflineRunnerConfig {
   bool enable_initial_static_vertical_specific_force = false;
   double initial_static_specific_force_sigma_mps2 = 1e-2;
   double initial_static_vertical_specific_force_sigma_mps2 = 1e-2;
+  bool enable_initial_static_vertical_bias_soft_prior = false;
+  double initial_static_vertical_bias_sigma_mps2 = 5e-5;
   bool enable_initial_static_subgraph = false;
   double initial_static_state_frequency_hz = 1.0;
   double initial_static_attitude_drift_sigma_rad = 1e-3;

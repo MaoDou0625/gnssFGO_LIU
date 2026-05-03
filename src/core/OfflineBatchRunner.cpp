@@ -24,6 +24,7 @@
 #include "offline_lc_minimal/core/GnssFactorBuilder.h"
 #include "offline_lc_minimal/core/GraphTimelineBuilder.h"
 #include "offline_lc_minimal/core/ImuIntegrationUtils.h"
+#include "offline_lc_minimal/core/InitialStaticBiasConstraintBuilder.h"
 #include "offline_lc_minimal/core/InitialStaticConstraintBuilder.h"
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
@@ -291,7 +292,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.initial_static_constraints_enabled =
     config_.enable_initial_static_zupt_zaru ||
     config_.enable_initial_static_zero_specific_force ||
-    config_.enable_initial_static_vertical_specific_force;
+    config_.enable_initial_static_vertical_specific_force ||
+    config_.enable_initial_static_vertical_bias_soft_prior;
   run_result.run_summary.initial_static_subgraph_enabled = config_.enable_initial_static_subgraph;
 
   const std::size_t origin_index = FindOriginIndex(dataset.gnss_samples, dataset.imu_samples);
@@ -488,6 +490,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     X(0),
     V(0),
     B(0));
+  if (InitialStaticBiasConstraintBuilder::AddVerticalAccelBiasSoftPrior(
+    config_,
+    graph,
+    B(0),
+    global_acc_bias_key)) {
+    ++run_result.run_summary.initial_static_vertical_bias_prior_factor_count;
+  }
 
   initial_values.insert(X(0), initial_pose_world);
   initial_values.insert(V(0), initial_velocity);
@@ -719,6 +728,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
           imu_window.mean_acc_mps2.z(),
           Eigen::Vector3d(0.0, 0.0, config_.gravity_mps2),
           gtsam::noiseModel::Isotropic::Sigma(1, static_vertical_specific_force_sigma)));
+      }
+      if (InitialStaticBiasConstraintBuilder::AddVerticalAccelBiasSoftPrior(
+        config_,
+        graph,
+        B(state_index),
+        global_acc_bias_key)) {
+        ++run_result.run_summary.initial_static_vertical_bias_prior_factor_count;
       }
       graph.add(factor::StaticAttitudeDriftFactor(
         X(state_index - 1U),

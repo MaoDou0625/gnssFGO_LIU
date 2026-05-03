@@ -33,6 +33,7 @@ struct RunSummary {
   std::size_t dropped_bad_status_count = 0;
   std::size_t dropped_out_of_imu_coverage_count = 0;
   std::size_t initial_static_constraint_sample_count = 0;
+  std::size_t initial_static_vertical_bias_prior_factor_count = 0;
   std::size_t error_state_count = 0;
   std::size_t segment_error_count = 0;
   std::size_t vertical_velocity_delta_factor_count = 0;
@@ -133,6 +134,8 @@ struct RunSummary {
         << "dropped_bad_status_count=" << dropped_bad_status_count << '\n'
         << "dropped_out_of_imu_coverage_count=" << dropped_out_of_imu_coverage_count << '\n'
         << "initial_static_constraint_sample_count=" << initial_static_constraint_sample_count << '\n'
+        << "initial_static_vertical_bias_prior_factor_count="
+        << initial_static_vertical_bias_prior_factor_count << '\n'
         << "error_state_count=" << error_state_count << '\n'
         << "segment_error_count=" << segment_error_count << '\n'
         << "vertical_velocity_delta_factor_count=" << vertical_velocity_delta_factor_count << '\n'

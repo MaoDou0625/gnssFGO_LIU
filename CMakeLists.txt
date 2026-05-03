@@ -62,6 +62,7 @@ add_library(offline_lc_minimal_lib
   src/core/GraphTimelineBuilder.cpp
   src/core/ImuIntegrationUtils.cpp
   src/core/ImuRateAvpReconstructor.cpp
+  src/core/InitialStaticBiasConstraintBuilder.cpp
   src/core/RunDiagnosticsBuilder.cpp
   src/core/StaticImuAlignment.cpp
   src/core/TrajectoryResultBuilder.cpp
@@ -144,6 +145,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     tests/vertical_jump_constraints_test.cpp
   )
 
+  add_executable(static_vertical_bias_constraint_test
+    tests/static_vertical_bias_constraint_test.cpp
+  )
+
   target_compile_definitions(config_test
     PRIVATE
       OFFLINE_LC_MINIMAL_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
@@ -175,6 +180,11 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(vertical_jump_constraints_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(static_vertical_bias_constraint_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -212,6 +222,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       vertical_jump_constraints_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      static_vertical_bias_constraint_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -261,6 +277,13 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
         $<TARGET_FILE:vertical_jump_constraints_test>
     )
+    add_test(
+      NAME static_vertical_bias_constraint_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:static_vertical_bias_constraint_test>
+    )
   else()
     add_test(
       NAME vertical_rtk_factors_test
@@ -285,6 +308,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     add_test(
       NAME vertical_jump_constraints_test
       COMMAND $<TARGET_FILE:vertical_jump_constraints_test>
+    )
+    add_test(
+      NAME static_vertical_bias_constraint_test
+      COMMAND $<TARGET_FILE:static_vertical_bias_constraint_test>
     )
   endif()
 endif()

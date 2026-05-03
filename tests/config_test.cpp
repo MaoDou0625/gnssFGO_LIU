@@ -207,6 +207,12 @@ void TestPhase7SmokeConfigLoads() {
   ExpectTrue(
     std::abs(config.vertical_acc_bias_sigma_mps2 - 0.01) < 1e-12,
     "phase7 should tighten vertical accelerometer bias GM sigma");
+  ExpectTrue(
+    config.enable_initial_static_vertical_bias_soft_prior,
+    "phase7 should enable initial static vertical bias soft prior");
+  ExpectTrue(
+    std::abs(config.initial_static_vertical_bias_sigma_mps2 - 5e-5) < 1e-12,
+    "phase7 static vertical bias sigma should load");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
@@ -330,6 +336,48 @@ void TestVerticalEnvelopeCenterPullConfigValidation() {
     threw = std::string(exception.what()).find("center deadband") != std::string::npos;
   }
   ExpectTrue(threw, "center pull deadband should be smaller than the envelope minimum half-width");
+}
+
+void TestInitialStaticVerticalBiasConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_global_acc_bias = true;
+  config.enable_vertical_acc_bias_gm_process = true;
+  config.enable_initial_static_subgraph = true;
+  config.enable_initial_static_vertical_bias_soft_prior = true;
+  config.static_alignment_duration_s = 100.0;
+  config.initial_static_vertical_bias_sigma_mps2 = 0.0;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("initial static constraint settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive static vertical bias sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_initial_static_subgraph = true;
+  config.enable_initial_static_vertical_bias_soft_prior = true;
+  config.static_alignment_duration_s = 100.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("global accelerometer bias") != std::string::npos;
+  }
+  ExpectTrue(threw, "static vertical bias soft prior should require global vertical GM bias mode");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_global_acc_bias = true;
+  config.enable_vertical_acc_bias_gm_process = true;
+  config.enable_initial_static_vertical_bias_soft_prior = true;
+  config.static_alignment_duration_s = 100.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("initial static subgraph") != std::string::npos;
+  }
+  ExpectTrue(threw, "static vertical bias soft prior should require the static subgraph");
 }
 
 void TestVerticalJumpConfigValidation() {
@@ -572,6 +620,7 @@ int main() {
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
     RunTest("TestVerticalEnvelopeCenterPullConfigValidation", TestVerticalEnvelopeCenterPullConfigValidation);
+    RunTest("TestInitialStaticVerticalBiasConfigValidation", TestInitialStaticVerticalBiasConfigValidation);
     RunTest("TestVerticalVelocityDeltaConfigValidation", TestVerticalVelocityDeltaConfigValidation);
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);
   } catch (const std::exception &exception) {
