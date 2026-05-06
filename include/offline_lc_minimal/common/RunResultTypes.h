@@ -54,6 +54,8 @@ struct RunSummary {
   std::size_t vertical_jump_bias_replaced_imu_factor_count = 0;
   std::size_t vertical_jump_bias_position_velocity_factor_count = 0;
   std::size_t vertical_jump_bias_skipped_count = 0;
+  std::size_t vertical_jump_bias_segment_count = 0;
+  std::size_t vertical_jump_bias_highfreq_inflated_factor_count = 0;
   std::size_t vertical_jump_velocity_ramp_factor_count = 0;
   std::size_t vertical_jump_position_ramp_factor_count = 0;
   std::size_t vertical_jump_velocity_height_slope_factor_count = 0;
@@ -170,6 +172,9 @@ struct RunSummary {
         << "vertical_jump_bias_position_velocity_factor_count="
         << vertical_jump_bias_position_velocity_factor_count << '\n'
         << "vertical_jump_bias_skipped_count=" << vertical_jump_bias_skipped_count << '\n'
+        << "vertical_jump_bias_segment_count=" << vertical_jump_bias_segment_count << '\n'
+        << "vertical_jump_bias_highfreq_inflated_factor_count="
+        << vertical_jump_bias_highfreq_inflated_factor_count << '\n'
         << "vertical_jump_velocity_ramp_factor_count=" << vertical_jump_velocity_ramp_factor_count << '\n'
         << "vertical_jump_position_ramp_factor_count=" << vertical_jump_position_ramp_factor_count << '\n'
         << "vertical_jump_velocity_height_slope_factor_count="

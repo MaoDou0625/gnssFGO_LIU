@@ -34,49 +34,35 @@ bool IntervalsOverlap(
   return left_start_s <= right_end_s && right_start_s <= left_end_s;
 }
 
-bool IntervalsHavePositiveOverlap(
+double PositiveOverlapDurationS(
   const double left_start_s,
   const double left_end_s,
   const double right_start_s,
   const double right_end_s) {
-  return std::min(left_end_s, right_end_s) - std::max(left_start_s, right_start_s) > kTimeEpsilonS;
+  return std::max(0.0, std::min(left_end_s, right_end_s) - std::max(left_start_s, right_start_s));
 }
 
-double SourceWindowDurationS(
-  const std::vector<BodyZSeedJumpWindowRow> &windows,
-  const std::vector<std::size_t> &window_indices) {
-  double duration_s = 0.0;
-  for (const std::size_t window_index : window_indices) {
-    if (window_index >= windows.size()) {
-      continue;
-    }
-    const auto &window = windows[window_index];
-    if (!std::isfinite(window.start_time_s) || !std::isfinite(window.end_time_s) ||
-        window.end_time_s <= window.start_time_s) {
-      continue;
-    }
-    duration_s += window.end_time_s - window.start_time_s;
+double VelocitySigmaMps(
+  const OfflineRunnerConfig &config,
+  const VerticalJumpBiasSegmentEstimate &segment,
+  const double dt_s,
+  double *highfreq_inflation_mps) {
+  double inflation_mps = 0.0;
+  if (std::isfinite(segment.highfreq_rms_mps2) &&
+      std::isfinite(dt_s) &&
+      dt_s > 0.0 &&
+      config.vertical_jump_bias_highfreq_sigma_scale > 0.0) {
+    inflation_mps =
+      config.vertical_jump_bias_highfreq_sigma_scale *
+      segment.highfreq_rms_mps2 *
+      std::sqrt(dt_s);
+    inflation_mps = std::min(inflation_mps, config.vertical_jump_bias_highfreq_sigma_max_mps);
   }
-  return duration_s;
-}
-
-double SumDetectedSignedDeltaVelocity(
-  const std::vector<BodyZSeedJumpWindowRow> &windows,
-  const std::vector<std::size_t> &window_indices) {
-  double sum = 0.0;
-  bool has_value = false;
-  for (const std::size_t window_index : window_indices) {
-    if (window_index >= windows.size()) {
-      continue;
-    }
-    const double value = windows[window_index].signed_delta_velocity_mps;
-    if (!std::isfinite(value)) {
-      continue;
-    }
-    sum += value;
-    has_value = true;
+  if (highfreq_inflation_mps != nullptr) {
+    *highfreq_inflation_mps = inflation_mps;
   }
-  return has_value ? sum : std::numeric_limits<double>::quiet_NaN();
+  const double base_sigma_mps = config.vertical_jump_bias_velocity_sigma_mps;
+  return std::sqrt(base_sigma_mps * base_sigma_mps + inflation_mps * inflation_mps);
 }
 
 }  // namespace
@@ -98,42 +84,69 @@ void VerticalJumpBiasConstraintBuilder::Build() const {
   }
 
   const std::vector<Span> spans = BuildMergedSpans();
-  request_.diagnostics->reserve(request_.diagnostics->size() + spans.size());
-  const auto prior_noise = gtsam::noiseModel::Isotropic::Sigma(
-    1,
-    request_.config->vertical_jump_bias_prior_sigma_mps2);
-  const auto velocity_noise = gtsam::noiseModel::Isotropic::Sigma(
-    1,
-    request_.config->vertical_jump_bias_velocity_sigma_mps);
+  const std::vector<VerticalJumpBiasSpanInput> segmenter_inputs = BuildSegmenterInputs(spans);
+  const std::vector<VerticalJumpBiasSegmentEstimate> segments = EstimateVerticalJumpBiasSegments(
+    VerticalJumpBiasSegmenterRequest{
+      request_.config,
+      request_.jump_windows,
+      request_.body_z_diagnostics,
+      &segmenter_inputs});
+  request_.diagnostics->reserve(request_.diagnostics->size() + segments.size());
   const auto position_velocity_noise = gtsam::noiseModel::Isotropic::Sigma(
     1,
     request_.config->vertical_jump_bias_position_velocity_sigma_m);
 
-  for (const auto &span : spans) {
+  for (const auto &segment : segments) {
     VerticalJumpBiasDiagnosticRow row;
-    row.span_index = span.span_index;
-    row.source_window_index = span.source_window_indices.empty() ? 0U : span.source_window_indices.front();
-    row.source_window_count = span.source_window_indices.size();
-    row.start_time_s = span.start_time_s;
-    row.end_time_s = span.end_time_s;
-    row.start_state_index = span.state_indices.empty() ? 0U : span.state_indices.front();
-    row.end_state_index = span.state_indices.empty() ? 0U : span.state_indices.back();
-    row.source_window_duration_s = SourceWindowDurationS(*request_.jump_windows, span.source_window_indices);
-    row.detected_signed_delta_velocity_mps =
-      SumDetectedSignedDeltaVelocity(*request_.jump_windows, span.source_window_indices);
+    row.span_index = segment.span_index;
+    row.segment_index = segment.segment_index;
+    row.segment_count = segment.segment_count;
+    row.bias_key_index = segment.bias_key_index;
+    row.source_window_index = segment.source_window_index;
+    row.source_window_count = segment.source_window_count;
+    row.start_time_s = segment.start_time_s;
+    row.end_time_s = segment.end_time_s;
+    row.source_window_duration_s = segment.source_window_duration_s;
+    row.detected_signed_delta_velocity_mps = segment.detected_signed_delta_velocity_mps;
+    row.detected_bias_mps2 = segment.detected_bias_mps2;
+    row.used_segmented_estimate = segment.used_segmented_estimate;
+    row.highfreq_rms_mps2 = segment.highfreq_rms_mps2;
+    row.highfreq_p95_abs_mps2 = segment.highfreq_p95_abs_mps2;
     row.prior_sigma_mps2 = request_.config->vertical_jump_bias_prior_sigma_mps2;
-    row.velocity_sigma_mps = request_.config->vertical_jump_bias_velocity_sigma_mps;
+    row.base_velocity_sigma_mps = request_.config->vertical_jump_bias_velocity_sigma_mps;
+    row.velocity_sigma_mps = row.base_velocity_sigma_mps;
     row.position_velocity_sigma_m = request_.config->vertical_jump_bias_position_velocity_sigma_m;
+    const std::vector<std::size_t> segment_state_indices =
+      StateIndicesInWindow(row.start_time_s, row.end_time_s);
+    if (!segment_state_indices.empty()) {
+      row.start_state_index = segment_state_indices.front();
+      row.end_state_index = segment_state_indices.back();
+    } else {
+      bool found_interval_bounds = false;
+      for (const auto &interval : *request_.imu_intervals) {
+        if (PositiveOverlapDurationS(
+              interval.start_time_s,
+              interval.end_time_s,
+              row.start_time_s,
+              row.end_time_s) <= kTimeEpsilonS) {
+          continue;
+        }
+        if (!found_interval_bounds) {
+          row.start_state_index = interval.state_index_i;
+          found_interval_bounds = true;
+        }
+        row.end_state_index = interval.state_index_j;
+      }
+    }
 
-    if (row.source_window_duration_s <= 0.0 || !std::isfinite(row.detected_signed_delta_velocity_mps)) {
+    if (row.source_window_duration_s <= 0.0 || !std::isfinite(row.detected_bias_mps2)) {
       row.skip_reason = "MISSING_DETECTED_BIAS";
       ++request_.run_summary->vertical_jump_bias_skipped_count;
       request_.diagnostics->push_back(row);
       continue;
     }
-    row.detected_bias_mps2 = row.detected_signed_delta_velocity_mps / row.source_window_duration_s;
 
-    const std::vector<MatchedInterval> matched_intervals = FindMatchedIntervals(span);
+    const std::vector<MatchedInterval> matched_intervals = FindMatchedIntervals(segment, segments);
     if (matched_intervals.empty()) {
       row.skip_reason = "MISSING_IMU_INTERVALS";
       ++request_.run_summary->vertical_jump_bias_skipped_count;
@@ -161,17 +174,34 @@ void VerticalJumpBiasConstraintBuilder::Build() const {
       continue;
     }
 
-    const gtsam::Key jump_bias_key = JumpBiasKey(span.span_index);
+    const gtsam::Key jump_bias_key = JumpBiasKey(segment.bias_key_index);
+    const auto prior_noise = gtsam::noiseModel::Isotropic::Sigma(
+      1,
+      request_.config->vertical_jump_bias_prior_sigma_mps2);
     if (!request_.initial_values->exists(jump_bias_key)) {
       request_.initial_values->insert(jump_bias_key, row.detected_bias_mps2);
     }
     request_.graph->add(gtsam::PriorFactor<double>(jump_bias_key, row.detected_bias_mps2, prior_noise));
     ++request_.run_summary->vertical_jump_bias_prior_factor_count;
+    ++request_.run_summary->vertical_jump_bias_segment_count;
 
     for (const auto &matched_interval : matched_intervals) {
       const auto &interval = *matched_interval.imu_interval;
       const auto &record = *matched_interval.propagation_record;
       const double dt_s = record.end_time_s - record.start_time_s;
+      double highfreq_inflation_mps = 0.0;
+      const double velocity_sigma_mps = VelocitySigmaMps(
+        *request_.config,
+        segment,
+        dt_s,
+        &highfreq_inflation_mps);
+      const auto velocity_noise = gtsam::noiseModel::Isotropic::Sigma(1, velocity_sigma_mps);
+      row.highfreq_sigma_inflation_mps =
+        std::max(row.highfreq_sigma_inflation_mps, highfreq_inflation_mps);
+      row.velocity_sigma_mps = std::max(row.velocity_sigma_mps, velocity_sigma_mps);
+      if (highfreq_inflation_mps > kTimeEpsilonS) {
+        ++request_.run_summary->vertical_jump_bias_highfreq_inflated_factor_count;
+      }
 
       if (interval.graph_factor_index < request_.graph->size()) {
         request_.graph->replace(
@@ -260,6 +290,21 @@ VerticalJumpBiasConstraintBuilder::BuildMergedSpans() const {
   return merged_spans;
 }
 
+std::vector<VerticalJumpBiasSpanInput> VerticalJumpBiasConstraintBuilder::BuildSegmenterInputs(
+  const std::vector<Span> &spans) const {
+  std::vector<VerticalJumpBiasSpanInput> inputs;
+  inputs.reserve(spans.size());
+  for (const auto &span : spans) {
+    VerticalJumpBiasSpanInput input;
+    input.span_index = span.span_index;
+    input.start_time_s = span.start_time_s;
+    input.end_time_s = span.end_time_s;
+    input.source_window_indices = span.source_window_indices;
+    inputs.push_back(std::move(input));
+  }
+  return inputs;
+}
+
 std::vector<std::size_t> VerticalJumpBiasConstraintBuilder::StateIndicesInWindow(
   const double start_time_s,
   const double end_time_s) const {
@@ -274,14 +319,38 @@ std::vector<std::size_t> VerticalJumpBiasConstraintBuilder::StateIndicesInWindow
 }
 
 std::vector<VerticalJumpBiasConstraintBuilder::MatchedInterval>
-VerticalJumpBiasConstraintBuilder::FindMatchedIntervals(const Span &span) const {
+VerticalJumpBiasConstraintBuilder::FindMatchedIntervals(
+  const VerticalJumpBiasSegmentEstimate &segment,
+  const std::vector<VerticalJumpBiasSegmentEstimate> &all_segments) const {
   std::vector<MatchedInterval> matched_intervals;
   for (const auto &interval : *request_.imu_intervals) {
-    if (!IntervalsHavePositiveOverlap(
-          interval.start_time_s,
-          interval.end_time_s,
-          span.start_time_s,
-          span.end_time_s)) {
+    const double overlap_s = PositiveOverlapDurationS(
+      interval.start_time_s,
+      interval.end_time_s,
+      segment.start_time_s,
+      segment.end_time_s);
+    if (overlap_s <= kTimeEpsilonS) {
+      continue;
+    }
+    bool assigned_to_another_segment = false;
+    for (const auto &other_segment : all_segments) {
+      if (other_segment.bias_key_index == segment.bias_key_index ||
+          other_segment.span_index != segment.span_index) {
+        continue;
+      }
+      const double other_overlap_s = PositiveOverlapDurationS(
+        interval.start_time_s,
+        interval.end_time_s,
+        other_segment.start_time_s,
+        other_segment.end_time_s);
+      if (other_overlap_s > overlap_s + kTimeEpsilonS ||
+          (std::abs(other_overlap_s - overlap_s) <= kTimeEpsilonS &&
+           other_segment.bias_key_index < segment.bias_key_index)) {
+        assigned_to_another_segment = true;
+        break;
+      }
+    }
+    if (assigned_to_another_segment) {
       continue;
     }
     const auto *record = FindPropagationRecord(interval.state_index_i, interval.state_index_j);
@@ -316,7 +385,7 @@ void PopulateVerticalJumpBiasDiagnostics(
     const double end_vz_mps =
       optimized_values.at<gtsam::Vector3>(symbol::V(row.end_state_index)).z();
     row.optimized_delta_vz_mps = end_vz_mps - start_vz_mps;
-    row.estimated_bias_mps2 = optimized_values.at<double>(JumpBiasKey(row.span_index));
+    row.estimated_bias_mps2 = optimized_values.at<double>(JumpBiasKey(row.bias_key_index));
     row.corrected_delta_vz_mps = row.imu_delta_vz_mps - row.estimated_bias_mps2 * row.factor_duration_s;
     row.residual_mps = row.optimized_delta_vz_mps - row.corrected_delta_vz_mps;
   }

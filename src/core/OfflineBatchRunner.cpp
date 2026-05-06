@@ -877,6 +877,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     vertical_jump_bias_request.config = &config_;
     vertical_jump_bias_request.state_timestamps = &state_timestamps;
     vertical_jump_bias_request.jump_windows = &run_result.body_z_seed_jump_windows;
+    vertical_jump_bias_request.body_z_diagnostics = &run_result.seed_body_z_acc_diagnostics;
     vertical_jump_bias_request.imu_intervals = &vertical_jump_imu_interval_records;
     vertical_jump_bias_request.propagation_records = &vertical_velocity_delta_records;
     vertical_jump_bias_request.graph = &graph_with_gnss;

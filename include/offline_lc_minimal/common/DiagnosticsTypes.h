@@ -225,6 +225,9 @@ struct VerticalJumpImpulseDiagnosticRow {
 
 struct VerticalJumpBiasDiagnosticRow {
   std::size_t span_index = 0;
+  std::size_t segment_index = 0;
+  std::size_t segment_count = 1;
+  std::size_t bias_key_index = 0;
   std::size_t source_window_index = 0;
   std::size_t source_window_count = 0;
   std::size_t start_state_index = 0;
@@ -241,7 +244,12 @@ struct VerticalJumpBiasDiagnosticRow {
   double imu_delta_vz_mps = 0.0;
   double detected_signed_delta_velocity_mps = std::numeric_limits<double>::quiet_NaN();
   double detected_bias_mps2 = std::numeric_limits<double>::quiet_NaN();
+  bool used_segmented_estimate = false;
   double prior_sigma_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double base_velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double highfreq_rms_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double highfreq_p95_abs_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double highfreq_sigma_inflation_mps = 0.0;
   double velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
   double position_velocity_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double estimated_bias_mps2 = std::numeric_limits<double>::quiet_NaN();

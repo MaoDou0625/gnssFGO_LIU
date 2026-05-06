@@ -293,6 +293,33 @@ void TestPhase9JumpBiasConfigLoads() {
   ExpectTrue(!config.enable_vertical_jump_velocity_context_mean, "phase9 should disable context mean smoothing");
 }
 
+void TestPhase10SegmentedJumpBiasConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase10_segmented_jump_bias.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase10 segmented jump-bias config should use envelope constraints");
+  ExpectTrue(config.enable_vertical_jump_bias, "phase10 should enable jump-local bias constraints");
+  ExpectTrue(config.enable_vertical_jump_segmented_bias, "phase10 should enable segmented jump bias");
+  ExpectTrue(
+    std::abs(config.vertical_jump_segmented_bias_min_segment_s - 0.30) < 1e-12,
+    "phase10 segmented min duration should load");
+  ExpectTrue(
+    config.vertical_jump_segmented_bias_max_segments == 5,
+    "phase10 segmented max segment count should load");
+  ExpectTrue(
+    std::abs(config.vertical_jump_segmented_bias_slope_merge_threshold_mps2 - 0.015) < 1e-12,
+    "phase10 segmented slope merge threshold should load");
+  ExpectTrue(
+    std::abs(config.vertical_jump_bias_highfreq_sigma_scale - 0.02) < 1e-12,
+    "phase10 high-frequency sigma scale should load");
+  ExpectTrue(
+    std::abs(config.vertical_jump_bias_highfreq_sigma_max_mps - 0.08) < 1e-12,
+    "phase10 high-frequency sigma cap should load");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -646,6 +673,69 @@ void TestVerticalJumpConfigValidation() {
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_segmented_bias = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("requires enable_vertical_jump_bias") != std::string::npos;
+  }
+  ExpectTrue(threw, "segmented jump bias should require jump-bias mode");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  config.enable_vertical_jump_segmented_bias = true;
+  config.vertical_jump_segmented_bias_min_segment_s = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive segmented jump-bias minimum duration should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  config.enable_vertical_jump_segmented_bias = true;
+  config.vertical_jump_segmented_bias_max_segments = 0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive segmented jump-bias max segments should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  config.enable_vertical_jump_segmented_bias = true;
+  config.vertical_jump_bias_highfreq_sigma_scale = -1.0e-3;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "negative high-frequency jump-bias sigma scale should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  config.enable_vertical_jump_segmented_bias = true;
+  config.vertical_jump_bias_highfreq_sigma_max_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive high-frequency jump-bias sigma cap should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
   config.enable_vertical_jump_masked_imu = true;
   config.vertical_jump_masked_imu_padding_s = 0.0;
   threw = false;
@@ -851,6 +941,7 @@ int main() {
     RunTest("TestPhase7TightDvzConfigLoads", TestPhase7TightDvzConfigLoads);
     RunTest("TestPhase8ImpulseConfigLoads", TestPhase8ImpulseConfigLoads);
     RunTest("TestPhase9JumpBiasConfigLoads", TestPhase9JumpBiasConfigLoads);
+    RunTest("TestPhase10SegmentedJumpBiasConfigLoads", TestPhase10SegmentedJumpBiasConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

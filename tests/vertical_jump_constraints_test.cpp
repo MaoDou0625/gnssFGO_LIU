@@ -72,6 +72,18 @@ offline_lc_minimal::BodyZSeedJumpWindowRow MakeJumpWindow(const double start_tim
   return window;
 }
 
+offline_lc_minimal::BodyZSeedImuDiagnosticRow MakeBodyZDiagnostic(
+  const double time_s,
+  const double velocity_mps,
+  const double acceleration_mps2) {
+  offline_lc_minimal::BodyZSeedImuDiagnosticRow row;
+  row.time_s = time_s;
+  row.integrated_body_z_velocity_mps = velocity_mps;
+  row.integrated_body_z_velocity_0p2s_smooth_mps = velocity_mps;
+  row.body_z_acc_mps2 = acceleration_mps2;
+  return row;
+}
+
 void TestVerticalMaskedCombinedImuDropsZAndVz() {
   const auto pim = MakePreintegratedMeasurements();
   const gtsam::imuBias::ConstantBias bias;
@@ -394,15 +406,15 @@ void TestVerticalJumpBiasBuilderSkipsMissingDetectedBias() {
   config.enable_vertical_jump_bias = true;
   const auto pim = MakePreintegratedMeasurements();
   gtsam::NonlinearFactorGraph graph;
-  graph.add(gtsam::CombinedImuFactor(symbol::X(0), symbol::V(0), symbol::X(1), symbol::V(1), symbol::B(0), symbol::B(1), pim));
-  const std::vector<double> state_timestamps{0.0, 0.5};
+  graph.add(gtsam::CombinedImuFactor(symbol::X(2), symbol::V(2), symbol::X(3), symbol::V(3), symbol::B(2), symbol::B(3), pim));
+  const std::vector<double> state_timestamps{0.0, 0.5, 1.0, 1.5};
   const std::vector<offline_lc_minimal::VerticalJumpImuIntervalRecord> intervals{
-    {0, 1, 0.0, 0.5, 0, pim},
+    {2, 3, 1.0, 1.5, 0, pim},
   };
   const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> propagation_records{
-    {0, 1, 0.0, 0.5, -0.10},
+    {2, 3, 1.0, 1.5, -0.10},
   };
-  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(0.1, 0.4)};
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(1.1, 1.4)};
   gtsam::Values initial_values;
   offline_lc_minimal::RunSummary summary;
   std::vector<offline_lc_minimal::VerticalJumpBiasDiagnosticRow> diagnostics;
@@ -430,6 +442,8 @@ void TestVerticalJumpBiasBuilderSkipsMissingDetectedBias() {
     0.0,
     "missing detected bias skip count is wrong");
   ExpectTrue(diagnostics.front().skip_reason == "MISSING_DETECTED_BIAS", "missing detected bias skip reason is wrong");
+  ExpectNear(diagnostics.front().start_state_index, 2.0, 0.0, "skipped diagnostic start state is wrong");
+  ExpectNear(diagnostics.front().end_state_index, 3.0, 0.0, "skipped diagnostic end state is wrong");
 }
 
 void TestVerticalJumpBiasBuilderIgnoresBoundaryTouchIntervals() {
@@ -494,6 +508,139 @@ void TestVerticalJumpBiasBuilderIgnoresBoundaryTouchIntervals() {
     "post-boundary interval should keep normal CombinedImuFactor");
   ExpectNear(diagnostics.front().start_state_index, 1.0, 0.0, "diagnostic start state should use positive overlap");
   ExpectNear(diagnostics.front().end_state_index, 2.0, 0.0, "diagnostic end state should use positive overlap");
+}
+
+void TestVerticalJumpBiasBuilderSegmentedBiasUsesBodyZDiagnostics() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  config.enable_vertical_jump_segmented_bias = true;
+  config.vertical_jump_bias_padding_s = 0.0;
+  config.vertical_jump_segmented_bias_min_segment_s = 0.25;
+  config.vertical_jump_segmented_bias_max_segments = 3;
+  config.vertical_jump_segmented_bias_slope_merge_threshold_mps2 = 0.001;
+  config.vertical_jump_bias_highfreq_sigma_scale = 0.02;
+  config.vertical_jump_bias_highfreq_sigma_max_mps = 0.08;
+  const auto pim = MakePreintegratedMeasurements();
+
+  gtsam::NonlinearFactorGraph graph;
+  graph.add(gtsam::CombinedImuFactor(symbol::X(0), symbol::V(0), symbol::X(1), symbol::V(1), symbol::B(0), symbol::B(1), pim));
+  graph.add(gtsam::CombinedImuFactor(symbol::X(1), symbol::V(1), symbol::X(2), symbol::V(2), symbol::B(1), symbol::B(2), pim));
+  graph.add(gtsam::CombinedImuFactor(symbol::X(2), symbol::V(2), symbol::X(3), symbol::V(3), symbol::B(2), symbol::B(3), pim));
+  graph.add(gtsam::CombinedImuFactor(symbol::X(3), symbol::V(3), symbol::X(4), symbol::V(4), symbol::B(3), symbol::B(4), pim));
+
+  const std::vector<double> state_timestamps{0.0, 0.25, 0.5, 0.75, 1.0};
+  const std::vector<offline_lc_minimal::VerticalJumpImuIntervalRecord> intervals{
+    {0, 1, 0.0, 0.25, 0, pim},
+    {1, 2, 0.25, 0.5, 1, pim},
+    {2, 3, 0.5, 0.75, 2, pim},
+    {3, 4, 0.75, 1.0, 3, pim},
+  };
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> propagation_records{
+    {0, 1, 0.0, 0.25, 0.025},
+    {1, 2, 0.25, 0.5, 0.025},
+    {2, 3, 0.5, 0.75, -0.125},
+    {3, 4, 0.75, 1.0, -0.125},
+  };
+  std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(0.0, 1.0)};
+  windows.front().signed_delta_velocity_mps = -0.20;
+  const std::vector<offline_lc_minimal::BodyZSeedImuDiagnosticRow> body_z_diagnostics{
+    MakeBodyZDiagnostic(0.0, 0.0, 0.50),
+    MakeBodyZDiagnostic(0.25, 0.025, -0.20),
+    MakeBodyZDiagnostic(0.5, 0.050, 0.30),
+    MakeBodyZDiagnostic(0.75, -0.075, -1.20),
+    MakeBodyZDiagnostic(1.0, -0.200, 0.20),
+  };
+  gtsam::Values initial_values;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpBiasDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalJumpBiasConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.body_z_diagnostics = &body_z_diagnostics;
+  request.imu_intervals = &intervals;
+  request.propagation_records = &propagation_records;
+  request.graph = &graph;
+  request.initial_values = &initial_values;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalJumpBiasConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_prior_factor_count),
+    2.0,
+    0.0,
+    "segmented jump-bias should add one prior per segment");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_segment_count),
+    2.0,
+    0.0,
+    "segmented jump-bias segment count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_velocity_factor_count),
+    4.0,
+    0.0,
+    "segmented jump-bias should assign each interval to one segment");
+  ExpectNear(static_cast<double>(diagnostics.size()), 2.0, 0.0, "segmented diagnostics should be per segment");
+  ExpectTrue(diagnostics[0].used_segmented_estimate, "first segment should use body-z diagnostics");
+  ExpectTrue(diagnostics[1].used_segmented_estimate, "second segment should use body-z diagnostics");
+  ExpectTrue(initial_values.exists(gtsam::Symbol('c', 0)), "first segment bias key should exist");
+  ExpectTrue(initial_values.exists(gtsam::Symbol('c', 1)), "second segment bias key should exist");
+  ExpectNear(diagnostics[0].detected_bias_mps2, 0.10, 1e-12, "first segment slope is wrong");
+  ExpectNear(diagnostics[1].detected_bias_mps2, -0.50, 1e-12, "second segment slope is wrong");
+  ExpectTrue(
+    diagnostics[0].velocity_sigma_mps > diagnostics[0].base_velocity_sigma_mps,
+    "high-frequency residual should inflate velocity sigma");
+  ExpectTrue(
+    summary.vertical_jump_bias_highfreq_inflated_factor_count > 0U,
+    "high-frequency inflated factor count should be positive");
+}
+
+void TestVerticalJumpBiasBuilderSegmentedFallsBackWithoutDiagnostics() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  config.enable_vertical_jump_segmented_bias = true;
+  config.vertical_jump_bias_padding_s = 0.0;
+  const auto pim = MakePreintegratedMeasurements();
+  gtsam::NonlinearFactorGraph graph;
+  graph.add(gtsam::CombinedImuFactor(symbol::X(0), symbol::V(0), symbol::X(1), symbol::V(1), symbol::B(0), symbol::B(1), pim));
+
+  const std::vector<double> state_timestamps{0.0, 0.5};
+  const std::vector<offline_lc_minimal::VerticalJumpImuIntervalRecord> intervals{
+    {0, 1, 0.0, 0.5, 0, pim},
+  };
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> propagation_records{
+    {0, 1, 0.0, 0.5, -0.10},
+  };
+  std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(0.0, 0.5)};
+  windows.front().signed_delta_velocity_mps = -0.10;
+  gtsam::Values initial_values;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpBiasDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalJumpBiasConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.imu_intervals = &intervals;
+  request.propagation_records = &propagation_records;
+  request.graph = &graph;
+  request.initial_values = &initial_values;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalJumpBiasConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(diagnostics.size()), 1.0, 0.0, "fallback should keep one diagnostic row");
+  ExpectTrue(!diagnostics.front().used_segmented_estimate, "missing diagnostics should fall back to window-level bias");
+  ExpectNear(diagnostics.front().detected_bias_mps2, -0.20, 1e-12, "fallback bias is wrong");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_prior_factor_count),
+    1.0,
+    0.0,
+    "fallback should add one prior");
 }
 
 void TestVerticalJumpImpulseBuilderAddsFactorAndReplacesImu() {
@@ -1533,6 +1680,12 @@ int main() {
     RunTest(
       "TestVerticalJumpBiasBuilderIgnoresBoundaryTouchIntervals",
       TestVerticalJumpBiasBuilderIgnoresBoundaryTouchIntervals);
+    RunTest(
+      "TestVerticalJumpBiasBuilderSegmentedBiasUsesBodyZDiagnostics",
+      TestVerticalJumpBiasBuilderSegmentedBiasUsesBodyZDiagnostics);
+    RunTest(
+      "TestVerticalJumpBiasBuilderSegmentedFallsBackWithoutDiagnostics",
+      TestVerticalJumpBiasBuilderSegmentedFallsBackWithoutDiagnostics);
     RunTest(
       "TestVerticalJumpImpulseBuilderAddsFactorAndReplacesImu",
       TestVerticalJumpImpulseBuilderAddsFactorAndReplacesImu);

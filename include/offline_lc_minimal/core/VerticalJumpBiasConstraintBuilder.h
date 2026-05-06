@@ -9,6 +9,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Types.h"
+#include "offline_lc_minimal/core/VerticalJumpBiasSegmenter.h"
 #include "offline_lc_minimal/core/VerticalJumpImuMasker.h"
 #include "offline_lc_minimal/core/VerticalMotionConstraintBuilder.h"
 
@@ -18,6 +19,7 @@ struct VerticalJumpBiasConstraintBuildRequest {
   const OfflineRunnerConfig *config = nullptr;
   const std::vector<double> *state_timestamps = nullptr;
   const std::vector<BodyZSeedJumpWindowRow> *jump_windows = nullptr;
+  const std::vector<BodyZSeedImuDiagnosticRow> *body_z_diagnostics = nullptr;
   const std::vector<VerticalJumpImuIntervalRecord> *imu_intervals = nullptr;
   const std::vector<VerticalVelocityDeltaPropagationRecord> *propagation_records = nullptr;
   gtsam::NonlinearFactorGraph *graph = nullptr;
@@ -47,8 +49,12 @@ class VerticalJumpBiasConstraintBuilder {
   };
 
   [[nodiscard]] std::vector<Span> BuildMergedSpans() const;
+  [[nodiscard]] std::vector<VerticalJumpBiasSpanInput> BuildSegmenterInputs(
+    const std::vector<Span> &spans) const;
   [[nodiscard]] std::vector<std::size_t> StateIndicesInWindow(double start_time_s, double end_time_s) const;
-  [[nodiscard]] std::vector<MatchedInterval> FindMatchedIntervals(const Span &span) const;
+  [[nodiscard]] std::vector<MatchedInterval> FindMatchedIntervals(
+    const VerticalJumpBiasSegmentEstimate &segment,
+    const std::vector<VerticalJumpBiasSegmentEstimate> &all_segments) const;
   [[nodiscard]] const VerticalVelocityDeltaPropagationRecord *FindPropagationRecord(
     std::size_t state_i,
     std::size_t state_j) const;

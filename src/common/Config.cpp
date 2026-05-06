@@ -265,6 +265,7 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if ((config.enable_vertical_jump_masked_imu ||
        config.enable_vertical_jump_impulse ||
        config.enable_vertical_jump_bias ||
+       config.enable_vertical_jump_segmented_bias ||
        config.enable_vertical_jump_velocity_ramp_smoothing ||
        config.enable_vertical_jump_position_ramp_smoothing ||
        config.enable_vertical_jump_velocity_continuity ||
@@ -291,6 +292,9 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       (config.enable_vertical_jump_impulse || config.enable_vertical_jump_masked_imu)) {
     throw std::runtime_error("enable_vertical_jump_bias is incompatible with impulse or masked IMU modes");
   }
+  if (config.enable_vertical_jump_segmented_bias && !config.enable_vertical_jump_bias) {
+    throw std::runtime_error("enable_vertical_jump_segmented_bias requires enable_vertical_jump_bias");
+  }
   if (config.vertical_jump_masked_imu_padding_s <= 0.0 ||
       !std::isfinite(config.vertical_jump_impulse_prior_sigma_mps) ||
       config.vertical_jump_impulse_prior_sigma_mps <= 0.0 ||
@@ -306,6 +310,15 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_jump_bias_velocity_sigma_mps <= 0.0 ||
       !std::isfinite(config.vertical_jump_bias_position_velocity_sigma_m) ||
       config.vertical_jump_bias_position_velocity_sigma_m <= 0.0 ||
+      !std::isfinite(config.vertical_jump_segmented_bias_min_segment_s) ||
+      config.vertical_jump_segmented_bias_min_segment_s <= 0.0 ||
+      config.vertical_jump_segmented_bias_max_segments <= 0 ||
+      !std::isfinite(config.vertical_jump_segmented_bias_slope_merge_threshold_mps2) ||
+      config.vertical_jump_segmented_bias_slope_merge_threshold_mps2 < 0.0 ||
+      !std::isfinite(config.vertical_jump_bias_highfreq_sigma_scale) ||
+      config.vertical_jump_bias_highfreq_sigma_scale < 0.0 ||
+      !std::isfinite(config.vertical_jump_bias_highfreq_sigma_max_mps) ||
+      config.vertical_jump_bias_highfreq_sigma_max_mps <= 0.0 ||
       config.vertical_jump_velocity_ramp_sigma_mps <= 0.0 ||
       config.vertical_jump_position_ramp_sigma_m <= 0.0 ||
       config.vertical_jump_velocity_continuity_sigma_mps <= 0.0 ||
@@ -592,6 +605,18 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_jump_bias_velocity_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_bias_position_velocity_sigma_m") {
     config.vertical_jump_bias_position_velocity_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_jump_segmented_bias") {
+    config.enable_vertical_jump_segmented_bias = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_jump_segmented_bias_min_segment_s") {
+    config.vertical_jump_segmented_bias_min_segment_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_segmented_bias_max_segments") {
+    config.vertical_jump_segmented_bias_max_segments = ParseInt(normalized_value);
+  } else if (normalized_key == "vertical_jump_segmented_bias_slope_merge_threshold_mps2") {
+    config.vertical_jump_segmented_bias_slope_merge_threshold_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_bias_highfreq_sigma_scale") {
+    config.vertical_jump_bias_highfreq_sigma_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_bias_highfreq_sigma_max_mps") {
+    config.vertical_jump_bias_highfreq_sigma_max_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_jump_velocity_ramp_smoothing") {
     config.enable_vertical_jump_velocity_ramp_smoothing = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_jump_velocity_ramp_sigma_mps") {
@@ -849,6 +874,18 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "vertical_jump_bias_velocity_sigma_mps=" << config.vertical_jump_bias_velocity_sigma_mps << '\n'
     << "vertical_jump_bias_position_velocity_sigma_m="
     << config.vertical_jump_bias_position_velocity_sigma_m << '\n'
+    << "enable_vertical_jump_segmented_bias="
+    << (config.enable_vertical_jump_segmented_bias ? "true" : "false") << '\n'
+    << "vertical_jump_segmented_bias_min_segment_s="
+    << config.vertical_jump_segmented_bias_min_segment_s << '\n'
+    << "vertical_jump_segmented_bias_max_segments="
+    << config.vertical_jump_segmented_bias_max_segments << '\n'
+    << "vertical_jump_segmented_bias_slope_merge_threshold_mps2="
+    << config.vertical_jump_segmented_bias_slope_merge_threshold_mps2 << '\n'
+    << "vertical_jump_bias_highfreq_sigma_scale="
+    << config.vertical_jump_bias_highfreq_sigma_scale << '\n'
+    << "vertical_jump_bias_highfreq_sigma_max_mps="
+    << config.vertical_jump_bias_highfreq_sigma_max_mps << '\n'
     << "enable_vertical_jump_velocity_ramp_smoothing="
     << (config.enable_vertical_jump_velocity_ramp_smoothing ? "true" : "false") << '\n'
     << "vertical_jump_velocity_ramp_sigma_mps=" << config.vertical_jump_velocity_ramp_sigma_mps << '\n'
