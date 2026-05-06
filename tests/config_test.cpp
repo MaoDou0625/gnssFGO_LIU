@@ -215,6 +215,24 @@ void TestPhase7SmokeConfigLoads() {
     "phase7 static vertical bias sigma should load");
 }
 
+void TestPhase7TightDvzConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase7_tight_dvz.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase7 tight-dvz config should use envelope constraints");
+  ExpectTrue(config.enable_vertical_velocity_delta_constraint, "phase7 tight-dvz should keep velocity delta enabled");
+  ExpectTrue(config.enable_vertical_envelope_center_pull, "phase7 tight-dvz should keep center pull enabled");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_acc_sigma_mps2 - 0.10) < 1e-12,
+    "phase7 tight-dvz should tighten velocity delta acceleration sigma");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_min_sigma_mps - 0.003) < 1e-12,
+    "phase7 tight-dvz should tighten velocity delta minimum sigma");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -616,6 +634,7 @@ int main() {
     RunTest("TestPhase5SmokeConfigLoads", TestPhase5SmokeConfigLoads);
     RunTest("TestPhase6SmokeConfigLoads", TestPhase6SmokeConfigLoads);
     RunTest("TestPhase7SmokeConfigLoads", TestPhase7SmokeConfigLoads);
+    RunTest("TestPhase7TightDvzConfigLoads", TestPhase7TightDvzConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
