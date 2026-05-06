@@ -45,6 +45,10 @@ struct RunSummary {
   std::size_t vertical_velocity_delta_target_clamped_count = 0;
   std::size_t vertical_jump_combined_imu_factor_count = 0;
   std::size_t vertical_jump_masked_imu_factor_count = 0;
+  std::size_t vertical_jump_impulse_factor_count = 0;
+  std::size_t vertical_jump_impulse_prior_factor_count = 0;
+  std::size_t vertical_jump_impulse_replaced_imu_factor_count = 0;
+  std::size_t vertical_jump_impulse_skipped_count = 0;
   std::size_t vertical_jump_velocity_ramp_factor_count = 0;
   std::size_t vertical_jump_position_ramp_factor_count = 0;
   std::size_t vertical_jump_velocity_height_slope_factor_count = 0;
@@ -149,6 +153,11 @@ struct RunSummary {
         << vertical_velocity_delta_target_clamped_count << '\n'
         << "vertical_jump_combined_imu_factor_count=" << vertical_jump_combined_imu_factor_count << '\n'
         << "vertical_jump_masked_imu_factor_count=" << vertical_jump_masked_imu_factor_count << '\n'
+        << "vertical_jump_impulse_factor_count=" << vertical_jump_impulse_factor_count << '\n'
+        << "vertical_jump_impulse_prior_factor_count=" << vertical_jump_impulse_prior_factor_count << '\n'
+        << "vertical_jump_impulse_replaced_imu_factor_count="
+        << vertical_jump_impulse_replaced_imu_factor_count << '\n'
+        << "vertical_jump_impulse_skipped_count=" << vertical_jump_impulse_skipped_count << '\n'
         << "vertical_jump_velocity_ramp_factor_count=" << vertical_jump_velocity_ramp_factor_count << '\n'
         << "vertical_jump_position_ramp_factor_count=" << vertical_jump_position_ramp_factor_count << '\n'
         << "vertical_jump_velocity_height_slope_factor_count="
@@ -246,6 +255,7 @@ struct OfflineRunResult {
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;
+  std::vector<VerticalJumpImpulseDiagnosticRow> vertical_jump_impulse_diagnostics;
   std::vector<VerticalJumpVelocityRampDiagnosticRow> vertical_jump_velocity_ramp_diagnostics;
   std::vector<VerticalJumpContinuityDiagnosticRow> vertical_jump_continuity_diagnostics;
   std::vector<VerticalStateCorrectionRow> vertical_state_corrections;

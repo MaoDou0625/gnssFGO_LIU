@@ -263,6 +263,7 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
     throw std::runtime_error("vertical velocity delta settings must be positive");
   }
   if ((config.enable_vertical_jump_masked_imu ||
+       config.enable_vertical_jump_impulse ||
        config.enable_vertical_jump_velocity_ramp_smoothing ||
        config.enable_vertical_jump_position_ramp_smoothing ||
        config.enable_vertical_jump_velocity_continuity ||
@@ -276,7 +277,19 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (config.enable_vertical_jump_masked_imu && config.enable_segment_error_feedback) {
     throw std::runtime_error("enable_vertical_jump_masked_imu requires CombinedImuFactor mode");
   }
+  if (config.enable_vertical_jump_impulse && config.enable_segment_error_feedback) {
+    throw std::runtime_error("enable_vertical_jump_impulse requires CombinedImuFactor mode");
+  }
+  if (config.enable_vertical_jump_impulse && config.enable_vertical_jump_masked_imu) {
+    throw std::runtime_error("enable_vertical_jump_impulse is incompatible with enable_vertical_jump_masked_imu");
+  }
   if (config.vertical_jump_masked_imu_padding_s <= 0.0 ||
+      !std::isfinite(config.vertical_jump_impulse_prior_sigma_mps) ||
+      config.vertical_jump_impulse_prior_sigma_mps <= 0.0 ||
+      !std::isfinite(config.vertical_jump_impulse_velocity_sigma_mps) ||
+      config.vertical_jump_impulse_velocity_sigma_mps <= 0.0 ||
+      !std::isfinite(config.vertical_jump_impulse_position_velocity_sigma_m) ||
+      config.vertical_jump_impulse_position_velocity_sigma_m <= 0.0 ||
       config.vertical_jump_velocity_ramp_sigma_mps <= 0.0 ||
       config.vertical_jump_position_ramp_sigma_m <= 0.0 ||
       config.vertical_jump_velocity_continuity_sigma_mps <= 0.0 ||
@@ -545,6 +558,14 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_vertical_jump_masked_imu = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_jump_masked_imu_padding_s") {
     config.vertical_jump_masked_imu_padding_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_jump_impulse") {
+    config.enable_vertical_jump_impulse = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_jump_impulse_prior_sigma_mps") {
+    config.vertical_jump_impulse_prior_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_impulse_velocity_sigma_mps") {
+    config.vertical_jump_impulse_velocity_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_impulse_position_velocity_sigma_m") {
+    config.vertical_jump_impulse_position_velocity_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_jump_velocity_ramp_smoothing") {
     config.enable_vertical_jump_velocity_ramp_smoothing = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_jump_velocity_ramp_sigma_mps") {
@@ -791,6 +812,11 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.vertical_velocity_delta_target_acc_limit_mps2 << '\n'
     << "enable_vertical_jump_masked_imu=" << (config.enable_vertical_jump_masked_imu ? "true" : "false") << '\n'
     << "vertical_jump_masked_imu_padding_s=" << config.vertical_jump_masked_imu_padding_s << '\n'
+    << "enable_vertical_jump_impulse=" << (config.enable_vertical_jump_impulse ? "true" : "false") << '\n'
+    << "vertical_jump_impulse_prior_sigma_mps=" << config.vertical_jump_impulse_prior_sigma_mps << '\n'
+    << "vertical_jump_impulse_velocity_sigma_mps=" << config.vertical_jump_impulse_velocity_sigma_mps << '\n'
+    << "vertical_jump_impulse_position_velocity_sigma_m="
+    << config.vertical_jump_impulse_position_velocity_sigma_m << '\n'
     << "enable_vertical_jump_velocity_ramp_smoothing="
     << (config.enable_vertical_jump_velocity_ramp_smoothing ? "true" : "false") << '\n'
     << "vertical_jump_velocity_ramp_sigma_mps=" << config.vertical_jump_velocity_ramp_sigma_mps << '\n'

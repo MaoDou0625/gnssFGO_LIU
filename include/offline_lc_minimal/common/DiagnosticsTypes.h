@@ -197,6 +197,32 @@ struct VerticalJumpMaskedImuDiagnosticRow {
   bool masked_vz = false;
 };
 
+struct VerticalJumpImpulseDiagnosticRow {
+  std::size_t span_index = 0;
+  std::size_t source_window_index = 0;
+  std::size_t source_window_count = 0;
+  std::size_t start_state_index = 0;
+  std::size_t end_state_index = 0;
+  std::size_t pre_anchor_state_index = 0;
+  std::size_t post_anchor_state_index = 0;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+  std::size_t replaced_imu_factor_count = 0;
+  double imu_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double detected_delta_vz_init_mps = std::numeric_limits<double>::quiet_NaN();
+  double detected_signed_delta_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double prior_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double estimated_jump_impulse_mps = std::numeric_limits<double>::quiet_NaN();
+  double corrected_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double pre_anchor_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double post_anchor_vz_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct VerticalJumpVelocityRampDiagnosticRow {
   std::size_t window_index = 0;
   std::size_t start_state_index = 0;

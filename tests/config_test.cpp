@@ -233,6 +233,37 @@ void TestPhase7TightDvzConfigLoads() {
     "phase7 tight-dvz should tighten velocity delta minimum sigma");
 }
 
+void TestPhase8ImpulseConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase8_impulse.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase8 impulse config should use envelope constraints");
+  ExpectTrue(config.enable_vertical_velocity_delta_constraint, "phase8 should keep jump-outside dvz constraints");
+  ExpectTrue(config.enable_vertical_envelope_center_pull, "phase8 should keep center pull enabled");
+  ExpectTrue(!config.enable_vertical_jump_masked_imu, "phase8 should not enable legacy masked IMU mode");
+  ExpectTrue(config.enable_vertical_jump_impulse, "phase8 should enable jump impulse constraints");
+  ExpectTrue(
+    std::abs(config.vertical_jump_impulse_prior_sigma_mps - 0.30) < 1e-12,
+    "phase8 impulse prior sigma should load");
+  ExpectTrue(
+    std::abs(config.vertical_jump_impulse_velocity_sigma_mps - 0.03) < 1e-12,
+    "phase8 impulse velocity sigma should load");
+  ExpectTrue(
+    std::abs(config.vertical_jump_impulse_position_velocity_sigma_m - 0.02) < 1e-12,
+    "phase8 impulse position-velocity sigma should load");
+  ExpectTrue(config.enable_vertical_jump_velocity_continuity, "phase8 should keep boundary velocity continuity");
+  ExpectTrue(
+    config.enable_vertical_jump_position_velocity_consistency,
+    "phase8 should keep jump position-velocity consistency");
+  ExpectTrue(config.enable_vertical_jump_velocity_context_mean, "phase8 should keep weak context mean smoothing");
+  ExpectTrue(config.enable_vertical_jump_context_mean_continuity, "phase8 should keep weak context mean continuity");
+  ExpectTrue(config.enable_vertical_jump_velocity_ramp_smoothing, "phase8 should keep weak velocity ramp smoothing");
+  ExpectTrue(config.enable_vertical_jump_position_ramp_smoothing, "phase8 should keep weak position ramp smoothing");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -468,6 +499,41 @@ void TestVerticalJumpConfigValidation() {
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_impulse = true;
+  config.enable_segment_error_feedback = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("requires CombinedImuFactor mode") != std::string::npos;
+  }
+  ExpectTrue(threw, "vertical jump impulse should reject ImuFactor mode");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_impulse = true;
+  config.enable_vertical_jump_masked_imu = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("incompatible") != std::string::npos;
+  }
+  ExpectTrue(threw, "vertical jump impulse should be incompatible with legacy masked IMU mode");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_vertical_jump_impulse = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump constraints require enable_body_z_jump_detection") !=
+            std::string::npos;
+  }
+  ExpectTrue(threw, "vertical jump impulse should require body-z detection");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
   config.enable_vertical_jump_masked_imu = true;
   config.vertical_jump_masked_imu_padding_s = 0.0;
   threw = false;
@@ -477,6 +543,42 @@ void TestVerticalJumpConfigValidation() {
     threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive masked IMU padding should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_impulse = true;
+  config.vertical_jump_impulse_prior_sigma_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive impulse prior sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_impulse = true;
+  config.vertical_jump_impulse_velocity_sigma_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive impulse velocity sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_impulse = true;
+  config.vertical_jump_impulse_position_velocity_sigma_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive impulse position-velocity sigma should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -635,6 +737,7 @@ int main() {
     RunTest("TestPhase6SmokeConfigLoads", TestPhase6SmokeConfigLoads);
     RunTest("TestPhase7SmokeConfigLoads", TestPhase7SmokeConfigLoads);
     RunTest("TestPhase7TightDvzConfigLoads", TestPhase7TightDvzConfigLoads);
+    RunTest("TestPhase8ImpulseConfigLoads", TestPhase8ImpulseConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

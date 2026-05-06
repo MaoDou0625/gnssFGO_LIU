@@ -437,6 +437,47 @@ void WriteVerticalJumpMaskedImuDiagnosticsCsv(
   }
 }
 
+void WriteVerticalJumpImpulseDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalJumpImpulseDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "span_index,source_window_index,source_window_count,start_state,end_state,pre_anchor,post_anchor,"
+       "start_time_s,end_time_s,factor_added,skip_reason,replaced_imu_factor_count,"
+       "imu_delta_vz_mps,detected_delta_vz_init_mps,detected_signed_delta_velocity_mps,"
+       "prior_sigma_mps,velocity_sigma_mps,estimated_jump_impulse_mps,corrected_delta_vz_mps,"
+       "optimized_delta_vz_mps,residual_mps,pre_anchor_vz_mps,post_anchor_vz_mps\n";
+  for (const auto &row : rows) {
+    stream << row.span_index << ','
+           << row.source_window_index << ','
+           << row.source_window_count << ','
+           << row.start_state_index << ','
+           << row.end_state_index << ','
+           << row.pre_anchor_state_index << ','
+           << row.post_anchor_state_index << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << row.replaced_imu_factor_count << ','
+           << row.imu_delta_vz_mps << ','
+           << row.detected_delta_vz_init_mps << ','
+           << row.detected_signed_delta_velocity_mps << ','
+           << row.prior_sigma_mps << ','
+           << row.velocity_sigma_mps << ','
+           << row.estimated_jump_impulse_mps << ','
+           << row.corrected_delta_vz_mps << ','
+           << row.optimized_delta_vz_mps << ','
+           << row.residual_mps << ','
+           << row.pre_anchor_vz_mps << ','
+           << row.post_anchor_vz_mps << '\n';
+  }
+}
+
 void WriteVerticalJumpVelocityRampDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpVelocityRampDiagnosticRow> &rows) {

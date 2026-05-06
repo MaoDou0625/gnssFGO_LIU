@@ -174,9 +174,13 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
     const auto velocity_continuity_noise = gtsam::noiseModel::Isotropic::Sigma(
       1,
       request_.config->vertical_jump_velocity_continuity_sigma_mps);
+    const double boundary_position_velocity_sigma_m =
+      request_.config->enable_vertical_jump_impulse
+        ? request_.config->vertical_jump_impulse_position_velocity_sigma_m
+        : request_.config->vertical_jump_boundary_position_velocity_consistency_sigma_m;
     const auto boundary_position_velocity_consistency_noise = gtsam::noiseModel::Isotropic::Sigma(
       1,
-      request_.config->vertical_jump_boundary_position_velocity_consistency_sigma_m);
+      boundary_position_velocity_sigma_m);
     const auto add_velocity_context_mean_factors =
       [this](const std::vector<std::size_t> &context_state_indices,
              const std::vector<std::size_t> &boundary_state_indices) {
@@ -385,9 +389,13 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
     const auto position_noise = gtsam::noiseModel::Isotropic::Sigma(
       1,
       request_.config->vertical_jump_position_ramp_sigma_m);
+    const double position_velocity_consistency_sigma_m =
+      request_.config->enable_vertical_jump_impulse
+        ? request_.config->vertical_jump_impulse_position_velocity_sigma_m
+        : request_.config->vertical_jump_position_velocity_consistency_sigma_m;
     const auto position_velocity_consistency_noise = gtsam::noiseModel::Isotropic::Sigma(
       1,
-      request_.config->vertical_jump_position_velocity_consistency_sigma_m);
+      position_velocity_consistency_sigma_m);
     const auto velocity_height_slope_noise = gtsam::noiseModel::Isotropic::Sigma(
       1,
       request_.config->vertical_jump_velocity_height_slope_sigma_mps);

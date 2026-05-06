@@ -84,6 +84,11 @@ void ResultWriter::WriteOutputs(
       output_path / "vertical_jump_masked_imu_diagnostics.csv",
       result.vertical_jump_masked_imu_diagnostics);
   }
+  if (!result.vertical_jump_impulse_diagnostics.empty()) {
+    WriteVerticalJumpImpulseDiagnosticsCsv(
+      output_path / "vertical_jump_impulse_diagnostics.csv",
+      result.vertical_jump_impulse_diagnostics);
+  }
   if (!result.vertical_jump_velocity_ramp_diagnostics.empty()) {
     WriteVerticalJumpVelocityRampDiagnosticsCsv(
       output_path / "vertical_jump_velocity_ramp_diagnostics.csv",

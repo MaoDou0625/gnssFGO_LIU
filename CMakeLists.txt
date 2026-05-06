@@ -68,6 +68,7 @@ add_library(offline_lc_minimal_lib
   src/core/TrajectoryResultBuilder.cpp
   src/core/TrajectoryInitializer.cpp
   src/core/VerticalConstraintPolicy.cpp
+  src/core/VerticalJumpImpulseConstraintBuilder.cpp
   src/core/VerticalJumpImuMasker.cpp
   src/core/VerticalJumpShapeConstraintBuilder.cpp
   src/core/VerticalMotionConstraintBuilder.cpp
