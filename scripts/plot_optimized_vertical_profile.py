@@ -39,6 +39,11 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional vertical_envelope_diagnostics.csv path; defaults to the trajectory directory when present",
     )
+    parser.add_argument(
+        "--jump-windows",
+        default="",
+        help="Optional body_z_seed_jump_windows.csv path; defaults to the trajectory directory when present",
+    )
     parser.add_argument("--speed-window-s", type=float, default=1.0, help="Centered RTK speed-difference window in seconds")
     parser.add_argument("--title", default="Optimized vertical position and velocity over full duration", help="Figure title")
     return parser.parse_args()
@@ -109,6 +114,25 @@ def read_envelope_rows(path: Path) -> list[dict[str, float]]:
                 continue
     rows.sort(key=lambda row: row["time_s"])
     return rows
+
+
+def read_jump_windows(path: Path) -> list[tuple[float, float]]:
+    if not path.exists():
+        return []
+
+    windows: list[tuple[float, float]] = []
+    with path.open("r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        for raw in reader:
+            try:
+                start_time_s = plot_speed_vs_rtk.safe_float(raw.get("start_time_s", "nan"))
+                end_time_s = plot_speed_vs_rtk.safe_float(raw.get("end_time_s", "nan"))
+            except ValueError:
+                continue
+            if math.isfinite(start_time_s) and math.isfinite(end_time_s) and end_time_s > start_time_s:
+                windows.append((start_time_s, end_time_s))
+    windows.sort(key=lambda window: window[0])
+    return windows
 
 
 def read_key_value_file(path: Path) -> dict[str, str]:
@@ -215,6 +239,26 @@ def plot_envelope_gate(
     )
 
 
+def shade_jump_windows(
+    axis,
+    jump_windows: list[tuple[float, float]],
+    reference_time_s: float,
+) -> None:
+    label_added = False
+    for start_time_s, end_time_s in jump_windows:
+        if end_time_s <= reference_time_s:
+            continue
+        axis.axvspan(
+            max(start_time_s - reference_time_s, 0.0),
+            end_time_s - reference_time_s,
+            color="#d62728",
+            alpha=0.12,
+            linewidth=0.0,
+            label="body-z jump window" if not label_added else None,
+        )
+        label_added = True
+
+
 def write_csv(
     path: Path,
     trajectory_rows: list[dict[str, float]],
@@ -271,6 +315,7 @@ def make_plot(
     rtk_rows: list[dict[str, float]],
     rtk_speed_rows: list[dict[str, float]],
     envelope_rows: list[dict[str, float]],
+    jump_windows: list[tuple[float, float]],
     output_path: Path,
     title: str,
 ) -> None:
@@ -286,8 +331,9 @@ def make_plot(
 
     axes[0].plot(relative_time(trajectory_rows), [row["up_m"] for row in trajectory_rows], color="#1f77b4", linewidth=1.1, label="optimized")
     axes[0].plot(relative_time(rtk_rows_from_start), [row["up_m"] for row in rtk_rows_from_start], color="#ff7f0e", linewidth=0.9, alpha=0.9, label="RTKFIX")
+    shade_jump_windows(axes[0], jump_windows, t0)
     axes[0].set_ylabel("Up [m]")
-    axes[0].set_title("Absolute up position")
+    axes[0].set_title("Absolute up position with body-z jump windows")
     axes[0].grid(True, alpha=0.3)
     axes[0].legend(loc="upper right")
 
@@ -330,6 +376,11 @@ def main() -> int:
         if args.envelope_diagnostics
         else trajectory_path.with_name("vertical_envelope_diagnostics.csv")
     )
+    jump_windows_path = (
+        Path(args.jump_windows)
+        if args.jump_windows
+        else trajectory_path.with_name("body_z_seed_jump_windows.csv")
+    )
     dynamic_start_time_s = resolve_dynamic_start_time(trajectory_path)
     trajectory_rows = (
         filter_rows_from_time(trajectory_rows_all, dynamic_start_time_s)
@@ -343,10 +394,11 @@ def main() -> int:
         plot_speed_vs_rtk.build_rtk_speed_rows(rtk_rows, args.speed_window_s)
     )
     envelope_rows = read_envelope_rows(envelope_path)
+    jump_windows = read_jump_windows(jump_windows_path)
     rtk_rows_from_start = filter_rows_from_time(rtk_rows, navigation_start_time_s)
     rtk_speed_rows_from_start = filter_rows_from_time(rtk_speed_rows, navigation_start_time_s)
 
-    make_plot(trajectory_rows, rtk_rows, rtk_speed_rows, envelope_rows, output_path, args.title)
+    make_plot(trajectory_rows, rtk_rows, rtk_speed_rows, envelope_rows, jump_windows, output_path, args.title)
     write_csv(csv_output_path, trajectory_rows, rtk_rows, rtk_speed_rows)
 
     optimized_stats = compute_vertical_stats(trajectory_rows)

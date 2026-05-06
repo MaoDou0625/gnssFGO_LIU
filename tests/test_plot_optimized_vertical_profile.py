@@ -94,6 +94,20 @@ class PlotOptimizedVerticalProfileTests(unittest.TestCase):
             dynamic_start_time_s = plot_optimized_vertical_profile.resolve_dynamic_start_time(trajectory_path)
             self.assertAlmostEqual(dynamic_start_time_s, 5801.6, places=9)
 
+    def test_read_jump_windows_drops_invalid_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            window_path = pathlib.Path(temp_dir) / "body_z_seed_jump_windows.csv"
+            window_path.write_text(
+                "start_time_s,end_time_s\n"
+                "10.0,11.0\n"
+                "12.0,12.0\n"
+                "bad,13.0\n",
+                encoding="utf-8",
+            )
+
+            windows = plot_optimized_vertical_profile.read_jump_windows(window_path)
+            self.assertEqual(windows, [(10.0, 11.0)])
+
 
 if __name__ == "__main__":
     unittest.main()
