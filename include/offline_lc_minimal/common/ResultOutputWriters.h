@@ -58,6 +58,10 @@ void WriteVerticalJumpImpulseDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpImpulseDiagnosticRow> &rows);
 
+void WriteVerticalJumpBiasDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalJumpBiasDiagnosticRow> &rows);
+
 void WriteVerticalJumpVelocityRampDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpVelocityRampDiagnosticRow> &rows);

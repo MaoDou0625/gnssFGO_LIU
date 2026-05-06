@@ -130,6 +130,11 @@ struct OfflineRunnerConfig {
   double vertical_jump_impulse_prior_sigma_mps = 0.30;
   double vertical_jump_impulse_velocity_sigma_mps = 0.03;
   double vertical_jump_impulse_position_velocity_sigma_m = 0.02;
+  bool enable_vertical_jump_bias = false;
+  double vertical_jump_bias_padding_s = 0.0;
+  double vertical_jump_bias_prior_sigma_mps2 = 0.05;
+  double vertical_jump_bias_velocity_sigma_mps = 0.01;
+  double vertical_jump_bias_position_velocity_sigma_m = 0.02;
   bool enable_vertical_jump_velocity_ramp_smoothing = false;
   double vertical_jump_velocity_ramp_sigma_mps = 0.08;
   bool enable_vertical_jump_position_ramp_smoothing = false;

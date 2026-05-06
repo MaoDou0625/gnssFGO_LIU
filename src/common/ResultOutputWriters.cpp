@@ -478,6 +478,49 @@ void WriteVerticalJumpImpulseDiagnosticsCsv(
   }
 }
 
+void WriteVerticalJumpBiasDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalJumpBiasDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "span_index,source_window_index,source_window_count,start_state,end_state,"
+       "start_time_s,end_time_s,factor_added,skip_reason,replaced_imu_factor_count,"
+       "velocity_factor_count,position_velocity_factor_count,source_window_duration_s,"
+       "factor_duration_s,imu_delta_vz_mps,detected_signed_delta_velocity_mps,"
+       "detected_bias_mps2,prior_sigma_mps2,velocity_sigma_mps,position_velocity_sigma_m,"
+       "estimated_bias_mps2,corrected_delta_vz_mps,optimized_delta_vz_mps,residual_mps\n";
+  for (const auto &row : rows) {
+    stream << row.span_index << ','
+           << row.source_window_index << ','
+           << row.source_window_count << ','
+           << row.start_state_index << ','
+           << row.end_state_index << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << row.replaced_imu_factor_count << ','
+           << row.velocity_factor_count << ','
+           << row.position_velocity_factor_count << ','
+           << row.source_window_duration_s << ','
+           << row.factor_duration_s << ','
+           << row.imu_delta_vz_mps << ','
+           << row.detected_signed_delta_velocity_mps << ','
+           << row.detected_bias_mps2 << ','
+           << row.prior_sigma_mps2 << ','
+           << row.velocity_sigma_mps << ','
+           << row.position_velocity_sigma_m << ','
+           << row.estimated_bias_mps2 << ','
+           << row.corrected_delta_vz_mps << ','
+           << row.optimized_delta_vz_mps << ','
+           << row.residual_mps << '\n';
+  }
+}
+
 void WriteVerticalJumpVelocityRampDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpVelocityRampDiagnosticRow> &rows) {

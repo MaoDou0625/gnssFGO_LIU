@@ -49,6 +49,11 @@ struct RunSummary {
   std::size_t vertical_jump_impulse_prior_factor_count = 0;
   std::size_t vertical_jump_impulse_replaced_imu_factor_count = 0;
   std::size_t vertical_jump_impulse_skipped_count = 0;
+  std::size_t vertical_jump_bias_velocity_factor_count = 0;
+  std::size_t vertical_jump_bias_prior_factor_count = 0;
+  std::size_t vertical_jump_bias_replaced_imu_factor_count = 0;
+  std::size_t vertical_jump_bias_position_velocity_factor_count = 0;
+  std::size_t vertical_jump_bias_skipped_count = 0;
   std::size_t vertical_jump_velocity_ramp_factor_count = 0;
   std::size_t vertical_jump_position_ramp_factor_count = 0;
   std::size_t vertical_jump_velocity_height_slope_factor_count = 0;
@@ -158,6 +163,13 @@ struct RunSummary {
         << "vertical_jump_impulse_replaced_imu_factor_count="
         << vertical_jump_impulse_replaced_imu_factor_count << '\n'
         << "vertical_jump_impulse_skipped_count=" << vertical_jump_impulse_skipped_count << '\n'
+        << "vertical_jump_bias_velocity_factor_count=" << vertical_jump_bias_velocity_factor_count << '\n'
+        << "vertical_jump_bias_prior_factor_count=" << vertical_jump_bias_prior_factor_count << '\n'
+        << "vertical_jump_bias_replaced_imu_factor_count="
+        << vertical_jump_bias_replaced_imu_factor_count << '\n'
+        << "vertical_jump_bias_position_velocity_factor_count="
+        << vertical_jump_bias_position_velocity_factor_count << '\n'
+        << "vertical_jump_bias_skipped_count=" << vertical_jump_bias_skipped_count << '\n'
         << "vertical_jump_velocity_ramp_factor_count=" << vertical_jump_velocity_ramp_factor_count << '\n'
         << "vertical_jump_position_ramp_factor_count=" << vertical_jump_position_ramp_factor_count << '\n'
         << "vertical_jump_velocity_height_slope_factor_count="
@@ -256,6 +268,7 @@ struct OfflineRunResult {
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;
   std::vector<VerticalJumpImpulseDiagnosticRow> vertical_jump_impulse_diagnostics;
+  std::vector<VerticalJumpBiasDiagnosticRow> vertical_jump_bias_diagnostics;
   std::vector<VerticalJumpVelocityRampDiagnosticRow> vertical_jump_velocity_ramp_diagnostics;
   std::vector<VerticalJumpContinuityDiagnosticRow> vertical_jump_continuity_diagnostics;
   std::vector<VerticalStateCorrectionRow> vertical_state_corrections;

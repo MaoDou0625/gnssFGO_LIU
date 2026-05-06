@@ -30,6 +30,7 @@
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
+#include "offline_lc_minimal/core/VerticalJumpBiasConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpImpulseConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpImuMasker.h"
 #include "offline_lc_minimal/core/VerticalJumpShapeConstraintBuilder.h"
@@ -832,6 +833,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.vertical_jump_impulse_prior_factor_count = 0;
   run_result.run_summary.vertical_jump_impulse_replaced_imu_factor_count = 0;
   run_result.run_summary.vertical_jump_impulse_skipped_count = 0;
+  run_result.run_summary.vertical_jump_bias_velocity_factor_count = 0;
+  run_result.run_summary.vertical_jump_bias_prior_factor_count = 0;
+  run_result.run_summary.vertical_jump_bias_replaced_imu_factor_count = 0;
+  run_result.run_summary.vertical_jump_bias_position_velocity_factor_count = 0;
+  run_result.run_summary.vertical_jump_bias_skipped_count = 0;
   run_result.run_summary.vertical_jump_velocity_ramp_factor_count = 0;
   run_result.run_summary.vertical_jump_position_ramp_factor_count = 0;
   run_result.run_summary.vertical_jump_velocity_height_slope_factor_count = 0;
@@ -846,6 +852,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.vertical_velocity_delta_diagnostics.clear();
   run_result.vertical_jump_masked_imu_diagnostics.clear();
   run_result.vertical_jump_impulse_diagnostics.clear();
+  run_result.vertical_jump_bias_diagnostics.clear();
   run_result.vertical_jump_velocity_ramp_diagnostics.clear();
   run_result.vertical_jump_continuity_diagnostics.clear();
   run_result.vertical_state_corrections.clear();
@@ -864,6 +871,19 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     vertical_jump_impulse_request.run_summary = &run_result.run_summary;
     vertical_jump_impulse_request.diagnostics = &run_result.vertical_jump_impulse_diagnostics;
     VerticalJumpImpulseConstraintBuilder(std::move(vertical_jump_impulse_request)).Build();
+  }
+  if (config_.enable_vertical_jump_bias) {
+    VerticalJumpBiasConstraintBuildRequest vertical_jump_bias_request;
+    vertical_jump_bias_request.config = &config_;
+    vertical_jump_bias_request.state_timestamps = &state_timestamps;
+    vertical_jump_bias_request.jump_windows = &run_result.body_z_seed_jump_windows;
+    vertical_jump_bias_request.imu_intervals = &vertical_jump_imu_interval_records;
+    vertical_jump_bias_request.propagation_records = &vertical_velocity_delta_records;
+    vertical_jump_bias_request.graph = &graph_with_gnss;
+    vertical_jump_bias_request.initial_values = &optimization_initial_values;
+    vertical_jump_bias_request.run_summary = &run_result.run_summary;
+    vertical_jump_bias_request.diagnostics = &run_result.vertical_jump_bias_diagnostics;
+    VerticalJumpBiasConstraintBuilder(std::move(vertical_jump_bias_request)).Build();
   }
   if (config_.enable_vertical_jump_masked_imu) {
     VerticalJumpImuMaskRequest vertical_jump_mask_request;
@@ -980,6 +1000,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateVerticalJumpImpulseDiagnostics(
     optimized_values,
     run_result.vertical_jump_impulse_diagnostics);
+  PopulateVerticalJumpBiasDiagnostics(
+    optimized_values,
+    run_result.vertical_jump_bias_diagnostics);
 
   if (collect_reference_states) {
     const std::vector<ReferenceNodeState> optimized_reference_states =

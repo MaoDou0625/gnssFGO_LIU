@@ -12,10 +12,12 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 
+#include "offline_lc_minimal/core/VerticalJumpBiasConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpImpulseConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpImuMasker.h"
 #include "offline_lc_minimal/core/VerticalJumpShapeConstraintBuilder.h"
 #include "offline_lc_minimal/factor/VerticalJumpImpulseVelocityFactor.h"
+#include "offline_lc_minimal/factor/VerticalJumpBiasVelocityFactor.h"
 #include "offline_lc_minimal/factor/VerticalMaskedCombinedImuFactor.h"
 #include "offline_lc_minimal/factor/VerticalPositionRampFactor.h"
 #include "offline_lc_minimal/factor/VerticalPositionVelocityConsistencyFactor.h"
@@ -266,6 +268,232 @@ void TestVerticalJumpImpulseVelocityFactor() {
     -0.1,
     1e-12,
     "jump impulse residual sign is wrong");
+}
+
+void TestVerticalJumpBiasVelocityFactor() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
+  const offline_lc_minimal::factor::VerticalJumpBiasVelocityFactor factor(
+    symbol::V(0),
+    symbol::V(1),
+    gtsam::Symbol('c', 0),
+    0.50,
+    2.0,
+    noise);
+
+  const gtsam::Vector3 velocity_i(3.0, -2.0, 1.0);
+  const gtsam::Vector3 velocity_j(-5.0, 4.0, 1.30);
+  ExpectNear(
+    factor.evaluateError(velocity_i, velocity_j, 0.10)(0),
+    0.0,
+    1e-12,
+    "local jump bias should absorb equivalent acceleration in delta-vz");
+  ExpectNear(
+    factor.evaluateError(
+      gtsam::Vector3(-100.0, 100.0, velocity_i.z()),
+      gtsam::Vector3(50.0, -50.0, velocity_j.z()),
+      0.10)(0),
+    0.0,
+    1e-12,
+    "horizontal velocity changes should not affect jump-bias residual");
+  ExpectNear(
+    factor.evaluateError(velocity_i, velocity_j, 0.05)(0),
+    -0.10,
+    1e-12,
+    "jump-bias residual sign is wrong");
+}
+
+void TestVerticalJumpBiasBuilderAddsPerIntervalFactors() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  config.vertical_jump_bias_padding_s = 0.0;
+  config.vertical_jump_bias_prior_sigma_mps2 = 0.05;
+  config.vertical_jump_bias_velocity_sigma_mps = 0.01;
+  config.vertical_jump_bias_position_velocity_sigma_m = 0.02;
+  const auto pim = MakePreintegratedMeasurements();
+
+  gtsam::NonlinearFactorGraph graph;
+  graph.add(gtsam::CombinedImuFactor(symbol::X(0), symbol::V(0), symbol::X(1), symbol::V(1), symbol::B(0), symbol::B(1), pim));
+  graph.add(gtsam::CombinedImuFactor(symbol::X(1), symbol::V(1), symbol::X(2), symbol::V(2), symbol::B(1), symbol::B(2), pim));
+  graph.add(gtsam::CombinedImuFactor(symbol::X(2), symbol::V(2), symbol::X(3), symbol::V(3), symbol::B(2), symbol::B(3), pim));
+
+  const std::vector<double> state_timestamps{0.0, 0.5, 1.0, 1.5};
+  const std::vector<offline_lc_minimal::VerticalJumpImuIntervalRecord> intervals{
+    {0, 1, 0.0, 0.5, 0, pim},
+    {1, 2, 0.5, 1.0, 1, pim},
+    {2, 3, 1.0, 1.5, 2, pim},
+  };
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> propagation_records{
+    {0, 1, 0.0, 0.5, -0.10},
+    {1, 2, 0.5, 1.0, -0.20},
+    {2, 3, 1.0, 1.5, -0.30},
+  };
+  std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(0.6, 1.2)};
+  windows.front().signed_delta_velocity_mps = -0.30;
+  gtsam::Values initial_values;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpBiasDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalJumpBiasConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.imu_intervals = &intervals;
+  request.propagation_records = &propagation_records;
+  request.graph = &graph;
+  request.initial_values = &initial_values;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalJumpBiasConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_prior_factor_count),
+    1.0,
+    0.0,
+    "jump-bias prior count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_velocity_factor_count),
+    2.0,
+    0.0,
+    "jump-bias velocity factor count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_position_velocity_factor_count),
+    2.0,
+    0.0,
+    "jump-bias position-velocity factor count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_replaced_imu_factor_count),
+    2.0,
+    0.0,
+    "jump-bias builder should replace only overlapping IMU factors");
+  ExpectTrue(initial_values.exists(gtsam::Symbol('c', 0)), "jump-bias initial value should be inserted");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<gtsam::CombinedImuFactor>(graph.at(0)) != nullptr,
+    "outside interval should keep normal CombinedImuFactor");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalMaskedCombinedImuFactor>(graph.at(1)) != nullptr,
+    "jump interval should be replaced with vertical-masked IMU factor");
+  ExpectNear(static_cast<double>(diagnostics.size()), 1.0, 0.0, "jump-bias diagnostic row missing");
+  ExpectTrue(diagnostics.front().factor_added, "jump-bias diagnostic should mark added factor");
+  ExpectNear(diagnostics.front().detected_bias_mps2, -0.5, 1e-12, "detected equivalent bias is wrong");
+  ExpectNear(diagnostics.front().imu_delta_vz_mps, -0.5, 1e-12, "summed IMU delta-vz is wrong");
+
+  gtsam::Values optimized_values;
+  optimized_values.insert(symbol::V(1), gtsam::Vector3(0.0, 0.0, 1.0));
+  optimized_values.insert(symbol::V(3), gtsam::Vector3(0.0, 0.0, 1.0));
+  optimized_values.insert(gtsam::Symbol('c', 0), -0.5);
+  offline_lc_minimal::PopulateVerticalJumpBiasDiagnostics(optimized_values, diagnostics);
+  ExpectNear(diagnostics.front().estimated_bias_mps2, -0.5, 1e-12, "estimated jump bias is wrong");
+  ExpectNear(diagnostics.front().corrected_delta_vz_mps, 0.0, 1e-12, "corrected delta-vz is wrong");
+  ExpectNear(diagnostics.front().residual_mps, 0.0, 1e-12, "jump-bias diagnostic residual is wrong");
+}
+
+void TestVerticalJumpBiasBuilderSkipsMissingDetectedBias() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  const auto pim = MakePreintegratedMeasurements();
+  gtsam::NonlinearFactorGraph graph;
+  graph.add(gtsam::CombinedImuFactor(symbol::X(0), symbol::V(0), symbol::X(1), symbol::V(1), symbol::B(0), symbol::B(1), pim));
+  const std::vector<double> state_timestamps{0.0, 0.5};
+  const std::vector<offline_lc_minimal::VerticalJumpImuIntervalRecord> intervals{
+    {0, 1, 0.0, 0.5, 0, pim},
+  };
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> propagation_records{
+    {0, 1, 0.0, 0.5, -0.10},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(0.1, 0.4)};
+  gtsam::Values initial_values;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpBiasDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalJumpBiasConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.imu_intervals = &intervals;
+  request.propagation_records = &propagation_records;
+  request.graph = &graph;
+  request.initial_values = &initial_values;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalJumpBiasConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_velocity_factor_count),
+    0.0,
+    0.0,
+    "missing detected bias should skip velocity factors");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_skipped_count),
+    1.0,
+    0.0,
+    "missing detected bias skip count is wrong");
+  ExpectTrue(diagnostics.front().skip_reason == "MISSING_DETECTED_BIAS", "missing detected bias skip reason is wrong");
+}
+
+void TestVerticalJumpBiasBuilderIgnoresBoundaryTouchIntervals() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  config.vertical_jump_bias_padding_s = 0.0;
+  const auto pim = MakePreintegratedMeasurements();
+
+  gtsam::NonlinearFactorGraph graph;
+  graph.add(gtsam::CombinedImuFactor(symbol::X(0), symbol::V(0), symbol::X(1), symbol::V(1), symbol::B(0), symbol::B(1), pim));
+  graph.add(gtsam::CombinedImuFactor(symbol::X(1), symbol::V(1), symbol::X(2), symbol::V(2), symbol::B(1), symbol::B(2), pim));
+  graph.add(gtsam::CombinedImuFactor(symbol::X(2), symbol::V(2), symbol::X(3), symbol::V(3), symbol::B(2), symbol::B(3), pim));
+
+  const std::vector<double> state_timestamps{0.0, 0.5, 1.0, 1.5};
+  const std::vector<offline_lc_minimal::VerticalJumpImuIntervalRecord> intervals{
+    {0, 1, 0.0, 0.5, 0, pim},
+    {1, 2, 0.5, 1.0, 1, pim},
+    {2, 3, 1.0, 1.5, 2, pim},
+  };
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> propagation_records{
+    {0, 1, 0.0, 0.5, -0.10},
+    {1, 2, 0.5, 1.0, -0.20},
+    {2, 3, 1.0, 1.5, -0.30},
+  };
+  std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(0.5, 1.0)};
+  windows.front().signed_delta_velocity_mps = -0.20;
+  gtsam::Values initial_values;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpBiasDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalJumpBiasConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.imu_intervals = &intervals;
+  request.propagation_records = &propagation_records;
+  request.graph = &graph;
+  request.initial_values = &initial_values;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalJumpBiasConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_velocity_factor_count),
+    1.0,
+    0.0,
+    "boundary-touch intervals should not get jump-bias velocity factors");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_replaced_imu_factor_count),
+    1.0,
+    0.0,
+    "boundary-touch intervals should not be replaced");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<gtsam::CombinedImuFactor>(graph.at(0)) != nullptr,
+    "pre-boundary interval should keep normal CombinedImuFactor");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalMaskedCombinedImuFactor>(graph.at(1)) != nullptr,
+    "positive-overlap interval should be replaced");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<gtsam::CombinedImuFactor>(graph.at(2)) != nullptr,
+    "post-boundary interval should keep normal CombinedImuFactor");
+  ExpectNear(diagnostics.front().start_state_index, 1.0, 0.0, "diagnostic start state should use positive overlap");
+  ExpectNear(diagnostics.front().end_state_index, 2.0, 0.0, "diagnostic end state should use positive overlap");
 }
 
 void TestVerticalJumpImpulseBuilderAddsFactorAndReplacesImu() {
@@ -1295,6 +1523,16 @@ int main() {
       TestVerticalMaskedCombinedImuMatchesCombinedKeptRowsForBias);
     RunTest("TestVerticalJumpImuMaskerReplacesOverlappingIntervals", TestVerticalJumpImuMaskerReplacesOverlappingIntervals);
     RunTest("TestVerticalJumpImpulseVelocityFactor", TestVerticalJumpImpulseVelocityFactor);
+    RunTest("TestVerticalJumpBiasVelocityFactor", TestVerticalJumpBiasVelocityFactor);
+    RunTest(
+      "TestVerticalJumpBiasBuilderAddsPerIntervalFactors",
+      TestVerticalJumpBiasBuilderAddsPerIntervalFactors);
+    RunTest(
+      "TestVerticalJumpBiasBuilderSkipsMissingDetectedBias",
+      TestVerticalJumpBiasBuilderSkipsMissingDetectedBias);
+    RunTest(
+      "TestVerticalJumpBiasBuilderIgnoresBoundaryTouchIntervals",
+      TestVerticalJumpBiasBuilderIgnoresBoundaryTouchIntervals);
     RunTest(
       "TestVerticalJumpImpulseBuilderAddsFactorAndReplacesImu",
       TestVerticalJumpImpulseBuilderAddsFactorAndReplacesImu);

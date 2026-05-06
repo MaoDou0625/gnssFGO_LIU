@@ -223,6 +223,33 @@ struct VerticalJumpImpulseDiagnosticRow {
   double post_anchor_vz_mps = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct VerticalJumpBiasDiagnosticRow {
+  std::size_t span_index = 0;
+  std::size_t source_window_index = 0;
+  std::size_t source_window_count = 0;
+  std::size_t start_state_index = 0;
+  std::size_t end_state_index = 0;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+  std::size_t replaced_imu_factor_count = 0;
+  std::size_t velocity_factor_count = 0;
+  std::size_t position_velocity_factor_count = 0;
+  double source_window_duration_s = std::numeric_limits<double>::quiet_NaN();
+  double factor_duration_s = 0.0;
+  double imu_delta_vz_mps = 0.0;
+  double detected_signed_delta_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double detected_bias_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double prior_sigma_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double position_velocity_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double estimated_bias_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double corrected_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double residual_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct VerticalJumpVelocityRampDiagnosticRow {
   std::size_t window_index = 0;
   std::size_t start_state_index = 0;

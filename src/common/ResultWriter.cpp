@@ -89,6 +89,11 @@ void ResultWriter::WriteOutputs(
       output_path / "vertical_jump_impulse_diagnostics.csv",
       result.vertical_jump_impulse_diagnostics);
   }
+  if (!result.vertical_jump_bias_diagnostics.empty()) {
+    WriteVerticalJumpBiasDiagnosticsCsv(
+      output_path / "vertical_jump_bias_diagnostics.csv",
+      result.vertical_jump_bias_diagnostics);
+  }
   if (!result.vertical_jump_velocity_ramp_diagnostics.empty()) {
     WriteVerticalJumpVelocityRampDiagnosticsCsv(
       output_path / "vertical_jump_velocity_ramp_diagnostics.csv",
