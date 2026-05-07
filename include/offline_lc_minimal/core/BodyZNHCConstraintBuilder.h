@@ -60,6 +60,7 @@ class BodyZNHCConstraintBuilder {
 };
 
 void PopulateBodyZNHCDiagnostics(
+  const gtsam::Values &initial_values,
   const gtsam::Values &optimized_values,
   const std::vector<double> &state_timestamps,
   std::vector<BodyZNHCDiagnosticRow> &diagnostics);

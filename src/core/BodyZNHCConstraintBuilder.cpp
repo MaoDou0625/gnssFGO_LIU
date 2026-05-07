@@ -39,20 +39,25 @@ struct BodyZNHCMetrics {
 std::optional<BodyZNHCMetrics> ComputeMetrics(
   const gtsam::Values &values,
   const std::vector<double> &state_timestamps,
-  const std::vector<std::size_t> &state_indices) {
+  const std::vector<std::size_t> &state_indices,
+  const std::vector<gtsam::Vector3> &body_z_axes_nav) {
   if (state_indices.size() < 2U) {
+    return std::nullopt;
+  }
+  if (body_z_axes_nav.size() != state_indices.size()) {
     return std::nullopt;
   }
 
   std::vector<double> body_z_velocities_mps;
   body_z_velocities_mps.reserve(state_indices.size());
-  for (const std::size_t state_index : state_indices) {
+  for (std::size_t offset = 0U; offset < state_indices.size(); ++offset) {
+    const std::size_t state_index = state_indices[offset];
     if (state_index >= state_timestamps.size()) {
       return std::nullopt;
     }
-    const auto pose = values.at<gtsam::Pose3>(symbol::X(state_index));
     const auto velocity = values.at<gtsam::Vector3>(symbol::V(state_index));
-    const double body_z_velocity_mps = factor::BodyZVelocityMps(pose, velocity);
+    const double body_z_velocity_mps =
+      factor::BodyZVelocityMps(body_z_axes_nav[offset], velocity);
     if (!std::isfinite(body_z_velocity_mps)) {
       return std::nullopt;
     }
@@ -85,6 +90,70 @@ std::optional<BodyZNHCMetrics> ComputeMetrics(
   metrics.max_abs_body_z_velocity_mps = max_abs;
   metrics.body_z_displacement_m = displacement_m;
   return metrics;
+}
+
+std::optional<BodyZNHCMetrics> ComputePoseBodyZMetrics(
+  const gtsam::Values &values,
+  const std::vector<double> &state_timestamps,
+  const std::vector<std::size_t> &state_indices) {
+  std::vector<gtsam::Vector3> optimized_axes_nav;
+  optimized_axes_nav.reserve(state_indices.size());
+  for (const std::size_t state_index : state_indices) {
+    try {
+      const auto pose = values.at<gtsam::Pose3>(symbol::X(state_index));
+      optimized_axes_nav.push_back(factor::BodyZAxisNavFromPose(pose));
+    } catch (const std::exception &) {
+      return std::nullopt;
+    }
+  }
+  return ComputeMetrics(values, state_timestamps, state_indices, optimized_axes_nav);
+}
+
+std::optional<std::vector<gtsam::Vector3>> BodyZAxesNavFromInitialValues(
+  const gtsam::Values &initial_values,
+  const std::vector<std::size_t> &state_indices) {
+  std::vector<gtsam::Vector3> body_z_axes_nav;
+  body_z_axes_nav.reserve(state_indices.size());
+  for (const std::size_t state_index : state_indices) {
+    try {
+      const auto pose = initial_values.at<gtsam::Pose3>(symbol::X(state_index));
+      body_z_axes_nav.push_back(factor::BodyZAxisNavFromPose(pose));
+    } catch (const std::exception &) {
+      return std::nullopt;
+    }
+  }
+  return body_z_axes_nav;
+}
+
+void PopulateAttitudeRanges(
+  const gtsam::Values &values,
+  const std::vector<std::size_t> &state_indices,
+  BodyZNHCDiagnosticRow &row) {
+  if (state_indices.size() < 2U) {
+    return;
+  }
+  double min_pitch_rad = std::numeric_limits<double>::infinity();
+  double max_pitch_rad = -std::numeric_limits<double>::infinity();
+  double min_roll_rad = std::numeric_limits<double>::infinity();
+  double max_roll_rad = -std::numeric_limits<double>::infinity();
+  for (const std::size_t state_index : state_indices) {
+    try {
+      const auto pose = values.at<gtsam::Pose3>(symbol::X(state_index));
+      const auto ypr = pose.rotation().ypr();
+      min_pitch_rad = std::min(min_pitch_rad, ypr.y());
+      max_pitch_rad = std::max(max_pitch_rad, ypr.y());
+      min_roll_rad = std::min(min_roll_rad, ypr.z());
+      max_roll_rad = std::max(max_roll_rad, ypr.z());
+    } catch (const std::exception &) {
+      return;
+    }
+  }
+  if (std::isfinite(min_pitch_rad) && std::isfinite(max_pitch_rad)) {
+    row.optimized_pitch_range_rad = max_pitch_rad - min_pitch_rad;
+  }
+  if (std::isfinite(min_roll_rad) && std::isfinite(max_roll_rad)) {
+    row.optimized_roll_range_rad = max_roll_rad - min_roll_rad;
+  }
 }
 
 }  // namespace
@@ -142,8 +211,21 @@ void BodyZNHCConstraintBuilder::Build() const {
       continue;
     }
 
+    const auto body_z_axes_nav =
+      BodyZAxesNavFromInitialValues(*request_.initial_values, state_indices);
+    if (!body_z_axes_nav.has_value()) {
+      row.skip_reason = "INVALID_FIXED_AXIS";
+      ++request_.run_summary->body_z_nhc_skipped_invalid_count;
+      request_.diagnostics->push_back(row);
+      continue;
+    }
+
     const auto initial_metrics =
-      ComputeMetrics(*request_.initial_values, *request_.state_timestamps, state_indices);
+      ComputeMetrics(
+        *request_.initial_values,
+        *request_.state_timestamps,
+        state_indices,
+        *body_z_axes_nav);
     if (!initial_metrics.has_value()) {
       row.skip_reason = "INVALID_METRICS";
       ++request_.run_summary->body_z_nhc_skipped_invalid_count;
@@ -154,26 +236,24 @@ void BodyZNHCConstraintBuilder::Build() const {
     row.initial_max_abs_body_z_velocity_mps = initial_metrics->max_abs_body_z_velocity_mps;
     row.initial_body_z_displacement_m = initial_metrics->body_z_displacement_m;
 
-    std::vector<gtsam::Key> pose_keys;
     std::vector<gtsam::Key> velocity_keys;
     std::vector<double> state_times_s;
-    pose_keys.reserve(state_indices.size());
     velocity_keys.reserve(state_indices.size());
     state_times_s.reserve(state_indices.size());
-    for (const std::size_t state_index : state_indices) {
-      pose_keys.push_back(symbol::X(state_index));
+    for (std::size_t offset = 0U; offset < state_indices.size(); ++offset) {
+      const std::size_t state_index = state_indices[offset];
       velocity_keys.push_back(symbol::V(state_index));
       state_times_s.push_back((*request_.state_timestamps)[state_index]);
       request_.graph->add(factor::BodyZVelocityZeroFactor(
-        symbol::X(state_index),
         symbol::V(state_index),
+        (*body_z_axes_nav)[offset],
         gtsam::noiseModel::Isotropic::Sigma(1, velocity_sigma_mps)));
       ++row.velocity_factor_count;
     }
 
     request_.graph->add(factor::BodyZWindowDisplacementZeroFactor(
-      pose_keys,
       velocity_keys,
+      *body_z_axes_nav,
       state_times_s,
       gtsam::noiseModel::Isotropic::Sigma(1, displacement_sigma_m)));
     row.displacement_factor_count = 1U;
@@ -333,6 +413,7 @@ BodyZNHCDiagnosticRow BodyZNHCConstraintBuilder::MakeDiagnosticRow(
 }
 
 void PopulateBodyZNHCDiagnostics(
+  const gtsam::Values &initial_values,
   const gtsam::Values &optimized_values,
   const std::vector<double> &state_timestamps,
   std::vector<BodyZNHCDiagnosticRow> &diagnostics) {
@@ -345,7 +426,11 @@ void PopulateBodyZNHCDiagnostics(
     for (std::size_t state_index = row.start_state_index; state_index <= row.end_state_index; ++state_index) {
       state_indices.push_back(state_index);
     }
-    const auto metrics = ComputeMetrics(optimized_values, state_timestamps, state_indices);
+    const auto body_z_axes_nav = BodyZAxesNavFromInitialValues(initial_values, state_indices);
+    if (!body_z_axes_nav.has_value()) {
+      continue;
+    }
+    const auto metrics = ComputeMetrics(optimized_values, state_timestamps, state_indices, *body_z_axes_nav);
     if (!metrics.has_value()) {
       continue;
     }
@@ -354,6 +439,14 @@ void PopulateBodyZNHCDiagnostics(
     row.optimized_body_z_displacement_m = metrics->body_z_displacement_m;
     row.max_velocity_residual_mps = metrics->max_abs_body_z_velocity_mps;
     row.displacement_residual_m = metrics->body_z_displacement_m;
+
+    const auto pose_metrics = ComputePoseBodyZMetrics(optimized_values, state_timestamps, state_indices);
+    if (pose_metrics.has_value()) {
+      row.optimized_pose_mean_abs_body_z_velocity_mps = pose_metrics->mean_abs_body_z_velocity_mps;
+      row.optimized_pose_max_abs_body_z_velocity_mps = pose_metrics->max_abs_body_z_velocity_mps;
+      row.optimized_pose_body_z_displacement_m = pose_metrics->body_z_displacement_m;
+    }
+    PopulateAttitudeRanges(optimized_values, state_indices, row);
   }
 }
 

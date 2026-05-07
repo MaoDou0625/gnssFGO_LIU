@@ -427,10 +427,13 @@ void WriteBodyZNHCDiagnosticsCsv(
     << "window_index,window_type,from_jump_window,source_window_index,source_window_count,"
        "start_state_index,end_state_index,state_count,start_time_s,end_time_s,duration_s,"
        "actual_state_span_s,factor_added,skip_reason,velocity_factor_count,displacement_factor_count,"
-       "velocity_sigma_mps,displacement_sigma_m,initial_mean_abs_body_z_velocity_mps,"
-       "initial_max_abs_body_z_velocity_mps,initial_body_z_displacement_m,"
-       "optimized_mean_abs_body_z_velocity_mps,optimized_max_abs_body_z_velocity_mps,"
-       "optimized_body_z_displacement_m,max_velocity_residual_mps,displacement_residual_m\n";
+        "velocity_sigma_mps,displacement_sigma_m,initial_mean_abs_body_z_velocity_mps,"
+        "initial_max_abs_body_z_velocity_mps,initial_body_z_displacement_m,"
+        "optimized_mean_abs_body_z_velocity_mps,optimized_max_abs_body_z_velocity_mps,"
+        "optimized_body_z_displacement_m,optimized_pose_mean_abs_body_z_velocity_mps,"
+        "optimized_pose_max_abs_body_z_velocity_mps,optimized_pose_body_z_displacement_m,"
+        "optimized_pitch_range_rad,optimized_roll_range_rad,max_velocity_residual_mps,"
+        "displacement_residual_m\n";
   for (const auto &row : rows) {
     stream << row.window_index << ','
            << row.window_type << ','
@@ -453,11 +456,16 @@ void WriteBodyZNHCDiagnosticsCsv(
            << row.initial_mean_abs_body_z_velocity_mps << ','
            << row.initial_max_abs_body_z_velocity_mps << ','
            << row.initial_body_z_displacement_m << ','
-           << row.optimized_mean_abs_body_z_velocity_mps << ','
-           << row.optimized_max_abs_body_z_velocity_mps << ','
-           << row.optimized_body_z_displacement_m << ','
-           << row.max_velocity_residual_mps << ','
-           << row.displacement_residual_m << '\n';
+            << row.optimized_mean_abs_body_z_velocity_mps << ','
+            << row.optimized_max_abs_body_z_velocity_mps << ','
+            << row.optimized_body_z_displacement_m << ','
+            << row.optimized_pose_mean_abs_body_z_velocity_mps << ','
+            << row.optimized_pose_max_abs_body_z_velocity_mps << ','
+            << row.optimized_pose_body_z_displacement_m << ','
+            << row.optimized_pitch_range_rad << ','
+            << row.optimized_roll_range_rad << ','
+            << row.max_velocity_residual_mps << ','
+            << row.displacement_residual_m << '\n';
   }
 }
 

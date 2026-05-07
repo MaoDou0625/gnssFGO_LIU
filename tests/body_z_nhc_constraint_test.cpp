@@ -63,31 +63,57 @@ offline_lc_minimal::BodyZSeedJumpWindowRow MakeJumpWindow(
 
 void TestBodyZVelocityZeroFactorUsesBodyFrameZ() {
   const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
-  const offline_lc_minimal::factor::BodyZVelocityZeroFactor factor(1, 2, noise);
-  const gtsam::Pose3 identity_pose;
+  const offline_lc_minimal::factor::BodyZVelocityZeroFactor identity_factor(
+    symbol::V(0),
+    gtsam::Vector3(0.0, 0.0, 1.0),
+    noise);
   ExpectNear(
-    factor.evaluateError(identity_pose, gtsam::Vector3(0.0, 0.0, 0.25))(0),
+    identity_factor.evaluateError(gtsam::Vector3(0.0, 0.0, 0.25))(0),
     0.25,
     1e-12,
-    "identity pose should use nav z as body z");
+    "identity fixed axis should use nav z as body z");
 
   const gtsam::Pose3 tilted_pose(
     gtsam::Rot3::RzRyRx(0.0, 1.5707963267948966, 0.0),
     gtsam::Point3(0.0, 0.0, 0.0));
+  const offline_lc_minimal::factor::BodyZVelocityZeroFactor tilted_factor(
+    symbol::V(1),
+    offline_lc_minimal::factor::BodyZAxisNavFromPose(tilted_pose),
+    noise);
   const gtsam::Vector3 horizontal_velocity(1.0, 0.0, 0.0);
-  const double residual = factor.evaluateError(tilted_pose, horizontal_velocity)(0);
+  const double residual = tilted_factor.evaluateError(horizontal_velocity)(0);
   ExpectTrue(std::abs(horizontal_velocity.z()) < 1e-12, "test velocity should have zero nav z");
-  ExpectTrue(std::abs(residual) > 0.5, "tilted pose should project horizontal nav velocity into body z");
+  ExpectTrue(std::abs(residual) > 0.5, "tilted fixed axis should project horizontal nav velocity into body z");
+  ExpectNear(
+    static_cast<double>(tilted_factor.keys().size()),
+    1.0,
+    0.0,
+    "fixed-axis velocity factor should only connect the velocity key");
+
+  gtsam::Matrix h_velocity;
+  const gtsam::Vector unused_residual = tilted_factor.evaluateError(horizontal_velocity, h_velocity);
+  (void)unused_residual;
+  ExpectNear(h_velocity.rows(), 1.0, 0.0, "velocity Jacobian should have one residual row");
+  ExpectNear(h_velocity.cols(), 3.0, 0.0, "velocity Jacobian should have three velocity columns");
+  ExpectNear(
+    h_velocity(0, 0),
+    tilted_factor.bodyZAxisNav().x(),
+    1e-12,
+    "velocity Jacobian should use the fixed nav-frame body-z axis");
 }
 
 void TestBodyZWindowDisplacementZeroFactorIntegratesBodyZVelocity() {
   const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
-  const std::vector<gtsam::Key> pose_keys{symbol::X(0), symbol::X(1), symbol::X(2)};
   const std::vector<gtsam::Key> velocity_keys{symbol::V(0), symbol::V(1), symbol::V(2)};
+  const std::vector<gtsam::Vector3> body_z_axes_nav{
+    gtsam::Vector3(0.0, 0.0, 1.0),
+    gtsam::Vector3(0.0, 0.0, 1.0),
+    gtsam::Vector3(0.0, 0.0, 1.0),
+  };
   const std::vector<double> times{0.0, 0.5, 1.0};
   const offline_lc_minimal::factor::BodyZWindowDisplacementZeroFactor factor(
-    pose_keys,
     velocity_keys,
+    body_z_axes_nav,
     times,
     noise);
 
@@ -96,6 +122,85 @@ void TestBodyZWindowDisplacementZeroFactorIntegratesBodyZVelocity() {
 
   values = MakeValues(times, gtsam::Rot3(), gtsam::Vector3(0.0, 0.0, 0.10));
   ExpectNear(factor.unwhitenedError(values)(0), 0.10, 1e-12, "constant body-z velocity integral is wrong");
+  ExpectNear(
+    static_cast<double>(factor.keys().size()),
+    3.0,
+    0.0,
+    "fixed-axis displacement factor should only connect velocity keys");
+}
+
+void TestFixedAxisGraphErrorIgnoresPoseChanges() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_nhc_constraint = true;
+  config.body_z_nhc_jump_padding_s = 0.0;
+  config.body_z_nhc_min_window_s = 0.5;
+  const std::vector<double> timestamps{0.0, 0.5, 1.0};
+  const gtsam::Rot3 tilted_rotation = gtsam::Rot3::RzRyRx(0.0, 1.5707963267948966, 0.0);
+  const gtsam::Values initial_values =
+    MakeValues(timestamps, tilted_rotation, gtsam::Vector3(1.0, 0.0, 0.0));
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows{
+    MakeJumpWindow(0.0, 1.0),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::BodyZNHCDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::BodyZNHCConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.jump_windows = &jump_windows;
+  request.initial_values = &initial_values;
+  request.dynamic_start_index = 0U;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::BodyZNHCConstraintBuilder(std::move(request)).Build();
+
+  gtsam::Values changed_pose_values =
+    MakeValues(timestamps, gtsam::Rot3(), gtsam::Vector3(1.0, 0.0, 0.0));
+  ExpectNear(
+    graph.error(initial_values),
+    graph.error(changed_pose_values),
+    1e-12,
+    "fixed-axis NHC graph error should not change when only optimized poses change");
+}
+
+void TestPopulateBodyZNHCDiagnosticsUsesFixedInitialAxis() {
+  const std::vector<double> timestamps{0.0, 0.5, 1.0};
+  const gtsam::Rot3 tilted_rotation = gtsam::Rot3::RzRyRx(0.0, 1.5707963267948966, 0.0);
+  const gtsam::Values initial_values =
+    MakeValues(timestamps, tilted_rotation, gtsam::Vector3::Zero());
+  const gtsam::Values optimized_values =
+    MakeValues(timestamps, gtsam::Rot3(), gtsam::Vector3(1.0, 0.0, 0.0));
+
+  offline_lc_minimal::BodyZNHCDiagnosticRow row;
+  row.factor_added = true;
+  row.start_state_index = 0U;
+  row.end_state_index = 2U;
+  row.state_count = 3U;
+  std::vector<offline_lc_minimal::BodyZNHCDiagnosticRow> diagnostics{row};
+
+  offline_lc_minimal::PopulateBodyZNHCDiagnostics(
+    initial_values,
+    optimized_values,
+    timestamps,
+    diagnostics);
+
+  ExpectNear(
+    diagnostics.front().optimized_mean_abs_body_z_velocity_mps,
+    1.0,
+    1e-12,
+    "postfit diagnostics should use the initial fixed body-z axis");
+  ExpectNear(
+    diagnostics.front().optimized_pose_mean_abs_body_z_velocity_mps,
+    0.0,
+    1e-12,
+    "pose-based diagnostic should still show the optimized-pose projection");
+  ExpectNear(
+    diagnostics.front().optimized_body_z_displacement_m,
+    1.0,
+    1e-12,
+    "fixed-axis postfit displacement should use the initial fixed body-z axis");
 }
 
 void TestBuilderAddsJumpWindowNHC() {
@@ -105,7 +210,10 @@ void TestBuilderAddsJumpWindowNHC() {
   config.body_z_nhc_jump_padding_s = 0.0;
   config.body_z_nhc_min_window_s = 0.5;
   const std::vector<double> timestamps{0.0, 0.5, 1.0, 1.5, 2.0};
-  const gtsam::Values values = MakeValues(timestamps, gtsam::Rot3(), gtsam::Vector3::Zero());
+  const gtsam::Values values = MakeValues(
+    timestamps,
+    gtsam::Rot3::RzRyRx(0.0, 1.5707963267948966, 0.0),
+    gtsam::Vector3(1.0, 0.0, 0.0));
   const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows{
     MakeJumpWindow(0.5, 1.5),
   };
@@ -128,8 +236,13 @@ void TestBuilderAddsJumpWindowNHC() {
   ExpectNear(static_cast<double>(summary.body_z_nhc_velocity_factor_count), 3.0, 0.0, "jump window velocity factor count is wrong");
   ExpectNear(static_cast<double>(summary.body_z_nhc_displacement_factor_count), 1.0, 0.0, "jump window displacement factor count is wrong");
   ExpectNear(static_cast<double>(graph.size()), 4.0, 0.0, "jump NHC should add one velocity factor per state plus one displacement factor");
+  ExpectNear(static_cast<double>(graph.at(0)->keys().size()), 1.0, 0.0, "velocity NHC should not connect pose keys");
+  ExpectNear(static_cast<double>(graph.at(3)->keys().size()), 3.0, 0.0, "window NHC should connect one velocity key per state");
   ExpectTrue(diagnostics.size() == 1U && diagnostics.front().from_jump_window, "jump NHC diagnostic should be recorded");
   ExpectNear(diagnostics.front().velocity_sigma_mps, config.body_z_nhc_jump_velocity_sigma_mps, 1e-12, "jump NHC should use jump velocity sigma");
+  ExpectTrue(
+    diagnostics.front().initial_mean_abs_body_z_velocity_mps > 0.5,
+    "builder should derive fixed body-z axes from tilted initial poses");
 }
 
 void TestBuilderMergesOverlappingJumpWindows() {
@@ -266,6 +379,8 @@ int main() {
   try {
     RunTest("TestBodyZVelocityZeroFactorUsesBodyFrameZ", TestBodyZVelocityZeroFactorUsesBodyFrameZ);
     RunTest("TestBodyZWindowDisplacementZeroFactorIntegratesBodyZVelocity", TestBodyZWindowDisplacementZeroFactorIntegratesBodyZVelocity);
+    RunTest("TestFixedAxisGraphErrorIgnoresPoseChanges", TestFixedAxisGraphErrorIgnoresPoseChanges);
+    RunTest("TestPopulateBodyZNHCDiagnosticsUsesFixedInitialAxis", TestPopulateBodyZNHCDiagnosticsUsesFixedInitialAxis);
     RunTest("TestBuilderAddsJumpWindowNHC", TestBuilderAddsJumpWindowNHC);
     RunTest("TestBuilderMergesOverlappingJumpWindows", TestBuilderMergesOverlappingJumpWindows);
     RunTest("TestBuilderSkipsShortWindow", TestBuilderSkipsShortWindow);

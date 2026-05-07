@@ -1010,6 +1010,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     optimized_values,
     run_result.vertical_velocity_delta_diagnostics);
   PopulateBodyZNHCDiagnostics(
+    optimization_initial_values,
     optimized_values,
     state_timestamps,
     run_result.body_z_nhc_diagnostics);

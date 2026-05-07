@@ -211,6 +211,11 @@ struct BodyZNHCDiagnosticRow {
   double optimized_mean_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
   double optimized_max_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
   double optimized_body_z_displacement_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_pose_mean_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_pose_max_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_pose_body_z_displacement_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_pitch_range_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_roll_range_rad = std::numeric_limits<double>::quiet_NaN();
   double max_velocity_residual_mps = std::numeric_limits<double>::quiet_NaN();
   double displacement_residual_m = std::numeric_limits<double>::quiet_NaN();
 };
