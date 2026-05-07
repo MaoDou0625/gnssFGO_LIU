@@ -262,6 +262,38 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_velocity_delta_target_acc_limit_mps2 <= 0.0) {
     throw std::runtime_error("vertical velocity delta settings must be positive");
   }
+  if (config.enable_body_z_nhc_global_weak_constraint &&
+      !config.enable_body_z_nhc_constraint) {
+    throw std::runtime_error("enable_body_z_nhc_global_weak_constraint requires enable_body_z_nhc_constraint");
+  }
+  if (config.enable_body_z_nhc_constraint &&
+      !config.enable_body_z_jump_detection &&
+      !config.enable_body_z_nhc_global_weak_constraint) {
+    throw std::runtime_error("jump-only body-z NHC requires enable_body_z_jump_detection");
+  }
+  if (!std::isfinite(config.body_z_nhc_jump_padding_s) ||
+      config.body_z_nhc_jump_padding_s < 0.0 ||
+      !std::isfinite(config.body_z_nhc_merge_gap_s) ||
+      config.body_z_nhc_merge_gap_s < 0.0 ||
+      !std::isfinite(config.body_z_nhc_min_window_s) ||
+      config.body_z_nhc_min_window_s <= 0.0 ||
+      !std::isfinite(config.body_z_nhc_jump_velocity_sigma_mps) ||
+      config.body_z_nhc_jump_velocity_sigma_mps <= 0.0 ||
+      !std::isfinite(config.body_z_nhc_jump_displacement_sigma_m) ||
+      config.body_z_nhc_jump_displacement_sigma_m <= 0.0 ||
+      !std::isfinite(config.body_z_nhc_global_window_s) ||
+      config.body_z_nhc_global_window_s <= 0.0 ||
+      !std::isfinite(config.body_z_nhc_global_stride_s) ||
+      config.body_z_nhc_global_stride_s <= 0.0 ||
+      !std::isfinite(config.body_z_nhc_global_velocity_sigma_mps) ||
+      config.body_z_nhc_global_velocity_sigma_mps <= 0.0 ||
+      !std::isfinite(config.body_z_nhc_global_displacement_sigma_m) ||
+      config.body_z_nhc_global_displacement_sigma_m <= 0.0) {
+    throw std::runtime_error("body-z NHC settings are invalid");
+  }
+  if (config.body_z_nhc_global_window_s < config.body_z_nhc_min_window_s) {
+    throw std::runtime_error("body-z NHC global window must be at least the minimum window duration");
+  }
   if ((config.enable_vertical_jump_masked_imu ||
        config.enable_vertical_jump_impulse ||
        config.enable_vertical_jump_bias ||
@@ -583,6 +615,28 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_velocity_delta_jump_padding_s = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_target_acc_limit_mps2") {
     config.vertical_velocity_delta_target_acc_limit_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_body_z_nhc_constraint") {
+    config.enable_body_z_nhc_constraint = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_body_z_nhc_global_weak_constraint") {
+    config.enable_body_z_nhc_global_weak_constraint = ParseBool(normalized_value);
+  } else if (normalized_key == "body_z_nhc_jump_padding_s") {
+    config.body_z_nhc_jump_padding_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_nhc_merge_gap_s") {
+    config.body_z_nhc_merge_gap_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_nhc_min_window_s") {
+    config.body_z_nhc_min_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_nhc_jump_velocity_sigma_mps") {
+    config.body_z_nhc_jump_velocity_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_nhc_jump_displacement_sigma_m") {
+    config.body_z_nhc_jump_displacement_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_nhc_global_window_s") {
+    config.body_z_nhc_global_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_nhc_global_stride_s") {
+    config.body_z_nhc_global_stride_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_nhc_global_velocity_sigma_mps") {
+    config.body_z_nhc_global_velocity_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_nhc_global_displacement_sigma_m") {
+    config.body_z_nhc_global_displacement_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_jump_masked_imu") {
     config.enable_vertical_jump_masked_imu = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_jump_masked_imu_padding_s") {
@@ -861,6 +915,18 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "vertical_velocity_delta_jump_padding_s=" << config.vertical_velocity_delta_jump_padding_s << '\n'
     << "vertical_velocity_delta_target_acc_limit_mps2="
     << config.vertical_velocity_delta_target_acc_limit_mps2 << '\n'
+    << "enable_body_z_nhc_constraint=" << (config.enable_body_z_nhc_constraint ? "true" : "false") << '\n'
+    << "enable_body_z_nhc_global_weak_constraint="
+    << (config.enable_body_z_nhc_global_weak_constraint ? "true" : "false") << '\n'
+    << "body_z_nhc_jump_padding_s=" << config.body_z_nhc_jump_padding_s << '\n'
+    << "body_z_nhc_merge_gap_s=" << config.body_z_nhc_merge_gap_s << '\n'
+    << "body_z_nhc_min_window_s=" << config.body_z_nhc_min_window_s << '\n'
+    << "body_z_nhc_jump_velocity_sigma_mps=" << config.body_z_nhc_jump_velocity_sigma_mps << '\n'
+    << "body_z_nhc_jump_displacement_sigma_m=" << config.body_z_nhc_jump_displacement_sigma_m << '\n'
+    << "body_z_nhc_global_window_s=" << config.body_z_nhc_global_window_s << '\n'
+    << "body_z_nhc_global_stride_s=" << config.body_z_nhc_global_stride_s << '\n'
+    << "body_z_nhc_global_velocity_sigma_mps=" << config.body_z_nhc_global_velocity_sigma_mps << '\n'
+    << "body_z_nhc_global_displacement_sigma_m=" << config.body_z_nhc_global_displacement_sigma_m << '\n'
     << "enable_vertical_jump_masked_imu=" << (config.enable_vertical_jump_masked_imu ? "true" : "false") << '\n'
     << "vertical_jump_masked_imu_padding_s=" << config.vertical_jump_masked_imu_padding_s << '\n'
     << "enable_vertical_jump_impulse=" << (config.enable_vertical_jump_impulse ? "true" : "false") << '\n'

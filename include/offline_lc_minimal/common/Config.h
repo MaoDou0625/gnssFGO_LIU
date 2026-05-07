@@ -124,6 +124,17 @@ struct OfflineRunnerConfig {
   double vertical_velocity_delta_min_sigma_mps = 0.02;
   double vertical_velocity_delta_jump_padding_s = 0.25;
   double vertical_velocity_delta_target_acc_limit_mps2 = 0.85;
+  bool enable_body_z_nhc_constraint = false;
+  bool enable_body_z_nhc_global_weak_constraint = false;
+  double body_z_nhc_jump_padding_s = 0.30;
+  double body_z_nhc_merge_gap_s = 0.20;
+  double body_z_nhc_min_window_s = 0.50;
+  double body_z_nhc_jump_velocity_sigma_mps = 0.02;
+  double body_z_nhc_jump_displacement_sigma_m = 0.02;
+  double body_z_nhc_global_window_s = 3.0;
+  double body_z_nhc_global_stride_s = 1.0;
+  double body_z_nhc_global_velocity_sigma_mps = 0.05;
+  double body_z_nhc_global_displacement_sigma_m = 0.05;
   bool enable_vertical_jump_masked_imu = false;
   double vertical_jump_masked_imu_padding_s = 0.25;
   bool enable_vertical_jump_impulse = false;

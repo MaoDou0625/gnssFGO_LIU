@@ -43,6 +43,11 @@ struct RunSummary {
   std::size_t vertical_velocity_delta_skipped_gnss_support_count = 0;
   std::size_t vertical_velocity_delta_skipped_invalid_count = 0;
   std::size_t vertical_velocity_delta_target_clamped_count = 0;
+  std::size_t body_z_nhc_velocity_factor_count = 0;
+  std::size_t body_z_nhc_displacement_factor_count = 0;
+  std::size_t body_z_nhc_window_count = 0;
+  std::size_t body_z_nhc_skipped_short_window_count = 0;
+  std::size_t body_z_nhc_skipped_invalid_count = 0;
   std::size_t vertical_jump_combined_imu_factor_count = 0;
   std::size_t vertical_jump_masked_imu_factor_count = 0;
   std::size_t vertical_jump_impulse_factor_count = 0;
@@ -158,6 +163,11 @@ struct RunSummary {
         << "vertical_velocity_delta_skipped_invalid_count=" << vertical_velocity_delta_skipped_invalid_count << '\n'
         << "vertical_velocity_delta_target_clamped_count="
         << vertical_velocity_delta_target_clamped_count << '\n'
+        << "body_z_nhc_velocity_factor_count=" << body_z_nhc_velocity_factor_count << '\n'
+        << "body_z_nhc_displacement_factor_count=" << body_z_nhc_displacement_factor_count << '\n'
+        << "body_z_nhc_window_count=" << body_z_nhc_window_count << '\n'
+        << "body_z_nhc_skipped_short_window_count=" << body_z_nhc_skipped_short_window_count << '\n'
+        << "body_z_nhc_skipped_invalid_count=" << body_z_nhc_skipped_invalid_count << '\n'
         << "vertical_jump_combined_imu_factor_count=" << vertical_jump_combined_imu_factor_count << '\n'
         << "vertical_jump_masked_imu_factor_count=" << vertical_jump_masked_imu_factor_count << '\n'
         << "vertical_jump_impulse_factor_count=" << vertical_jump_impulse_factor_count << '\n'
@@ -271,6 +281,7 @@ struct OfflineRunResult {
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;
+  std::vector<BodyZNHCDiagnosticRow> body_z_nhc_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;
   std::vector<VerticalJumpImpulseDiagnosticRow> vertical_jump_impulse_diagnostics;
   std::vector<VerticalJumpBiasDiagnosticRow> vertical_jump_bias_diagnostics;

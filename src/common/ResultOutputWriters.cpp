@@ -415,6 +415,52 @@ void WriteVerticalVelocityDeltaDiagnosticsCsv(
   }
 }
 
+void WriteBodyZNHCDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<BodyZNHCDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,window_type,from_jump_window,source_window_index,source_window_count,"
+       "start_state_index,end_state_index,state_count,start_time_s,end_time_s,duration_s,"
+       "actual_state_span_s,factor_added,skip_reason,velocity_factor_count,displacement_factor_count,"
+       "velocity_sigma_mps,displacement_sigma_m,initial_mean_abs_body_z_velocity_mps,"
+       "initial_max_abs_body_z_velocity_mps,initial_body_z_displacement_m,"
+       "optimized_mean_abs_body_z_velocity_mps,optimized_max_abs_body_z_velocity_mps,"
+       "optimized_body_z_displacement_m,max_velocity_residual_mps,displacement_residual_m\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.window_type << ','
+           << (row.from_jump_window ? 1 : 0) << ','
+           << row.source_window_index << ','
+           << row.source_window_count << ','
+           << row.start_state_index << ','
+           << row.end_state_index << ','
+           << row.state_count << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.duration_s << ','
+           << row.actual_state_span_s << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << row.velocity_factor_count << ','
+           << row.displacement_factor_count << ','
+           << row.velocity_sigma_mps << ','
+           << row.displacement_sigma_m << ','
+           << row.initial_mean_abs_body_z_velocity_mps << ','
+           << row.initial_max_abs_body_z_velocity_mps << ','
+           << row.initial_body_z_displacement_m << ','
+           << row.optimized_mean_abs_body_z_velocity_mps << ','
+           << row.optimized_max_abs_body_z_velocity_mps << ','
+           << row.optimized_body_z_displacement_m << ','
+           << row.max_velocity_residual_mps << ','
+           << row.displacement_residual_m << '\n';
+  }
+}
+
 void WriteVerticalJumpMaskedImuDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpMaskedImuDiagnosticRow> &rows) {

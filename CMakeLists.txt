@@ -57,6 +57,7 @@ add_library(offline_lc_minimal_lib
   src/io/TextDatasetLoader.cpp
   src/core/InitialStaticConstraintBuilder.cpp
   src/core/BodyZBidirectionalJumpDetector.cpp
+  src/core/BodyZNHCConstraintBuilder.cpp
   src/core/BodyZWindowPipeline.cpp
   src/core/GnssFactorBuilder.cpp
   src/core/GraphTimelineBuilder.cpp
@@ -144,6 +145,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     tests/vertical_velocity_delta_constraint_test.cpp
   )
 
+  add_executable(body_z_nhc_constraint_test
+    tests/body_z_nhc_constraint_test.cpp
+  )
+
   add_executable(vertical_jump_constraints_test
     tests/vertical_jump_constraints_test.cpp
   )
@@ -178,6 +183,11 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(vertical_velocity_delta_constraint_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(body_z_nhc_constraint_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -219,6 +229,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       vertical_velocity_delta_constraint_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      body_z_nhc_constraint_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -274,6 +290,13 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         $<TARGET_FILE:vertical_velocity_delta_constraint_test>
     )
     add_test(
+      NAME body_z_nhc_constraint_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:body_z_nhc_constraint_test>
+    )
+    add_test(
       NAME vertical_jump_constraints_test
       COMMAND
         ${CMAKE_COMMAND} -E env
@@ -307,6 +330,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     add_test(
       NAME vertical_velocity_delta_constraint_test
       COMMAND $<TARGET_FILE:vertical_velocity_delta_constraint_test>
+    )
+    add_test(
+      NAME body_z_nhc_constraint_test
+      COMMAND $<TARGET_FILE:body_z_nhc_constraint_test>
     )
     add_test(
       NAME vertical_jump_constraints_test

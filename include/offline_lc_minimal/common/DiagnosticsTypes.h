@@ -186,6 +186,35 @@ struct VerticalVelocityDeltaDiagnosticRow {
   double sigma_mps = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct BodyZNHCDiagnosticRow {
+  std::size_t window_index = 0;
+  std::string window_type = "UNSET";
+  bool from_jump_window = false;
+  std::size_t source_window_index = 0;
+  std::size_t source_window_count = 0;
+  std::size_t start_state_index = 0;
+  std::size_t end_state_index = 0;
+  std::size_t state_count = 0;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double duration_s = std::numeric_limits<double>::quiet_NaN();
+  double actual_state_span_s = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+  std::size_t velocity_factor_count = 0;
+  std::size_t displacement_factor_count = 0;
+  double velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double displacement_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double initial_mean_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double initial_max_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double initial_body_z_displacement_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_mean_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_max_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_body_z_displacement_m = std::numeric_limits<double>::quiet_NaN();
+  double max_velocity_residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double displacement_residual_m = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct VerticalJumpMaskedImuDiagnosticRow {
   std::size_t state_index_i = 0;
   std::size_t state_index_j = 0;

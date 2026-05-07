@@ -927,6 +927,56 @@ void TestVerticalJumpConfigValidation() {
   ExpectTrue(threw, "non-positive boundary position-velocity consistency sigma should be rejected");
 }
 
+void TestBodyZNHCConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "enable_body_z_nhc_constraint", "true");
+  offline_lc_minimal::OverrideConfigField(config, "enable_body_z_nhc_global_weak_constraint", "true");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_jump_padding_s", "0.30");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_merge_gap_s", "0.20");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_min_window_s", "0.50");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_jump_velocity_sigma_mps", "0.02");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_jump_displacement_sigma_m", "0.02");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_global_window_s", "3.0");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_global_stride_s", "1.0");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_global_velocity_sigma_mps", "0.05");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_global_displacement_sigma_m", "0.05");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "body-z NHC flag should load");
+  ExpectTrue(config.enable_body_z_nhc_global_weak_constraint, "body-z NHC global flag should load");
+  ExpectTrue(std::abs(config.body_z_nhc_global_window_s - 3.0) < 1e-12, "global NHC window should load");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_nhc_constraint = true;
+  config.enable_body_z_jump_detection = false;
+  config.enable_body_z_nhc_global_weak_constraint = false;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("jump-only body-z NHC") != std::string::npos;
+  }
+  ExpectTrue(threw, "jump-only body-z NHC should require jump detection");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_nhc_global_weak_constraint = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("requires enable_body_z_nhc_constraint") != std::string::npos;
+  }
+  ExpectTrue(threw, "global body-z NHC should require the main NHC flag");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.body_z_nhc_jump_velocity_sigma_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("body-z NHC settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive body-z NHC velocity sigma should be rejected");
+}
+
 }  // namespace
 
 int main() {
@@ -949,6 +999,7 @@ int main() {
     RunTest("TestInitialStaticVerticalBiasConfigValidation", TestInitialStaticVerticalBiasConfigValidation);
     RunTest("TestVerticalVelocityDeltaConfigValidation", TestVerticalVelocityDeltaConfigValidation);
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);
+    RunTest("TestBodyZNHCConfigValidation", TestBodyZNHCConfigValidation);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;
