@@ -8,6 +8,7 @@ import importlib.util
 import math
 import statistics
 from pathlib import Path
+from typing import NamedTuple
 
 try:
     import matplotlib.pyplot as plt
@@ -44,9 +45,25 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional body_z_seed_jump_windows.csv path; defaults to the trajectory directory when present",
     )
+    parser.add_argument(
+        "--time-origin",
+        choices=["alignment", "dynamic", "trajectory"],
+        default="alignment",
+        help=(
+            "Time zero for plotting. Default alignment uses alignment_start_time_s "
+            "so the 100 s static alignment and dynamic navigation are continuous. "
+            "Use dynamic for the legacy dynamic-start zoom."
+        ),
+    )
     parser.add_argument("--speed-window-s", type=float, default=1.0, help="Centered RTK speed-difference window in seconds")
     parser.add_argument("--title", default="Optimized vertical position and velocity over full duration", help="Figure title")
     return parser.parse_args()
+
+
+class PlotTimeOrigin(NamedTuple):
+    start_time_s: float
+    dynamic_start_time_s: float | None
+    label: str
 
 
 def read_trajectory_rows(path: Path) -> list[dict[str, float]]:
@@ -155,6 +172,53 @@ def resolve_dynamic_start_time(trajectory_path: Path) -> float | None:
     return None
 
 
+def snap_to_nearest_trajectory_time(
+    trajectory_rows: list[dict[str, float]],
+    target_time_s: float,
+) -> float:
+    nearest_index = find_nearest_index(
+        [row["time_s"] for row in trajectory_rows],
+        target_time_s,
+    )
+    return trajectory_rows[nearest_index]["time_s"]
+
+
+def resolve_plot_time_origin(
+    trajectory_path: Path,
+    trajectory_rows: list[dict[str, float]],
+    time_origin: str,
+) -> PlotTimeOrigin:
+    summary_values = read_key_value_file(trajectory_path.with_name("summary.txt"))
+    dynamic_start_time_s = (
+        float(summary_values["dynamic_start_time_s"])
+        if summary_values.get("dynamic_start_time_s", "")
+        else None
+    )
+    alignment_start_time_s = (
+        float(summary_values["alignment_start_time_s"])
+        if summary_values.get("alignment_start_time_s", "")
+        else None
+    )
+
+    if time_origin == "dynamic" and dynamic_start_time_s is not None:
+        return PlotTimeOrigin(
+            start_time_s=snap_to_nearest_trajectory_time(trajectory_rows, dynamic_start_time_s),
+            dynamic_start_time_s=dynamic_start_time_s,
+            label="dynamic start",
+        )
+    if time_origin == "alignment" and alignment_start_time_s is not None:
+        return PlotTimeOrigin(
+            start_time_s=snap_to_nearest_trajectory_time(trajectory_rows, alignment_start_time_s),
+            dynamic_start_time_s=dynamic_start_time_s,
+            label="static alignment start",
+        )
+    return PlotTimeOrigin(
+        start_time_s=trajectory_rows[0]["time_s"],
+        dynamic_start_time_s=dynamic_start_time_s,
+        label="trajectory start",
+    )
+
+
 def compute_delta_up(
     rows: list[dict[str, float]],
     key: str = "up_m",
@@ -191,16 +255,18 @@ def plot_envelope_gate(
     axis,
     envelope_rows: list[dict[str, float]],
     reference_time_s: float,
+    reference_up_m: float | None = None,
 ) -> None:
     envelope_rows_from_start = filter_rows_from_time(envelope_rows, reference_time_s)
     if not envelope_rows_from_start:
         return
 
-    reference_index = find_nearest_index(
-        [row["time_s"] for row in envelope_rows_from_start],
-        reference_time_s,
-    )
-    reference_up_m = envelope_rows_from_start[reference_index]["rtk_up_m"]
+    if reference_up_m is None:
+        reference_index = find_nearest_index(
+            [row["time_s"] for row in envelope_rows_from_start],
+            reference_time_s,
+        )
+        reference_up_m = envelope_rows_from_start[reference_index]["rtk_up_m"]
     time_s = [row["time_s"] - reference_time_s for row in envelope_rows_from_start]
     center_delta_up = [row["rtk_up_m"] - reference_up_m for row in envelope_rows_from_start]
     upper_delta_up = [
@@ -259,13 +325,38 @@ def shade_jump_windows(
         label_added = True
 
 
+def shade_static_alignment(
+    axis,
+    reference_time_s: float,
+    dynamic_start_time_s: float | None,
+) -> None:
+    if dynamic_start_time_s is None or dynamic_start_time_s <= reference_time_s + TIME_EPSILON_S:
+        return
+    axis.axvspan(
+        0.0,
+        dynamic_start_time_s - reference_time_s,
+        color="#17becf",
+        alpha=0.08,
+        linewidth=0.0,
+        label="static alignment window",
+    )
+    axis.axvline(
+        dynamic_start_time_s - reference_time_s,
+        color="#222222",
+        linestyle="--",
+        linewidth=1.0,
+        alpha=0.7,
+        label="dynamic start",
+    )
+
+
 def write_csv(
     path: Path,
     trajectory_rows: list[dict[str, float]],
     rtk_rows: list[dict[str, float]],
     rtk_speed_rows: list[dict[str, float]],
+    reference_time_s: float,
 ) -> None:
-    reference_time_s = trajectory_rows[0]["time_s"]
     rtk_times = [row["time_s"] for row in rtk_rows]
     rtk_speed_times = [row["time_s"] for row in rtk_speed_rows]
     optimized_delta_up = compute_delta_up(
@@ -318,10 +409,18 @@ def make_plot(
     jump_windows: list[tuple[float, float]],
     output_path: Path,
     title: str,
+    time_origin: PlotTimeOrigin,
 ) -> None:
-    t0 = trajectory_rows[0]["time_s"]
+    t0 = time_origin.start_time_s
     rtk_rows_from_start = filter_rows_from_time(rtk_rows, t0)
     rtk_speed_rows_from_start = filter_rows_from_time(rtk_speed_rows, t0)
+    rtk_reference_up_m = None
+    if rtk_rows_from_start:
+        rtk_reference_index = find_nearest_index(
+            [row["time_s"] for row in rtk_rows_from_start],
+            t0,
+        )
+        rtk_reference_up_m = rtk_rows_from_start[rtk_reference_index]["up_m"]
 
     def relative_time(rows: list[dict[str, float]]) -> list[float]:
         return [row["time_s"] - t0 for row in rows]
@@ -331,15 +430,17 @@ def make_plot(
 
     axes[0].plot(relative_time(trajectory_rows), [row["up_m"] for row in trajectory_rows], color="#1f77b4", linewidth=1.1, label="optimized")
     axes[0].plot(relative_time(rtk_rows_from_start), [row["up_m"] for row in rtk_rows_from_start], color="#ff7f0e", linewidth=0.9, alpha=0.9, label="RTKFIX")
+    shade_static_alignment(axes[0], t0, time_origin.dynamic_start_time_s)
     shade_jump_windows(axes[0], jump_windows, t0)
     axes[0].set_ylabel("Up [m]")
-    axes[0].set_title("Absolute up position with body-z jump windows")
+    axes[0].set_title("Absolute up position with static alignment and body-z jump windows")
     axes[0].grid(True, alpha=0.3)
     axes[0].legend(loc="upper right")
 
     axes[1].plot(relative_time(trajectory_rows), compute_delta_up(trajectory_rows, reference_time_s=t0), color="#1f77b4", linewidth=1.1, label="optimized")
     axes[1].plot(relative_time(rtk_rows_from_start), compute_delta_up(rtk_rows_from_start, reference_time_s=t0), color="#ff7f0e", linewidth=0.9, alpha=0.9, label="RTKFIX")
-    plot_envelope_gate(axes[1], envelope_rows, t0)
+    shade_static_alignment(axes[1], t0, time_origin.dynamic_start_time_s)
+    plot_envelope_gate(axes[1], envelope_rows, t0, rtk_reference_up_m)
     axes[1].set_ylabel("Delta Up [m]")
     axes[1].set_title("Relative up position with envelope gate")
     axes[1].grid(True, alpha=0.3)
@@ -347,9 +448,10 @@ def make_plot(
 
     axes[2].plot(relative_time(trajectory_rows), [row["vz_mps"] for row in trajectory_rows], color="#1f77b4", linewidth=1.1, label="optimized")
     axes[2].plot(relative_time(rtk_speed_rows_from_start), [row["vz_mps"] for row in rtk_speed_rows_from_start], color="#ff7f0e", linewidth=0.9, alpha=0.9, label="RTKFIX diff")
+    shade_static_alignment(axes[2], t0, time_origin.dynamic_start_time_s)
     axes[2].set_ylabel("Vz [m/s]")
     axes[2].set_title("Vertical velocity")
-    axes[2].set_xlabel("Time since navigation start [s]")
+    axes[2].set_xlabel(f"Time since {time_origin.label} [s]")
     axes[2].grid(True, alpha=0.3)
     axes[2].legend(loc="upper right")
     axes[2].set_xlim(left=0.0)
@@ -381,13 +483,13 @@ def main() -> int:
         if args.jump_windows
         else trajectory_path.with_name("body_z_seed_jump_windows.csv")
     )
-    dynamic_start_time_s = resolve_dynamic_start_time(trajectory_path)
-    trajectory_rows = (
-        filter_rows_from_time(trajectory_rows_all, dynamic_start_time_s)
-        if dynamic_start_time_s is not None
-        else trajectory_rows_all
+    time_origin = resolve_plot_time_origin(
+        trajectory_path,
+        trajectory_rows_all,
+        args.time_origin,
     )
-    navigation_start_time_s = trajectory_rows[0]["time_s"]
+    trajectory_rows = filter_rows_from_time(trajectory_rows_all, time_origin.start_time_s)
+    navigation_start_time_s = time_origin.start_time_s
     origin_lat_rad, origin_lon_rad, origin_h_m = plot_speed_vs_rtk.choose_origin(gnss_path, trajectory_path)
     rtk_rows = plot_speed_vs_rtk.read_rtkfix_rows(gnss_path, origin_lat_rad, origin_lon_rad, origin_h_m)
     rtk_speed_rows = filter_valid_rtk_speed_rows(
@@ -398,8 +500,17 @@ def main() -> int:
     rtk_rows_from_start = filter_rows_from_time(rtk_rows, navigation_start_time_s)
     rtk_speed_rows_from_start = filter_rows_from_time(rtk_speed_rows, navigation_start_time_s)
 
-    make_plot(trajectory_rows, rtk_rows, rtk_speed_rows, envelope_rows, jump_windows, output_path, args.title)
-    write_csv(csv_output_path, trajectory_rows, rtk_rows, rtk_speed_rows)
+    make_plot(
+        trajectory_rows,
+        rtk_rows,
+        rtk_speed_rows,
+        envelope_rows,
+        jump_windows,
+        output_path,
+        args.title,
+        time_origin,
+    )
+    write_csv(csv_output_path, trajectory_rows, rtk_rows, rtk_speed_rows, time_origin.start_time_s)
 
     optimized_stats = compute_vertical_stats(trajectory_rows)
     rtk_stats = compute_vertical_stats(
@@ -411,6 +522,10 @@ def main() -> int:
     )
     print(f"plot_saved={output_path}")
     print(f"csv_saved={csv_output_path}")
+    print(f"time_origin={args.time_origin}")
+    print(f"plot_start_time_s={time_origin.start_time_s}")
+    if time_origin.dynamic_start_time_s is not None:
+        print(f"dynamic_start_time_s={time_origin.dynamic_start_time_s}")
     print(
         "optimized: "
         f"delta_up_range_m={optimized_stats['delta_up_range_m']:.6f}, "

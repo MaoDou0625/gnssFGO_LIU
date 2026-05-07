@@ -94,6 +94,95 @@ class PlotOptimizedVerticalProfileTests(unittest.TestCase):
             dynamic_start_time_s = plot_optimized_vertical_profile.resolve_dynamic_start_time(trajectory_path)
             self.assertAlmostEqual(dynamic_start_time_s, 5801.6, places=9)
 
+    def test_resolve_plot_time_origin_defaults_to_alignment_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = pathlib.Path(temp_dir)
+            trajectory_path = temp_path / "trajectory.csv"
+            summary_path = temp_path / "summary.txt"
+            rows = [
+                {"time_s": 5701.4, "up_m": 10.0, "vz_mps": 0.0},
+                {"time_s": 5801.6, "up_m": 10.1, "vz_mps": 0.0},
+            ]
+            trajectory_path.write_text(
+                "time_s,up_m,vz_mps\n5701.4,10.0,0.0\n5801.6,10.1,0.0\n",
+                encoding="utf-8",
+            )
+            summary_path.write_text(
+                "alignment_start_time_s=5701.4\n"
+                "dynamic_start_time_s=5801.6\n",
+                encoding="utf-8",
+            )
+
+            origin = plot_optimized_vertical_profile.resolve_plot_time_origin(
+                trajectory_path,
+                rows,
+                "alignment",
+            )
+
+            self.assertAlmostEqual(origin.start_time_s, 5701.4, places=9)
+            self.assertAlmostEqual(origin.dynamic_start_time_s, 5801.6, places=9)
+            self.assertEqual(origin.label, "static alignment start")
+
+    def test_resolve_plot_time_origin_keeps_dynamic_zoom_option(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = pathlib.Path(temp_dir)
+            trajectory_path = temp_path / "trajectory.csv"
+            summary_path = temp_path / "summary.txt"
+            rows = [
+                {"time_s": 5701.4, "up_m": 10.0, "vz_mps": 0.0},
+                {"time_s": 5801.6, "up_m": 10.1, "vz_mps": 0.0},
+            ]
+            trajectory_path.write_text(
+                "time_s,up_m,vz_mps\n5701.4,10.0,0.0\n5801.6,10.1,0.0\n",
+                encoding="utf-8",
+            )
+            summary_path.write_text(
+                "alignment_start_time_s=5701.4\n"
+                "dynamic_start_time_s=5801.6\n",
+                encoding="utf-8",
+            )
+
+            origin = plot_optimized_vertical_profile.resolve_plot_time_origin(
+                trajectory_path,
+                rows,
+                "dynamic",
+            )
+
+            self.assertAlmostEqual(origin.start_time_s, 5801.6, places=9)
+            self.assertAlmostEqual(origin.dynamic_start_time_s, 5801.6, places=9)
+            self.assertEqual(origin.label, "dynamic start")
+
+    def test_resolve_plot_time_origin_snaps_summary_time_to_existing_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = pathlib.Path(temp_dir)
+            trajectory_path = temp_path / "trajectory.csv"
+            summary_path = temp_path / "summary.txt"
+            rows = [
+                {"time_s": 5701.3996, "up_m": 10.0, "vz_mps": 0.0},
+                {"time_s": 5701.8996, "up_m": 10.0, "vz_mps": 0.0},
+                {"time_s": 5801.5970, "up_m": 10.1, "vz_mps": 0.0},
+            ]
+            trajectory_path.write_text(
+                "time_s,up_m,vz_mps\n"
+                "5701.3996,10.0,0.0\n"
+                "5701.8996,10.0,0.0\n"
+                "5801.5970,10.1,0.0\n",
+                encoding="utf-8",
+            )
+            summary_path.write_text(
+                "alignment_start_time_s=5701.4\n"
+                "dynamic_start_time_s=5801.6\n",
+                encoding="utf-8",
+            )
+
+            origin = plot_optimized_vertical_profile.resolve_plot_time_origin(
+                trajectory_path,
+                rows,
+                "alignment",
+            )
+
+            self.assertAlmostEqual(origin.start_time_s, 5701.3996, places=9)
+
     def test_read_jump_windows_drops_invalid_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             window_path = pathlib.Path(temp_dir) / "body_z_seed_jump_windows.csv"
