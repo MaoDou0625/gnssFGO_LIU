@@ -355,6 +355,74 @@ void TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled() {
   ExpectTrue(envelope_diagnostics.front().center_pull_factor_used, "interpolated diagnostic should mark center pull");
 }
 
+void TestEnvelopeModeAddsOnlyInterpolatedEnvelopeWhenCenterPullDisabled() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
+  config.vertical_envelope_gate_sigma_multiple = 2.0;
+  config.vertical_envelope_min_half_width_m = 0.10;
+  config.vertical_envelope_factor_sigma_m = 0.20;
+  config.enable_vertical_envelope_center_pull = false;
+  config.early_gnss_relaxation_duration_s = 0.0;
+
+  std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeGnssSample(0.0),
+    MakeGnssSample(1.0),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  std::vector<offline_lc_minimal::TrajectoryRow> trajectory(2);
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::GnssFactorRecord> factor_records;
+  std::vector<offline_lc_minimal::GnssConsistencyRecord> consistency_records;
+  std::vector<offline_lc_minimal::VerticalEnvelopeDiagnosticRow> envelope_diagnostics;
+
+  offline_lc_minimal::GnssFactorBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.navigation_start_index = 0;
+  request.graph = &graph;
+  request.trajectory = &trajectory;
+  request.run_summary = &summary;
+  request.factor_records = &factor_records;
+  request.consistency_records = &consistency_records;
+  request.vertical_envelope_diagnostics = &envelope_diagnostics;
+  request.collect_consistency_records = true;
+  request.dynamic_start_time_s = 1.0;
+  request.should_use_sample = [](const auto &) { return true; };
+  request.is_within_imu_coverage = [](double) { return true; };
+  request.corrected_time_s = [](const auto &sample) { return sample.time_s; };
+  request.clamped_sigma_m = [](const auto &) { return Eigen::Vector3d(0.1, 0.2, 0.3); };
+  request.find_state_for_time_s = [](double) {
+    offline_lc_minimal::StateMeasSyncResult result;
+    result.status = offline_lc_minimal::StateMeasSyncStatus::kInterpolated;
+    result.key_index_i = 0;
+    result.key_index_j = 1;
+    result.timestamp_i_s = 0.0;
+    result.timestamp_j_s = 1.0;
+    result.duration_from_state_i_s = 0.4;
+    return result;
+  };
+  request.trajectory_row_index_for_state = [](std::size_t state_index) {
+    return static_cast<long long>(state_index);
+  };
+
+  offline_lc_minimal::GnssFactorBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 2.0, 0.0, "interpolated gate-only RTK should add two GNSS factors");
+  ExpectTrue(
+    static_cast<bool>(boost::dynamic_pointer_cast<offline_lc_minimal::factor::GPInterpolatedHorizontalPositionFactor>(graph[0])),
+    "gate-only RTK should keep the GP horizontal factor first");
+  ExpectTrue(
+    static_cast<bool>(boost::dynamic_pointer_cast<offline_lc_minimal::factor::GPInterpolatedVerticalEnvelopeFactor>(graph[1])),
+    "gate-only RTK should add one GP vertical envelope factor");
+  ExpectTrue(
+    !static_cast<bool>(boost::dynamic_pointer_cast<offline_lc_minimal::factor::GPInterpolatedVerticalEnvelopeCenterPullFactor>(graph[1])),
+    "gate-only RTK should not add an interpolated center-pull factor");
+  ExpectNear(static_cast<double>(summary.gnss_interpolated_factor_count), 1.0, 0.0, "sample should be interpolated");
+  ExpectNear(static_cast<double>(summary.gnss_factor_count), 1.0, 0.0, "GNSS sample count should not change");
+  ExpectNear(static_cast<double>(envelope_diagnostics.size()), 1.0, 0.0, "envelope diagnostics should stay one row per sample");
+  ExpectTrue(!envelope_diagnostics.front().center_pull_factor_used, "gate-only diagnostic should not mark center pull");
+}
+
 void TestEnvelopeResidualStaysHorizontalWithoutConsistencyRecords() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
@@ -449,6 +517,9 @@ int main() {
     RunTest(
       "TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled",
       TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled);
+    RunTest(
+      "TestEnvelopeModeAddsOnlyInterpolatedEnvelopeWhenCenterPullDisabled",
+      TestEnvelopeModeAddsOnlyInterpolatedEnvelopeWhenCenterPullDisabled);
     RunTest(
       "TestEnvelopeResidualStaysHorizontalWithoutConsistencyRecords",
       TestEnvelopeResidualStaysHorizontalWithoutConsistencyRecords);

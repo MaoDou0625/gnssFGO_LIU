@@ -320,6 +320,38 @@ void TestPhase10SegmentedJumpBiasConfigLoads() {
     "phase10 high-frequency sigma cap should load");
 }
 
+void TestPhase12RtkGateOnlyFullNavConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase12_rtk_gate_only_full_nav.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase12 gate-only config should use envelope constraints");
+  ExpectTrue(!config.enable_vertical_envelope_center_pull, "phase12 should disable center pull");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_gate_sigma_multiple - 2.0) < 1e-12,
+    "phase12 should keep the 2-sigma vertical envelope gate");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_min_half_width_m - 0.10) < 1e-12,
+    "phase12 should keep the minimum vertical envelope half-width");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_factor_sigma_m - 0.20) < 1e-12,
+    "phase12 should keep the gate-outside vertical sigma");
+  ExpectTrue(config.enable_gp_interpolated_gnss, "phase12 should keep full GNSS interpolation enabled");
+  ExpectTrue(!config.drop_non_rtkfix, "phase12 should keep all valid non-RTKFIX samples available");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase12 should keep fixed-axis body-z NHC enabled");
+  ExpectTrue(
+    !config.enable_body_z_nhc_global_weak_constraint,
+    "phase12 should keep global weak body-z NHC disabled");
+  ExpectTrue(
+    std::abs(config.body_z_nhc_jump_velocity_sigma_mps - 0.005) < 1e-12,
+    "phase12 should keep strong jump-window NHC velocity sigma");
+  ExpectTrue(
+    std::abs(config.body_z_nhc_jump_displacement_sigma_m - 0.005) < 1e-12,
+    "phase12 should keep strong jump-window NHC displacement sigma");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -992,6 +1024,7 @@ int main() {
     RunTest("TestPhase8ImpulseConfigLoads", TestPhase8ImpulseConfigLoads);
     RunTest("TestPhase9JumpBiasConfigLoads", TestPhase9JumpBiasConfigLoads);
     RunTest("TestPhase10SegmentedJumpBiasConfigLoads", TestPhase10SegmentedJumpBiasConfigLoads);
+    RunTest("TestPhase12RtkGateOnlyFullNavConfigLoads", TestPhase12RtkGateOnlyFullNavConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
