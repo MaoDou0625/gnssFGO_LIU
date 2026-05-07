@@ -141,6 +141,10 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_acc_bias_process_noise_scale <= 0.0) {
     throw std::runtime_error("vertical accelerometer bias GM settings are invalid");
   }
+  if (config.static_vertical_bias_carryover_sigma_mps2 <= 0.0 ||
+      config.static_vertical_bias_carryover_vertical_gm_sigma_mps2 <= 0.0) {
+    throw std::runtime_error("static vertical bias carryover settings must be positive");
+  }
   if (config.enable_vertical_acc_bias_gm_process && !config.enable_global_acc_bias) {
     throw std::runtime_error("enable_vertical_acc_bias_gm_process requires enable_global_acc_bias");
   }
@@ -219,6 +223,7 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
        config.enable_initial_static_zero_specific_force ||
        config.enable_initial_static_vertical_specific_force ||
        config.enable_initial_static_vertical_bias_soft_prior ||
+       config.enable_static_vertical_bias_carryover ||
        config.enable_initial_static_subgraph) &&
       config.static_alignment_duration_s <= 0.0) {
     throw std::runtime_error("initial static constraints require static_alignment_duration_s > 0");
@@ -230,6 +235,16 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   }
   if (config.enable_initial_static_vertical_bias_soft_prior && !config.enable_initial_static_subgraph) {
     throw std::runtime_error("initial static vertical bias soft prior requires initial static subgraph");
+  }
+  if (config.enable_static_vertical_bias_carryover &&
+      (!config.enable_initial_static_subgraph ||
+       !config.enable_global_acc_bias ||
+       !config.enable_vertical_acc_bias_gm_process ||
+       !config.enable_initial_static_vertical_specific_force ||
+       !config.enable_initial_static_vertical_bias_soft_prior)) {
+    throw std::runtime_error(
+      "static vertical bias carryover requires static subgraph, global accelerometer bias, vertical GM bias process, "
+      "static vertical specific force, and static vertical bias soft prior");
   }
   if (config.early_gnss_relaxation_duration_s < 0.0 || config.early_gnss_relaxation_scale <= 0.0) {
     throw std::runtime_error("early GNSS relaxation settings are invalid");
@@ -465,6 +480,14 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_acc_bias_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_acc_bias_process_noise_scale") {
     config.vertical_acc_bias_process_noise_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_static_vertical_bias_carryover") {
+    config.enable_static_vertical_bias_carryover = ParseBool(normalized_value);
+  } else if (normalized_key == "static_vertical_bias_carryover_sigma_mps2") {
+    config.static_vertical_bias_carryover_sigma_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "static_vertical_bias_carryover_tighten_gm") {
+    config.static_vertical_bias_carryover_tighten_gm = ParseBool(normalized_value);
+  } else if (normalized_key == "static_vertical_bias_carryover_vertical_gm_sigma_mps2") {
+    config.static_vertical_bias_carryover_vertical_gm_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_body_z_jump_detection") {
     config.enable_body_z_jump_detection = ParseBool(normalized_value);
   } else if (normalized_key == "body_z_seed_jump_use_fix_only") {
@@ -834,6 +857,13 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "vertical_acc_bias_tau_s=" << config.vertical_acc_bias_tau_s << '\n'
     << "vertical_acc_bias_sigma_mps2=" << config.vertical_acc_bias_sigma_mps2 << '\n'
     << "vertical_acc_bias_process_noise_scale=" << config.vertical_acc_bias_process_noise_scale << '\n'
+    << "enable_static_vertical_bias_carryover="
+    << (config.enable_static_vertical_bias_carryover ? "true" : "false") << '\n'
+    << "static_vertical_bias_carryover_sigma_mps2=" << config.static_vertical_bias_carryover_sigma_mps2 << '\n'
+    << "static_vertical_bias_carryover_tighten_gm="
+    << (config.static_vertical_bias_carryover_tighten_gm ? "true" : "false") << '\n'
+    << "static_vertical_bias_carryover_vertical_gm_sigma_mps2="
+    << config.static_vertical_bias_carryover_vertical_gm_sigma_mps2 << '\n'
     << "enable_body_z_jump_detection=" << (config.enable_body_z_jump_detection ? "true" : "false") << '\n'
     << "body_z_seed_jump_use_fix_only=" << (config.body_z_seed_jump_use_fix_only ? "true" : "false") << '\n'
     << "body_z_jump_pre_post_window_s=" << config.body_z_jump_pre_post_window_s << '\n'

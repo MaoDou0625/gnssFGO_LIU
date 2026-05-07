@@ -34,6 +34,8 @@ struct RunSummary {
   std::size_t dropped_out_of_imu_coverage_count = 0;
   std::size_t initial_static_constraint_sample_count = 0;
   std::size_t initial_static_vertical_bias_prior_factor_count = 0;
+  bool static_vertical_bias_carryover_enabled = false;
+  std::size_t static_vertical_bias_carryover_factor_count = 0;
   std::size_t error_state_count = 0;
   std::size_t segment_error_count = 0;
   std::size_t vertical_velocity_delta_factor_count = 0;
@@ -83,6 +85,10 @@ struct RunSummary {
   double initial_bgz_radps = std::numeric_limits<double>::quiet_NaN();
   double static_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
   double static_bgz_radps = std::numeric_limits<double>::quiet_NaN();
+  double static_vertical_bias_ref_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double static_vertical_bias_global_delta_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double static_vertical_bias_dynamic_first20_max_abs_delta_mps2 =
+    std::numeric_limits<double>::quiet_NaN();
   double optimized_last_static_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
   double optimized_last_static_bgz_radps = std::numeric_limits<double>::quiet_NaN();
   double optimized_first_static_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
@@ -152,6 +158,10 @@ struct RunSummary {
         << "initial_static_constraint_sample_count=" << initial_static_constraint_sample_count << '\n'
         << "initial_static_vertical_bias_prior_factor_count="
         << initial_static_vertical_bias_prior_factor_count << '\n'
+        << "static_vertical_bias_carryover_enabled="
+        << (static_vertical_bias_carryover_enabled ? "true" : "false") << '\n'
+        << "static_vertical_bias_carryover_factor_count="
+        << static_vertical_bias_carryover_factor_count << '\n'
         << "error_state_count=" << error_state_count << '\n'
         << "segment_error_count=" << segment_error_count << '\n'
         << "vertical_velocity_delta_factor_count=" << vertical_velocity_delta_factor_count << '\n'
@@ -214,6 +224,10 @@ struct RunSummary {
         << "initial_bgz_radps=" << initial_bgz_radps << '\n'
         << "static_baz_mps2=" << static_baz_mps2 << '\n'
         << "static_bgz_radps=" << static_bgz_radps << '\n'
+        << "static_vertical_bias_ref_mps2=" << static_vertical_bias_ref_mps2 << '\n'
+        << "static_vertical_bias_global_delta_mps2=" << static_vertical_bias_global_delta_mps2 << '\n'
+        << "static_vertical_bias_dynamic_first20_max_abs_delta_mps2="
+        << static_vertical_bias_dynamic_first20_max_abs_delta_mps2 << '\n'
         << "optimized_last_static_baz_mps2=" << optimized_last_static_baz_mps2 << '\n'
         << "optimized_last_static_bgz_radps=" << optimized_last_static_bgz_radps << '\n'
         << "optimized_first_static_baz_mps2=" << optimized_first_static_baz_mps2 << '\n'
@@ -280,6 +294,7 @@ struct OfflineRunResult {
   std::vector<GnssFactorRecord> gnss_factor_records;
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
+  std::vector<StaticVerticalBiasCarryoverDiagnosticRow> static_vertical_bias_carryover_diagnostics;
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;
   std::vector<BodyZNHCDiagnosticRow> body_z_nhc_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;

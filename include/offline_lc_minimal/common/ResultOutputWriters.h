@@ -46,6 +46,10 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalEnvelopeDiagnosticRow> &rows);
 
+void WriteStaticVerticalBiasCarryoverDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<StaticVerticalBiasCarryoverDiagnosticRow> &rows);
+
 void WriteVerticalVelocityDeltaDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalVelocityDeltaDiagnosticRow> &rows);

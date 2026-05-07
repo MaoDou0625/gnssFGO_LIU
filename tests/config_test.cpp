@@ -348,8 +348,42 @@ void TestPhase12RtkGateOnlyFullNavConfigLoads() {
     std::abs(config.body_z_nhc_jump_velocity_sigma_mps - 0.005) < 1e-12,
     "phase12 should keep strong jump-window NHC velocity sigma");
   ExpectTrue(
-    std::abs(config.body_z_nhc_jump_displacement_sigma_m - 0.005) < 1e-12,
-    "phase12 should keep strong jump-window NHC displacement sigma");
+      std::abs(config.body_z_nhc_jump_displacement_sigma_m - 0.005) < 1e-12,
+      "phase12 should keep strong jump-window NHC displacement sigma");
+}
+
+void TestPhase13StaticBazCarryoverConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase13_static_baz_carryover.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase13 carryover config should use envelope constraints");
+  ExpectTrue(!config.enable_vertical_envelope_center_pull, "phase13 should keep center pull disabled");
+  ExpectTrue(config.enable_static_vertical_bias_carryover, "phase13 should enable static ba_z carryover");
+  ExpectTrue(
+    std::abs(config.static_vertical_bias_carryover_sigma_mps2 - 5e-5) < 1e-12,
+    "phase13 static ba_z reference sigma should load");
+  ExpectTrue(
+    config.static_vertical_bias_carryover_tighten_gm,
+    "phase13 should tighten vertical GM around static ba_z reference");
+  ExpectTrue(
+    std::abs(config.static_vertical_bias_carryover_vertical_gm_sigma_mps2 - 5e-5) < 1e-12,
+    "phase13 static ba_z GM sigma should load");
+  ExpectTrue(config.enable_initial_static_subgraph, "phase13 should keep static subgraph enabled");
+  ExpectTrue(config.enable_global_acc_bias, "phase13 should keep global accelerometer bias enabled");
+  ExpectTrue(config.enable_vertical_acc_bias_gm_process, "phase13 should keep vertical GM bias process enabled");
+  ExpectTrue(
+    config.enable_initial_static_vertical_specific_force,
+    "phase13 should keep static vertical specific force enabled");
+  ExpectTrue(
+    config.enable_initial_static_vertical_bias_soft_prior,
+    "phase13 should keep static vertical bias soft prior enabled");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase13 should keep fixed-axis body-z NHC enabled");
+  ExpectTrue(
+    !config.enable_body_z_nhc_global_weak_constraint,
+    "phase13 should keep global weak body-z NHC disabled");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
@@ -515,6 +549,46 @@ void TestInitialStaticVerticalBiasConfigValidation() {
     threw = std::string(exception.what()).find("initial static subgraph") != std::string::npos;
   }
   ExpectTrue(threw, "static vertical bias soft prior should require the static subgraph");
+}
+
+void TestStaticVerticalBiasCarryoverConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_static_vertical_bias_carryover = true;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("static_alignment_duration_s") != std::string::npos;
+  }
+  ExpectTrue(threw, "carryover should require a static alignment duration");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_static_vertical_bias_carryover = true;
+  config.static_alignment_duration_s = 100.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("static vertical bias carryover requires") != std::string::npos;
+  }
+  ExpectTrue(threw, "carryover should require its static/global bias prerequisites");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_static_vertical_bias_carryover = true;
+  config.static_alignment_duration_s = 100.0;
+  config.enable_initial_static_subgraph = true;
+  config.enable_global_acc_bias = true;
+  config.enable_vertical_acc_bias_gm_process = true;
+  config.enable_initial_static_vertical_specific_force = true;
+  config.enable_initial_static_vertical_bias_soft_prior = true;
+  config.static_vertical_bias_carryover_sigma_mps2 = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("static vertical bias carryover settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "carryover should reject non-positive reference sigma");
 }
 
 void TestVerticalJumpConfigValidation() {
@@ -1025,11 +1099,13 @@ int main() {
     RunTest("TestPhase9JumpBiasConfigLoads", TestPhase9JumpBiasConfigLoads);
     RunTest("TestPhase10SegmentedJumpBiasConfigLoads", TestPhase10SegmentedJumpBiasConfigLoads);
     RunTest("TestPhase12RtkGateOnlyFullNavConfigLoads", TestPhase12RtkGateOnlyFullNavConfigLoads);
+    RunTest("TestPhase13StaticBazCarryoverConfigLoads", TestPhase13StaticBazCarryoverConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
     RunTest("TestVerticalEnvelopeCenterPullConfigValidation", TestVerticalEnvelopeCenterPullConfigValidation);
     RunTest("TestInitialStaticVerticalBiasConfigValidation", TestInitialStaticVerticalBiasConfigValidation);
+    RunTest("TestStaticVerticalBiasCarryoverConfigValidation", TestStaticVerticalBiasCarryoverConfigValidation);
     RunTest("TestVerticalVelocityDeltaConfigValidation", TestVerticalVelocityDeltaConfigValidation);
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);
     RunTest("TestBodyZNHCConfigValidation", TestBodyZNHCConfigValidation);

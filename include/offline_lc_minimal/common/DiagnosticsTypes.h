@@ -169,6 +169,27 @@ struct VerticalEnvelopeDiagnosticRow {
   double center_pull_residual_m = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct StaticVerticalBiasCarryoverDiagnosticRow {
+  double static_window_start_s = std::numeric_limits<double>::quiet_NaN();
+  double static_window_end_s = std::numeric_limits<double>::quiet_NaN();
+  std::size_t static_sample_count = 0;
+  std::size_t static_state_count = 0;
+  double initial_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double static_baz_ref_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double calibration_initial_error = std::numeric_limits<double>::quiet_NaN();
+  double calibration_final_error = std::numeric_limits<double>::quiet_NaN();
+  double optimized_global_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double optimized_global_baz_delta_mps2 = std::numeric_limits<double>::quiet_NaN();
+  std::size_t dynamic_first20_state_count = 0;
+  std::size_t dynamic_first20_added_factor_count = 0;
+  double dynamic_first20_mean_abs_baz_delta_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double dynamic_first20_max_abs_baz_delta_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double dynamic_first20_up_delta_m = std::numeric_limits<double>::quiet_NaN();
+  double dynamic_first20_up_range_m = std::numeric_limits<double>::quiet_NaN();
+  double dynamic_first20_vz_delta_mps = std::numeric_limits<double>::quiet_NaN();
+  double dynamic_first20_vz_range_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct VerticalVelocityDeltaDiagnosticRow {
   std::size_t state_index_i = 0;
   std::size_t state_index_j = 0;

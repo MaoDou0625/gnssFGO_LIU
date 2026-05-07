@@ -29,6 +29,7 @@
 #include "offline_lc_minimal/core/InitialStaticConstraintBuilder.h"
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
+#include "offline_lc_minimal/core/StaticVerticalBiasCalibrator.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
 #include "offline_lc_minimal/core/VerticalJumpBiasConstraintBuilder.h"
@@ -44,6 +45,7 @@
 #include "offline_lc_minimal/factor/SegmentBiasFeedbackFactor.h"
 #include "offline_lc_minimal/factor/StaticZeroAngularRateFactor.h"
 #include "offline_lc_minimal/factor/StaticSpecificForceFactor.h"
+#include "offline_lc_minimal/factor/StaticVerticalBiasReferenceFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/StaticAttitudeDriftFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasGmTransitionFactor.h"
@@ -75,6 +77,10 @@ gtsam::Matrix3 ComputeBiasPhi(const double dt_s, const double tau_s) {
 }
 
 double ResolveVerticalAccBiasSigmaMps2(const OfflineRunnerConfig &config) {
+  if (config.enable_static_vertical_bias_carryover &&
+      config.static_vertical_bias_carryover_tighten_gm) {
+    return config.static_vertical_bias_carryover_vertical_gm_sigma_mps2;
+  }
   return config.vertical_acc_bias_sigma_mps2 > 0.0 ? config.vertical_acc_bias_sigma_mps2 : config.bias_acc_sigma;
 }
 
@@ -342,6 +348,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       config_);
   run_result.run_summary.initial_static_constraint_sample_count =
     initial_static_constraint_data.window_summary.sample_count;
+  run_result.run_summary.static_vertical_bias_carryover_enabled =
+    config_.enable_static_vertical_bias_carryover;
+  std::optional<StaticVerticalBiasCalibrationResult> static_vertical_bias_calibration;
+  if (config_.enable_static_vertical_bias_carryover) {
+    static_vertical_bias_calibration = StaticVerticalBiasCalibrator::Calibrate(
+      StaticVerticalBiasCalibrationRequest{
+        &dataset.imu_samples,
+        alignment_start_time_s,
+        alignment_end_time_s,
+        geo_reference.EarthRateEnu(),
+        config_});
+    run_result.run_summary.static_vertical_bias_ref_mps2 =
+      static_vertical_bias_calibration->static_baz_ref_mps2;
+  }
   AccumulateStaticSpecificForceWindowMetrics(
     dataset.imu_samples,
     alignment_start_time_s,
@@ -463,6 +483,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       global_acc_bias_key,
       initial_bias.accelerometer(),
       gtsam::noiseModel::Isotropic::Sigma(3, config_.bias_acc_prior_sigma)));
+    if (static_vertical_bias_calibration.has_value()) {
+      graph.add(factor::StaticVerticalBiasReferenceFactor(
+        global_acc_bias_key,
+        static_vertical_bias_calibration->static_baz_ref_mps2,
+        gtsam::noiseModel::Isotropic::Sigma(1, config_.static_vertical_bias_carryover_sigma_mps2)));
+      ++run_result.run_summary.static_vertical_bias_carryover_factor_count;
+    }
     if (config_.enable_vertical_acc_bias_gm_process) {
       graph.add(factor::GlobalPlanarAccelBiasFactor(
         B(0),
@@ -1027,6 +1054,21 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateVerticalJumpBiasDiagnostics(
     optimized_values,
     run_result.vertical_jump_bias_diagnostics);
+
+  if (static_vertical_bias_calibration.has_value()) {
+    run_result.static_vertical_bias_carryover_diagnostics.push_back(
+      BuildStaticVerticalBiasCarryoverDiagnostic(
+        *static_vertical_bias_calibration,
+        optimized_values,
+        state_timestamps,
+        graph_timeline.dynamic_start_index,
+        global_acc_bias_key));
+    const auto &carryover_diagnostic = run_result.static_vertical_bias_carryover_diagnostics.back();
+    run_result.run_summary.static_vertical_bias_global_delta_mps2 =
+      carryover_diagnostic.optimized_global_baz_delta_mps2;
+    run_result.run_summary.static_vertical_bias_dynamic_first20_max_abs_delta_mps2 =
+      carryover_diagnostic.dynamic_first20_max_abs_baz_delta_mps2;
+  }
 
   if (collect_reference_states) {
     const std::vector<ReferenceNodeState> optimized_reference_states =

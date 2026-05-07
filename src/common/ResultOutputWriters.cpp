@@ -385,6 +385,43 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
   }
 }
 
+void WriteStaticVerticalBiasCarryoverDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<StaticVerticalBiasCarryoverDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "static_window_start_s,static_window_end_s,static_sample_count,static_state_count,"
+       "initial_baz_mps2,static_baz_ref_mps2,calibration_initial_error,calibration_final_error,"
+       "optimized_global_baz_mps2,optimized_global_baz_delta_mps2,dynamic_first20_state_count,"
+       "dynamic_first20_added_factor_count,dynamic_first20_mean_abs_baz_delta_mps2,"
+       "dynamic_first20_max_abs_baz_delta_mps2,dynamic_first20_up_delta_m,dynamic_first20_up_range_m,"
+       "dynamic_first20_vz_delta_mps,dynamic_first20_vz_range_mps\n";
+  for (const auto &row : rows) {
+    stream << row.static_window_start_s << ','
+           << row.static_window_end_s << ','
+           << row.static_sample_count << ','
+           << row.static_state_count << ','
+           << row.initial_baz_mps2 << ','
+           << row.static_baz_ref_mps2 << ','
+           << row.calibration_initial_error << ','
+           << row.calibration_final_error << ','
+           << row.optimized_global_baz_mps2 << ','
+           << row.optimized_global_baz_delta_mps2 << ','
+           << row.dynamic_first20_state_count << ','
+           << row.dynamic_first20_added_factor_count << ','
+           << row.dynamic_first20_mean_abs_baz_delta_mps2 << ','
+           << row.dynamic_first20_max_abs_baz_delta_mps2 << ','
+           << row.dynamic_first20_up_delta_m << ','
+           << row.dynamic_first20_up_range_m << ','
+           << row.dynamic_first20_vz_delta_mps << ','
+           << row.dynamic_first20_vz_range_mps << '\n';
+  }
+}
+
 void WriteVerticalVelocityDeltaDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalVelocityDeltaDiagnosticRow> &rows) {
