@@ -19,11 +19,17 @@ except ImportError as exc:  # pragma: no cover
 
 TIME_EPSILON_S = 1e-9
 MICRO_G_TO_MPS2 = 9.80665e-6
+RTK_FIX_CODE = 1
 
 
 class PlotContext(NamedTuple):
     reference_time_s: float
     dynamic_start_time_s: float | None
+
+
+class RtkPlotRows(NamedTuple):
+    rows: list[dict[str, float]]
+    source: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,6 +73,49 @@ def read_summary(path: Path) -> dict[str, float]:
     return result
 
 
+def read_config_values(path: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    if not path.exists():
+        return result
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        result[key.strip()] = value.strip()
+    return result
+
+
+def config_float(config: dict[str, str], key: str, default: float) -> float:
+    value = safe_float(config.get(key))
+    return value if math.isfinite(value) else default
+
+
+def config_int(config: dict[str, str], key: str, default: int) -> int:
+    value = safe_float(config.get(key))
+    return int(round(value)) if math.isfinite(value) else default
+
+
+def rounded_int(value: str, default: int) -> int:
+    parsed = safe_float(value)
+    return int(round(parsed)) if math.isfinite(parsed) else default
+
+
+def resolve_data_path(path_value: str | None, base_dir: Path) -> Path | None:
+    if not path_value:
+        return None
+    normalized = path_value.strip()
+    direct_path = Path(normalized)
+    if direct_path.exists():
+        return direct_path
+    if normalized.startswith("/mnt/") and len(normalized) > 6 and normalized[5].isalpha():
+        drive = normalized[5].upper()
+        return Path(f"{drive}:{normalized[6:]}")
+    if direct_path.is_absolute():
+        return direct_path
+    return base_dir / direct_path
+
+
 def read_trajectory(path: Path) -> list[dict[str, float]]:
     rows: list[dict[str, float]] = []
     with path.open("r", encoding="utf-8", newline="") as file:
@@ -88,6 +137,56 @@ def read_trajectory(path: Path) -> list[dict[str, float]]:
     if not rows:
         raise ValueError(f"No trajectory rows found in {path}")
     return rows
+
+
+def read_raw_rtk_rows(config_path: Path, summary: dict[str, float]) -> RtkPlotRows:
+    config = read_config_values(config_path)
+    gnss_path = resolve_data_path(config.get("gnss_path"), config_path.parent)
+    origin_h_m = summary.get("origin_h_m")
+    if gnss_path is None or not gnss_path.exists() or origin_h_m is None or not math.isfinite(origin_h_m):
+        return RtkPlotRows([], "none")
+
+    required_status_code = config_int(config, "required_best_sol_status_code", 0)
+    fixed_sigma_m = config_float(config, "gnss_vertical_fixed_sigma_m", 0.20)
+    sigma_scale_up = config_float(config, "gnss_sigma_scale_up", 1.0)
+    rtkfix_scale = config_float(config, "rtkfix_scale", 1.0)
+    gate_multiple = config_float(config, "vertical_envelope_gate_sigma_multiple", 2.0)
+    min_half_width_m = config_float(config, "vertical_envelope_min_half_width_m", 0.0)
+    use_fixed_sigma = config.get("gnss_vertical_sigma_mode", "from_file").strip().lower() == "fixed"
+
+    rows: list[dict[str, float]] = []
+    with gnss_path.open("r", encoding="utf-8") as file:
+        for line in file:
+            tokens = line.split()
+            if len(tokens) < 18:
+                continue
+            time_s = safe_float(tokens[0])
+            h_m = safe_float(tokens[3])
+            sigma_h_m = safe_float(tokens[6])
+            status_code = rounded_int(tokens[10], 0)
+            fix_code = rounded_int(tokens[12], 4)
+            if fix_code != RTK_FIX_CODE:
+                continue
+            if required_status_code > 0 and status_code != required_status_code:
+                continue
+            if not (math.isfinite(time_s) and math.isfinite(h_m)):
+                continue
+            sigma_u_m = fixed_sigma_m if use_fixed_sigma else sigma_h_m
+            if not math.isfinite(sigma_u_m):
+                continue
+            sigma_u_m *= sigma_scale_up * rtkfix_scale
+            rows.append(
+                {
+                    "time_s": time_s,
+                    # Local ENU Up is effectively the ellipsoidal height delta for this
+                    # short plot span; the solver's exact LocalCartesian conversion is
+                    # not needed for visual gate inspection.
+                    "rtk_up_m": h_m - origin_h_m,
+                    "half_width_m": max(min_half_width_m, gate_multiple * sigma_u_m),
+                }
+            )
+    rows.sort(key=lambda row: row["time_s"])
+    return RtkPlotRows(rows, "raw_gnss")
 
 
 def read_envelope_rows(path: Path) -> list[dict[str, float]]:
@@ -163,6 +262,10 @@ def relative_values(rows: list[dict[str, float]], key: str) -> list[float]:
     return [row[key] - reference for row in rows]
 
 
+def values_minus_reference(rows: list[dict[str, float]], key: str, reference: float) -> list[float]:
+    return [row[key] - reference for row in rows]
+
+
 def shade_static_and_dynamic(axis, context: PlotContext) -> None:
     if (
         context.dynamic_start_time_s is None or
@@ -215,6 +318,7 @@ def plot_alignment_continuity(
     plot_rows = rows_from_time(trajectory_rows, context.reference_time_s)
     envelope_rows = rows_from_time(envelope_rows, context.reference_time_s)
     x = relative_time(plot_rows, context.reference_time_s)
+    up_reference_m = plot_rows[0]["up_m"]
 
     fig, axes = plt.subplots(4, 1, figsize=(15, 11), sharex=True, constrained_layout=True)
     fig.suptitle(title, fontsize=14)
@@ -224,10 +328,16 @@ def plot_alignment_continuity(
         shade_nhc_windows(axis, nhc_windows, context.reference_time_s)
         axis.grid(True, alpha=0.3)
 
-    axes[0].plot(x, relative_values(plot_rows, "up_m"), color="#1f77b4", linewidth=1.1, label="optimized up")
+    axes[0].plot(
+        x,
+        values_minus_reference(plot_rows, "up_m", up_reference_m),
+        color="#1f77b4",
+        linewidth=1.1,
+        label="optimized up",
+    )
     if envelope_rows:
         rtk_x = relative_time(envelope_rows, context.reference_time_s)
-        rtk_delta = relative_values(envelope_rows, "rtk_up_m")
+        rtk_delta = values_minus_reference(envelope_rows, "rtk_up_m", up_reference_m)
         lower = [center - row["half_width_m"] for center, row in zip(rtk_delta, envelope_rows)]
         upper = [center + row["half_width_m"] for center, row in zip(rtk_delta, envelope_rows)]
         axes[0].plot(rtk_x, rtk_delta, color="#9467bd", linewidth=0.9, alpha=0.85, label="RTK up center")
@@ -264,7 +374,9 @@ def main() -> int:
     run_dir = Path(args.run_dir)
     trajectory_rows = read_trajectory(run_dir / "trajectory.csv")
     summary = read_summary(run_dir / "summary.txt")
-    envelope_rows = read_envelope_rows(run_dir / "vertical_envelope_diagnostics.csv")
+    raw_rtk_rows = read_raw_rtk_rows(run_dir / "config_snapshot.cfg", summary)
+    envelope_rows = raw_rtk_rows.rows or read_envelope_rows(run_dir / "vertical_envelope_diagnostics.csv")
+    rtk_source = raw_rtk_rows.source if raw_rtk_rows.rows else "vertical_envelope_diagnostics"
     nhc_windows = read_nhc_windows(run_dir / "body_z_nhc_diagnostics.csv")
     context = resolve_plot_context(summary, trajectory_rows)
     output_path = Path(args.output)
@@ -284,6 +396,7 @@ def main() -> int:
         print(f"dynamic_start_time_s={context.dynamic_start_time_s}")
     if envelope_rows:
         print(f"first_rtk_gate_half_width_m={envelope_rows[0]['half_width_m']}")
+        print(f"rtk_plot_source={rtk_source}")
     return 0
 
 

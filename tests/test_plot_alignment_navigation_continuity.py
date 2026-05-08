@@ -43,6 +43,40 @@ class PlotAlignmentNavigationContinuityTests(unittest.TestCase):
             self.assertAlmostEqual(rows[0]["half_width_m"], 0.4, places=9)
             self.assertAlmostEqual(rows[1]["time_s"], 3.0, places=9)
 
+    def test_read_raw_rtk_rows_uses_config_snapshot_and_static_samples(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = pathlib.Path(temp_dir)
+            gnss_path = temp_path / "gnss_solution.txt"
+            gnss_path.write_text(
+                "10.0 0.0 0.0 101.0 0.01 0.01 0.02 0 0 10 1 7 1 0 0 0 1 4\n"
+                "11.0 0.0 0.0 91.0 NaN NaN NaN 0 0 10 NaN NaN 4 0 0 0 1 4\n"
+                "12.0 0.0 0.0 102.0 0.01 0.01 0.02 0 0 10 2 7 1 0 0 0 1 4\n"
+                "13.0 0.0 0.0 103.0 0.01 0.01 0.02 0 0 10 1 7 2 0 0 0 1 4\n",
+                encoding="utf-8",
+            )
+            config_path = temp_path / "config_snapshot.cfg"
+            config_path.write_text(
+                f"gnss_path={gnss_path}\n"
+                "required_best_sol_status_code=1\n"
+                "gnss_vertical_sigma_mode=fixed\n"
+                "gnss_vertical_fixed_sigma_m=0.20\n"
+                "gnss_sigma_scale_up=1.0\n"
+                "rtkfix_scale=1.0\n"
+                "vertical_envelope_gate_sigma_multiple=2.0\n",
+                encoding="utf-8",
+            )
+
+            result = plot_alignment_navigation_continuity.read_raw_rtk_rows(
+                config_path,
+                {"origin_h_m": 100.0},
+            )
+
+            self.assertEqual(result.source, "raw_gnss")
+            self.assertEqual(len(result.rows), 1)
+            self.assertAlmostEqual(result.rows[0]["time_s"], 10.0, places=9)
+            self.assertAlmostEqual(result.rows[0]["rtk_up_m"], 1.0, places=9)
+            self.assertAlmostEqual(result.rows[0]["half_width_m"], 0.4, places=9)
+
     def test_read_nhc_windows_drops_skipped_factors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = pathlib.Path(temp_dir) / "body_z_nhc_diagnostics.csv"
