@@ -49,10 +49,13 @@ struct RunSummary {
   std::size_t vertical_velocity_delta_skipped_invalid_count = 0;
   std::size_t vertical_velocity_delta_target_clamped_count = 0;
   bool vertical_velocity_delta_bias_consistent_sigma_enabled = false;
+  bool vertical_velocity_delta_bias_aware_target_enabled = false;
+  std::size_t vertical_velocity_delta_bias_aware_factor_count = 0;
   double vertical_velocity_delta_sigma_mean_mps = std::numeric_limits<double>::quiet_NaN();
   double vertical_velocity_delta_sigma_max_mps = std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_velocity_delta_sigma_clamped_floor_count = 0;
   std::size_t vertical_velocity_delta_sigma_clamped_ceiling_count = 0;
+  std::size_t attitude_reference_factor_count = 0;
   std::size_t body_z_nhc_velocity_factor_count = 0;
   std::size_t body_z_nhc_displacement_factor_count = 0;
   std::size_t body_z_nhc_window_count = 0;
@@ -191,12 +194,17 @@ struct RunSummary {
         << vertical_velocity_delta_target_clamped_count << '\n'
         << "vertical_velocity_delta_bias_consistent_sigma_enabled="
         << (vertical_velocity_delta_bias_consistent_sigma_enabled ? "true" : "false") << '\n'
+        << "vertical_velocity_delta_bias_aware_target_enabled="
+        << (vertical_velocity_delta_bias_aware_target_enabled ? "true" : "false") << '\n'
+        << "vertical_velocity_delta_bias_aware_factor_count="
+        << vertical_velocity_delta_bias_aware_factor_count << '\n'
         << "vertical_velocity_delta_sigma_mean_mps=" << vertical_velocity_delta_sigma_mean_mps << '\n'
         << "vertical_velocity_delta_sigma_max_mps=" << vertical_velocity_delta_sigma_max_mps << '\n'
         << "vertical_velocity_delta_sigma_clamped_floor_count="
         << vertical_velocity_delta_sigma_clamped_floor_count << '\n'
         << "vertical_velocity_delta_sigma_clamped_ceiling_count="
         << vertical_velocity_delta_sigma_clamped_ceiling_count << '\n'
+        << "attitude_reference_factor_count=" << attitude_reference_factor_count << '\n'
         << "body_z_nhc_velocity_factor_count=" << body_z_nhc_velocity_factor_count << '\n'
         << "body_z_nhc_displacement_factor_count=" << body_z_nhc_displacement_factor_count << '\n'
         << "body_z_nhc_window_count=" << body_z_nhc_window_count << '\n'
@@ -316,6 +324,7 @@ struct OfflineRunResult {
   std::vector<TrajectoryRow> initial_static_trajectory;
   std::vector<TrajectoryRow> optimized_static_terminal_forward_trajectory;
   std::vector<ReferenceNodeRow> reference_node_trajectory;
+  std::vector<ReferenceNodeState> attitude_reference_states;
   std::vector<BodyZSeedImuDiagnosticRow> seed_body_z_acc_diagnostics;
   std::vector<BodyZSeedJumpWindowRow> body_z_seed_jump_windows;
   std::vector<ErrorStateRow> error_state_trajectory;
@@ -328,6 +337,7 @@ struct OfflineRunResult {
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
   std::vector<StaticAlignmentValidationRow> static_alignment_validation;
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;
+  std::vector<AttitudeReferenceDiagnosticRow> attitude_reference_diagnostics;
   std::vector<BodyZNHCDiagnosticRow> body_z_nhc_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;
   std::vector<VerticalJumpImpulseDiagnosticRow> vertical_jump_impulse_diagnostics;

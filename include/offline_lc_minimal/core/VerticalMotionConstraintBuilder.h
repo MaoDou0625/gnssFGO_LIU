@@ -18,6 +18,7 @@ struct VerticalVelocityDeltaPropagationRecord {
   double start_time_s = 0.0;
   double end_time_s = 0.0;
   double target_delta_vz_mps = 0.0;
+  double reference_ba_z_mps2 = 0.0;
 };
 
 struct VerticalMotionConstraintBuildRequest {

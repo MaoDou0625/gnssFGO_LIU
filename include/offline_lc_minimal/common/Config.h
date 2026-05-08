@@ -132,10 +132,13 @@ struct OfflineRunnerConfig {
   double vertical_velocity_delta_jump_padding_s = 0.25;
   double vertical_velocity_delta_target_acc_limit_mps2 = 0.85;
   bool enable_vertical_velocity_delta_bias_consistent_sigma = false;
+  bool enable_vertical_velocity_delta_bias_aware_target = false;
   double vertical_velocity_delta_bias_sigma_mps2 = 9.80665e-5;
   double vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
   double vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
   double vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+  bool enable_attitude_reference_constraint = false;
+  double attitude_reference_sigma_rad = 0.01;
   bool enable_body_z_nhc_constraint = false;
   bool enable_body_z_nhc_global_weak_constraint = false;
   double body_z_nhc_jump_padding_s = 0.30;

@@ -20,6 +20,7 @@
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/slam/PriorFactor.h>
 
+#include "offline_lc_minimal/core/AttitudeReferenceConstraintBuilder.h"
 #include "offline_lc_minimal/core/BodyZWindowPipeline.h"
 #include "offline_lc_minimal/core/BodyZNHCConstraintBuilder.h"
 #include "offline_lc_minimal/core/GnssFactorBuilder.h"
@@ -629,7 +630,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       state_index,
       previous_time_s,
       current_time_s,
-      predicted_state.v().z() - previous_nav_state.v().z()});
+      predicted_state.v().z() - previous_nav_state.v().z(),
+      previous_bias.accelerometer().z()});
     initial_values.insert(X(state_index), predicted_state.pose());
     initial_values.insert(V(state_index), predicted_state.v());
     initial_values.insert(B(state_index), previous_bias);
@@ -853,6 +855,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     const BodyZWindowPipelineResult body_z_result = BodyZWindowPipeline(std::move(body_z_request)).Run();
     run_result.seed_body_z_acc_diagnostics = body_z_result.imu_diagnostics;
     run_result.body_z_seed_jump_windows = body_z_result.jump_windows;
+    run_result.attitude_reference_states = body_z_result.seed_reference_states;
   }
 
   run_result.run_summary = base_run_summary;
@@ -877,6 +880,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.vertical_velocity_delta_skipped_gnss_support_count = 0;
   run_result.run_summary.vertical_velocity_delta_skipped_invalid_count = 0;
   run_result.run_summary.vertical_velocity_delta_target_clamped_count = 0;
+  run_result.run_summary.vertical_velocity_delta_bias_aware_target_enabled = false;
+  run_result.run_summary.vertical_velocity_delta_bias_aware_factor_count = 0;
+  run_result.run_summary.attitude_reference_factor_count = 0;
   run_result.run_summary.body_z_nhc_velocity_factor_count = 0;
   run_result.run_summary.body_z_nhc_displacement_factor_count = 0;
   run_result.run_summary.body_z_nhc_window_count = 0;
@@ -905,6 +911,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.gnss_consistency_records.clear();
   run_result.vertical_envelope_diagnostics.clear();
   run_result.vertical_velocity_delta_diagnostics.clear();
+  run_result.attitude_reference_diagnostics.clear();
   run_result.body_z_nhc_diagnostics.clear();
   run_result.vertical_jump_masked_imu_diagnostics.clear();
   run_result.vertical_jump_impulse_diagnostics.clear();
@@ -1018,6 +1025,16 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   body_z_nhc_request.diagnostics = &run_result.body_z_nhc_diagnostics;
   BodyZNHCConstraintBuilder(std::move(body_z_nhc_request)).Build();
 
+  AttitudeReferenceConstraintBuildRequest attitude_reference_request;
+  attitude_reference_request.config = &config_;
+  attitude_reference_request.state_timestamps = &state_timestamps;
+  attitude_reference_request.reference_states = &run_result.attitude_reference_states;
+  attitude_reference_request.dynamic_start_index = graph_timeline.dynamic_start_index;
+  attitude_reference_request.graph = &graph_with_gnss;
+  attitude_reference_request.run_summary = &run_result.run_summary;
+  attitude_reference_request.diagnostics = &run_result.attitude_reference_diagnostics;
+  AttitudeReferenceConstraintBuilder(std::move(attitude_reference_request)).Build();
+
   if (config_.enable_vertical_jump_velocity_ramp_smoothing ||
       config_.enable_vertical_jump_position_ramp_smoothing ||
       config_.enable_vertical_jump_velocity_continuity ||
@@ -1063,6 +1080,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     optimized_values,
     state_timestamps,
     run_result.body_z_nhc_diagnostics);
+  PopulateAttitudeReferenceDiagnostics(
+    optimized_values,
+    run_result.attitude_reference_diagnostics);
   PopulateVerticalJumpVelocityRampDiagnostics(
     optimized_values,
     run_result.vertical_jump_velocity_ramp_diagnostics);

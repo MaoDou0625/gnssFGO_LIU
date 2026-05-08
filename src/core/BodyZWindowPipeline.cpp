@@ -190,15 +190,15 @@ BodyZWindowPipelineResult BodyZWindowPipeline::Run() const {
     return result;
   }
 
-  const std::vector<ReferenceNodeState> seed_reference_states = BuildRtkSeedReferenceStates(request_);
-  if (seed_reference_states.empty()) {
+  result.seed_reference_states = BuildRtkSeedReferenceStates(request_);
+  if (result.seed_reference_states.empty()) {
     return result;
   }
 
   BodyZBidirectionalJumpDetector detector(*request_.config);
   result.detection = detector.Detect(
     *request_.imu_samples,
-    seed_reference_states,
+    result.seed_reference_states,
     *request_.state_timestamps,
     request_.dynamic_start_time_s,
     request_.end_time_s);

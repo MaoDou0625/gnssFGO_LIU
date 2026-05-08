@@ -10,6 +10,8 @@
 #include <gtsam/linear/NoiseModel.h>
 
 #include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
+#include "offline_lc_minimal/common/Units.h"
+#include "offline_lc_minimal/factor/VerticalVelocityDeltaBiasFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaFactor.h"
 
 namespace offline_lc_minimal {
@@ -50,6 +52,7 @@ VerticalVelocityDeltaDiagnosticRow MakeDiagnosticRow(
   row.attitude_sigma_mps = sigma.attitude_sigma_mps;
   row.sigma_floor_mps = sigma.sigma_floor_mps;
   row.sigma_ceiling_mps = sigma.sigma_ceiling_mps;
+  row.reference_ba_z_ug = Mps2ToMicroG(record.reference_ba_z_mps2);
   return row;
 }
 
@@ -77,6 +80,8 @@ void VerticalMotionConstraintBuilder::Build() const {
   VerticalVelocityDeltaSigmaModel sigma_model(*request_.config);
   request_.run_summary->vertical_velocity_delta_bias_consistent_sigma_enabled =
     request_.config->enable_vertical_velocity_delta_bias_consistent_sigma;
+  request_.run_summary->vertical_velocity_delta_bias_aware_target_enabled =
+    request_.config->enable_vertical_velocity_delta_bias_aware_target;
   double added_sigma_sum_mps = 0.0;
   double added_sigma_max_mps = -std::numeric_limits<double>::infinity();
 
@@ -122,8 +127,12 @@ void VerticalMotionConstraintBuilder::Build() const {
     }
 
     row.factor_added = true;
+    row.bias_aware_factor = request_.config->enable_vertical_velocity_delta_bias_aware_target;
     row.skip_reason = "ADDED";
     ++request_.run_summary->vertical_velocity_delta_factor_count;
+    if (row.bias_aware_factor) {
+      ++request_.run_summary->vertical_velocity_delta_bias_aware_factor_count;
+    }
     added_sigma_sum_mps += row.sigma_mps;
     added_sigma_max_mps = std::max(added_sigma_max_mps, row.sigma_mps);
     if (!used_clamped_target_fallback && sigma.clamped_floor) {
@@ -135,11 +144,23 @@ void VerticalMotionConstraintBuilder::Build() const {
     if (row.target_clamped) {
       ++request_.run_summary->vertical_velocity_delta_target_clamped_count;
     }
-    request_.graph->add(factor::VerticalVelocityDeltaFactor(
-      symbol::V(record.state_index_i),
-      symbol::V(record.state_index_j),
-      row.target_delta_vz_mps,
-      gtsam::noiseModel::Isotropic::Sigma(1, row.sigma_mps)));
+    const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, row.sigma_mps);
+    if (row.bias_aware_factor) {
+      request_.graph->add(factor::VerticalVelocityDeltaBiasFactor(
+        symbol::V(record.state_index_i),
+        symbol::V(record.state_index_j),
+        symbol::B(record.state_index_i),
+        row.target_delta_vz_mps,
+        record.reference_ba_z_mps2,
+        dt_s,
+        noise));
+    } else {
+      request_.graph->add(factor::VerticalVelocityDeltaFactor(
+        symbol::V(record.state_index_i),
+        symbol::V(record.state_index_j),
+        row.target_delta_vz_mps,
+        noise));
+    }
     request_.diagnostics->push_back(row);
   }
 
@@ -188,7 +209,20 @@ void PopulateVerticalVelocityDeltaDiagnostics(
     const auto velocity_i = optimized_values.at<gtsam::Vector3>(symbol::V(row.state_index_i));
     const auto velocity_j = optimized_values.at<gtsam::Vector3>(symbol::V(row.state_index_j));
     row.optimized_delta_vz_mps = velocity_j.z() - velocity_i.z();
-    row.residual_mps = row.optimized_delta_vz_mps - row.target_delta_vz_mps;
+    if (row.bias_aware_factor) {
+      const auto bias_i = optimized_values.at<gtsam::imuBias::ConstantBias>(symbol::B(row.state_index_i));
+      const double optimized_ba_z_mps2 = bias_i.accelerometer().z();
+      const double reference_ba_z_mps2 = MicroGToMps2(row.reference_ba_z_ug);
+      row.optimized_ba_z_ug = Mps2ToMicroG(optimized_ba_z_mps2);
+      row.bias_delta_ug = Mps2ToMicroG(optimized_ba_z_mps2 - reference_ba_z_mps2);
+      row.bias_delta_velocity_correction_mps =
+        (optimized_ba_z_mps2 - reference_ba_z_mps2) * row.dt_s;
+      row.residual_mps =
+        row.optimized_delta_vz_mps - row.target_delta_vz_mps +
+        row.bias_delta_velocity_correction_mps;
+    } else {
+      row.residual_mps = row.optimized_delta_vz_mps - row.target_delta_vz_mps;
+    }
   }
 }
 

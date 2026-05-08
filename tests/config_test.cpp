@@ -457,6 +457,24 @@ void TestPhase17BiasConsistentDvzConfigLoads() {
     "phase17 velocity delta sigma ceiling should load");
 }
 
+void TestPhase18AttitudeRefBiasAwareDvzConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase18_attitude_ref_bias_aware_dvz.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase18 config should use envelope constraints");
+  ExpectTrue(config.enable_initial_static_rtk_height_reference, "phase18 should keep static RTK anchor");
+  ExpectTrue(config.enable_vertical_velocity_delta_bias_consistent_sigma, "phase18 should keep bias-consistent sigma");
+  ExpectTrue(config.enable_vertical_velocity_delta_bias_aware_target, "phase18 should enable bias-aware dvz target");
+  ExpectTrue(config.enable_attitude_reference_constraint, "phase18 should enable attitude reference constraints");
+  ExpectTrue(
+    std::abs(config.attitude_reference_sigma_rad - 0.01) < 1e-15,
+    "phase18 attitude reference sigma should load");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase18 should keep fixed-axis body-z NHC enabled");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -596,6 +614,27 @@ void TestVerticalVelocityDeltaConfigValidation() {
     threw = std::string(exception.what()).find("requires enable_body_z_jump_detection") != std::string::npos;
   }
   ExpectTrue(threw, "velocity delta constraints should require body-z jump detection");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.attitude_reference_sigma_rad = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("attitude reference settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive attitude reference sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_attitude_reference_constraint = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("attitude reference constraint") != std::string::npos;
+  }
+  ExpectTrue(threw, "attitude reference constraints should require body-z seed optimization");
 }
 
 void TestVerticalEnvelopeCenterPullConfigValidation() {
@@ -743,6 +782,7 @@ void TestAccelerometerBiasUgConfigParsing() {
   offline_lc_minimal::OverrideConfigField(config, "global_acc_bias_tie_sigma_xy_ug", "0.25");
   offline_lc_minimal::OverrideConfigField(config, "initial_static_vertical_bias_global_tie_sigma_ug", "0.05");
   offline_lc_minimal::OverrideConfigField(config, "initial_static_vertical_bias_gm_sigma_ug", "0.02");
+  offline_lc_minimal::OverrideConfigField(config, "enable_vertical_velocity_delta_bias_aware_target", "true");
 
   ExpectTrue(
     std::abs(config.vertical_acc_bias_sigma_mps2 - offline_lc_minimal::MicroGToMps2(10.0)) < 1e-15,
@@ -765,6 +805,7 @@ void TestAccelerometerBiasUgConfigParsing() {
     std::abs(config.initial_static_vertical_bias_gm_sigma_mps2 -
              offline_lc_minimal::MicroGToMps2(0.02)) < 1e-15,
     "static vertical bias GM sigma should parse from ug");
+  ExpectTrue(config.enable_vertical_velocity_delta_bias_aware_target, "bias-aware dvz target flag should parse");
 }
 
 void TestVerticalJumpConfigValidation() {
@@ -1278,6 +1319,7 @@ int main() {
     RunTest("TestPhase15StaticBazGmTightenedConfigLoads", TestPhase15StaticBazGmTightenedConfigLoads);
     RunTest("TestPhase16StaticRtkHeightAnchorConfigLoads", TestPhase16StaticRtkHeightAnchorConfigLoads);
     RunTest("TestPhase17BiasConsistentDvzConfigLoads", TestPhase17BiasConsistentDvzConfigLoads);
+    RunTest("TestPhase18AttitudeRefBiasAwareDvzConfigLoads", TestPhase18AttitudeRefBiasAwareDvzConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

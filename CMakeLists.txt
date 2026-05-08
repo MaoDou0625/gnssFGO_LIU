@@ -55,6 +55,7 @@ add_library(offline_lc_minimal_lib
   src/factor/VerticalMaskedCombinedImuFactor.cpp
   src/gp/Pose3Utils.cpp
   src/io/TextDatasetLoader.cpp
+  src/core/AttitudeReferenceConstraintBuilder.cpp
   src/core/InitialStaticConstraintBuilder.cpp
   src/core/BodyZBidirectionalJumpDetector.cpp
   src/core/BodyZNHCConstraintBuilder.cpp
@@ -144,6 +145,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     tests/config_test.cpp
   )
 
+  add_executable(attitude_reference_constraint_test
+    tests/attitude_reference_constraint_test.cpp
+  )
+
   add_executable(vertical_velocity_delta_constraint_test
     tests/vertical_velocity_delta_constraint_test.cpp
   )
@@ -181,6 +186,11 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(config_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(attitude_reference_constraint_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -226,6 +236,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       config_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      attitude_reference_constraint_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -286,6 +302,13 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         $<TARGET_FILE:config_test>
     )
     add_test(
+      NAME attitude_reference_constraint_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:attitude_reference_constraint_test>
+    )
+    add_test(
       NAME vertical_velocity_delta_constraint_test
       COMMAND
         ${CMAKE_COMMAND} -E env
@@ -329,6 +352,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     add_test(
       NAME config_test
       COMMAND $<TARGET_FILE:config_test>
+    )
+    add_test(
+      NAME attitude_reference_constraint_test
+      COMMAND $<TARGET_FILE:attitude_reference_constraint_test>
     )
     add_test(
       NAME vertical_velocity_delta_constraint_test

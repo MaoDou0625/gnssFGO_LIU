@@ -426,7 +426,9 @@ void WriteVerticalVelocityDeltaDiagnosticsCsv(
     << "state_i,state_j,start_time_s,end_time_s,dt_s,factor_added,skip_reason,in_jump_padding,"
        "target_clamped,raw_target_delta_vz_mps,"
        "target_delta_vz_mps,optimized_delta_vz_mps,residual_mps,sigma_mps,sigma_model,"
-       "legacy_sigma_mps,bias_sigma_mps,attitude_sigma_mps,sigma_floor_mps,sigma_ceiling_mps\n";
+       "legacy_sigma_mps,bias_sigma_mps,attitude_sigma_mps,sigma_floor_mps,sigma_ceiling_mps,"
+       "bias_aware_factor,reference_ba_z_ug,optimized_ba_z_ug,bias_delta_ug,"
+       "bias_delta_velocity_correction_mps\n";
   for (const auto &row : rows) {
     stream << row.state_index_i << ','
            << row.state_index_j << ','
@@ -447,7 +449,43 @@ void WriteVerticalVelocityDeltaDiagnosticsCsv(
            << row.bias_sigma_mps << ','
            << row.attitude_sigma_mps << ','
            << row.sigma_floor_mps << ','
-           << row.sigma_ceiling_mps << '\n';
+           << row.sigma_ceiling_mps << ','
+           << (row.bias_aware_factor ? 1 : 0) << ','
+           << row.reference_ba_z_ug << ','
+           << row.optimized_ba_z_ug << ','
+           << row.bias_delta_ug << ','
+           << row.bias_delta_velocity_correction_mps << '\n';
+  }
+}
+
+void WriteAttitudeReferenceDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<AttitudeReferenceDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "state_index,time_s,factor_added,skip_reason,"
+       "reference_yaw_rad,reference_pitch_rad,reference_roll_rad,"
+       "optimized_yaw_rad,optimized_pitch_rad,optimized_roll_rad,"
+       "residual_x_rad,residual_y_rad,residual_z_rad,residual_norm_rad\n";
+  for (const auto &row : rows) {
+    stream << row.state_index << ','
+           << row.time_s << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << row.reference_ypr_rad.x() << ','
+           << row.reference_ypr_rad.y() << ','
+           << row.reference_ypr_rad.z() << ','
+           << row.optimized_ypr_rad.x() << ','
+           << row.optimized_ypr_rad.y() << ','
+           << row.optimized_ypr_rad.z() << ','
+           << row.residual_x_rad << ','
+           << row.residual_y_rad << ','
+           << row.residual_z_rad << ','
+           << row.residual_norm_rad << '\n';
   }
 }
 

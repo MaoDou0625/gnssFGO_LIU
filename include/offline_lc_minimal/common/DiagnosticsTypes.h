@@ -204,6 +204,24 @@ struct VerticalVelocityDeltaDiagnosticRow {
   double attitude_sigma_mps = std::numeric_limits<double>::quiet_NaN();
   double sigma_floor_mps = std::numeric_limits<double>::quiet_NaN();
   double sigma_ceiling_mps = std::numeric_limits<double>::quiet_NaN();
+  bool bias_aware_factor = false;
+  double reference_ba_z_ug = std::numeric_limits<double>::quiet_NaN();
+  double optimized_ba_z_ug = std::numeric_limits<double>::quiet_NaN();
+  double bias_delta_ug = std::numeric_limits<double>::quiet_NaN();
+  double bias_delta_velocity_correction_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct AttitudeReferenceDiagnosticRow {
+  std::size_t state_index = 0;
+  double time_s = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+  Eigen::Vector3d reference_ypr_rad = Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d optimized_ypr_rad = Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double residual_x_rad = std::numeric_limits<double>::quiet_NaN();
+  double residual_y_rad = std::numeric_limits<double>::quiet_NaN();
+  double residual_z_rad = std::numeric_limits<double>::quiet_NaN();
+  double residual_norm_rad = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct BodyZNHCDiagnosticRow {

@@ -36,6 +36,7 @@ struct BodyZWindowPipelineRequest {
 
 struct BodyZWindowPipelineResult {
   BodyZJumpDetectionResult detection;
+  std::vector<ReferenceNodeState> seed_reference_states;
   std::vector<BodyZSeedImuDiagnosticRow> imu_diagnostics;
   std::vector<BodyZSeedJumpWindowRow> jump_windows;
 };

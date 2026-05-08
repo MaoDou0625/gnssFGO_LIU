@@ -12,6 +12,7 @@
 #include "offline_lc_minimal/common/Units.h"
 #include "offline_lc_minimal/core/VerticalMotionConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
+#include "offline_lc_minimal/factor/VerticalVelocityDeltaBiasFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaFactor.h"
 
 namespace {
@@ -59,6 +60,41 @@ void TestVerticalVelocityDeltaFactorUsesOnlyZ() {
     -0.15,
     1e-12,
     "negative vertical delta residual is wrong");
+}
+
+void TestVerticalVelocityDeltaBiasFactorUsesBaZ() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
+  const double reference_ba_z_mps2 = 0.01;
+  const double dt_s = 0.5;
+  const offline_lc_minimal::factor::VerticalVelocityDeltaBiasFactor factor(
+    1,
+    2,
+    3,
+    0.10,
+    reference_ba_z_mps2,
+    dt_s,
+    noise);
+
+  gtsam::Matrix h_vi;
+  gtsam::Matrix h_vj;
+  gtsam::Matrix h_bi;
+  const gtsam::imuBias::ConstantBias bias(
+    gtsam::Vector3(0.0, 0.0, reference_ba_z_mps2 + 0.02),
+    gtsam::Vector3::Zero());
+  const gtsam::Vector residual = factor.evaluateError(
+    gtsam::Vector3(0.0, 0.0, 1.0),
+    gtsam::Vector3(0.0, 0.0, 1.09),
+    bias,
+    h_vi,
+    h_vj,
+    h_bi);
+
+  ExpectNear(residual(0), 0.0, 1e-12, "bias-aware residual should account for ba_z correction");
+  ExpectNear(h_vi(0, 2), -1.0, 1e-12, "velocity_i z jacobian is wrong");
+  ExpectNear(h_vj(0, 2), 1.0, 1e-12, "velocity_j z jacobian is wrong");
+  ExpectNear(h_bi(0, 2), dt_s, 1e-12, "ba_z jacobian is wrong");
+  ExpectNear(h_bi(0, 0), 0.0, 1e-12, "ba_x jacobian should be zero");
+  ExpectNear(h_bi(0, 5), 0.0, 1e-12, "gyro bias jacobian should be zero");
 }
 
 std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> MakePropagationRecords() {
@@ -390,6 +426,65 @@ void TestBuilderUsesBiasConsistentSigmaAndSummary() {
   ExpectNear(summary.vertical_velocity_delta_sigma_max_mps, expected_sigma_mps, 1e-15, "summary max sigma is wrong");
 }
 
+void TestBuilderUsesBiasAwareVelocityDeltaFactor() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.enable_vertical_velocity_delta_bias_aware_target = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.5;
+  config.vertical_velocity_delta_min_sigma_mps = 0.02;
+  const double reference_ba_z_mps2 = offline_lc_minimal::MicroGToMps2(-500.0);
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {1, 2, 1.0, 1.5, 0.10, reference_ba_z_mps2},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.dynamic_start_index = 1;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  const auto &keys = graph.at(0)->keys();
+  ExpectNear(static_cast<double>(keys.size()), 3.0, 0.0, "bias-aware factor should connect V_i, V_j, and B_i");
+  ExpectTrue(keys[0] == gtsam::symbol_shorthand::V(1), "bias-aware factor first key should be V_i");
+  ExpectTrue(keys[1] == gtsam::symbol_shorthand::V(2), "bias-aware factor second key should be V_j");
+  ExpectTrue(keys[2] == gtsam::symbol_shorthand::B(1), "bias-aware factor third key should be B_i");
+
+  gtsam::Values values;
+  values.insert(gtsam::symbol_shorthand::V(1), gtsam::Vector3(0.0, 0.0, 1.0));
+  values.insert(gtsam::symbol_shorthand::V(2), gtsam::Vector3(0.0, 0.0, 1.09));
+  values.insert(
+    gtsam::symbol_shorthand::B(1),
+    gtsam::imuBias::ConstantBias(
+      gtsam::Vector3(0.0, 0.0, reference_ba_z_mps2 + 0.02),
+      gtsam::Vector3::Zero()));
+  offline_lc_minimal::PopulateVerticalVelocityDeltaDiagnostics(values, diagnostics);
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "bias-aware interval should add a factor");
+  ExpectTrue(summary.vertical_velocity_delta_bias_aware_target_enabled, "summary should report bias-aware mode");
+  ExpectNear(
+    static_cast<double>(summary.vertical_velocity_delta_bias_aware_factor_count),
+    1.0,
+    0.0,
+    "bias-aware factor count is wrong");
+  ExpectTrue(diagnostics.front().bias_aware_factor, "diagnostic should mark bias-aware factor");
+  ExpectNear(diagnostics.front().bias_delta_ug, offline_lc_minimal::Mps2ToMicroG(0.02), 1e-9, "bias delta is wrong");
+  ExpectNear(
+    diagnostics.front().bias_delta_velocity_correction_mps,
+    0.01,
+    1e-12,
+    "bias delta velocity correction is wrong");
+  ExpectNear(diagnostics.front().residual_mps, 0.0, 1e-12, "bias-aware diagnostic residual is wrong");
+}
+
 void TestBuilderUsesLegacySigmaForClampedTargetInBiasConsistentMode() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -436,6 +531,7 @@ void TestBuilderUsesLegacySigmaForClampedTargetInBiasConsistentMode() {
 int main() {
   try {
     RunTest("TestVerticalVelocityDeltaFactorUsesOnlyZ", TestVerticalVelocityDeltaFactorUsesOnlyZ);
+    RunTest("TestVerticalVelocityDeltaBiasFactorUsesBaZ", TestVerticalVelocityDeltaBiasFactorUsesBaZ);
     RunTest("TestSigmaModelLegacyMatchesExistingFormula", TestSigmaModelLegacyMatchesExistingFormula);
     RunTest("TestSigmaModelBiasConsistentComponents", TestSigmaModelBiasConsistentComponents);
     RunTest("TestSigmaModelClampFlags", TestSigmaModelClampFlags);
@@ -452,6 +548,7 @@ int main() {
     RunTest("TestBuilderSkipsIntervalsAfterGnssSupport", TestBuilderSkipsIntervalsAfterGnssSupport);
     RunTest("TestBuilderClampsVelocityDeltaTarget", TestBuilderClampsVelocityDeltaTarget);
     RunTest("TestBuilderUsesBiasConsistentSigmaAndSummary", TestBuilderUsesBiasConsistentSigmaAndSummary);
+    RunTest("TestBuilderUsesBiasAwareVelocityDeltaFactor", TestBuilderUsesBiasAwareVelocityDeltaFactor);
     RunTest(
       "TestBuilderUsesLegacySigmaForClampedTargetInBiasConsistentMode",
       TestBuilderUsesLegacySigmaForClampedTargetInBiasConsistentMode);
