@@ -74,10 +74,10 @@ void ResultWriter::WriteOutputs(
       output_path / "vertical_envelope_diagnostics.csv",
       result.vertical_envelope_diagnostics);
   }
-  if (!result.static_vertical_bias_carryover_diagnostics.empty()) {
-    WriteStaticVerticalBiasCarryoverDiagnosticsCsv(
-      output_path / "static_vertical_bias_carryover_diagnostics.csv",
-      result.static_vertical_bias_carryover_diagnostics);
+  if (!result.static_alignment_validation.empty()) {
+    WriteStaticAlignmentValidationCsv(
+      output_path / "static_alignment_validation.csv",
+      result.static_alignment_validation);
   }
   if (!result.vertical_velocity_delta_diagnostics.empty()) {
     WriteVerticalVelocityDeltaDiagnosticsCsv(

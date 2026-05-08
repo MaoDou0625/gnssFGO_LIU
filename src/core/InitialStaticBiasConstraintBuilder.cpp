@@ -21,11 +21,20 @@ bool InitialStaticBiasConstraintBuilder::AddVerticalAccelBiasSoftPrior(
 
   graph.add(factor::StaticVerticalAccelBiasFactor(
     bias_key,
-    global_acc_bias_key,
-    gtsam::noiseModel::Isotropic::Sigma(
-      1,
-      config.initial_static_vertical_bias_sigma_mps2)));
+      global_acc_bias_key,
+      gtsam::noiseModel::Isotropic::Sigma(
+        1,
+        config.initial_static_vertical_bias_global_tie_sigma_mps2)));
   return true;
+}
+
+double InitialStaticBiasConstraintBuilder::ResolveVerticalGmSigmaMps2(
+  const OfflineRunnerConfig &config,
+  const bool is_initial_static_interval) {
+  if (is_initial_static_interval && config.enable_initial_static_vertical_bias_gm_tightening) {
+    return config.initial_static_vertical_bias_gm_sigma_mps2;
+  }
+  return config.vertical_acc_bias_sigma_mps2 > 0.0 ? config.vertical_acc_bias_sigma_mps2 : config.bias_acc_sigma;
 }
 
 }  // namespace offline_lc_minimal

@@ -18,12 +18,12 @@ except ImportError as exc:  # pragma: no cover
 
 
 TIME_EPSILON_S = 1e-9
+MICRO_G_TO_MPS2 = 9.80665e-6
 
 
 class PlotContext(NamedTuple):
     reference_time_s: float
     dynamic_start_time_s: float | None
-    static_baz_ref_mps2: float | None
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,6 +47,10 @@ def safe_float(value: str | None) -> float:
         return float(value)
     except ValueError:
         return math.nan
+
+
+def mps2_to_ug(value: float) -> float:
+    return value / MICRO_G_TO_MPS2
 
 
 def read_summary(path: Path) -> dict[str, float]:
@@ -76,6 +80,7 @@ def read_trajectory(path: Path) -> list[dict[str, float]]:
                     "pitch_rad": safe_float(raw.get("pitch_rad")),
                     "roll_rad": safe_float(raw.get("roll_rad")),
                     "baz": safe_float(raw.get("baz")),
+                    "baz_ug": mps2_to_ug(safe_float(raw.get("baz"))),
                 }
             )
     rows = [row for row in rows if math.isfinite(row["time_s"])]
@@ -137,11 +142,9 @@ def resolve_plot_context(
 ) -> PlotContext:
     reference_raw = summary.get("alignment_start_time_s", trajectory_rows[0]["time_s"])
     dynamic_start_time_s = summary.get("dynamic_start_time_s")
-    static_baz_ref_mps2 = summary.get("static_vertical_bias_ref_mps2", summary.get("static_baz_mps2"))
     return PlotContext(
         reference_time_s=nearest_time(trajectory_rows, reference_raw),
         dynamic_start_time_s=dynamic_start_time_s,
-        static_baz_ref_mps2=static_baz_ref_mps2,
     )
 
 
@@ -238,14 +241,9 @@ def plot_alignment_continuity(
     axes[1].set_ylabel("Vz [m/s]")
     axes[1].set_title("Vertical velocity")
 
-    if context.static_baz_ref_mps2 is not None:
-        baz_delta = [row["baz"] - context.static_baz_ref_mps2 for row in plot_rows]
-    else:
-        baz_delta = relative_values(plot_rows, "baz")
-    axes[2].plot(x, baz_delta, color="#2ca02c", linewidth=1.0, label="ba_z - static reference")
-    axes[2].axhline(0.0, color="#222222", linewidth=0.7, alpha=0.5)
-    axes[2].set_ylabel("ba_z [m/s^2]")
-    axes[2].set_title("Vertical accelerometer bias relative to static reference")
+    axes[2].plot(x, [row["baz_ug"] for row in plot_rows], color="#2ca02c", linewidth=1.0, label="ba_z")
+    axes[2].set_ylabel("ba_z [ug]")
+    axes[2].set_title("Vertical accelerometer bias")
 
     pitch_deg = [math.degrees(row["pitch_rad"]) for row in plot_rows]
     roll_deg = [math.degrees(row["roll_rad"]) for row in plot_rows]

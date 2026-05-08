@@ -64,8 +64,8 @@ legend({'Optimized pitch', 'Optimized roll'}, 'Location', 'best');
 title('Attitude State');
 
 nexttile;
-plot(time_rel_s, rows.optimized_baz_mps2, 'r-', 'LineWidth', 1.1);
-ylabel('ba_z (m/s^2)');
+plot(time_rel_s, rows.optimized_baz_ug, 'r-', 'LineWidth', 1.1);
+ylabel('ba_z (ug)');
 grid on;
 xlabel('Relative time (s)');
 legend({'Optimized ba_z'}, 'Location', 'best');

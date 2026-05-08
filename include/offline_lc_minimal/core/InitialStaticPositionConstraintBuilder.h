@@ -6,19 +6,15 @@
 
 namespace offline_lc_minimal {
 
-class InitialStaticBiasConstraintBuilder {
+class InitialStaticPositionConstraintBuilder {
  public:
   [[nodiscard]] static bool Enabled(const OfflineRunnerConfig &config);
 
-  [[nodiscard]] static bool AddVerticalAccelBiasSoftPrior(
+  [[nodiscard]] static bool AddVerticalPositionHold(
     const OfflineRunnerConfig &config,
     gtsam::NonlinearFactorGraph &graph,
-    gtsam::Key bias_key,
-    gtsam::Key global_acc_bias_key);
-
-  [[nodiscard]] static double ResolveVerticalGmSigmaMps2(
-    const OfflineRunnerConfig &config,
-    bool is_initial_static_interval);
+    gtsam::Key reference_pose_key,
+    gtsam::Key pose_key);
 };
 
 }  // namespace offline_lc_minimal

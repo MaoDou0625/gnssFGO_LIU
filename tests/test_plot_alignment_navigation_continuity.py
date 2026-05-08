@@ -11,22 +11,20 @@ SCRIPT_SPEC.loader.exec_module(plot_alignment_navigation_continuity)
 
 
 class PlotAlignmentNavigationContinuityTests(unittest.TestCase):
-    def test_resolve_plot_context_uses_alignment_start_and_static_baz_reference(self) -> None:
+    def test_resolve_plot_context_uses_alignment_start(self) -> None:
         rows = [
-            {"time_s": 5701.3996, "up_m": 0.0, "vz_mps": 0.0, "pitch_rad": 0.0, "roll_rad": 0.0, "baz": -0.1},
-            {"time_s": 5801.5970, "up_m": 0.1, "vz_mps": 0.0, "pitch_rad": 0.0, "roll_rad": 0.0, "baz": -0.1},
+            {"time_s": 5701.3996, "up_m": 0.0, "vz_mps": 0.0, "pitch_rad": 0.0, "roll_rad": 0.0, "baz": -0.1, "baz_ug": -10197.162129779282},
+            {"time_s": 5801.5970, "up_m": 0.1, "vz_mps": 0.0, "pitch_rad": 0.0, "roll_rad": 0.0, "baz": -0.1, "baz_ug": -10197.162129779282},
         ]
         summary = {
             "alignment_start_time_s": 5701.4,
             "dynamic_start_time_s": 5801.6,
-            "static_vertical_bias_ref_mps2": -0.005,
         }
 
         context = plot_alignment_navigation_continuity.resolve_plot_context(summary, rows)
 
         self.assertAlmostEqual(context.reference_time_s, 5701.3996, places=9)
         self.assertAlmostEqual(context.dynamic_start_time_s, 5801.6, places=9)
-        self.assertAlmostEqual(context.static_baz_ref_mps2, -0.005, places=9)
 
     def test_read_envelope_rows_keeps_single_run_gate_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

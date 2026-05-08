@@ -77,6 +77,13 @@ void AccumulateStaticSpecificForceWindowMetrics(
   double window_duration_s,
   RunSummary &run_summary);
 
+[[nodiscard]] std::vector<StaticAlignmentValidationRow> BuildStaticAlignmentValidation(
+  const gtsam::Values &optimized_values,
+  const GraphTimeline &graph_timeline,
+  gtsam::Key global_acc_bias_key,
+  double vertical_acc_bias_tau_s,
+  RunSummary &run_summary);
+
 void AccumulateGnssConsistencySummary(
   const std::vector<GnssConsistencyRecord> &gnss_consistency_records,
   const OfflineRunnerConfig &config,

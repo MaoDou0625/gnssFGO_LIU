@@ -96,11 +96,11 @@ struct OfflineRunnerConfig {
   double initial_static_specific_force_sigma_mps2 = 1e-2;
   double initial_static_vertical_specific_force_sigma_mps2 = 1e-2;
   bool enable_initial_static_vertical_bias_soft_prior = false;
-  double initial_static_vertical_bias_sigma_mps2 = 5e-5;
-  bool enable_static_vertical_bias_carryover = false;
-  double static_vertical_bias_carryover_sigma_mps2 = 5e-5;
-  bool static_vertical_bias_carryover_tighten_gm = true;
-  double static_vertical_bias_carryover_vertical_gm_sigma_mps2 = 5e-5;
+  double initial_static_vertical_bias_global_tie_sigma_mps2 = 5e-5;
+  bool enable_initial_static_vertical_bias_gm_tightening = false;
+  double initial_static_vertical_bias_gm_sigma_mps2 = 1.96133e-7;
+  bool enable_initial_static_vertical_position_hold = false;
+  double initial_static_vertical_position_hold_sigma_m = 0.005;
   bool enable_initial_static_subgraph = false;
   double initial_static_state_frequency_hz = 1.0;
   double initial_static_attitude_drift_sigma_rad = 1e-3;

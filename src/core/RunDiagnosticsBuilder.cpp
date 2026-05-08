@@ -8,6 +8,7 @@
 
 #include <gtsam/inference/Symbol.h>
 
+#include "offline_lc_minimal/common/Units.h"
 #include "offline_lc_minimal/core/ImuIntegrationUtils.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/factor/VerticalRtkFactors.h"
@@ -677,6 +678,97 @@ void AccumulateStaticSpecificForceWindowMetrics(
   run_summary.static_specific_force_window_std_y_mps2 = std::sqrt(std::max(variance_mps4.y(), 0.0));
   run_summary.static_specific_force_window_std_z_mps2 = std::sqrt(std::max(variance_mps4.z(), 0.0));
   run_summary.static_specific_force_window_rms_xyz_mps2 = std::sqrt(std::max(squared_norm_sum, 0.0));
+}
+
+std::vector<StaticAlignmentValidationRow> BuildStaticAlignmentValidation(
+  const gtsam::Values &optimized_values,
+  const GraphTimeline &graph_timeline,
+  const gtsam::Key global_acc_bias_key,
+  const double vertical_acc_bias_tau_s,
+  RunSummary &run_summary) {
+  std::vector<StaticAlignmentValidationRow> rows;
+  if (graph_timeline.initial_static_state_count == 0U || graph_timeline.timestamps_s.empty()) {
+    return rows;
+  }
+
+  const std::size_t last_static_index = std::min(
+    graph_timeline.initial_static_state_count - 1U,
+    graph_timeline.timestamps_s.size() - 1U);
+  rows.reserve(last_static_index + 1U);
+
+  const gtsam::Pose3 reference_pose = optimized_values.at<gtsam::Pose3>(X(0));
+  const double reference_time_s = graph_timeline.timestamps_s.front();
+  const double reference_up_m = reference_pose.translation().z();
+  const bool has_global_acc_bias = optimized_values.exists(global_acc_bias_key);
+  const double global_baz_mps2 =
+    has_global_acc_bias
+      ? optimized_values.at<gtsam::Vector3>(global_acc_bias_key).z()
+      : std::numeric_limits<double>::quiet_NaN();
+
+  std::vector<double> up_values;
+  std::vector<double> vz_abs_values;
+  std::vector<double> baz_ug_values;
+  std::vector<double> baz_minus_global_abs_ug_values;
+  up_values.reserve(last_static_index + 1U);
+  vz_abs_values.reserve(last_static_index + 1U);
+  baz_ug_values.reserve(last_static_index + 1U);
+  baz_minus_global_abs_ug_values.reserve(last_static_index + 1U);
+
+  for (std::size_t state_index = 0; state_index <= last_static_index; ++state_index) {
+    const double time_s = graph_timeline.timestamps_s[state_index];
+    const auto pose = optimized_values.at<gtsam::Pose3>(X(state_index));
+    const auto velocity = optimized_values.at<gtsam::Vector3>(V(state_index));
+    const auto bias = optimized_values.at<gtsam::imuBias::ConstantBias>(B(state_index));
+    const double baz_mps2 = bias.accelerometer().z();
+    const double baz_ug = Mps2ToMicroG(baz_mps2);
+
+    StaticAlignmentValidationRow row;
+    row.time_s = time_s;
+    row.relative_time_s = time_s - reference_time_s;
+    row.up_delta_m = pose.translation().z() - reference_up_m;
+    row.vz_mps = velocity.z();
+    row.ba_z_ug = baz_ug;
+    row.global_ba_z_ug = Mps2ToMicroG(global_baz_mps2);
+    row.ba_z_minus_global_ug = Mps2ToMicroG(baz_mps2 - global_baz_mps2);
+    row.static_height_residual_m = row.up_delta_m;
+
+    if (state_index > 0U && std::isfinite(global_baz_mps2)) {
+      const double previous_time_s = graph_timeline.timestamps_s[state_index - 1U];
+      const auto previous_bias = optimized_values.at<gtsam::imuBias::ConstantBias>(B(state_index - 1U));
+      const double phi = ComputeBiasDecay(time_s - previous_time_s, vertical_acc_bias_tau_s);
+      const double predicted_baz =
+        global_baz_mps2 + phi * (previous_bias.accelerometer().z() - global_baz_mps2);
+      row.static_bias_gm_residual_ug = Mps2ToMicroG(baz_mps2 - predicted_baz);
+    }
+
+    rows.push_back(row);
+    up_values.push_back(row.up_delta_m);
+    vz_abs_values.push_back(std::abs(row.vz_mps));
+    baz_ug_values.push_back(row.ba_z_ug);
+    if (std::isfinite(row.ba_z_minus_global_ug)) {
+      baz_minus_global_abs_ug_values.push_back(std::abs(row.ba_z_minus_global_ug));
+    }
+  }
+
+  if (!up_values.empty()) {
+    const auto [up_min_it, up_max_it] = std::minmax_element(up_values.begin(), up_values.end());
+    run_summary.static_alignment_up_drift_m = up_values.back() - up_values.front();
+    run_summary.static_alignment_up_range_m = *up_max_it - *up_min_it;
+    run_summary.static_alignment_vz_max_abs_mps =
+      *std::max_element(vz_abs_values.begin(), vz_abs_values.end());
+  }
+  if (!baz_ug_values.empty()) {
+    const auto [baz_min_it, baz_max_it] = std::minmax_element(baz_ug_values.begin(), baz_ug_values.end());
+    run_summary.static_alignment_baz_range_ug = *baz_max_it - *baz_min_it;
+  }
+  if (!baz_minus_global_abs_ug_values.empty()) {
+    run_summary.static_alignment_baz_minus_global_max_abs_ug =
+      *std::max_element(
+        baz_minus_global_abs_ug_values.begin(),
+        baz_minus_global_abs_ug_values.end());
+  }
+
+  return rows;
 }
 
 void AccumulateGnssConsistencySummary(

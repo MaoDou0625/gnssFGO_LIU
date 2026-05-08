@@ -27,9 +27,9 @@
 #include "offline_lc_minimal/core/ImuIntegrationUtils.h"
 #include "offline_lc_minimal/core/InitialStaticBiasConstraintBuilder.h"
 #include "offline_lc_minimal/core/InitialStaticConstraintBuilder.h"
+#include "offline_lc_minimal/core/InitialStaticPositionConstraintBuilder.h"
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
-#include "offline_lc_minimal/core/StaticVerticalBiasCalibrator.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
 #include "offline_lc_minimal/core/VerticalJumpBiasConstraintBuilder.h"
@@ -45,7 +45,6 @@
 #include "offline_lc_minimal/factor/SegmentBiasFeedbackFactor.h"
 #include "offline_lc_minimal/factor/StaticZeroAngularRateFactor.h"
 #include "offline_lc_minimal/factor/StaticSpecificForceFactor.h"
-#include "offline_lc_minimal/factor/StaticVerticalBiasReferenceFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/StaticAttitudeDriftFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasGmTransitionFactor.h"
@@ -76,17 +75,17 @@ gtsam::Matrix3 ComputeBiasPhi(const double dt_s, const double tau_s) {
   return ComputeBiasDecay(dt_s, tau_s) * gtsam::I_3x3;
 }
 
-double ResolveVerticalAccBiasSigmaMps2(const OfflineRunnerConfig &config) {
-  if (config.enable_static_vertical_bias_carryover &&
-      config.static_vertical_bias_carryover_tighten_gm) {
-    return config.static_vertical_bias_carryover_vertical_gm_sigma_mps2;
-  }
-  return config.vertical_acc_bias_sigma_mps2 > 0.0 ? config.vertical_acc_bias_sigma_mps2 : config.bias_acc_sigma;
-}
-
-double ComputeVerticalAccBiasProcessVariance(const double dt_s, const OfflineRunnerConfig &config) {
+double ComputeVerticalAccBiasProcessVariance(
+  const double dt_s,
+  const OfflineRunnerConfig &config,
+  const bool is_initial_static_interval) {
   const double bounded_dt_s = std::max(dt_s, 1e-6);
-  return std::pow(ResolveVerticalAccBiasSigmaMps2(config), 2.0) * config.vertical_acc_bias_process_noise_scale *
+  return std::pow(
+           InitialStaticBiasConstraintBuilder::ResolveVerticalGmSigmaMps2(
+             config,
+             is_initial_static_interval),
+           2.0) *
+         config.vertical_acc_bias_process_noise_scale *
          std::max(1.0 - std::exp(-2.0 * bounded_dt_s / std::max(config.vertical_acc_bias_tau_s, 1e-9)), 1e-9);
 }
 
@@ -302,7 +301,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     config_.enable_initial_static_zupt_zaru ||
     config_.enable_initial_static_zero_specific_force ||
     config_.enable_initial_static_vertical_specific_force ||
-    config_.enable_initial_static_vertical_bias_soft_prior;
+    config_.enable_initial_static_vertical_bias_soft_prior ||
+    config_.enable_initial_static_vertical_bias_gm_tightening ||
+    config_.enable_initial_static_vertical_position_hold;
   run_result.run_summary.initial_static_subgraph_enabled = config_.enable_initial_static_subgraph;
 
   const std::size_t origin_index = FindOriginIndex(dataset.gnss_samples, dataset.imu_samples);
@@ -348,20 +349,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       config_);
   run_result.run_summary.initial_static_constraint_sample_count =
     initial_static_constraint_data.window_summary.sample_count;
-  run_result.run_summary.static_vertical_bias_carryover_enabled =
-    config_.enable_static_vertical_bias_carryover;
-  std::optional<StaticVerticalBiasCalibrationResult> static_vertical_bias_calibration;
-  if (config_.enable_static_vertical_bias_carryover) {
-    static_vertical_bias_calibration = StaticVerticalBiasCalibrator::Calibrate(
-      StaticVerticalBiasCalibrationRequest{
-        &dataset.imu_samples,
-        alignment_start_time_s,
-        alignment_end_time_s,
-        geo_reference.EarthRateEnu(),
-        config_});
-    run_result.run_summary.static_vertical_bias_ref_mps2 =
-      static_vertical_bias_calibration->static_baz_ref_mps2;
-  }
   AccumulateStaticSpecificForceWindowMetrics(
     dataset.imu_samples,
     alignment_start_time_s,
@@ -483,13 +470,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       global_acc_bias_key,
       initial_bias.accelerometer(),
       gtsam::noiseModel::Isotropic::Sigma(3, config_.bias_acc_prior_sigma)));
-    if (static_vertical_bias_calibration.has_value()) {
-      graph.add(factor::StaticVerticalBiasReferenceFactor(
-        global_acc_bias_key,
-        static_vertical_bias_calibration->static_baz_ref_mps2,
-        gtsam::noiseModel::Isotropic::Sigma(1, config_.static_vertical_bias_carryover_sigma_mps2)));
-      ++run_result.run_summary.static_vertical_bias_carryover_factor_count;
-    }
     if (config_.enable_vertical_acc_bias_gm_process) {
       graph.add(factor::GlobalPlanarAccelBiasFactor(
         B(0),
@@ -662,13 +642,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     if (config_.enable_vertical_acc_bias_gm_process) {
       const double delta_time_s = current_time_s - previous_time_s;
       const double phi_vertical_acc = ComputeBiasDecay(delta_time_s, config_.vertical_acc_bias_tau_s);
-      const double vertical_acc_variance = ComputeVerticalAccBiasProcessVariance(delta_time_s, config_);
+      const bool is_initial_static_interval =
+        config_.enable_initial_static_subgraph &&
+        current_time_s <= alignment_end_time_s + kTimeEpsilonS;
+      const double vertical_acc_variance =
+        ComputeVerticalAccBiasProcessVariance(delta_time_s, config_, is_initial_static_interval);
       graph.add(factor::VerticalAccelBiasGmTransitionFactor(
         B(state_index - 1U),
         B(state_index),
         global_acc_bias_key,
         phi_vertical_acc,
         gtsam::noiseModel::Isotropic::Sigma(1, std::sqrt(std::max(vertical_acc_variance, 1e-12)))));
+      if (is_initial_static_interval && config_.enable_initial_static_vertical_bias_gm_tightening) {
+        ++run_result.run_summary.initial_static_vertical_bias_gm_tightened_factor_count;
+      }
     }
     if (config_.enable_segment_error_feedback) {
       const double delta_time_s = current_time_s - previous_time_s;
@@ -765,6 +752,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         B(state_index),
         global_acc_bias_key)) {
         ++run_result.run_summary.initial_static_vertical_bias_prior_factor_count;
+      }
+      if (InitialStaticPositionConstraintBuilder::AddVerticalPositionHold(
+        config_,
+        graph,
+        X(0),
+        X(state_index))) {
+        ++run_result.run_summary.initial_static_vertical_position_hold_factor_count;
       }
       graph.add(factor::StaticAttitudeDriftFactor(
         X(state_index - 1U),
@@ -1055,21 +1049,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     optimized_values,
     run_result.vertical_jump_bias_diagnostics);
 
-  if (static_vertical_bias_calibration.has_value()) {
-    run_result.static_vertical_bias_carryover_diagnostics.push_back(
-      BuildStaticVerticalBiasCarryoverDiagnostic(
-        *static_vertical_bias_calibration,
-        optimized_values,
-        state_timestamps,
-        graph_timeline.dynamic_start_index,
-        global_acc_bias_key));
-    const auto &carryover_diagnostic = run_result.static_vertical_bias_carryover_diagnostics.back();
-    run_result.run_summary.static_vertical_bias_global_delta_mps2 =
-      carryover_diagnostic.optimized_global_baz_delta_mps2;
-    run_result.run_summary.static_vertical_bias_dynamic_first20_max_abs_delta_mps2 =
-      carryover_diagnostic.dynamic_first20_max_abs_baz_delta_mps2;
-  }
-
   if (collect_reference_states) {
     const std::vector<ReferenceNodeState> optimized_reference_states =
       BuildReferenceStatesFromOptimizedValues(state_timestamps, optimized_values);
@@ -1080,6 +1059,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     }
   }
   AccumulateStaticConsistencyMetrics(optimized_values, graph_timeline, run_result.run_summary);
+  run_result.static_alignment_validation = BuildStaticAlignmentValidation(
+    optimized_values,
+    graph_timeline,
+    global_acc_bias_key,
+    config_.vertical_acc_bias_tau_s,
+    run_result.run_summary);
   run_result.error_state_trajectory.clear();
   if (graph_timeline.dynamic_start_index < state_timestamps.size()) {
     const std::size_t first_dynamic_index = graph_timeline.dynamic_start_index;

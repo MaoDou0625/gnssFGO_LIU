@@ -12,6 +12,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "offline_lc_minimal/common/Units.h"
+
 namespace offline_lc_minimal {
 
 struct ScalarSeriesStats {
@@ -385,40 +387,27 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
   }
 }
 
-void WriteStaticVerticalBiasCarryoverDiagnosticsCsv(
+void WriteStaticAlignmentValidationCsv(
   const std::filesystem::path &path,
-  const std::vector<StaticVerticalBiasCarryoverDiagnosticRow> &rows) {
+  const std::vector<StaticAlignmentValidationRow> &rows) {
   std::ofstream stream(path);
   if (!stream.is_open()) {
     throw std::runtime_error("failed to write " + path.filename().string());
   }
   stream << std::setprecision(17);
   stream
-    << "static_window_start_s,static_window_end_s,static_sample_count,static_state_count,"
-       "initial_baz_mps2,static_baz_ref_mps2,calibration_initial_error,calibration_final_error,"
-       "optimized_global_baz_mps2,optimized_global_baz_delta_mps2,dynamic_first20_state_count,"
-       "dynamic_first20_added_factor_count,dynamic_first20_mean_abs_baz_delta_mps2,"
-       "dynamic_first20_max_abs_baz_delta_mps2,dynamic_first20_up_delta_m,dynamic_first20_up_range_m,"
-       "dynamic_first20_vz_delta_mps,dynamic_first20_vz_range_mps\n";
+    << "time_s,relative_time_s,up_delta_m,vz_mps,ba_z_ug,global_ba_z_ug,"
+       "ba_z_minus_global_ug,static_bias_gm_residual_ug,static_height_residual_m\n";
   for (const auto &row : rows) {
-    stream << row.static_window_start_s << ','
-           << row.static_window_end_s << ','
-           << row.static_sample_count << ','
-           << row.static_state_count << ','
-           << row.initial_baz_mps2 << ','
-           << row.static_baz_ref_mps2 << ','
-           << row.calibration_initial_error << ','
-           << row.calibration_final_error << ','
-           << row.optimized_global_baz_mps2 << ','
-           << row.optimized_global_baz_delta_mps2 << ','
-           << row.dynamic_first20_state_count << ','
-           << row.dynamic_first20_added_factor_count << ','
-           << row.dynamic_first20_mean_abs_baz_delta_mps2 << ','
-           << row.dynamic_first20_max_abs_baz_delta_mps2 << ','
-           << row.dynamic_first20_up_delta_m << ','
-           << row.dynamic_first20_up_range_m << ','
-           << row.dynamic_first20_vz_delta_mps << ','
-           << row.dynamic_first20_vz_range_mps << '\n';
+    stream << row.time_s << ','
+           << row.relative_time_s << ','
+           << row.up_delta_m << ','
+           << row.vz_mps << ','
+           << row.ba_z_ug << ','
+           << row.global_ba_z_ug << ','
+           << row.ba_z_minus_global_ug << ','
+           << row.static_bias_gm_residual_ug << ','
+           << row.static_height_residual_m << '\n';
   }
 }
 
@@ -738,7 +727,7 @@ void WriteVerticalStateCorrectionCsv(
   stream
     << "sample_index,raw_time_s,corrected_time_s,sync_status,state_index,state_time_s,factor_used,"
        "vertical_direct_position_factor_used,measurement_up_m,optimized_up_m,optimized_vz_mps,"
-       "optimized_pitch_rad,optimized_roll_rad,optimized_baz_mps2,postfit_residual_u_m\n";
+       "optimized_pitch_rad,optimized_roll_rad,optimized_baz_ug,postfit_residual_u_m\n";
   for (const auto &row : rows) {
     stream << row.sample_index << ','
            << row.raw_time_s << ','
@@ -753,7 +742,7 @@ void WriteVerticalStateCorrectionCsv(
            << row.optimized_vz_mps << ','
            << row.optimized_pitch_rad << ','
            << row.optimized_roll_rad << ','
-           << row.optimized_baz_mps2 << ','
+           << Mps2ToMicroG(row.optimized_baz_mps2) << ','
            << row.postfit_residual_u_m << '\n';
   }
 }
@@ -772,11 +761,11 @@ void WriteInitialDynamicConsistencyCsv(
   }
   stream << std::setprecision(17);
   stream
-    << "time_s,relative_time_s,up_m,vz_mps,yaw_rad,pitch_rad,roll_rad,baz_mps2,bgz_radps,initial_baz_mps2,"
-       "initial_bgz_radps,static_baz_mps2,static_bgz_radps,optimized_last_static_baz_mps2,"
-       "optimized_last_static_bgz_radps,optimized_first_static_baz_mps2,optimized_first_static_bgz_radps,"
-       "optimized_first_dynamic_baz_mps2,optimized_first_dynamic_bgz_radps,"
-       "bootstrap_to_optimized_first_dynamic_baz_delta_mps2,static_to_dynamic_baz_delta_mps2\n";
+    << "time_s,relative_time_s,up_m,vz_mps,yaw_rad,pitch_rad,roll_rad,baz_ug,bgz_radps,initial_baz_ug,"
+       "initial_bgz_radps,static_baz_ug,static_bgz_radps,optimized_last_static_baz_ug,"
+       "optimized_last_static_bgz_radps,optimized_first_static_baz_ug,optimized_first_static_bgz_radps,"
+       "optimized_first_dynamic_baz_ug,optimized_first_dynamic_bgz_radps,"
+       "bootstrap_to_optimized_first_dynamic_baz_delta_ug,static_to_dynamic_baz_delta_ug\n";
 
   const double start_time_s = rows.front().time_s;
   for (const auto &row : rows) {
@@ -790,20 +779,20 @@ void WriteInitialDynamicConsistencyCsv(
            << row.ypr_rad.x() << ','
            << row.ypr_rad.y() << ','
            << row.ypr_rad.z() << ','
-           << row.bias_acc.z() << ','
+           << Mps2ToMicroG(row.bias_acc.z()) << ','
            << row.bias_gyro.z() << ','
-           << run_summary.initial_baz_mps2 << ','
+           << Mps2ToMicroG(run_summary.initial_baz_mps2) << ','
            << run_summary.initial_bgz_radps << ','
-           << run_summary.static_baz_mps2 << ','
+           << Mps2ToMicroG(run_summary.static_baz_mps2) << ','
            << run_summary.static_bgz_radps << ','
-           << run_summary.optimized_last_static_baz_mps2 << ','
+           << Mps2ToMicroG(run_summary.optimized_last_static_baz_mps2) << ','
            << run_summary.optimized_last_static_bgz_radps << ','
-           << run_summary.optimized_first_static_baz_mps2 << ','
+           << Mps2ToMicroG(run_summary.optimized_first_static_baz_mps2) << ','
            << run_summary.optimized_first_static_bgz_radps << ','
-           << run_summary.optimized_first_dynamic_baz_mps2 << ','
+           << Mps2ToMicroG(run_summary.optimized_first_dynamic_baz_mps2) << ','
            << run_summary.optimized_first_dynamic_bgz_radps << ','
-           << run_summary.bootstrap_to_optimized_first_dynamic_baz_delta_mps2 << ','
-           << run_summary.static_to_dynamic_baz_delta_mps2 << '\n';
+           << Mps2ToMicroG(run_summary.bootstrap_to_optimized_first_dynamic_baz_delta_mps2) << ','
+           << Mps2ToMicroG(run_summary.static_to_dynamic_baz_delta_mps2) << '\n';
   }
 }
 

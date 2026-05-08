@@ -11,10 +11,11 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 
+#include "offline_lc_minimal/common/Units.h"
 #include "offline_lc_minimal/core/InitialStaticBiasConstraintBuilder.h"
-#include "offline_lc_minimal/core/StaticVerticalBiasCalibrator.h"
+#include "offline_lc_minimal/core/InitialStaticPositionConstraintBuilder.h"
 #include "offline_lc_minimal/factor/StaticVerticalAccelBiasFactor.h"
-#include "offline_lc_minimal/factor/StaticVerticalBiasReferenceFactor.h"
+#include "offline_lc_minimal/factor/StaticVerticalPositionHoldFactor.h"
 
 namespace {
 
@@ -86,7 +87,7 @@ void TestInitialStaticBiasConstraintBuilderHonorsEnableFlag() {
   ExpectTrue(graph.empty(), "disabled static bias builder should add no factors");
 
   config.enable_initial_static_vertical_bias_soft_prior = true;
-  config.initial_static_vertical_bias_sigma_mps2 = 5e-5;
+  config.initial_static_vertical_bias_global_tie_sigma_mps2 = 5e-5;
   const bool enabled_added =
     offline_lc_minimal::InitialStaticBiasConstraintBuilder::AddVerticalAccelBiasSoftPrior(
     config,
@@ -97,70 +98,72 @@ void TestInitialStaticBiasConstraintBuilderHonorsEnableFlag() {
   ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "enabled static bias builder should add one factor");
 }
 
-void TestStaticVerticalBiasReferenceFactorUsesOnlyGlobalBaz() {
-  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
-  const offline_lc_minimal::factor::StaticVerticalBiasReferenceFactor factor(
-    gtsam::Symbol('a', 0),
-    0.005,
-    noise);
+void TestInitialStaticBiasGmTighteningSelectsStaticSigmaOnlyInsideStaticWindow() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_acc_bias_sigma_mps2 = 0.01;
+  config.enable_initial_static_vertical_bias_gm_tightening = true;
+  config.initial_static_vertical_bias_gm_sigma_mps2 = offline_lc_minimal::MicroGToMps2(0.02);
 
-  gtsam::Matrix h_global;
-  const gtsam::Vector residual =
-    factor.evaluateError(gtsam::Vector3(100.0, -200.0, 0.006), h_global);
-  const gtsam::Vector xy_changed_residual =
-    factor.evaluateError(gtsam::Vector3(-10.0, 20.0, 0.006));
-  const gtsam::Vector z_changed_residual =
-    factor.evaluateError(gtsam::Vector3(100.0, -200.0, 0.004));
-
-  ExpectNear(residual(0), 0.001, 1e-12, "reference factor residual is wrong");
-  ExpectNear(xy_changed_residual(0), 0.001, 1e-12, "reference factor should ignore global x/y");
-  ExpectNear(z_changed_residual(0), -0.001, 1e-12, "reference factor should use global z");
-  ExpectNear(static_cast<double>(h_global.rows()), 1.0, 0.0, "global Jacobian row count is wrong");
-  ExpectNear(static_cast<double>(h_global.cols()), 3.0, 0.0, "global Jacobian column count is wrong");
-  ExpectNear(h_global(0, 0), 0.0, 1e-12, "global reference Jacobian should not touch x");
-  ExpectNear(h_global(0, 1), 0.0, 1e-12, "global reference Jacobian should not touch y");
-  ExpectNear(h_global(0, 2), 1.0, 1e-12, "global reference Jacobian should touch z");
+  ExpectNear(
+    offline_lc_minimal::InitialStaticBiasConstraintBuilder::ResolveVerticalGmSigmaMps2(config, true),
+    offline_lc_minimal::MicroGToMps2(0.02),
+    1e-18,
+    "static GM sigma should use the tightened static sigma");
+  ExpectNear(
+    offline_lc_minimal::InitialStaticBiasConstraintBuilder::ResolveVerticalGmSigmaMps2(config, false),
+    0.01,
+    1e-18,
+    "dynamic GM sigma should keep the normal vertical sigma");
 }
 
-void TestStaticVerticalBiasCarryoverDiagnosticDoesNotAddDynamicFactors() {
-  offline_lc_minimal::StaticVerticalBiasCalibrationResult calibration;
-  calibration.static_window_start_s = 10.0;
-  calibration.static_window_end_s = 110.0;
-  calibration.static_sample_count = 1000;
-  calibration.static_state_count = 201;
-  calibration.initial_baz_mps2 = 0.004;
-  calibration.static_baz_ref_mps2 = 0.005;
-  calibration.initial_error = 10.0;
-  calibration.final_error = 1.0;
+void TestStaticVerticalPositionHoldFactorUsesOnlyZ() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
+  const offline_lc_minimal::factor::StaticVerticalPositionHoldFactor factor(
+    X(0),
+    X(1),
+    noise);
+  const gtsam::Pose3 reference_pose(gtsam::Rot3::RzRyRx(0.2, -0.1, 0.3), gtsam::Point3(10.0, -20.0, 5.0));
+  const gtsam::Pose3 same_z_pose(gtsam::Rot3::RzRyRx(-0.4, 0.5, -0.6), gtsam::Point3(-30.0, 40.0, 5.0));
+  const gtsam::Pose3 shifted_z_pose(gtsam::Rot3(), gtsam::Point3(-30.0, 40.0, 5.25));
 
-  const gtsam::Key global_acc_bias_key = gtsam::Symbol('a', 0);
-  gtsam::Values values;
-  values.insert(global_acc_bias_key, gtsam::Vector3(0.0, 0.0, 0.0051));
-  const std::vector<double> timestamps{100.0, 120.0, 121.0};
-  values.insert(X(0), gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(0.0, 0.0, 1.0)));
-  values.insert(V(0), gtsam::Vector3(0.0, 0.0, 0.1));
-  values.insert(B(0), gtsam::imuBias::ConstantBias(gtsam::Vector3(0.0, 0.0, 0.0052), gtsam::Vector3::Zero()));
-  values.insert(X(1), gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(0.0, 0.0, 1.2)));
-  values.insert(V(1), gtsam::Vector3(0.0, 0.0, 0.3));
-  values.insert(B(1), gtsam::imuBias::ConstantBias(gtsam::Vector3(0.0, 0.0, 0.0048), gtsam::Vector3::Zero()));
-  values.insert(X(2), gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(0.0, 0.0, 1.4)));
-  values.insert(V(2), gtsam::Vector3(0.0, 0.0, -0.2));
-  values.insert(B(2), gtsam::imuBias::ConstantBias(gtsam::Vector3(0.0, 0.0, 0.0060), gtsam::Vector3::Zero()));
+  gtsam::Matrix h_reference;
+  gtsam::Matrix h_pose;
+  const gtsam::Vector zero_residual =
+    factor.evaluateError(reference_pose, same_z_pose, h_reference, h_pose);
+  const gtsam::Vector shifted_residual = factor.evaluateError(reference_pose, shifted_z_pose);
 
-  const offline_lc_minimal::StaticVerticalBiasCarryoverDiagnosticRow row =
-    offline_lc_minimal::BuildStaticVerticalBiasCarryoverDiagnostic(
-      calibration,
-      values,
-      timestamps,
-      0U,
-      global_acc_bias_key);
+  ExpectNear(zero_residual(0), 0.0, 1e-12, "static vertical position hold should ignore x/y and attitude");
+  ExpectNear(shifted_residual(0), 0.25, 1e-12, "static vertical position hold residual is wrong");
+  ExpectNear(h_reference(0, 5), -1.0, 1e-12, "reference pose z Jacobian is wrong");
+  ExpectNear(h_pose(0, 5), 1.0, 1e-12, "pose z Jacobian is wrong");
+  for (int column = 0; column < 5; ++column) {
+    ExpectNear(h_reference(0, column), 0.0, 1e-12, "reference pose Jacobian should only touch z");
+    ExpectNear(h_pose(0, column), 0.0, 1e-12, "pose Jacobian should only touch z");
+  }
+}
 
-  ExpectNear(static_cast<double>(row.dynamic_first20_added_factor_count), 0.0, 0.0, "diagnostic should add no factors");
-  ExpectNear(static_cast<double>(row.dynamic_first20_state_count), 2.0, 0.0, "diagnostic should inspect first20 states");
-  ExpectNear(row.optimized_global_baz_delta_mps2, 0.0001, 1e-12, "global delta diagnostic is wrong");
-  ExpectNear(row.dynamic_first20_max_abs_baz_delta_mps2, 0.0002, 1e-12, "max dynamic bias delta is wrong");
-  ExpectNear(row.dynamic_first20_up_delta_m, 0.2, 1e-12, "dynamic up delta is wrong");
-  ExpectNear(row.dynamic_first20_vz_range_mps, 0.2, 1e-12, "dynamic vz range is wrong");
+void TestInitialStaticPositionConstraintBuilderHonorsEnableFlag() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  gtsam::NonlinearFactorGraph graph;
+
+  const bool disabled_added =
+    offline_lc_minimal::InitialStaticPositionConstraintBuilder::AddVerticalPositionHold(
+      config,
+      graph,
+      X(0),
+      X(1));
+  ExpectTrue(!disabled_added, "disabled static position builder should report no factor");
+  ExpectTrue(graph.empty(), "disabled static position builder should add no factors");
+
+  config.enable_initial_static_vertical_position_hold = true;
+  const bool enabled_added =
+    offline_lc_minimal::InitialStaticPositionConstraintBuilder::AddVerticalPositionHold(
+      config,
+      graph,
+      X(0),
+      X(1));
+  ExpectTrue(enabled_added, "enabled static position builder should report one factor");
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "enabled static position builder should add one factor");
 }
 
 }  // namespace
@@ -172,11 +175,14 @@ int main() {
       "TestInitialStaticBiasConstraintBuilderHonorsEnableFlag",
       TestInitialStaticBiasConstraintBuilderHonorsEnableFlag);
     RunTest(
-      "TestStaticVerticalBiasReferenceFactorUsesOnlyGlobalBaz",
-      TestStaticVerticalBiasReferenceFactorUsesOnlyGlobalBaz);
+      "TestInitialStaticBiasGmTighteningSelectsStaticSigmaOnlyInsideStaticWindow",
+      TestInitialStaticBiasGmTighteningSelectsStaticSigmaOnlyInsideStaticWindow);
     RunTest(
-      "TestStaticVerticalBiasCarryoverDiagnosticDoesNotAddDynamicFactors",
-      TestStaticVerticalBiasCarryoverDiagnosticDoesNotAddDynamicFactors);
+      "TestStaticVerticalPositionHoldFactorUsesOnlyZ",
+      TestStaticVerticalPositionHoldFactorUsesOnlyZ);
+    RunTest(
+      "TestInitialStaticPositionConstraintBuilderHonorsEnableFlag",
+      TestInitialStaticPositionConstraintBuilderHonorsEnableFlag);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <utility>
 
+#include "offline_lc_minimal/common/Units.h"
+
 namespace offline_lc_minimal {
 namespace {
 
@@ -141,9 +143,10 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_acc_bias_process_noise_scale <= 0.0) {
     throw std::runtime_error("vertical accelerometer bias GM settings are invalid");
   }
-  if (config.static_vertical_bias_carryover_sigma_mps2 <= 0.0 ||
-      config.static_vertical_bias_carryover_vertical_gm_sigma_mps2 <= 0.0) {
-    throw std::runtime_error("static vertical bias carryover settings must be positive");
+  if (config.initial_static_vertical_bias_global_tie_sigma_mps2 <= 0.0 ||
+      config.initial_static_vertical_bias_gm_sigma_mps2 <= 0.0 ||
+      config.initial_static_vertical_position_hold_sigma_m <= 0.0) {
+    throw std::runtime_error("initial static vertical bias and position settings must be positive");
   }
   if (config.enable_vertical_acc_bias_gm_process && !config.enable_global_acc_bias) {
     throw std::runtime_error("enable_vertical_acc_bias_gm_process requires enable_global_acc_bias");
@@ -214,7 +217,6 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.initial_static_zaru_sigma_radps <= 0.0 ||
       config.initial_static_specific_force_sigma_mps2 <= 0.0 ||
       config.initial_static_vertical_specific_force_sigma_mps2 <= 0.0 ||
-      config.initial_static_vertical_bias_sigma_mps2 <= 0.0 ||
       config.initial_static_state_frequency_hz <= 0.0 ||
       config.initial_static_attitude_drift_sigma_rad <= 0.0) {
     throw std::runtime_error("initial static constraint settings must be positive");
@@ -223,7 +225,8 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
        config.enable_initial_static_zero_specific_force ||
        config.enable_initial_static_vertical_specific_force ||
        config.enable_initial_static_vertical_bias_soft_prior ||
-       config.enable_static_vertical_bias_carryover ||
+       config.enable_initial_static_vertical_bias_gm_tightening ||
+       config.enable_initial_static_vertical_position_hold ||
        config.enable_initial_static_subgraph) &&
       config.static_alignment_duration_s <= 0.0) {
     throw std::runtime_error("initial static constraints require static_alignment_duration_s > 0");
@@ -236,15 +239,13 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (config.enable_initial_static_vertical_bias_soft_prior && !config.enable_initial_static_subgraph) {
     throw std::runtime_error("initial static vertical bias soft prior requires initial static subgraph");
   }
-  if (config.enable_static_vertical_bias_carryover &&
-      (!config.enable_initial_static_subgraph ||
-       !config.enable_global_acc_bias ||
-       !config.enable_vertical_acc_bias_gm_process ||
-       !config.enable_initial_static_vertical_specific_force ||
-       !config.enable_initial_static_vertical_bias_soft_prior)) {
+  if (config.enable_initial_static_vertical_bias_gm_tightening &&
+      (!config.enable_initial_static_subgraph || !config.enable_vertical_acc_bias_gm_process)) {
     throw std::runtime_error(
-      "static vertical bias carryover requires static subgraph, global accelerometer bias, vertical GM bias process, "
-      "static vertical specific force, and static vertical bias soft prior");
+      "initial static vertical bias GM tightening requires initial static subgraph and vertical GM bias process");
+  }
+  if (config.enable_initial_static_vertical_position_hold && !config.enable_initial_static_subgraph) {
+    throw std::runtime_error("initial static vertical position hold requires initial static subgraph");
   }
   if (config.early_gnss_relaxation_duration_s < 0.0 || config.early_gnss_relaxation_scale <= 0.0) {
     throw std::runtime_error("early GNSS relaxation settings are invalid");
@@ -464,8 +465,12 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.bias_gyro_prior_sigma = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_global_acc_bias") {
     config.enable_global_acc_bias = ParseBool(normalized_value);
+  } else if (normalized_key == "global_acc_bias_tie_sigma_ug") {
+    config.global_acc_bias_tie_sigma_mps2 = MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "global_acc_bias_tie_sigma_mps2") {
     config.global_acc_bias_tie_sigma_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "global_acc_bias_tie_sigma_xy_ug") {
+    config.global_acc_bias_tie_sigma_xy_mps2 = MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "global_acc_bias_tie_sigma_xy_mps2") {
     config.global_acc_bias_tie_sigma_xy_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_global_gyro_bias") {
@@ -476,18 +481,12 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_vertical_acc_bias_gm_process = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_acc_bias_tau_s") {
     config.vertical_acc_bias_tau_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_acc_bias_sigma_ug") {
+    config.vertical_acc_bias_sigma_mps2 = MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "vertical_acc_bias_sigma_mps2") {
     config.vertical_acc_bias_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_acc_bias_process_noise_scale") {
     config.vertical_acc_bias_process_noise_scale = ParseDouble(normalized_value);
-  } else if (normalized_key == "enable_static_vertical_bias_carryover") {
-    config.enable_static_vertical_bias_carryover = ParseBool(normalized_value);
-  } else if (normalized_key == "static_vertical_bias_carryover_sigma_mps2") {
-    config.static_vertical_bias_carryover_sigma_mps2 = ParseDouble(normalized_value);
-  } else if (normalized_key == "static_vertical_bias_carryover_tighten_gm") {
-    config.static_vertical_bias_carryover_tighten_gm = ParseBool(normalized_value);
-  } else if (normalized_key == "static_vertical_bias_carryover_vertical_gm_sigma_mps2") {
-    config.static_vertical_bias_carryover_vertical_gm_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_body_z_jump_detection") {
     config.enable_body_z_jump_detection = ParseBool(normalized_value);
   } else if (normalized_key == "body_z_seed_jump_use_fix_only") {
@@ -584,8 +583,26 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.initial_static_vertical_specific_force_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_initial_static_vertical_bias_soft_prior") {
     config.enable_initial_static_vertical_bias_soft_prior = ParseBool(normalized_value);
+  } else if (normalized_key == "initial_static_vertical_bias_global_tie_sigma_ug") {
+    config.initial_static_vertical_bias_global_tie_sigma_mps2 =
+      MicroGToMps2(ParseDouble(normalized_value));
+  } else if (normalized_key == "initial_static_vertical_bias_global_tie_sigma_mps2") {
+    config.initial_static_vertical_bias_global_tie_sigma_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "initial_static_vertical_bias_sigma_ug") {
+    config.initial_static_vertical_bias_global_tie_sigma_mps2 =
+      MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "initial_static_vertical_bias_sigma_mps2") {
-    config.initial_static_vertical_bias_sigma_mps2 = ParseDouble(normalized_value);
+    config.initial_static_vertical_bias_global_tie_sigma_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_initial_static_vertical_bias_gm_tightening") {
+    config.enable_initial_static_vertical_bias_gm_tightening = ParseBool(normalized_value);
+  } else if (normalized_key == "initial_static_vertical_bias_gm_sigma_ug") {
+    config.initial_static_vertical_bias_gm_sigma_mps2 = MicroGToMps2(ParseDouble(normalized_value));
+  } else if (normalized_key == "initial_static_vertical_bias_gm_sigma_mps2") {
+    config.initial_static_vertical_bias_gm_sigma_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_initial_static_vertical_position_hold") {
+    config.enable_initial_static_vertical_position_hold = ParseBool(normalized_value);
+  } else if (normalized_key == "initial_static_vertical_position_hold_sigma_m") {
+    config.initial_static_vertical_position_hold_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_initial_static_subgraph") {
     config.enable_initial_static_subgraph = ParseBool(normalized_value);
   } else if (normalized_key == "initial_static_state_frequency_hz") {
@@ -849,21 +866,14 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "bias_acc_prior_sigma=" << config.bias_acc_prior_sigma << '\n'
     << "bias_gyro_prior_sigma=" << config.bias_gyro_prior_sigma << '\n'
     << "enable_global_acc_bias=" << (config.enable_global_acc_bias ? "true" : "false") << '\n'
-    << "global_acc_bias_tie_sigma_mps2=" << config.global_acc_bias_tie_sigma_mps2 << '\n'
-    << "global_acc_bias_tie_sigma_xy_mps2=" << config.global_acc_bias_tie_sigma_xy_mps2 << '\n'
+    << "global_acc_bias_tie_sigma_ug=" << Mps2ToMicroG(config.global_acc_bias_tie_sigma_mps2) << '\n'
+    << "global_acc_bias_tie_sigma_xy_ug=" << Mps2ToMicroG(config.global_acc_bias_tie_sigma_xy_mps2) << '\n'
     << "enable_global_gyro_bias=" << (config.enable_global_gyro_bias ? "true" : "false") << '\n'
     << "global_gyro_bias_tie_sigma_radps=" << config.global_gyro_bias_tie_sigma_radps << '\n'
     << "enable_vertical_acc_bias_gm_process=" << (config.enable_vertical_acc_bias_gm_process ? "true" : "false") << '\n'
     << "vertical_acc_bias_tau_s=" << config.vertical_acc_bias_tau_s << '\n'
-    << "vertical_acc_bias_sigma_mps2=" << config.vertical_acc_bias_sigma_mps2 << '\n'
+    << "vertical_acc_bias_sigma_ug=" << Mps2ToMicroG(config.vertical_acc_bias_sigma_mps2) << '\n'
     << "vertical_acc_bias_process_noise_scale=" << config.vertical_acc_bias_process_noise_scale << '\n'
-    << "enable_static_vertical_bias_carryover="
-    << (config.enable_static_vertical_bias_carryover ? "true" : "false") << '\n'
-    << "static_vertical_bias_carryover_sigma_mps2=" << config.static_vertical_bias_carryover_sigma_mps2 << '\n'
-    << "static_vertical_bias_carryover_tighten_gm="
-    << (config.static_vertical_bias_carryover_tighten_gm ? "true" : "false") << '\n'
-    << "static_vertical_bias_carryover_vertical_gm_sigma_mps2="
-    << config.static_vertical_bias_carryover_vertical_gm_sigma_mps2 << '\n'
     << "enable_body_z_jump_detection=" << (config.enable_body_z_jump_detection ? "true" : "false") << '\n'
     << "body_z_seed_jump_use_fix_only=" << (config.body_z_seed_jump_use_fix_only ? "true" : "false") << '\n'
     << "body_z_jump_pre_post_window_s=" << config.body_z_jump_pre_post_window_s << '\n'
@@ -915,8 +925,16 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.initial_static_vertical_specific_force_sigma_mps2 << '\n'
     << "enable_initial_static_vertical_bias_soft_prior="
     << (config.enable_initial_static_vertical_bias_soft_prior ? "true" : "false") << '\n'
-    << "initial_static_vertical_bias_sigma_mps2="
-    << config.initial_static_vertical_bias_sigma_mps2 << '\n'
+    << "initial_static_vertical_bias_global_tie_sigma_ug="
+    << Mps2ToMicroG(config.initial_static_vertical_bias_global_tie_sigma_mps2) << '\n'
+    << "enable_initial_static_vertical_bias_gm_tightening="
+    << (config.enable_initial_static_vertical_bias_gm_tightening ? "true" : "false") << '\n'
+    << "initial_static_vertical_bias_gm_sigma_ug="
+    << Mps2ToMicroG(config.initial_static_vertical_bias_gm_sigma_mps2) << '\n'
+    << "enable_initial_static_vertical_position_hold="
+    << (config.enable_initial_static_vertical_position_hold ? "true" : "false") << '\n'
+    << "initial_static_vertical_position_hold_sigma_m="
+    << config.initial_static_vertical_position_hold_sigma_m << '\n'
     << "enable_initial_static_subgraph=" << (config.enable_initial_static_subgraph ? "true" : "false") << '\n'
     << "initial_static_state_frequency_hz=" << config.initial_static_state_frequency_hz << '\n'
     << "initial_static_attitude_drift_sigma_rad=" << config.initial_static_attitude_drift_sigma_rad << '\n'

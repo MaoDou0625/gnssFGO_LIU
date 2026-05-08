@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "offline_lc_minimal/common/DiagnosticsTypes.h"
+#include "offline_lc_minimal/common/Units.h"
 
 namespace offline_lc_minimal {
 
@@ -34,8 +35,8 @@ struct RunSummary {
   std::size_t dropped_out_of_imu_coverage_count = 0;
   std::size_t initial_static_constraint_sample_count = 0;
   std::size_t initial_static_vertical_bias_prior_factor_count = 0;
-  bool static_vertical_bias_carryover_enabled = false;
-  std::size_t static_vertical_bias_carryover_factor_count = 0;
+  std::size_t initial_static_vertical_bias_gm_tightened_factor_count = 0;
+  std::size_t initial_static_vertical_position_hold_factor_count = 0;
   std::size_t error_state_count = 0;
   std::size_t segment_error_count = 0;
   std::size_t vertical_velocity_delta_factor_count = 0;
@@ -85,10 +86,6 @@ struct RunSummary {
   double initial_bgz_radps = std::numeric_limits<double>::quiet_NaN();
   double static_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
   double static_bgz_radps = std::numeric_limits<double>::quiet_NaN();
-  double static_vertical_bias_ref_mps2 = std::numeric_limits<double>::quiet_NaN();
-  double static_vertical_bias_global_delta_mps2 = std::numeric_limits<double>::quiet_NaN();
-  double static_vertical_bias_dynamic_first20_max_abs_delta_mps2 =
-    std::numeric_limits<double>::quiet_NaN();
   double optimized_last_static_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
   double optimized_last_static_bgz_radps = std::numeric_limits<double>::quiet_NaN();
   double optimized_first_static_baz_mps2 = std::numeric_limits<double>::quiet_NaN();
@@ -101,6 +98,11 @@ struct RunSummary {
   double initial_static_horizontal_drift_max_m = 0.0;
   double initial_static_up_drift_max_m = 0.0;
   double initial_static_3d_drift_max_m = 0.0;
+  double static_alignment_up_drift_m = std::numeric_limits<double>::quiet_NaN();
+  double static_alignment_up_range_m = std::numeric_limits<double>::quiet_NaN();
+  double static_alignment_vz_max_abs_mps = std::numeric_limits<double>::quiet_NaN();
+  double static_alignment_baz_range_ug = std::numeric_limits<double>::quiet_NaN();
+  double static_alignment_baz_minus_global_max_abs_ug = std::numeric_limits<double>::quiet_NaN();
   double gnss_nis_mean = std::numeric_limits<double>::quiet_NaN();
   double gnss_nis_median = std::numeric_limits<double>::quiet_NaN();
   double gnss_nis_p95 = std::numeric_limits<double>::quiet_NaN();
@@ -158,10 +160,10 @@ struct RunSummary {
         << "initial_static_constraint_sample_count=" << initial_static_constraint_sample_count << '\n'
         << "initial_static_vertical_bias_prior_factor_count="
         << initial_static_vertical_bias_prior_factor_count << '\n'
-        << "static_vertical_bias_carryover_enabled="
-        << (static_vertical_bias_carryover_enabled ? "true" : "false") << '\n'
-        << "static_vertical_bias_carryover_factor_count="
-        << static_vertical_bias_carryover_factor_count << '\n'
+        << "initial_static_vertical_bias_gm_tightened_factor_count="
+        << initial_static_vertical_bias_gm_tightened_factor_count << '\n'
+        << "initial_static_vertical_position_hold_factor_count="
+        << initial_static_vertical_position_hold_factor_count << '\n'
         << "error_state_count=" << error_state_count << '\n'
         << "segment_error_count=" << segment_error_count << '\n'
         << "vertical_velocity_delta_factor_count=" << vertical_velocity_delta_factor_count << '\n'
@@ -220,26 +222,28 @@ struct RunSummary {
         << "static_specific_force_window_std_y_mps2=" << static_specific_force_window_std_y_mps2 << '\n'
         << "static_specific_force_window_std_z_mps2=" << static_specific_force_window_std_z_mps2 << '\n'
         << "static_specific_force_window_rms_xyz_mps2=" << static_specific_force_window_rms_xyz_mps2 << '\n'
-        << "initial_baz_mps2=" << initial_baz_mps2 << '\n'
+        << "initial_baz_ug=" << Mps2ToMicroG(initial_baz_mps2) << '\n'
         << "initial_bgz_radps=" << initial_bgz_radps << '\n'
-        << "static_baz_mps2=" << static_baz_mps2 << '\n'
+        << "static_baz_ug=" << Mps2ToMicroG(static_baz_mps2) << '\n'
         << "static_bgz_radps=" << static_bgz_radps << '\n'
-        << "static_vertical_bias_ref_mps2=" << static_vertical_bias_ref_mps2 << '\n'
-        << "static_vertical_bias_global_delta_mps2=" << static_vertical_bias_global_delta_mps2 << '\n'
-        << "static_vertical_bias_dynamic_first20_max_abs_delta_mps2="
-        << static_vertical_bias_dynamic_first20_max_abs_delta_mps2 << '\n'
-        << "optimized_last_static_baz_mps2=" << optimized_last_static_baz_mps2 << '\n'
+        << "optimized_last_static_baz_ug=" << Mps2ToMicroG(optimized_last_static_baz_mps2) << '\n'
         << "optimized_last_static_bgz_radps=" << optimized_last_static_bgz_radps << '\n'
-        << "optimized_first_static_baz_mps2=" << optimized_first_static_baz_mps2 << '\n'
+        << "optimized_first_static_baz_ug=" << Mps2ToMicroG(optimized_first_static_baz_mps2) << '\n'
         << "optimized_first_static_bgz_radps=" << optimized_first_static_bgz_radps << '\n'
-        << "optimized_first_dynamic_baz_mps2=" << optimized_first_dynamic_baz_mps2 << '\n'
+        << "optimized_first_dynamic_baz_ug=" << Mps2ToMicroG(optimized_first_dynamic_baz_mps2) << '\n'
         << "optimized_first_dynamic_bgz_radps=" << optimized_first_dynamic_bgz_radps << '\n'
-        << "bootstrap_to_optimized_first_dynamic_baz_delta_mps2="
-        << bootstrap_to_optimized_first_dynamic_baz_delta_mps2 << '\n'
-        << "static_to_dynamic_baz_delta_mps2=" << static_to_dynamic_baz_delta_mps2 << '\n'
+        << "bootstrap_to_optimized_first_dynamic_baz_delta_ug="
+        << Mps2ToMicroG(bootstrap_to_optimized_first_dynamic_baz_delta_mps2) << '\n'
+        << "static_to_dynamic_baz_delta_ug=" << Mps2ToMicroG(static_to_dynamic_baz_delta_mps2) << '\n'
         << "initial_static_horizontal_drift_max_m=" << initial_static_horizontal_drift_max_m << '\n'
         << "initial_static_up_drift_max_m=" << initial_static_up_drift_max_m << '\n'
         << "initial_static_3d_drift_max_m=" << initial_static_3d_drift_max_m << '\n'
+        << "static_alignment_up_drift_m=" << static_alignment_up_drift_m << '\n'
+        << "static_alignment_up_range_m=" << static_alignment_up_range_m << '\n'
+        << "static_alignment_vz_max_abs_mps=" << static_alignment_vz_max_abs_mps << '\n'
+        << "static_alignment_baz_range_ug=" << static_alignment_baz_range_ug << '\n'
+        << "static_alignment_baz_minus_global_max_abs_ug="
+        << static_alignment_baz_minus_global_max_abs_ug << '\n'
         << "gnss_nis_mean=" << gnss_nis_mean << '\n'
         << "gnss_nis_median=" << gnss_nis_median << '\n'
         << "gnss_nis_p95=" << gnss_nis_p95 << '\n'
@@ -248,12 +252,12 @@ struct RunSummary {
         << "feedback_forward_up_slope_30s=" << feedback_forward_up_slope_30s << '\n'
         << "feedback_forward_horizontal_slope_10s=" << feedback_forward_horizontal_slope_10s << '\n'
         << "feedback_forward_horizontal_slope_30s=" << feedback_forward_horizontal_slope_30s << '\n'
-        << "optimized_first30s_mean_baz_mps2=" << optimized_first30s_mean_baz_mps2 << '\n'
+        << "optimized_first30s_mean_baz_ug=" << Mps2ToMicroG(optimized_first30s_mean_baz_mps2) << '\n'
         << "optimized_first30s_mean_bgz_radps=" << optimized_first30s_mean_bgz_radps << '\n'
         << "optimized_first30s_mean_roll_rad=" << optimized_first30s_mean_roll_rad << '\n'
         << "optimized_first30s_mean_pitch_rad=" << optimized_first30s_mean_pitch_rad << '\n'
         << "optimized_first30s_mean_yaw_rad=" << optimized_first30s_mean_yaw_rad << '\n'
-        << "optimized_first30s_std_baz_mps2=" << optimized_first30s_std_baz_mps2 << '\n'
+        << "optimized_first30s_std_baz_ug=" << Mps2ToMicroG(optimized_first30s_std_baz_mps2) << '\n'
         << "optimized_first30s_std_pitch_rad=" << optimized_first30s_std_pitch_rad << '\n'
         << "optimized_first30s_std_roll_rad=" << optimized_first30s_std_roll_rad << '\n'
         << "optimized_first30s_up_total_variation_m=" << optimized_first30s_up_total_variation_m << '\n'
@@ -294,7 +298,7 @@ struct OfflineRunResult {
   std::vector<GnssFactorRecord> gnss_factor_records;
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
-  std::vector<StaticVerticalBiasCarryoverDiagnosticRow> static_vertical_bias_carryover_diagnostics;
+  std::vector<StaticAlignmentValidationRow> static_alignment_validation;
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;
   std::vector<BodyZNHCDiagnosticRow> body_z_nhc_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;
