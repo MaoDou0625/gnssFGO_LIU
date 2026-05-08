@@ -468,6 +468,9 @@ void TestPhase18AttitudeRefBiasAwareDvzConfigLoads() {
   ExpectTrue(config.enable_initial_static_rtk_height_reference, "phase18 should keep static RTK anchor");
   ExpectTrue(config.enable_vertical_velocity_delta_bias_consistent_sigma, "phase18 should keep bias-consistent sigma");
   ExpectTrue(config.enable_vertical_velocity_delta_bias_aware_target, "phase18 should enable bias-aware dvz target");
+  ExpectTrue(
+    std::abs(config.vertical_acc_bias_sigma_mps2 - offline_lc_minimal::MicroGToMps2(10.0)) < 1e-15,
+    "phase18 dynamic vertical ba_z GM sigma should load from 10 ug");
   ExpectTrue(config.enable_attitude_reference_constraint, "phase18 should enable attitude reference constraints");
   ExpectTrue(
     std::abs(config.attitude_reference_sigma_rad - 0.01) < 1e-15,
