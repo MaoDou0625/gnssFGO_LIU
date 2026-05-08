@@ -400,6 +400,34 @@ void TestPhase15StaticBazGmTightenedConfigLoads() {
     "phase15 should use neutral early GNSS/RTK relaxation scale");
 }
 
+void TestPhase16StaticRtkHeightAnchorConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase16_static_rtk_height_anchor.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase16 config should use envelope constraints");
+  ExpectTrue(!config.enable_vertical_envelope_center_pull, "phase16 should keep center pull disabled");
+  ExpectTrue(config.enable_initial_static_subgraph, "phase16 should keep static subgraph enabled");
+  ExpectTrue(
+    config.enable_initial_static_vertical_position_hold,
+    "phase16 should keep static vertical position hold");
+  ExpectTrue(
+    config.enable_initial_static_rtk_height_reference,
+    "phase16 should enable static RTK height reference");
+  ExpectTrue(
+    std::abs(config.initial_static_rtk_height_reference_sigma_m - 0.02) < 1e-12,
+    "phase16 static RTK height reference sigma should load");
+  ExpectTrue(
+    config.initial_static_rtk_height_reference_min_sample_count == 20,
+    "phase16 static RTK height minimum sample count should load");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase16 should keep fixed-axis body-z NHC enabled");
+  ExpectTrue(
+    !config.enable_body_z_nhc_global_weak_constraint,
+    "phase16 should keep global weak body-z NHC disabled");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -600,6 +628,34 @@ void TestInitialStaticVerticalBiasConfigValidation() {
     threw = std::string(exception.what()).find("initial static subgraph") != std::string::npos;
   }
   ExpectTrue(threw, "static position hold should require the static subgraph");
+}
+
+void TestInitialStaticRtkHeightReferenceConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.static_alignment_duration_s = 100.0;
+  config.enable_initial_static_rtk_height_reference = true;
+  config.enable_gnss = true;
+  config.enable_initial_static_subgraph = false;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("static RTK height reference") != std::string::npos;
+  }
+  ExpectTrue(threw, "static RTK height reference should require the static subgraph");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.static_alignment_duration_s = 100.0;
+  config.enable_initial_static_subgraph = true;
+  config.enable_initial_static_rtk_height_reference = true;
+  config.initial_static_rtk_height_reference_sigma_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("initial static constraint settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive static RTK height reference sigma should be rejected");
 }
 
 void TestAccelerometerBiasUgConfigParsing() {
@@ -1138,11 +1194,15 @@ int main() {
     RunTest("TestPhase10SegmentedJumpBiasConfigLoads", TestPhase10SegmentedJumpBiasConfigLoads);
     RunTest("TestPhase12RtkGateOnlyFullNavConfigLoads", TestPhase12RtkGateOnlyFullNavConfigLoads);
     RunTest("TestPhase15StaticBazGmTightenedConfigLoads", TestPhase15StaticBazGmTightenedConfigLoads);
+    RunTest("TestPhase16StaticRtkHeightAnchorConfigLoads", TestPhase16StaticRtkHeightAnchorConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
     RunTest("TestVerticalEnvelopeCenterPullConfigValidation", TestVerticalEnvelopeCenterPullConfigValidation);
     RunTest("TestInitialStaticVerticalBiasConfigValidation", TestInitialStaticVerticalBiasConfigValidation);
+    RunTest(
+      "TestInitialStaticRtkHeightReferenceConfigValidation",
+      TestInitialStaticRtkHeightReferenceConfigValidation);
     RunTest("TestAccelerometerBiasUgConfigParsing", TestAccelerometerBiasUgConfigParsing);
     RunTest("TestVerticalVelocityDeltaConfigValidation", TestVerticalVelocityDeltaConfigValidation);
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);

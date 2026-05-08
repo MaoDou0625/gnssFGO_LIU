@@ -28,6 +28,7 @@
 #include "offline_lc_minimal/core/InitialStaticBiasConstraintBuilder.h"
 #include "offline_lc_minimal/core/InitialStaticConstraintBuilder.h"
 #include "offline_lc_minimal/core/InitialStaticPositionConstraintBuilder.h"
+#include "offline_lc_minimal/core/InitialStaticRtkHeightConstraintBuilder.h"
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
@@ -303,7 +304,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     config_.enable_initial_static_vertical_specific_force ||
     config_.enable_initial_static_vertical_bias_soft_prior ||
     config_.enable_initial_static_vertical_bias_gm_tightening ||
-    config_.enable_initial_static_vertical_position_hold;
+    config_.enable_initial_static_vertical_position_hold ||
+    config_.enable_initial_static_rtk_height_reference;
   run_result.run_summary.initial_static_subgraph_enabled = config_.enable_initial_static_subgraph;
 
   const std::size_t origin_index = FindOriginIndex(dataset.gnss_samples, dataset.imu_samples);
@@ -349,6 +351,18 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       config_);
   run_result.run_summary.initial_static_constraint_sample_count =
     initial_static_constraint_data.window_summary.sample_count;
+  const InitialStaticRtkHeightReference initial_static_rtk_height_reference =
+    InitialStaticRtkHeightConstraintBuilder::BuildReference(
+      dataset.gnss_samples,
+      alignment_start_time_s,
+      alignment_end_time_s,
+      config_);
+  run_result.run_summary.initial_static_rtk_height_reference_sample_count =
+    initial_static_rtk_height_reference.sample_count;
+  if (initial_static_rtk_height_reference.valid) {
+    run_result.run_summary.initial_static_rtk_height_reference_up_m =
+      initial_static_rtk_height_reference.reference_up_m;
+  }
   AccumulateStaticSpecificForceWindowMetrics(
     dataset.imu_samples,
     alignment_start_time_s,
@@ -506,6 +520,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     B(0),
     global_acc_bias_key)) {
     ++run_result.run_summary.initial_static_vertical_bias_prior_factor_count;
+  }
+  if (InitialStaticRtkHeightConstraintBuilder::AddVerticalReference(
+    initial_static_rtk_height_reference,
+    config_,
+    graph,
+    X(0))) {
+    ++run_result.run_summary.initial_static_rtk_height_reference_factor_count;
   }
 
   initial_values.insert(X(0), initial_pose_world);
@@ -759,6 +780,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         X(0),
         X(state_index))) {
         ++run_result.run_summary.initial_static_vertical_position_hold_factor_count;
+      }
+      if (InitialStaticRtkHeightConstraintBuilder::AddVerticalReference(
+        initial_static_rtk_height_reference,
+        config_,
+        graph,
+        X(state_index))) {
+        ++run_result.run_summary.initial_static_rtk_height_reference_factor_count;
       }
       graph.add(factor::StaticAttitudeDriftFactor(
         X(state_index - 1U),
@@ -1064,6 +1092,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     graph_timeline,
     global_acc_bias_key,
     config_.vertical_acc_bias_tau_s,
+    run_result.run_summary.initial_static_rtk_height_reference_up_m,
     run_result.run_summary);
   run_result.error_state_trajectory.clear();
   if (graph_timeline.dynamic_start_index < state_timestamps.size()) {

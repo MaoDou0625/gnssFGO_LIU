@@ -2,7 +2,9 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
+#include <Eigen/Core>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/geometry/Rot3.h>
@@ -14,6 +16,7 @@
 #include "offline_lc_minimal/common/Units.h"
 #include "offline_lc_minimal/core/InitialStaticBiasConstraintBuilder.h"
 #include "offline_lc_minimal/core/InitialStaticPositionConstraintBuilder.h"
+#include "offline_lc_minimal/core/InitialStaticRtkHeightConstraintBuilder.h"
 #include "offline_lc_minimal/factor/StaticVerticalAccelBiasFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalPositionHoldFactor.h"
 
@@ -166,6 +169,74 @@ void TestInitialStaticPositionConstraintBuilderHonorsEnableFlag() {
   ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "enabled static position builder should add one factor");
 }
 
+offline_lc_minimal::GnssSolutionSample MakeStaticRtkSample(const double time_s, const double up_m) {
+  offline_lc_minimal::GnssSolutionSample sample;
+  sample.time_s = time_s;
+  sample.lat_rad = 1.0;
+  sample.lon_rad = 2.0;
+  sample.h_m = 3.0;
+  sample.sigma_lat_m = 0.01;
+  sample.sigma_lon_m = 0.01;
+  sample.sigma_h_m = 0.02;
+  sample.best_sol_status_code = 1;
+  sample.gnssfgo_type_code = 1;
+  sample.enu_position_m = Eigen::Vector3d(0.0, 0.0, up_m);
+  sample.has_enu_position = true;
+  return sample;
+}
+
+void TestInitialStaticRtkHeightReferenceUsesStaticRtkMedian() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_initial_static_rtk_height_reference = true;
+  config.initial_static_rtk_height_reference_min_sample_count = 3;
+  const std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeStaticRtkSample(10.0, 1.0),
+    MakeStaticRtkSample(11.0, 1.2),
+    MakeStaticRtkSample(12.0, 1.1),
+    MakeStaticRtkSample(30.0, 9.0)};
+
+  const auto reference =
+    offline_lc_minimal::InitialStaticRtkHeightConstraintBuilder::BuildReference(
+      samples,
+      10.0,
+      12.0,
+      config);
+
+  ExpectTrue(reference.valid, "static RTK height reference should be valid");
+  ExpectNear(static_cast<double>(reference.sample_count), 3.0, 0.0, "static RTK sample count is wrong");
+  ExpectNear(reference.reference_up_m, 1.1, 1e-12, "static RTK height reference should use median up");
+}
+
+void TestInitialStaticRtkHeightReferenceAddsVerticalPositionFactorOnlyWhenValid() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_initial_static_rtk_height_reference = true;
+  config.initial_static_rtk_height_reference_sigma_m = 0.02;
+  gtsam::NonlinearFactorGraph graph;
+
+  offline_lc_minimal::InitialStaticRtkHeightReference invalid_reference;
+  const bool invalid_added =
+    offline_lc_minimal::InitialStaticRtkHeightConstraintBuilder::AddVerticalReference(
+      invalid_reference,
+      config,
+      graph,
+      X(0));
+  ExpectTrue(!invalid_added, "invalid static RTK reference should add no factor");
+  ExpectTrue(graph.empty(), "invalid static RTK reference should leave graph empty");
+
+  offline_lc_minimal::InitialStaticRtkHeightReference reference;
+  reference.valid = true;
+  reference.sample_count = 10;
+  reference.reference_up_m = 1.25;
+  const bool valid_added =
+    offline_lc_minimal::InitialStaticRtkHeightConstraintBuilder::AddVerticalReference(
+      reference,
+      config,
+      graph,
+      X(0));
+  ExpectTrue(valid_added, "valid static RTK reference should add one factor");
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "static RTK reference should add one factor");
+}
+
 }  // namespace
 
 int main() {
@@ -183,6 +254,12 @@ int main() {
     RunTest(
       "TestInitialStaticPositionConstraintBuilderHonorsEnableFlag",
       TestInitialStaticPositionConstraintBuilderHonorsEnableFlag);
+    RunTest(
+      "TestInitialStaticRtkHeightReferenceUsesStaticRtkMedian",
+      TestInitialStaticRtkHeightReferenceUsesStaticRtkMedian);
+    RunTest(
+      "TestInitialStaticRtkHeightReferenceAddsVerticalPositionFactorOnlyWhenValid",
+      TestInitialStaticRtkHeightReferenceAddsVerticalPositionFactorOnlyWhenValid);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

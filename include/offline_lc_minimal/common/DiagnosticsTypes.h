@@ -179,6 +179,8 @@ struct StaticAlignmentValidationRow {
   double ba_z_minus_global_ug = std::numeric_limits<double>::quiet_NaN();
   double static_bias_gm_residual_ug = std::numeric_limits<double>::quiet_NaN();
   double static_height_residual_m = std::numeric_limits<double>::quiet_NaN();
+  double rtk_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double rtk_reference_residual_m = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct VerticalVelocityDeltaDiagnosticRow {

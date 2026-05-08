@@ -397,7 +397,8 @@ void WriteStaticAlignmentValidationCsv(
   stream << std::setprecision(17);
   stream
     << "time_s,relative_time_s,up_delta_m,vz_mps,ba_z_ug,global_ba_z_ug,"
-       "ba_z_minus_global_ug,static_bias_gm_residual_ug,static_height_residual_m\n";
+       "ba_z_minus_global_ug,static_bias_gm_residual_ug,static_height_residual_m,"
+       "rtk_reference_up_m,rtk_reference_residual_m\n";
   for (const auto &row : rows) {
     stream << row.time_s << ','
            << row.relative_time_s << ','
@@ -407,7 +408,9 @@ void WriteStaticAlignmentValidationCsv(
            << row.global_ba_z_ug << ','
            << row.ba_z_minus_global_ug << ','
            << row.static_bias_gm_residual_ug << ','
-           << row.static_height_residual_m << '\n';
+           << row.static_height_residual_m << ','
+           << row.rtk_reference_up_m << ','
+           << row.rtk_reference_residual_m << '\n';
   }
 }
 

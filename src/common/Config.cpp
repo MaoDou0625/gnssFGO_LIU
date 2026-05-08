@@ -217,6 +217,8 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.initial_static_zaru_sigma_radps <= 0.0 ||
       config.initial_static_specific_force_sigma_mps2 <= 0.0 ||
       config.initial_static_vertical_specific_force_sigma_mps2 <= 0.0 ||
+      config.initial_static_rtk_height_reference_sigma_m <= 0.0 ||
+      config.initial_static_rtk_height_reference_min_sample_count <= 0 ||
       config.initial_static_state_frequency_hz <= 0.0 ||
       config.initial_static_attitude_drift_sigma_rad <= 0.0) {
     throw std::runtime_error("initial static constraint settings must be positive");
@@ -227,6 +229,7 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
        config.enable_initial_static_vertical_bias_soft_prior ||
        config.enable_initial_static_vertical_bias_gm_tightening ||
        config.enable_initial_static_vertical_position_hold ||
+       config.enable_initial_static_rtk_height_reference ||
        config.enable_initial_static_subgraph) &&
       config.static_alignment_duration_s <= 0.0) {
     throw std::runtime_error("initial static constraints require static_alignment_duration_s > 0");
@@ -246,6 +249,10 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   }
   if (config.enable_initial_static_vertical_position_hold && !config.enable_initial_static_subgraph) {
     throw std::runtime_error("initial static vertical position hold requires initial static subgraph");
+  }
+  if (config.enable_initial_static_rtk_height_reference &&
+      (!config.enable_initial_static_subgraph || !config.enable_gnss)) {
+    throw std::runtime_error("initial static RTK height reference requires initial static subgraph and GNSS");
   }
   if (config.early_gnss_relaxation_duration_s < 0.0 || config.early_gnss_relaxation_scale <= 0.0) {
     throw std::runtime_error("early GNSS relaxation settings are invalid");
@@ -603,6 +610,12 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_initial_static_vertical_position_hold = ParseBool(normalized_value);
   } else if (normalized_key == "initial_static_vertical_position_hold_sigma_m") {
     config.initial_static_vertical_position_hold_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_initial_static_rtk_height_reference") {
+    config.enable_initial_static_rtk_height_reference = ParseBool(normalized_value);
+  } else if (normalized_key == "initial_static_rtk_height_reference_sigma_m") {
+    config.initial_static_rtk_height_reference_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "initial_static_rtk_height_reference_min_sample_count") {
+    config.initial_static_rtk_height_reference_min_sample_count = ParseInt(normalized_value);
   } else if (normalized_key == "enable_initial_static_subgraph") {
     config.enable_initial_static_subgraph = ParseBool(normalized_value);
   } else if (normalized_key == "initial_static_state_frequency_hz") {
@@ -935,6 +948,12 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.enable_initial_static_vertical_position_hold ? "true" : "false") << '\n'
     << "initial_static_vertical_position_hold_sigma_m="
     << config.initial_static_vertical_position_hold_sigma_m << '\n'
+    << "enable_initial_static_rtk_height_reference="
+    << (config.enable_initial_static_rtk_height_reference ? "true" : "false") << '\n'
+    << "initial_static_rtk_height_reference_sigma_m="
+    << config.initial_static_rtk_height_reference_sigma_m << '\n'
+    << "initial_static_rtk_height_reference_min_sample_count="
+    << config.initial_static_rtk_height_reference_min_sample_count << '\n'
     << "enable_initial_static_subgraph=" << (config.enable_initial_static_subgraph ? "true" : "false") << '\n'
     << "initial_static_state_frequency_hz=" << config.initial_static_state_frequency_hz << '\n'
     << "initial_static_attitude_drift_sigma_rad=" << config.initial_static_attitude_drift_sigma_rad << '\n'

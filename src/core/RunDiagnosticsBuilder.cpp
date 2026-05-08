@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <numeric>
 #include <unordered_map>
@@ -685,6 +686,7 @@ std::vector<StaticAlignmentValidationRow> BuildStaticAlignmentValidation(
   const GraphTimeline &graph_timeline,
   const gtsam::Key global_acc_bias_key,
   const double vertical_acc_bias_tau_s,
+  const double static_rtk_reference_up_m,
   RunSummary &run_summary) {
   std::vector<StaticAlignmentValidationRow> rows;
   if (graph_timeline.initial_static_state_count == 0U || graph_timeline.timestamps_s.empty()) {
@@ -709,10 +711,12 @@ std::vector<StaticAlignmentValidationRow> BuildStaticAlignmentValidation(
   std::vector<double> vz_abs_values;
   std::vector<double> baz_ug_values;
   std::vector<double> baz_minus_global_abs_ug_values;
+  std::vector<double> rtk_reference_residual_values;
   up_values.reserve(last_static_index + 1U);
   vz_abs_values.reserve(last_static_index + 1U);
   baz_ug_values.reserve(last_static_index + 1U);
   baz_minus_global_abs_ug_values.reserve(last_static_index + 1U);
+  rtk_reference_residual_values.reserve(last_static_index + 1U);
 
   for (std::size_t state_index = 0; state_index <= last_static_index; ++state_index) {
     const double time_s = graph_timeline.timestamps_s[state_index];
@@ -731,6 +735,11 @@ std::vector<StaticAlignmentValidationRow> BuildStaticAlignmentValidation(
     row.global_ba_z_ug = Mps2ToMicroG(global_baz_mps2);
     row.ba_z_minus_global_ug = Mps2ToMicroG(baz_mps2 - global_baz_mps2);
     row.static_height_residual_m = row.up_delta_m;
+    if (std::isfinite(static_rtk_reference_up_m)) {
+      row.rtk_reference_up_m = static_rtk_reference_up_m;
+      row.rtk_reference_residual_m = pose.translation().z() - static_rtk_reference_up_m;
+      rtk_reference_residual_values.push_back(row.rtk_reference_residual_m);
+    }
 
     if (state_index > 0U && std::isfinite(global_baz_mps2)) {
       const double previous_time_s = graph_timeline.timestamps_s[state_index - 1U];
@@ -766,6 +775,24 @@ std::vector<StaticAlignmentValidationRow> BuildStaticAlignmentValidation(
       *std::max_element(
         baz_minus_global_abs_ug_values.begin(),
         baz_minus_global_abs_ug_values.end());
+  }
+  if (!rtk_reference_residual_values.empty()) {
+    const double residual_sum =
+      std::accumulate(
+        rtk_reference_residual_values.begin(),
+        rtk_reference_residual_values.end(),
+        0.0);
+    run_summary.static_alignment_rtk_reference_residual_mean_m =
+      residual_sum / static_cast<double>(rtk_reference_residual_values.size());
+    std::vector<double> residual_abs_values;
+    residual_abs_values.reserve(rtk_reference_residual_values.size());
+    std::transform(
+      rtk_reference_residual_values.begin(),
+      rtk_reference_residual_values.end(),
+      std::back_inserter(residual_abs_values),
+      [](const double value) { return std::abs(value); });
+    run_summary.static_alignment_rtk_reference_residual_max_abs_m =
+      *std::max_element(residual_abs_values.begin(), residual_abs_values.end());
   }
 
   return rows;

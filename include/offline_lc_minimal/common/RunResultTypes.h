@@ -37,6 +37,8 @@ struct RunSummary {
   std::size_t initial_static_vertical_bias_prior_factor_count = 0;
   std::size_t initial_static_vertical_bias_gm_tightened_factor_count = 0;
   std::size_t initial_static_vertical_position_hold_factor_count = 0;
+  std::size_t initial_static_rtk_height_reference_sample_count = 0;
+  std::size_t initial_static_rtk_height_reference_factor_count = 0;
   std::size_t error_state_count = 0;
   std::size_t segment_error_count = 0;
   std::size_t vertical_velocity_delta_factor_count = 0;
@@ -103,6 +105,9 @@ struct RunSummary {
   double static_alignment_vz_max_abs_mps = std::numeric_limits<double>::quiet_NaN();
   double static_alignment_baz_range_ug = std::numeric_limits<double>::quiet_NaN();
   double static_alignment_baz_minus_global_max_abs_ug = std::numeric_limits<double>::quiet_NaN();
+  double initial_static_rtk_height_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double static_alignment_rtk_reference_residual_mean_m = std::numeric_limits<double>::quiet_NaN();
+  double static_alignment_rtk_reference_residual_max_abs_m = std::numeric_limits<double>::quiet_NaN();
   double gnss_nis_mean = std::numeric_limits<double>::quiet_NaN();
   double gnss_nis_median = std::numeric_limits<double>::quiet_NaN();
   double gnss_nis_p95 = std::numeric_limits<double>::quiet_NaN();
@@ -164,6 +169,10 @@ struct RunSummary {
         << initial_static_vertical_bias_gm_tightened_factor_count << '\n'
         << "initial_static_vertical_position_hold_factor_count="
         << initial_static_vertical_position_hold_factor_count << '\n'
+        << "initial_static_rtk_height_reference_sample_count="
+        << initial_static_rtk_height_reference_sample_count << '\n'
+        << "initial_static_rtk_height_reference_factor_count="
+        << initial_static_rtk_height_reference_factor_count << '\n'
         << "error_state_count=" << error_state_count << '\n'
         << "segment_error_count=" << segment_error_count << '\n'
         << "vertical_velocity_delta_factor_count=" << vertical_velocity_delta_factor_count << '\n'
@@ -244,6 +253,12 @@ struct RunSummary {
         << "static_alignment_baz_range_ug=" << static_alignment_baz_range_ug << '\n'
         << "static_alignment_baz_minus_global_max_abs_ug="
         << static_alignment_baz_minus_global_max_abs_ug << '\n'
+        << "initial_static_rtk_height_reference_up_m="
+        << initial_static_rtk_height_reference_up_m << '\n'
+        << "static_alignment_rtk_reference_residual_mean_m="
+        << static_alignment_rtk_reference_residual_mean_m << '\n'
+        << "static_alignment_rtk_reference_residual_max_abs_m="
+        << static_alignment_rtk_reference_residual_max_abs_m << '\n'
         << "gnss_nis_mean=" << gnss_nis_mean << '\n'
         << "gnss_nis_median=" << gnss_nis_median << '\n'
         << "gnss_nis_p95=" << gnss_nis_p95 << '\n'

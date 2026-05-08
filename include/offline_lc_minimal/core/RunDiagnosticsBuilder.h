@@ -82,6 +82,7 @@ void AccumulateStaticSpecificForceWindowMetrics(
   const GraphTimeline &graph_timeline,
   gtsam::Key global_acc_bias_key,
   double vertical_acc_bias_tau_s,
+  double static_rtk_reference_up_m,
   RunSummary &run_summary);
 
 void AccumulateGnssConsistencySummary(

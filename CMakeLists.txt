@@ -65,6 +65,7 @@ add_library(offline_lc_minimal_lib
   src/core/ImuRateAvpReconstructor.cpp
   src/core/InitialStaticBiasConstraintBuilder.cpp
   src/core/InitialStaticPositionConstraintBuilder.cpp
+  src/core/InitialStaticRtkHeightConstraintBuilder.cpp
   src/core/RunDiagnosticsBuilder.cpp
   src/core/StaticImuAlignment.cpp
   src/core/TrajectoryResultBuilder.cpp
