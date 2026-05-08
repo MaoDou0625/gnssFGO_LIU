@@ -39,7 +39,6 @@ class VerticalMotionConstraintBuilder {
 
  private:
   [[nodiscard]] bool OverlapsJumpPadding(double start_time_s, double end_time_s) const;
-  [[nodiscard]] double SigmaMps(double dt_s) const;
   [[nodiscard]] double TargetDeltaVzMps(const VerticalVelocityDeltaPropagationRecord &record, double dt_s) const;
 
   VerticalMotionConstraintBuildRequest request_;

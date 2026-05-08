@@ -198,6 +198,12 @@ struct VerticalVelocityDeltaDiagnosticRow {
   double optimized_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
   double residual_mps = std::numeric_limits<double>::quiet_NaN();
   double sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  std::string sigma_model = "legacy";
+  double legacy_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double bias_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double attitude_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double sigma_floor_mps = std::numeric_limits<double>::quiet_NaN();
+  double sigma_ceiling_mps = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct BodyZNHCDiagnosticRow {

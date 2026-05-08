@@ -428,6 +428,35 @@ void TestPhase16StaticRtkHeightAnchorConfigLoads() {
     "phase16 should keep global weak body-z NHC disabled");
 }
 
+void TestPhase17BiasConsistentDvzConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase17_bias_consistent_dvz.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase17 config should use envelope constraints");
+  ExpectTrue(!config.enable_vertical_envelope_center_pull, "phase17 should keep center pull disabled");
+  ExpectTrue(config.enable_initial_static_rtk_height_reference, "phase17 should keep static RTK anchor");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase17 should keep fixed-axis body-z NHC enabled");
+  ExpectTrue(
+    config.enable_vertical_velocity_delta_bias_consistent_sigma,
+    "phase17 should enable bias-consistent velocity delta sigma");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_bias_sigma_mps2 -
+             offline_lc_minimal::MicroGToMps2(10.0)) < 1e-15,
+    "phase17 velocity delta bias sigma should parse from ug");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_attitude_sigma_rad - 1.0e-4) < 1e-15,
+    "phase17 attitude sigma should load");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_sigma_floor_mps - 1.0e-5) < 1e-15,
+    "phase17 velocity delta sigma floor should load");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_sigma_ceiling_mps - 5.0e-4) < 1e-15,
+    "phase17 velocity delta sigma ceiling should load");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -509,6 +538,54 @@ void TestVerticalVelocityDeltaConfigValidation() {
     threw = std::string(exception.what()).find("vertical velocity delta settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive velocity delta target limit should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.vertical_velocity_delta_bias_sigma_mps2 = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical velocity delta settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive velocity delta bias sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.vertical_velocity_delta_attitude_sigma_rad = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical velocity delta settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive velocity delta attitude sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.vertical_velocity_delta_sigma_floor_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical velocity delta settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive velocity delta sigma floor should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.vertical_velocity_delta_sigma_ceiling_mps = config.vertical_velocity_delta_sigma_floor_mps * 0.5;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("sigma ceiling") != std::string::npos;
+  }
+  ExpectTrue(threw, "velocity delta sigma ceiling below floor should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_vertical_velocity_delta_constraint = true;
@@ -661,6 +738,7 @@ void TestInitialStaticRtkHeightReferenceConfigValidation() {
 void TestAccelerometerBiasUgConfigParsing() {
   auto config = offline_lc_minimal::DefaultConfig();
   offline_lc_minimal::OverrideConfigField(config, "vertical_acc_bias_sigma_ug", "10.0");
+  offline_lc_minimal::OverrideConfigField(config, "vertical_velocity_delta_bias_sigma_ug", "12.0");
   offline_lc_minimal::OverrideConfigField(config, "global_acc_bias_tie_sigma_ug", "0.5");
   offline_lc_minimal::OverrideConfigField(config, "global_acc_bias_tie_sigma_xy_ug", "0.25");
   offline_lc_minimal::OverrideConfigField(config, "initial_static_vertical_bias_global_tie_sigma_ug", "0.05");
@@ -669,6 +747,10 @@ void TestAccelerometerBiasUgConfigParsing() {
   ExpectTrue(
     std::abs(config.vertical_acc_bias_sigma_mps2 - offline_lc_minimal::MicroGToMps2(10.0)) < 1e-15,
     "vertical acc bias sigma should parse from ug");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_bias_sigma_mps2 -
+             offline_lc_minimal::MicroGToMps2(12.0)) < 1e-15,
+    "vertical velocity delta bias sigma should parse from ug");
   ExpectTrue(
     std::abs(config.global_acc_bias_tie_sigma_mps2 - offline_lc_minimal::MicroGToMps2(0.5)) < 1e-15,
     "global acc bias tie sigma should parse from ug");
@@ -1195,6 +1277,7 @@ int main() {
     RunTest("TestPhase12RtkGateOnlyFullNavConfigLoads", TestPhase12RtkGateOnlyFullNavConfigLoads);
     RunTest("TestPhase15StaticBazGmTightenedConfigLoads", TestPhase15StaticBazGmTightenedConfigLoads);
     RunTest("TestPhase16StaticRtkHeightAnchorConfigLoads", TestPhase16StaticRtkHeightAnchorConfigLoads);
+    RunTest("TestPhase17BiasConsistentDvzConfigLoads", TestPhase17BiasConsistentDvzConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

@@ -282,8 +282,15 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (config.vertical_velocity_delta_acc_sigma_mps2 <= 0.0 ||
       config.vertical_velocity_delta_min_sigma_mps <= 0.0 ||
       config.vertical_velocity_delta_jump_padding_s <= 0.0 ||
-      config.vertical_velocity_delta_target_acc_limit_mps2 <= 0.0) {
+      config.vertical_velocity_delta_target_acc_limit_mps2 <= 0.0 ||
+      config.vertical_velocity_delta_bias_sigma_mps2 <= 0.0 ||
+      config.vertical_velocity_delta_attitude_sigma_rad <= 0.0 ||
+      config.vertical_velocity_delta_sigma_floor_mps <= 0.0 ||
+      config.vertical_velocity_delta_sigma_ceiling_mps <= 0.0) {
     throw std::runtime_error("vertical velocity delta settings must be positive");
+  }
+  if (config.vertical_velocity_delta_sigma_ceiling_mps < config.vertical_velocity_delta_sigma_floor_mps) {
+    throw std::runtime_error("vertical velocity delta sigma ceiling must be >= floor");
   }
   if (config.enable_body_z_nhc_global_weak_constraint &&
       !config.enable_body_z_nhc_constraint) {
@@ -668,6 +675,18 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_velocity_delta_jump_padding_s = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_target_acc_limit_mps2") {
     config.vertical_velocity_delta_target_acc_limit_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_velocity_delta_bias_consistent_sigma") {
+    config.enable_vertical_velocity_delta_bias_consistent_sigma = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_bias_sigma_ug") {
+    config.vertical_velocity_delta_bias_sigma_mps2 = MicroGToMps2(ParseDouble(normalized_value));
+  } else if (normalized_key == "vertical_velocity_delta_bias_sigma_mps2") {
+    config.vertical_velocity_delta_bias_sigma_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_attitude_sigma_rad") {
+    config.vertical_velocity_delta_attitude_sigma_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_sigma_floor_mps") {
+    config.vertical_velocity_delta_sigma_floor_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_sigma_ceiling_mps") {
+    config.vertical_velocity_delta_sigma_ceiling_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_body_z_nhc_constraint") {
     config.enable_body_z_nhc_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "enable_body_z_nhc_global_weak_constraint") {
@@ -982,6 +1001,16 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "vertical_velocity_delta_jump_padding_s=" << config.vertical_velocity_delta_jump_padding_s << '\n'
     << "vertical_velocity_delta_target_acc_limit_mps2="
     << config.vertical_velocity_delta_target_acc_limit_mps2 << '\n'
+    << "enable_vertical_velocity_delta_bias_consistent_sigma="
+    << (config.enable_vertical_velocity_delta_bias_consistent_sigma ? "true" : "false") << '\n'
+    << "vertical_velocity_delta_bias_sigma_ug="
+    << Mps2ToMicroG(config.vertical_velocity_delta_bias_sigma_mps2) << '\n'
+    << "vertical_velocity_delta_attitude_sigma_rad="
+    << config.vertical_velocity_delta_attitude_sigma_rad << '\n'
+    << "vertical_velocity_delta_sigma_floor_mps="
+    << config.vertical_velocity_delta_sigma_floor_mps << '\n'
+    << "vertical_velocity_delta_sigma_ceiling_mps="
+    << config.vertical_velocity_delta_sigma_ceiling_mps << '\n'
     << "enable_body_z_nhc_constraint=" << (config.enable_body_z_nhc_constraint ? "true" : "false") << '\n'
     << "enable_body_z_nhc_global_weak_constraint="
     << (config.enable_body_z_nhc_global_weak_constraint ? "true" : "false") << '\n'

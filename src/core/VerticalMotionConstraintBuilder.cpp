@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
 
+#include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaFactor.h"
 
 namespace offline_lc_minimal {
@@ -27,7 +29,7 @@ bool IntervalsOverlap(
 
 VerticalVelocityDeltaDiagnosticRow MakeDiagnosticRow(
   const VerticalVelocityDeltaPropagationRecord &record,
-  const double sigma_mps,
+  const VerticalVelocityDeltaSigmaResult &sigma,
   const double target_delta_vz_mps) {
   VerticalVelocityDeltaDiagnosticRow row;
   row.state_index_i = record.state_index_i;
@@ -41,8 +43,23 @@ VerticalVelocityDeltaDiagnosticRow MakeDiagnosticRow(
     std::isfinite(row.raw_target_delta_vz_mps) &&
     std::isfinite(row.target_delta_vz_mps) &&
     std::abs(row.raw_target_delta_vz_mps - row.target_delta_vz_mps) > 1.0e-12;
-  row.sigma_mps = sigma_mps;
+  row.sigma_mps = sigma.sigma_mps;
+  row.sigma_model = sigma.model;
+  row.legacy_sigma_mps = sigma.legacy_sigma_mps;
+  row.bias_sigma_mps = sigma.bias_sigma_mps;
+  row.attitude_sigma_mps = sigma.attitude_sigma_mps;
+  row.sigma_floor_mps = sigma.sigma_floor_mps;
+  row.sigma_ceiling_mps = sigma.sigma_ceiling_mps;
   return row;
+}
+
+bool ApplyClampedTargetSigmaFallback(VerticalVelocityDeltaDiagnosticRow &row) {
+  if (!row.target_clamped || row.sigma_model != "bias_consistent") {
+    return false;
+  }
+  row.sigma_model = "legacy_clamped_target";
+  row.sigma_mps = row.legacy_sigma_mps;
+  return true;
 }
 
 }  // namespace
@@ -57,11 +74,19 @@ void VerticalMotionConstraintBuilder::Build() const {
     throw std::runtime_error("VerticalMotionConstraintBuilder received an incomplete request");
   }
 
+  VerticalVelocityDeltaSigmaModel sigma_model(*request_.config);
+  request_.run_summary->vertical_velocity_delta_bias_consistent_sigma_enabled =
+    request_.config->enable_vertical_velocity_delta_bias_consistent_sigma;
+  double added_sigma_sum_mps = 0.0;
+  double added_sigma_max_mps = -std::numeric_limits<double>::infinity();
+
   request_.diagnostics->reserve(request_.diagnostics->size() + request_.propagation_records->size());
   for (const auto &record : *request_.propagation_records) {
     const double dt_s = record.end_time_s - record.start_time_s;
+    const VerticalVelocityDeltaSigmaResult sigma = sigma_model.Compute(dt_s);
     VerticalVelocityDeltaDiagnosticRow row =
-      MakeDiagnosticRow(record, SigmaMps(dt_s), TargetDeltaVzMps(record, dt_s));
+      MakeDiagnosticRow(record, sigma, TargetDeltaVzMps(record, dt_s));
+    const bool used_clamped_target_fallback = ApplyClampedTargetSigmaFallback(row);
 
     if (!request_.config->enable_vertical_velocity_delta_constraint) {
       row.skip_reason = "DISABLED";
@@ -99,6 +124,14 @@ void VerticalMotionConstraintBuilder::Build() const {
     row.factor_added = true;
     row.skip_reason = "ADDED";
     ++request_.run_summary->vertical_velocity_delta_factor_count;
+    added_sigma_sum_mps += row.sigma_mps;
+    added_sigma_max_mps = std::max(added_sigma_max_mps, row.sigma_mps);
+    if (!used_clamped_target_fallback && sigma.clamped_floor) {
+      ++request_.run_summary->vertical_velocity_delta_sigma_clamped_floor_count;
+    }
+    if (!used_clamped_target_fallback && sigma.clamped_ceiling) {
+      ++request_.run_summary->vertical_velocity_delta_sigma_clamped_ceiling_count;
+    }
     if (row.target_clamped) {
       ++request_.run_summary->vertical_velocity_delta_target_clamped_count;
     }
@@ -108,6 +141,12 @@ void VerticalMotionConstraintBuilder::Build() const {
       row.target_delta_vz_mps,
       gtsam::noiseModel::Isotropic::Sigma(1, row.sigma_mps)));
     request_.diagnostics->push_back(row);
+  }
+
+  if (request_.run_summary->vertical_velocity_delta_factor_count > 0U) {
+    request_.run_summary->vertical_velocity_delta_sigma_mean_mps =
+      added_sigma_sum_mps / static_cast<double>(request_.run_summary->vertical_velocity_delta_factor_count);
+    request_.run_summary->vertical_velocity_delta_sigma_max_mps = added_sigma_max_mps;
   }
 }
 
@@ -126,12 +165,6 @@ bool VerticalMotionConstraintBuilder::OverlapsJumpPadding(
     }
   }
   return false;
-}
-
-double VerticalMotionConstraintBuilder::SigmaMps(const double dt_s) const {
-  return std::max(
-    request_.config->vertical_velocity_delta_min_sigma_mps,
-    request_.config->vertical_velocity_delta_acc_sigma_mps2 * std::max(dt_s, 0.0));
 }
 
 double VerticalMotionConstraintBuilder::TargetDeltaVzMps(

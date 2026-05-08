@@ -48,6 +48,11 @@ struct RunSummary {
   std::size_t vertical_velocity_delta_skipped_gnss_support_count = 0;
   std::size_t vertical_velocity_delta_skipped_invalid_count = 0;
   std::size_t vertical_velocity_delta_target_clamped_count = 0;
+  bool vertical_velocity_delta_bias_consistent_sigma_enabled = false;
+  double vertical_velocity_delta_sigma_mean_mps = std::numeric_limits<double>::quiet_NaN();
+  double vertical_velocity_delta_sigma_max_mps = std::numeric_limits<double>::quiet_NaN();
+  std::size_t vertical_velocity_delta_sigma_clamped_floor_count = 0;
+  std::size_t vertical_velocity_delta_sigma_clamped_ceiling_count = 0;
   std::size_t body_z_nhc_velocity_factor_count = 0;
   std::size_t body_z_nhc_displacement_factor_count = 0;
   std::size_t body_z_nhc_window_count = 0;
@@ -184,6 +189,14 @@ struct RunSummary {
         << "vertical_velocity_delta_skipped_invalid_count=" << vertical_velocity_delta_skipped_invalid_count << '\n'
         << "vertical_velocity_delta_target_clamped_count="
         << vertical_velocity_delta_target_clamped_count << '\n'
+        << "vertical_velocity_delta_bias_consistent_sigma_enabled="
+        << (vertical_velocity_delta_bias_consistent_sigma_enabled ? "true" : "false") << '\n'
+        << "vertical_velocity_delta_sigma_mean_mps=" << vertical_velocity_delta_sigma_mean_mps << '\n'
+        << "vertical_velocity_delta_sigma_max_mps=" << vertical_velocity_delta_sigma_max_mps << '\n'
+        << "vertical_velocity_delta_sigma_clamped_floor_count="
+        << vertical_velocity_delta_sigma_clamped_floor_count << '\n'
+        << "vertical_velocity_delta_sigma_clamped_ceiling_count="
+        << vertical_velocity_delta_sigma_clamped_ceiling_count << '\n'
         << "body_z_nhc_velocity_factor_count=" << body_z_nhc_velocity_factor_count << '\n'
         << "body_z_nhc_displacement_factor_count=" << body_z_nhc_displacement_factor_count << '\n'
         << "body_z_nhc_window_count=" << body_z_nhc_window_count << '\n'

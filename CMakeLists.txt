@@ -77,6 +77,7 @@ add_library(offline_lc_minimal_lib
   src/core/VerticalJumpImuMasker.cpp
   src/core/VerticalJumpShapeConstraintBuilder.cpp
   src/core/VerticalMotionConstraintBuilder.cpp
+  src/core/VerticalVelocityDeltaSigmaModel.cpp
   src/core/OfflineBatchRunner.cpp
 )
 
