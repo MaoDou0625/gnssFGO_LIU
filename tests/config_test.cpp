@@ -386,6 +386,25 @@ void TestPhase13StaticBazCarryoverConfigLoads() {
     "phase13 should keep global weak body-z NHC disabled");
 }
 
+void TestPhase14StaticBazNoEarlyGateConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase14_static_baz_no_early_gate.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase14 no-early-gate config should use envelope constraints");
+  ExpectTrue(!config.enable_vertical_envelope_center_pull, "phase14 should keep center pull disabled");
+  ExpectTrue(config.enable_static_vertical_bias_carryover, "phase14 should keep static ba_z carryover enabled");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase14 should keep fixed-axis body-z NHC enabled");
+  ExpectTrue(
+    std::abs(config.early_gnss_relaxation_duration_s) < 1e-12,
+    "phase14 should disable early GNSS/RTK relaxation duration");
+  ExpectTrue(
+    std::abs(config.early_gnss_relaxation_scale - 1.0) < 1e-12,
+    "phase14 should use neutral early GNSS/RTK relaxation scale");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -1100,6 +1119,7 @@ int main() {
     RunTest("TestPhase10SegmentedJumpBiasConfigLoads", TestPhase10SegmentedJumpBiasConfigLoads);
     RunTest("TestPhase12RtkGateOnlyFullNavConfigLoads", TestPhase12RtkGateOnlyFullNavConfigLoads);
     RunTest("TestPhase13StaticBazCarryoverConfigLoads", TestPhase13StaticBazCarryoverConfigLoads);
+    RunTest("TestPhase14StaticBazNoEarlyGateConfigLoads", TestPhase14StaticBazNoEarlyGateConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
