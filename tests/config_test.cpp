@@ -469,6 +469,9 @@ void TestPhase18AttitudeRefBiasAwareDvzConfigLoads() {
   ExpectTrue(config.enable_vertical_velocity_delta_bias_consistent_sigma, "phase18 should keep bias-consistent sigma");
   ExpectTrue(config.enable_vertical_velocity_delta_bias_aware_target, "phase18 should enable bias-aware dvz target");
   ExpectTrue(
+    config.enable_vertical_velocity_delta_initial_static_constraint,
+    "phase18 should apply dvz constraints inside the static alignment window");
+  ExpectTrue(
     std::abs(config.vertical_acc_bias_sigma_mps2 - offline_lc_minimal::MicroGToMps2(10.0)) < 1e-15,
     "phase18 dynamic vertical ba_z GM sigma should load from 10 ug");
   ExpectTrue(config.enable_attitude_reference_constraint, "phase18 should enable attitude reference constraints");
@@ -786,6 +789,7 @@ void TestAccelerometerBiasUgConfigParsing() {
   offline_lc_minimal::OverrideConfigField(config, "initial_static_vertical_bias_global_tie_sigma_ug", "0.05");
   offline_lc_minimal::OverrideConfigField(config, "initial_static_vertical_bias_gm_sigma_ug", "0.02");
   offline_lc_minimal::OverrideConfigField(config, "enable_vertical_velocity_delta_bias_aware_target", "true");
+  offline_lc_minimal::OverrideConfigField(config, "enable_vertical_velocity_delta_initial_static_constraint", "true");
 
   ExpectTrue(
     std::abs(config.vertical_acc_bias_sigma_mps2 - offline_lc_minimal::MicroGToMps2(10.0)) < 1e-15,
@@ -809,6 +813,9 @@ void TestAccelerometerBiasUgConfigParsing() {
              offline_lc_minimal::MicroGToMps2(0.02)) < 1e-15,
     "static vertical bias GM sigma should parse from ug");
   ExpectTrue(config.enable_vertical_velocity_delta_bias_aware_target, "bias-aware dvz target flag should parse");
+  ExpectTrue(
+    config.enable_vertical_velocity_delta_initial_static_constraint,
+    "initial static dvz constraint flag should parse");
 }
 
 void TestVerticalJumpConfigValidation() {

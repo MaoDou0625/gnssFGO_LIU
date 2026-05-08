@@ -99,7 +99,8 @@ void VerticalMotionConstraintBuilder::Build() const {
       request_.diagnostics->push_back(row);
       continue;
     }
-    if (record.state_index_j < request_.dynamic_start_index) {
+    const bool static_interior = record.state_index_j < request_.dynamic_start_index;
+    if (static_interior && !request_.config->enable_vertical_velocity_delta_initial_static_constraint) {
       row.skip_reason = "STATIC_INTERIOR";
       ++request_.run_summary->vertical_velocity_delta_skipped_static_count;
       request_.diagnostics->push_back(row);
@@ -130,6 +131,9 @@ void VerticalMotionConstraintBuilder::Build() const {
     row.bias_aware_factor = request_.config->enable_vertical_velocity_delta_bias_aware_target;
     row.skip_reason = "ADDED";
     ++request_.run_summary->vertical_velocity_delta_factor_count;
+    if (static_interior) {
+      ++request_.run_summary->vertical_velocity_delta_static_factor_count;
+    }
     if (row.bias_aware_factor) {
       ++request_.run_summary->vertical_velocity_delta_bias_aware_factor_count;
     }

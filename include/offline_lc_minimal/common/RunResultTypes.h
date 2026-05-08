@@ -42,6 +42,7 @@ struct RunSummary {
   std::size_t error_state_count = 0;
   std::size_t segment_error_count = 0;
   std::size_t vertical_velocity_delta_factor_count = 0;
+  std::size_t vertical_velocity_delta_static_factor_count = 0;
   std::size_t vertical_velocity_delta_skipped_disabled_count = 0;
   std::size_t vertical_velocity_delta_skipped_static_count = 0;
   std::size_t vertical_velocity_delta_skipped_jump_count = 0;
@@ -184,6 +185,7 @@ struct RunSummary {
         << "error_state_count=" << error_state_count << '\n'
         << "segment_error_count=" << segment_error_count << '\n'
         << "vertical_velocity_delta_factor_count=" << vertical_velocity_delta_factor_count << '\n'
+        << "vertical_velocity_delta_static_factor_count=" << vertical_velocity_delta_static_factor_count << '\n'
         << "vertical_velocity_delta_skipped_disabled_count=" << vertical_velocity_delta_skipped_disabled_count << '\n'
         << "vertical_velocity_delta_skipped_static_count=" << vertical_velocity_delta_skipped_static_count << '\n'
         << "vertical_velocity_delta_skipped_jump_count=" << vertical_velocity_delta_skipped_jump_count << '\n'

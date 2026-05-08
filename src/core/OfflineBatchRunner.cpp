@@ -874,6 +874,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.gnss_nis_p95 = std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.axis_2sigma_pass_rate = std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.vertical_velocity_delta_factor_count = 0;
+  run_result.run_summary.vertical_velocity_delta_static_factor_count = 0;
   run_result.run_summary.vertical_velocity_delta_skipped_disabled_count = 0;
   run_result.run_summary.vertical_velocity_delta_skipped_static_count = 0;
   run_result.run_summary.vertical_velocity_delta_skipped_jump_count = 0;

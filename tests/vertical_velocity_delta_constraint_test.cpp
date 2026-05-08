@@ -244,6 +244,67 @@ void TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary() {
   ExpectTrue(diagnostics[1].skip_reason == "ADDED", "boundary interval should be marked as added");
 }
 
+void TestBuilderAddsStaticInteriorWhenConfigured() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.enable_vertical_velocity_delta_initial_static_constraint = true;
+  config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
+  config.enable_vertical_velocity_delta_bias_aware_target = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.10;
+  config.vertical_velocity_delta_min_sigma_mps = 0.003;
+  config.vertical_velocity_delta_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(10.0);
+  config.vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
+  config.vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
+  config.vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {0, 1, 0.0, 0.5, 0.01, 0.001},
+    {1, 2, 0.5, 1.0, 0.02, 0.002},
+    {2, 3, 1.0, 1.5, 0.03, 0.003},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.dynamic_start_index = 2;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 3.0, 0.0, "all intervals should receive factors");
+  ExpectNear(static_cast<double>(summary.vertical_velocity_delta_factor_count), 3.0, 0.0, "factor count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.vertical_velocity_delta_static_factor_count),
+    1.0,
+    0.0,
+    "static factor count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.vertical_velocity_delta_skipped_static_count),
+    0.0,
+    0.0,
+    "static skip count is wrong");
+  ExpectTrue(diagnostics[0].factor_added, "static interior interval should receive a factor");
+  ExpectTrue(diagnostics[0].skip_reason == "ADDED", "static interior interval should be marked as added");
+  ExpectTrue(diagnostics[0].sigma_model == "bias_consistent", "static interval should use bias-consistent sigma");
+  ExpectTrue(diagnostics[0].bias_aware_factor, "static interval should use bias-aware dvz target");
+  const double expected_sigma_mps = std::sqrt(
+    std::pow(offline_lc_minimal::MicroGToMps2(10.0) * 0.5, 2.0) +
+    std::pow(config.gravity_mps2 * config.vertical_velocity_delta_attitude_sigma_rad * 0.5, 2.0) +
+    std::pow(config.vertical_velocity_delta_sigma_floor_mps, 2.0));
+  ExpectNear(diagnostics[0].sigma_mps, expected_sigma_mps, 1e-15, "static interval sigma is wrong");
+  ExpectNear(
+    static_cast<double>(graph.at(0)->keys().size()),
+    3.0,
+    0.0,
+    "bias-aware static factor should connect V_i, V_j, and B_i");
+}
+
 void TestBuilderSkipsStaticDynamicBoundaryInsideJumpPadding() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -541,6 +602,7 @@ int main() {
     RunTest(
       "TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary",
       TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary);
+    RunTest("TestBuilderAddsStaticInteriorWhenConfigured", TestBuilderAddsStaticInteriorWhenConfigured);
     RunTest(
       "TestBuilderSkipsStaticDynamicBoundaryInsideJumpPadding",
       TestBuilderSkipsStaticDynamicBoundaryInsideJumpPadding);
