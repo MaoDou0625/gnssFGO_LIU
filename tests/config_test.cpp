@@ -565,6 +565,32 @@ void TestPhase21PositionVelocityWindowConsistencyConfigLoads() {
   ExpectTrue(config.enable_body_z_nhc_constraint, "phase21 should keep fixed-axis body-z NHC enabled");
 }
 
+void TestPhase22OneUgBiasStrengthConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase22_1ug_bias_strength.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase22 config should use envelope constraints");
+  ExpectTrue(
+    config.enable_vertical_position_velocity_consistency_all_states,
+    "phase22 should keep adjacent all-state position-velocity consistency");
+  ExpectTrue(
+    config.enable_vertical_position_velocity_window_consistency,
+    "phase22 should keep window position-velocity consistency");
+  ExpectTrue(
+    std::abs(config.vertical_acc_bias_sigma_mps2 - offline_lc_minimal::MicroGToMps2(1.0)) < 1e-15,
+    "phase22 dynamic vertical ba_z GM sigma should load from 1 ug");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_bias_sigma_mps2 -
+             offline_lc_minimal::MicroGToMps2(1.0)) < 1e-15,
+    "phase22 velocity delta bias sigma should load from 1 ug");
+  ExpectTrue(config.enable_vertical_envelope_center_pull, "phase22 should keep gate-inside RTK center pull");
+  ExpectTrue(config.enable_attitude_reference_constraint, "phase22 should keep attitude reference constraints");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase22 should keep fixed-axis body-z NHC enabled");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -1459,6 +1485,9 @@ int main() {
     RunTest(
       "TestPhase21PositionVelocityWindowConsistencyConfigLoads",
       TestPhase21PositionVelocityWindowConsistencyConfigLoads);
+    RunTest(
+      "TestPhase22OneUgBiasStrengthConfigLoads",
+      TestPhase22OneUgBiasStrengthConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
