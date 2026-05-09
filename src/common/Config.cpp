@@ -114,6 +114,17 @@ VerticalConstraintMode ParseVerticalConstraintMode(const std::string &value) {
   throw std::runtime_error("invalid vertical constraint mode: " + value);
 }
 
+VerticalEnvelopeCenterSigmaMode ParseVerticalEnvelopeCenterSigmaMode(const std::string &value) {
+  const std::string lowered = Lowercase(value);
+  if (lowered == "fixed") {
+    return VerticalEnvelopeCenterSigmaMode::kFixed;
+  }
+  if (lowered == "gate_sigma") {
+    return VerticalEnvelopeCenterSigmaMode::kGateSigma;
+  }
+  throw std::runtime_error("invalid vertical envelope center sigma mode: " + value);
+}
+
 }  // namespace
 
 void ValidateConfig(const OfflineRunnerConfig &config) {
@@ -669,6 +680,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_vertical_envelope_center_pull = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_envelope_center_sigma_m") {
     config.vertical_envelope_center_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_envelope_center_sigma_mode") {
+    config.vertical_envelope_center_sigma_mode = ParseVerticalEnvelopeCenterSigmaMode(normalized_value);
   } else if (normalized_key == "vertical_envelope_center_deadband_m") {
     config.vertical_envelope_center_deadband_m = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_velocity_delta_constraint") {
@@ -1007,6 +1020,7 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "enable_vertical_envelope_center_pull="
     << (config.enable_vertical_envelope_center_pull ? "true" : "false") << '\n'
     << "vertical_envelope_center_sigma_m=" << config.vertical_envelope_center_sigma_m << '\n'
+    << "vertical_envelope_center_sigma_mode=" << ToString(config.vertical_envelope_center_sigma_mode) << '\n'
     << "vertical_envelope_center_deadband_m=" << config.vertical_envelope_center_deadband_m << '\n'
     << "enable_vertical_velocity_delta_constraint="
     << (config.enable_vertical_velocity_delta_constraint ? "true" : "false") << '\n'

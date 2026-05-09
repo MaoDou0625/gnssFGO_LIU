@@ -20,6 +20,7 @@ struct EnvelopePolicyParams {
   double factor_sigma_m = 0.20;
   bool enable_center_pull = false;
   double center_sigma_m = 0.60;
+  VerticalEnvelopeCenterSigmaMode center_sigma_mode = VerticalEnvelopeCenterSigmaMode::kFixed;
   double center_deadband_m = 0.01;
 };
 
@@ -31,14 +32,23 @@ gtsam::SharedNoiseModel MakeEnvelopeNoiseModel(const EnvelopePolicyParams &param
   return gtsam::noiseModel::Isotropic::Sigma(1, params.factor_sigma_m);
 }
 
-gtsam::SharedNoiseModel MakeEnvelopeCenterNoiseModel(const EnvelopePolicyParams &params) {
-  return gtsam::noiseModel::Isotropic::Sigma(1, params.center_sigma_m);
+gtsam::SharedNoiseModel MakeEnvelopeCenterNoiseModel(const double center_sigma_m) {
+  return gtsam::noiseModel::Isotropic::Sigma(1, center_sigma_m);
 }
 
 double ComputeEnvelopeHalfWidthM(const EnvelopePolicyParams &params, const Eigen::Vector3d &sigma_m) {
   return std::max(
     params.min_half_width_m,
     params.gate_sigma_multiple * sigma_m.z());
+}
+
+double ComputeEnvelopeCenterSigmaM(
+  const EnvelopePolicyParams &params,
+  const double half_width_m) {
+  if (params.center_sigma_mode == VerticalEnvelopeCenterSigmaMode::kGateSigma) {
+    return half_width_m / params.gate_sigma_multiple;
+  }
+  return params.center_sigma_m;
 }
 
 VerticalEnvelopeDiagnosticRow MakeEnvelopeDiagnosticRow(
@@ -48,6 +58,7 @@ VerticalEnvelopeDiagnosticRow MakeEnvelopeDiagnosticRow(
   const StateMeasSyncResult &sync_result,
   const Eigen::Vector3d &sigma_m,
   const double half_width_m,
+  const double center_sigma_m,
   const EnvelopePolicyParams &params) {
   VerticalEnvelopeDiagnosticRow row;
   row.sample_index = sample_index;
@@ -72,7 +83,7 @@ VerticalEnvelopeDiagnosticRow MakeEnvelopeDiagnosticRow(
   row.half_width_m = half_width_m;
   row.center_pull_factor_used = params.enable_center_pull;
   if (params.enable_center_pull) {
-    row.center_pull_sigma_m = params.center_sigma_m;
+    row.center_pull_sigma_m = center_sigma_m;
     row.center_pull_deadband_m = params.center_deadband_m;
   }
   return row;
@@ -143,6 +154,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
           config.vertical_envelope_factor_sigma_m,
           config.enable_vertical_envelope_center_pull,
           config.vertical_envelope_center_sigma_m,
+          config.vertical_envelope_center_sigma_mode,
           config.vertical_envelope_center_deadband_m} {}
 
   [[nodiscard]] bool UsesDirectPositionFactor() const override { return false; }
@@ -167,6 +179,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
         ? sync_result.key_index_i
         : sync_result.key_index_j;
     const double half_width_m = ComputeEnvelopeHalfWidthM(params_, sigma_m);
+    const double center_sigma_m = ComputeEnvelopeCenterSigmaM(params_, half_width_m);
     context.graph->add(factor::VerticalEnvelopeFactor(
       symbol::X(state_index),
       sample.enu_position_m.z(),
@@ -178,10 +191,18 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
         sample.enu_position_m.z(),
         half_width_m,
         params_.center_deadband_m,
-        MakeEnvelopeCenterNoiseModel(params_)));
+        MakeEnvelopeCenterNoiseModel(center_sigma_m)));
     }
     context.envelope_diagnostics->push_back(
-      MakeEnvelopeDiagnosticRow(sample, sample_index, corrected_time_s, sync_result, sigma_m, half_width_m, params_));
+      MakeEnvelopeDiagnosticRow(
+        sample,
+        sample_index,
+        corrected_time_s,
+        sync_result,
+        sigma_m,
+        half_width_m,
+        center_sigma_m,
+        params_));
   }
 
   void AddInterpolated(
@@ -197,6 +218,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
       throw std::runtime_error("envelope vertical constraints require diagnostics storage");
     }
     const double half_width_m = ComputeEnvelopeHalfWidthM(params_, sigma_m);
+    const double center_sigma_m = ComputeEnvelopeCenterSigmaM(params_, half_width_m);
     context.graph->add(factor::GPInterpolatedVerticalEnvelopeFactor(
       symbol::X(sync_result.key_index_i),
       symbol::V(sync_result.key_index_i),
@@ -220,10 +242,18 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
         half_width_m,
         params_.center_deadband_m,
         interpolator,
-        MakeEnvelopeCenterNoiseModel(params_)));
+        MakeEnvelopeCenterNoiseModel(center_sigma_m)));
     }
     context.envelope_diagnostics->push_back(
-      MakeEnvelopeDiagnosticRow(sample, sample_index, corrected_time_s, sync_result, sigma_m, half_width_m, params_));
+      MakeEnvelopeDiagnosticRow(
+        sample,
+        sample_index,
+        corrected_time_s,
+        sync_result,
+        sigma_m,
+        half_width_m,
+        center_sigma_m,
+        params_));
   }
 
  private:

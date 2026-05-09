@@ -286,6 +286,79 @@ void TestEnvelopeModeAddsCenterPullFactorWhenEnabled() {
     "center pull diagnostic should subtract the deadband");
 }
 
+void TestEnvelopeModeUsesGateSigmaCenterPullWhenConfigured() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
+  config.vertical_envelope_gate_sigma_multiple = 2.0;
+  config.vertical_envelope_min_half_width_m = 0.10;
+  config.vertical_envelope_factor_sigma_m = 0.20;
+  config.enable_vertical_envelope_center_pull = true;
+  config.vertical_envelope_center_sigma_m = 99.0;
+  config.vertical_envelope_center_sigma_mode = offline_lc_minimal::VerticalEnvelopeCenterSigmaMode::kGateSigma;
+  config.vertical_envelope_center_deadband_m = 0.0;
+  config.early_gnss_relaxation_duration_s = 0.0;
+
+  std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeGnssSample(0.0),
+    MakeGnssSample(1.0),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  std::vector<offline_lc_minimal::TrajectoryRow> trajectory(2);
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::GnssFactorRecord> factor_records;
+  std::vector<offline_lc_minimal::GnssConsistencyRecord> consistency_records;
+  std::vector<offline_lc_minimal::VerticalEnvelopeDiagnosticRow> envelope_diagnostics;
+
+  offline_lc_minimal::GnssFactorBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.navigation_start_index = 0;
+  request.graph = &graph;
+  request.trajectory = &trajectory;
+  request.run_summary = &summary;
+  request.factor_records = &factor_records;
+  request.consistency_records = &consistency_records;
+  request.vertical_envelope_diagnostics = &envelope_diagnostics;
+  request.collect_consistency_records = true;
+  request.dynamic_start_time_s = 1.0;
+  request.should_use_sample = [](const auto &) { return true; };
+  request.is_within_imu_coverage = [](double) { return true; };
+  request.corrected_time_s = [](const auto &sample) { return sample.time_s; };
+  request.clamped_sigma_m = [](const auto &) { return Eigen::Vector3d(0.1, 0.2, 0.3); };
+  request.find_state_for_time_s = [](double) {
+    offline_lc_minimal::StateMeasSyncResult result;
+    result.status = offline_lc_minimal::StateMeasSyncStatus::kSynchronizedI;
+    result.key_index_i = 1;
+    result.key_index_j = 1;
+    result.timestamp_i_s = 1.0;
+    result.timestamp_j_s = 1.0;
+    return result;
+  };
+  request.trajectory_row_index_for_state = [](std::size_t state_index) {
+    return static_cast<long long>(state_index);
+  };
+
+  offline_lc_minimal::GnssFactorBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 3.0, 0.0, "gate-sigma center pull should add one extra vertical factor");
+  ExpectTrue(envelope_diagnostics.front().center_pull_factor_used, "diagnostic should mark center pull");
+  ExpectNear(envelope_diagnostics.front().half_width_m, 0.60, 1e-12, "half-width should use the gate multiple");
+  ExpectNear(envelope_diagnostics.front().center_pull_sigma_m, 0.30, 1e-12, "center sigma should derive from gate width");
+  ExpectNear(envelope_diagnostics.front().center_pull_deadband_m, 0.0, 1e-12, "center pull deadband should be disabled");
+
+  gtsam::Values optimized_values;
+  optimized_values.insert(
+    gtsam::symbol_shorthand::X(1),
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(0.0, 0.0, 0.0), gtsam::Point3(4.0, 5.0, 6.25)));
+  const auto qc_model = gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(10000.0));
+  const offline_lc_minimal::gp::GPWNOJInterpolator interpolator(qc_model, 1.0, 0.0);
+  offline_lc_minimal::PopulateVerticalEnvelopeDiagnostics(
+    optimized_values,
+    interpolator,
+    envelope_diagnostics);
+  ExpectNear(envelope_diagnostics.front().center_pull_residual_m, 0.25, 1e-12, "zero-deadband residual should keep raw residual inside gate");
+}
+
 void TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
@@ -353,6 +426,68 @@ void TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled() {
   ExpectNear(static_cast<double>(summary.gnss_factor_count), 1.0, 0.0, "GNSS sample count should not change");
   ExpectNear(static_cast<double>(envelope_diagnostics.size()), 1.0, 0.0, "interpolated diagnostics should stay one row per sample");
   ExpectTrue(envelope_diagnostics.front().center_pull_factor_used, "interpolated diagnostic should mark center pull");
+}
+
+void TestEnvelopeModeUsesGateSigmaForInterpolatedCenterPull() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
+  config.vertical_envelope_gate_sigma_multiple = 2.0;
+  config.vertical_envelope_min_half_width_m = 0.10;
+  config.vertical_envelope_factor_sigma_m = 0.20;
+  config.enable_vertical_envelope_center_pull = true;
+  config.vertical_envelope_center_sigma_m = 99.0;
+  config.vertical_envelope_center_sigma_mode = offline_lc_minimal::VerticalEnvelopeCenterSigmaMode::kGateSigma;
+  config.vertical_envelope_center_deadband_m = 0.0;
+  config.early_gnss_relaxation_duration_s = 0.0;
+
+  std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeGnssSample(0.0),
+    MakeGnssSample(1.0),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  std::vector<offline_lc_minimal::TrajectoryRow> trajectory(2);
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::GnssFactorRecord> factor_records;
+  std::vector<offline_lc_minimal::GnssConsistencyRecord> consistency_records;
+  std::vector<offline_lc_minimal::VerticalEnvelopeDiagnosticRow> envelope_diagnostics;
+
+  offline_lc_minimal::GnssFactorBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.navigation_start_index = 0;
+  request.graph = &graph;
+  request.trajectory = &trajectory;
+  request.run_summary = &summary;
+  request.factor_records = &factor_records;
+  request.consistency_records = &consistency_records;
+  request.vertical_envelope_diagnostics = &envelope_diagnostics;
+  request.collect_consistency_records = true;
+  request.dynamic_start_time_s = 1.0;
+  request.should_use_sample = [](const auto &) { return true; };
+  request.is_within_imu_coverage = [](double) { return true; };
+  request.corrected_time_s = [](const auto &sample) { return sample.time_s; };
+  request.clamped_sigma_m = [](const auto &) { return Eigen::Vector3d(0.1, 0.2, 0.3); };
+  request.find_state_for_time_s = [](double) {
+    offline_lc_minimal::StateMeasSyncResult result;
+    result.status = offline_lc_minimal::StateMeasSyncStatus::kInterpolated;
+    result.key_index_i = 0;
+    result.key_index_j = 1;
+    result.timestamp_i_s = 0.0;
+    result.timestamp_j_s = 1.0;
+    result.duration_from_state_i_s = 0.4;
+    return result;
+  };
+  request.trajectory_row_index_for_state = [](std::size_t state_index) {
+    return static_cast<long long>(state_index);
+  };
+
+  offline_lc_minimal::GnssFactorBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 3.0, 0.0, "interpolated gate-sigma center pull should add three factors");
+  ExpectTrue(envelope_diagnostics.front().center_pull_factor_used, "interpolated diagnostic should mark center pull");
+  ExpectNear(envelope_diagnostics.front().half_width_m, 0.60, 1e-12, "interpolated half-width should use the gate multiple");
+  ExpectNear(envelope_diagnostics.front().center_pull_sigma_m, 0.30, 1e-12, "interpolated center sigma should derive from gate width");
+  ExpectNear(envelope_diagnostics.front().center_pull_deadband_m, 0.0, 1e-12, "interpolated center pull deadband should be disabled");
 }
 
 void TestEnvelopeModeAddsOnlyInterpolatedEnvelopeWhenCenterPullDisabled() {
@@ -515,8 +650,14 @@ int main() {
       "TestEnvelopeModeAddsCenterPullFactorWhenEnabled",
       TestEnvelopeModeAddsCenterPullFactorWhenEnabled);
     RunTest(
+      "TestEnvelopeModeUsesGateSigmaCenterPullWhenConfigured",
+      TestEnvelopeModeUsesGateSigmaCenterPullWhenConfigured);
+    RunTest(
       "TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled",
       TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled);
+    RunTest(
+      "TestEnvelopeModeUsesGateSigmaForInterpolatedCenterPull",
+      TestEnvelopeModeUsesGateSigmaForInterpolatedCenterPull);
     RunTest(
       "TestEnvelopeModeAddsOnlyInterpolatedEnvelopeWhenCenterPullDisabled",
       TestEnvelopeModeAddsOnlyInterpolatedEnvelopeWhenCenterPullDisabled);

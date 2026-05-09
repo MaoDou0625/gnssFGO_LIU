@@ -66,6 +66,19 @@ void TestVerticalEnvelopeCenterPullFactorUsesClampedCenterResidual() {
   ExpectNear(factor.evaluateError(low_pose)(0), -0.09, 1e-12, "negative center residual should clamp at half-width minus deadband");
 }
 
+void TestVerticalEnvelopeCenterPullFactorSupportsZeroDeadband() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
+  const offline_lc_minimal::factor::VerticalEnvelopeCenterPullFactor factor(1, 3.0, 0.10, 0.0, noise);
+
+  const gtsam::Pose3 inside_pose(gtsam::Rot3::RzRyRx(0.0, 0.0, 0.0), gtsam::Point3(10.0, -20.0, 3.05));
+  const gtsam::Pose3 high_pose(gtsam::Rot3::RzRyRx(0.0, 0.0, 0.0), gtsam::Point3(10.0, -20.0, 3.25));
+  const gtsam::Pose3 low_pose(gtsam::Rot3::RzRyRx(0.0, 0.0, 0.0), gtsam::Point3(10.0, -20.0, 2.75));
+
+  ExpectNear(factor.evaluateError(inside_pose)(0), 0.05, 1e-12, "zero-deadband center residual should keep raw residual inside gate");
+  ExpectNear(factor.evaluateError(high_pose)(0), 0.10, 1e-12, "zero-deadband positive center residual should clamp at half-width");
+  ExpectNear(factor.evaluateError(low_pose)(0), -0.10, 1e-12, "zero-deadband negative center residual should clamp at half-width");
+}
+
 void TestGpInterpolatedVerticalFactorMatchesInterpolator() {
   const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
   const auto qc_model = gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(10000.0));
@@ -161,6 +174,9 @@ int main() {
     RunTest(
       "TestVerticalEnvelopeCenterPullFactorUsesClampedCenterResidual",
       TestVerticalEnvelopeCenterPullFactorUsesClampedCenterResidual);
+    RunTest(
+      "TestVerticalEnvelopeCenterPullFactorSupportsZeroDeadband",
+      TestVerticalEnvelopeCenterPullFactorSupportsZeroDeadband);
     RunTest("TestGpInterpolatedVerticalFactorMatchesInterpolator", TestGpInterpolatedVerticalFactorMatchesInterpolator);
     RunTest(
       "TestGpInterpolatedVerticalEnvelopeFactorMatchesInterpolator",

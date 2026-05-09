@@ -465,6 +465,10 @@ void TestPhase18AttitudeRefBiasAwareDvzConfigLoads() {
   ExpectTrue(
     config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
     "phase18 config should use envelope constraints");
+  ExpectTrue(!config.enable_vertical_envelope_center_pull, "phase18 should keep gate-only center pull disabled");
+  ExpectTrue(
+    config.vertical_envelope_center_sigma_mode == offline_lc_minimal::VerticalEnvelopeCenterSigmaMode::kFixed,
+    "phase18 should keep legacy fixed center sigma mode");
   ExpectTrue(config.enable_initial_static_rtk_height_reference, "phase18 should keep static RTK anchor");
   ExpectTrue(config.enable_vertical_velocity_delta_bias_consistent_sigma, "phase18 should keep bias-consistent sigma");
   ExpectTrue(config.enable_vertical_velocity_delta_bias_aware_target, "phase18 should enable bias-aware dvz target");
@@ -479,6 +483,26 @@ void TestPhase18AttitudeRefBiasAwareDvzConfigLoads() {
     std::abs(config.attitude_reference_sigma_rad - 0.01) < 1e-15,
     "phase18 attitude reference sigma should load");
   ExpectTrue(config.enable_body_z_nhc_constraint, "phase18 should keep fixed-axis body-z NHC enabled");
+}
+
+void TestPhase19GateInsideRtkWeightConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase19_gate_inside_rtk_weight.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase19 config should use envelope constraints");
+  ExpectTrue(config.enable_vertical_envelope_center_pull, "phase19 should restore gate-inside RTK center pull");
+  ExpectTrue(
+    config.vertical_envelope_center_sigma_mode == offline_lc_minimal::VerticalEnvelopeCenterSigmaMode::kGateSigma,
+    "phase19 center pull sigma should derive from gate sigma");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_center_deadband_m) < 1e-15,
+    "phase19 center pull should not use a deadband");
+  ExpectTrue(config.enable_vertical_velocity_delta_initial_static_constraint, "phase19 should keep static dvz enabled");
+  ExpectTrue(config.enable_attitude_reference_constraint, "phase19 should keep attitude reference constraints");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase19 should keep fixed-axis body-z NHC enabled");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
@@ -674,6 +698,21 @@ void TestVerticalEnvelopeCenterPullConfigValidation() {
     threw = std::string(exception.what()).find("center deadband") != std::string::npos;
   }
   ExpectTrue(threw, "center pull deadband should be smaller than the envelope minimum half-width");
+
+  config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "vertical_envelope_center_sigma_mode", "gate_sigma");
+  ExpectTrue(
+    config.vertical_envelope_center_sigma_mode == offline_lc_minimal::VerticalEnvelopeCenterSigmaMode::kGateSigma,
+    "gate-sigma center pull mode should parse");
+
+  config = offline_lc_minimal::DefaultConfig();
+  threw = false;
+  try {
+    offline_lc_minimal::OverrideConfigField(config, "vertical_envelope_center_sigma_mode", "bogus");
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical envelope center sigma mode") != std::string::npos;
+  }
+  ExpectTrue(threw, "unknown center pull sigma mode should be rejected");
 }
 
 void TestInitialStaticVerticalBiasConfigValidation() {
@@ -1330,6 +1369,7 @@ int main() {
     RunTest("TestPhase16StaticRtkHeightAnchorConfigLoads", TestPhase16StaticRtkHeightAnchorConfigLoads);
     RunTest("TestPhase17BiasConsistentDvzConfigLoads", TestPhase17BiasConsistentDvzConfigLoads);
     RunTest("TestPhase18AttitudeRefBiasAwareDvzConfigLoads", TestPhase18AttitudeRefBiasAwareDvzConfigLoads);
+    RunTest("TestPhase19GateInsideRtkWeightConfigLoads", TestPhase19GateInsideRtkWeightConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

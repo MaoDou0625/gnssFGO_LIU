@@ -48,6 +48,11 @@ enum class VerticalConstraintMode : int {
   kEnvelope = 1,
 };
 
+enum class VerticalEnvelopeCenterSigmaMode : int {
+  kFixed = 0,
+  kGateSigma = 1,
+};
+
 enum class StateMeasSyncStatus : int {
   kDropped = 0,
   kSynchronizedI = 1,
@@ -118,6 +123,16 @@ inline std::string ToString(const VerticalConstraintMode mode) {
     case VerticalConstraintMode::kDirectZ:
     default:
       return "direct_z";
+  }
+}
+
+inline std::string ToString(const VerticalEnvelopeCenterSigmaMode mode) {
+  switch (mode) {
+    case VerticalEnvelopeCenterSigmaMode::kGateSigma:
+      return "gate_sigma";
+    case VerticalEnvelopeCenterSigmaMode::kFixed:
+    default:
+      return "fixed";
   }
 }
 
