@@ -266,6 +266,25 @@ def values_minus_reference(rows: list[dict[str, float]], key: str, reference: fl
     return [row[key] - reference for row in rows]
 
 
+def padded_axis_limits(
+    values: list[float],
+    min_span: float = 0.02,
+    padding_ratio: float = 0.08,
+) -> tuple[float, float] | None:
+    finite_values = [value for value in values if math.isfinite(value)]
+    if not finite_values:
+        return None
+    lower = min(finite_values)
+    upper = max(finite_values)
+    span = upper - lower
+    if span < min_span:
+        center = 0.5 * (lower + upper)
+        half_span = 0.5 * min_span
+        return center - half_span, center + half_span
+    padding = span * padding_ratio
+    return lower - padding, upper + padding
+
+
 def shade_static_and_dynamic(axis, context: PlotContext) -> None:
     if (
         context.dynamic_start_time_s is None or
@@ -328,9 +347,11 @@ def plot_alignment_continuity(
         shade_nhc_windows(axis, nhc_windows, context.reference_time_s)
         axis.grid(True, alpha=0.3)
 
+    optimized_up_delta = values_minus_reference(plot_rows, "up_m", up_reference_m)
+    height_axis_values = list(optimized_up_delta)
     axes[0].plot(
         x,
-        values_minus_reference(plot_rows, "up_m", up_reference_m),
+        optimized_up_delta,
         color="#1f77b4",
         linewidth=1.1,
         label="optimized up",
@@ -340,8 +361,12 @@ def plot_alignment_continuity(
         rtk_delta = values_minus_reference(envelope_rows, "rtk_up_m", up_reference_m)
         lower = [center - row["half_width_m"] for center, row in zip(rtk_delta, envelope_rows)]
         upper = [center + row["half_width_m"] for center, row in zip(rtk_delta, envelope_rows)]
+        height_axis_values.extend(rtk_delta)
         axes[0].plot(rtk_x, rtk_delta, color="#9467bd", linewidth=0.9, alpha=0.85, label="RTK up center")
         axes[0].fill_between(rtk_x, lower, upper, color="#9467bd", alpha=0.10, linewidth=0.0, label="RTK gate")
+    height_limits = padded_axis_limits(height_axis_values)
+    if height_limits is not None:
+        axes[0].set_ylim(*height_limits)
     axes[0].set_ylabel("Delta up [m]")
     axes[0].set_title("Up continuity from static alignment start")
     axes[0].legend(loc="upper left", ncol=3, fontsize=8)

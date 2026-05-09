@@ -91,6 +91,19 @@ class PlotAlignmentNavigationContinuityTests(unittest.TestCase):
 
             self.assertEqual(windows, [(10.0, 11.0)])
 
+    def test_padded_axis_limits_uses_height_values_without_gate_width(self) -> None:
+        limits = plot_alignment_navigation_continuity.padded_axis_limits([0.0, 0.02, -0.01, 0.01])
+
+        self.assertIsNotNone(limits)
+        self.assertGreater(limits[0], -0.05)
+        self.assertLess(limits[1], 0.05)
+
+    def test_padded_axis_limits_expands_tiny_ranges(self) -> None:
+        limits = plot_alignment_navigation_continuity.padded_axis_limits([0.001, 0.001])
+
+        self.assertIsNotNone(limits)
+        self.assertAlmostEqual(limits[1] - limits[0], 0.02, places=9)
+
 
 if __name__ == "__main__":
     unittest.main()
