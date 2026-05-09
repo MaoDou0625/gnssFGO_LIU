@@ -2,12 +2,14 @@
 
 #include <gtsam/linear/NoiseModel.h>
 
+#include "offline_lc_minimal/factor/StaticPositionHoldFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalPositionHoldFactor.h"
 
 namespace offline_lc_minimal {
 
 bool InitialStaticPositionConstraintBuilder::Enabled(const OfflineRunnerConfig &config) {
-  return config.enable_initial_static_vertical_position_hold;
+  return config.enable_initial_static_vertical_position_hold ||
+         config.enable_initial_static_position_hold;
 }
 
 bool InitialStaticPositionConstraintBuilder::AddVerticalPositionHold(
@@ -15,7 +17,7 @@ bool InitialStaticPositionConstraintBuilder::AddVerticalPositionHold(
   gtsam::NonlinearFactorGraph &graph,
   const gtsam::Key reference_pose_key,
   const gtsam::Key pose_key) {
-  if (!Enabled(config)) {
+  if (!config.enable_initial_static_vertical_position_hold) {
     return false;
   }
 
@@ -25,6 +27,24 @@ bool InitialStaticPositionConstraintBuilder::AddVerticalPositionHold(
     gtsam::noiseModel::Isotropic::Sigma(
       1,
       config.initial_static_vertical_position_hold_sigma_m)));
+  return true;
+}
+
+bool InitialStaticPositionConstraintBuilder::AddPositionHold(
+  const OfflineRunnerConfig &config,
+  gtsam::NonlinearFactorGraph &graph,
+  const gtsam::Key reference_pose_key,
+  const gtsam::Key pose_key) {
+  if (!config.enable_initial_static_position_hold) {
+    return false;
+  }
+
+  graph.add(factor::StaticPositionHoldFactor(
+    reference_pose_key,
+    pose_key,
+    gtsam::noiseModel::Isotropic::Sigma(
+      3,
+      config.initial_static_position_hold_sigma_m)));
   return true;
 }
 

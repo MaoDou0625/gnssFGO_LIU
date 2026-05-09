@@ -37,6 +37,7 @@ struct RunSummary {
   std::size_t initial_static_vertical_bias_prior_factor_count = 0;
   std::size_t initial_static_vertical_bias_gm_tightened_factor_count = 0;
   std::size_t initial_static_vertical_position_hold_factor_count = 0;
+  std::size_t initial_static_position_hold_factor_count = 0;
   std::size_t initial_static_rtk_height_reference_sample_count = 0;
   std::size_t initial_static_rtk_height_reference_factor_count = 0;
   std::size_t error_state_count = 0;
@@ -190,6 +191,8 @@ struct RunSummary {
         << initial_static_vertical_bias_gm_tightened_factor_count << '\n'
         << "initial_static_vertical_position_hold_factor_count="
         << initial_static_vertical_position_hold_factor_count << '\n'
+        << "initial_static_position_hold_factor_count="
+        << initial_static_position_hold_factor_count << '\n'
         << "initial_static_rtk_height_reference_sample_count="
         << initial_static_rtk_height_reference_sample_count << '\n'
         << "initial_static_rtk_height_reference_factor_count="

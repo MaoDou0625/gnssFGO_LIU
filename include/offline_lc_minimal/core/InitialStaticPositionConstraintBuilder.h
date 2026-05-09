@@ -15,6 +15,12 @@ class InitialStaticPositionConstraintBuilder {
     gtsam::NonlinearFactorGraph &graph,
     gtsam::Key reference_pose_key,
     gtsam::Key pose_key);
+
+  [[nodiscard]] static bool AddPositionHold(
+    const OfflineRunnerConfig &config,
+    gtsam::NonlinearFactorGraph &graph,
+    gtsam::Key reference_pose_key,
+    gtsam::Key pose_key);
 };
 
 }  // namespace offline_lc_minimal

@@ -784,6 +784,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         X(state_index))) {
         ++run_result.run_summary.initial_static_vertical_position_hold_factor_count;
       }
+      if (InitialStaticPositionConstraintBuilder::AddPositionHold(
+        config_,
+        graph,
+        X(0),
+        X(state_index))) {
+        ++run_result.run_summary.initial_static_position_hold_factor_count;
+      }
       if (InitialStaticRtkHeightConstraintBuilder::AddVerticalReference(
         initial_static_rtk_height_reference,
         config_,

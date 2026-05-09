@@ -101,6 +101,8 @@ struct OfflineRunnerConfig {
   double initial_static_vertical_bias_gm_sigma_mps2 = 1.96133e-7;
   bool enable_initial_static_vertical_position_hold = false;
   double initial_static_vertical_position_hold_sigma_m = 0.005;
+  bool enable_initial_static_position_hold = false;
+  double initial_static_position_hold_sigma_m = 0.005;
   bool enable_initial_static_rtk_height_reference = false;
   double initial_static_rtk_height_reference_sigma_m = 0.02;
   int initial_static_rtk_height_reference_min_sample_count = 5;

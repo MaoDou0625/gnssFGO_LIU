@@ -649,6 +649,37 @@ void TestPhase24ThreeCentimeterRtkGateConfigLoads() {
   ExpectTrue(config.enable_body_z_nhc_constraint, "phase24 should keep fixed-axis body-z NHC enabled");
 }
 
+void TestPhase25StaticHoldTightenedConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase25_static_hold_tightened.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase25 config should use envelope constraints");
+  ExpectTrue(
+    std::abs(config.gnss_vertical_fixed_sigma_m - 0.015) < 1e-15,
+    "phase25 should keep the 3cm RTK gate sigma");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_min_half_width_m - 0.03) < 1e-15,
+    "phase25 should keep the 3cm RTK gate minimum half-width");
+  ExpectTrue(
+    std::abs(config.initial_static_zupt_velocity_sigma_mps - 0.0005) < 1e-15,
+    "phase25 should tighten static ZUPT velocity sigma");
+  ExpectTrue(
+    !config.enable_initial_static_vertical_position_hold,
+    "phase25 should replace vertical-only static position hold");
+  ExpectTrue(
+    config.enable_initial_static_position_hold,
+    "phase25 should enable full 3D static position hold");
+  ExpectTrue(
+    std::abs(config.initial_static_position_hold_sigma_m - 0.001) < 1e-15,
+    "phase25 full static position hold sigma should be 1mm");
+  ExpectTrue(config.enable_vertical_envelope_center_pull, "phase25 should keep gate-inside RTK center pull");
+  ExpectTrue(config.enable_attitude_reference_constraint, "phase25 should keep attitude reference constraints");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase25 should keep fixed-axis body-z NHC enabled");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -956,6 +987,27 @@ void TestInitialStaticVerticalBiasConfigValidation() {
     threw = std::string(exception.what()).find("initial static subgraph") != std::string::npos;
   }
   ExpectTrue(threw, "static position hold should require the static subgraph");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_initial_static_position_hold = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("static_alignment_duration_s") != std::string::npos;
+  }
+  ExpectTrue(threw, "full static position hold should require a static alignment duration");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.static_alignment_duration_s = 100.0;
+  config.enable_initial_static_position_hold = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("initial static subgraph") != std::string::npos;
+  }
+  ExpectTrue(threw, "full static position hold should require the static subgraph");
 }
 
 void TestInitialStaticRtkHeightReferenceConfigValidation() {
@@ -1552,6 +1604,9 @@ int main() {
     RunTest(
       "TestPhase24ThreeCentimeterRtkGateConfigLoads",
       TestPhase24ThreeCentimeterRtkGateConfigLoads);
+    RunTest(
+      "TestPhase25StaticHoldTightenedConfigLoads",
+      TestPhase25StaticHoldTightenedConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

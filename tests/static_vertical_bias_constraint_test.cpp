@@ -17,6 +17,7 @@
 #include "offline_lc_minimal/core/InitialStaticBiasConstraintBuilder.h"
 #include "offline_lc_minimal/core/InitialStaticPositionConstraintBuilder.h"
 #include "offline_lc_minimal/core/InitialStaticRtkHeightConstraintBuilder.h"
+#include "offline_lc_minimal/factor/StaticPositionHoldFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalAccelBiasFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalPositionHoldFactor.h"
 
@@ -145,6 +146,44 @@ void TestStaticVerticalPositionHoldFactorUsesOnlyZ() {
   }
 }
 
+void TestStaticPositionHoldFactorUsesTranslationOnly() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(3, 1.0);
+  const offline_lc_minimal::factor::StaticPositionHoldFactor factor(
+    X(0),
+    X(1),
+    noise);
+  const gtsam::Pose3 reference_pose(gtsam::Rot3::RzRyRx(0.2, -0.1, 0.3), gtsam::Point3(10.0, -20.0, 5.0));
+  const gtsam::Pose3 same_position_pose(gtsam::Rot3::RzRyRx(-0.4, 0.5, -0.6), gtsam::Point3(10.0, -20.0, 5.0));
+  const gtsam::Pose3 shifted_pose(gtsam::Rot3(), gtsam::Point3(11.0, -22.0, 5.25));
+
+  gtsam::Matrix h_reference;
+  gtsam::Matrix h_pose;
+  const gtsam::Vector zero_residual =
+    factor.evaluateError(reference_pose, same_position_pose, h_reference, h_pose);
+  const gtsam::Vector shifted_residual = factor.evaluateError(reference_pose, shifted_pose);
+
+  ExpectNear(zero_residual.norm(), 0.0, 1e-12, "static position hold should ignore attitude");
+  ExpectNear(shifted_residual(0), 1.0, 1e-12, "static position hold x residual is wrong");
+  ExpectNear(shifted_residual(1), -2.0, 1e-12, "static position hold y residual is wrong");
+  ExpectNear(shifted_residual(2), 0.25, 1e-12, "static position hold z residual is wrong");
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      ExpectNear(h_reference(row, column), 0.0, 1e-12, "reference pose rotation Jacobian should be zero");
+      ExpectNear(h_pose(row, column), 0.0, 1e-12, "pose rotation Jacobian should be zero");
+      ExpectNear(
+        h_reference(row, column + 3),
+        -reference_pose.rotation().matrix()(row, column),
+        1e-12,
+        "reference pose translation Jacobian is wrong");
+      ExpectNear(
+        h_pose(row, column + 3),
+        same_position_pose.rotation().matrix()(row, column),
+        1e-12,
+        "pose translation Jacobian is wrong");
+    }
+  }
+}
+
 void TestInitialStaticPositionConstraintBuilderHonorsEnableFlag() {
   auto config = offline_lc_minimal::DefaultConfig();
   gtsam::NonlinearFactorGraph graph;
@@ -167,6 +206,24 @@ void TestInitialStaticPositionConstraintBuilderHonorsEnableFlag() {
       X(1));
   ExpectTrue(enabled_added, "enabled static position builder should report one factor");
   ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "enabled static position builder should add one factor");
+
+  const bool full_disabled_added =
+    offline_lc_minimal::InitialStaticPositionConstraintBuilder::AddPositionHold(
+      config,
+      graph,
+      X(0),
+      X(2));
+  ExpectTrue(!full_disabled_added, "disabled full static position builder should report no factor");
+
+  config.enable_initial_static_position_hold = true;
+  const bool full_enabled_added =
+    offline_lc_minimal::InitialStaticPositionConstraintBuilder::AddPositionHold(
+      config,
+      graph,
+      X(0),
+      X(2));
+  ExpectTrue(full_enabled_added, "enabled full static position builder should report one factor");
+  ExpectNear(static_cast<double>(graph.size()), 2.0, 0.0, "full static position builder should add one factor");
 }
 
 offline_lc_minimal::GnssSolutionSample MakeStaticRtkSample(const double time_s, const double up_m) {
@@ -251,6 +308,9 @@ int main() {
     RunTest(
       "TestStaticVerticalPositionHoldFactorUsesOnlyZ",
       TestStaticVerticalPositionHoldFactorUsesOnlyZ);
+    RunTest(
+      "TestStaticPositionHoldFactorUsesTranslationOnly",
+      TestStaticPositionHoldFactorUsesTranslationOnly);
     RunTest(
       "TestInitialStaticPositionConstraintBuilderHonorsEnableFlag",
       TestInitialStaticPositionConstraintBuilderHonorsEnableFlag);
