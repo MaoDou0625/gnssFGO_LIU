@@ -211,6 +211,25 @@ struct VerticalVelocityDeltaDiagnosticRow {
   double bias_delta_velocity_correction_mps = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct VerticalPositionVelocityConsistencyDiagnosticRow {
+  std::size_t state_index_i = 0;
+  std::size_t state_index_j = 0;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double dt_s = std::numeric_limits<double>::quiet_NaN();
+  std::string interval_type = "UNSET";
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+  double sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double initial_delta_z_m = std::numeric_limits<double>::quiet_NaN();
+  double initial_trapezoid_vz_integral_m = std::numeric_limits<double>::quiet_NaN();
+  double initial_mismatch_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_delta_z_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_trapezoid_vz_integral_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_mismatch_m = std::numeric_limits<double>::quiet_NaN();
+  double normalized_residual = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct AttitudeReferenceDiagnosticRow {
   std::size_t state_index = 0;
   double time_s = std::numeric_limits<double>::quiet_NaN();

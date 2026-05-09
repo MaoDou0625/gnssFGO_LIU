@@ -39,6 +39,7 @@
 #include "offline_lc_minimal/core/VerticalJumpImuMasker.h"
 #include "offline_lc_minimal/core/VerticalJumpShapeConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalMotionConstraintBuilder.h"
+#include "offline_lc_minimal/core/VerticalPositionVelocityConsistencyConstraintBuilder.h"
 #include "offline_lc_minimal/factor/AngularRateFactor.h"
 #include "offline_lc_minimal/factor/BiasGmTransitionFactor.h"
 #include "offline_lc_minimal/factor/GlobalAccelBiasFactor.h"
@@ -883,6 +884,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.vertical_velocity_delta_target_clamped_count = 0;
   run_result.run_summary.vertical_velocity_delta_bias_aware_target_enabled = false;
   run_result.run_summary.vertical_velocity_delta_bias_aware_factor_count = 0;
+  run_result.run_summary.vertical_position_velocity_consistency_factor_count = 0;
+  run_result.run_summary.vertical_position_velocity_consistency_skipped_invalid_count = 0;
   run_result.run_summary.attitude_reference_factor_count = 0;
   run_result.run_summary.body_z_nhc_velocity_factor_count = 0;
   run_result.run_summary.body_z_nhc_displacement_factor_count = 0;
@@ -912,6 +915,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.gnss_consistency_records.clear();
   run_result.vertical_envelope_diagnostics.clear();
   run_result.vertical_velocity_delta_diagnostics.clear();
+  run_result.vertical_position_velocity_consistency_diagnostics.clear();
   run_result.attitude_reference_diagnostics.clear();
   run_result.body_z_nhc_diagnostics.clear();
   run_result.vertical_jump_masked_imu_diagnostics.clear();
@@ -1015,6 +1019,19 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   vertical_motion_request.diagnostics = &run_result.vertical_velocity_delta_diagnostics;
   VerticalMotionConstraintBuilder(std::move(vertical_motion_request)).Build();
 
+  VerticalPositionVelocityConsistencyBuildRequest vertical_position_velocity_request;
+  vertical_position_velocity_request.config = &config_;
+  vertical_position_velocity_request.state_timestamps = &state_timestamps;
+  vertical_position_velocity_request.jump_windows = &run_result.body_z_seed_jump_windows;
+  vertical_position_velocity_request.initial_values = &optimization_initial_values;
+  vertical_position_velocity_request.dynamic_start_index = graph_timeline.dynamic_start_index;
+  vertical_position_velocity_request.graph = &graph_with_gnss;
+  vertical_position_velocity_request.run_summary = &run_result.run_summary;
+  vertical_position_velocity_request.diagnostics =
+    &run_result.vertical_position_velocity_consistency_diagnostics;
+  VerticalPositionVelocityConsistencyConstraintBuilder(
+    std::move(vertical_position_velocity_request)).Build();
+
   BodyZNHCConstraintBuildRequest body_z_nhc_request;
   body_z_nhc_request.config = &config_;
   body_z_nhc_request.state_timestamps = &state_timestamps;
@@ -1076,6 +1093,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateVerticalVelocityDeltaDiagnostics(
     optimized_values,
     run_result.vertical_velocity_delta_diagnostics);
+  PopulateVerticalPositionVelocityConsistencyDiagnostics(
+    optimized_values,
+    run_result.vertical_position_velocity_consistency_diagnostics,
+    run_result.run_summary);
   PopulateBodyZNHCDiagnostics(
     optimization_initial_values,
     optimized_values,

@@ -303,6 +303,10 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (config.vertical_velocity_delta_sigma_ceiling_mps < config.vertical_velocity_delta_sigma_floor_mps) {
     throw std::runtime_error("vertical velocity delta sigma ceiling must be >= floor");
   }
+  if (!std::isfinite(config.vertical_position_velocity_consistency_sigma_m) ||
+      config.vertical_position_velocity_consistency_sigma_m <= 0.0) {
+    throw std::runtime_error("vertical position-velocity consistency settings must be positive");
+  }
   if (config.attitude_reference_sigma_rad <= 0.0) {
     throw std::runtime_error("attitude reference settings must be positive");
   }
@@ -710,6 +714,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_velocity_delta_sigma_floor_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_sigma_ceiling_mps") {
     config.vertical_velocity_delta_sigma_ceiling_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_position_velocity_consistency_all_states") {
+    config.enable_vertical_position_velocity_consistency_all_states = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_position_velocity_consistency_sigma_m") {
+    config.vertical_position_velocity_consistency_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_attitude_reference_constraint") {
     config.enable_attitude_reference_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "attitude_reference_sigma_rad") {
@@ -1043,6 +1051,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.vertical_velocity_delta_sigma_floor_mps << '\n'
     << "vertical_velocity_delta_sigma_ceiling_mps="
     << config.vertical_velocity_delta_sigma_ceiling_mps << '\n'
+    << "enable_vertical_position_velocity_consistency_all_states="
+    << (config.enable_vertical_position_velocity_consistency_all_states ? "true" : "false") << '\n'
+    << "vertical_position_velocity_consistency_sigma_m="
+    << config.vertical_position_velocity_consistency_sigma_m << '\n'
     << "enable_attitude_reference_constraint="
     << (config.enable_attitude_reference_constraint ? "true" : "false") << '\n'
     << "attitude_reference_sigma_rad=" << config.attitude_reference_sigma_rad << '\n'

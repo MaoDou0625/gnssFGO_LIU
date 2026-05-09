@@ -503,6 +503,32 @@ void TestPhase19GateInsideRtkWeightConfigLoads() {
   ExpectTrue(config.enable_vertical_velocity_delta_initial_static_constraint, "phase19 should keep static dvz enabled");
   ExpectTrue(config.enable_attitude_reference_constraint, "phase19 should keep attitude reference constraints");
   ExpectTrue(config.enable_body_z_nhc_constraint, "phase19 should keep fixed-axis body-z NHC enabled");
+  ExpectTrue(
+    !config.enable_vertical_position_velocity_consistency_all_states,
+    "phase19 should not enable all-state position-velocity consistency");
+}
+
+void TestPhase20PositionVelocityConsistentHeightConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase20_pv_consistent_height.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase20 config should use envelope constraints");
+  ExpectTrue(config.enable_vertical_envelope_center_pull, "phase20 should keep gate-inside RTK center pull");
+  ExpectTrue(
+    config.vertical_envelope_center_sigma_mode == offline_lc_minimal::VerticalEnvelopeCenterSigmaMode::kGateSigma,
+    "phase20 center pull sigma should derive from gate sigma");
+  ExpectTrue(
+    config.enable_vertical_position_velocity_consistency_all_states,
+    "phase20 should enable all-state position-velocity consistency");
+  ExpectTrue(
+    std::abs(config.vertical_position_velocity_consistency_sigma_m - 0.001) < 1e-15,
+    "phase20 position-velocity consistency sigma should be 1 mm");
+  ExpectTrue(config.enable_vertical_velocity_delta_initial_static_constraint, "phase20 should keep static dvz enabled");
+  ExpectTrue(config.enable_attitude_reference_constraint, "phase20 should keep attitude reference constraints");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase20 should keep fixed-axis body-z NHC enabled");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
@@ -634,6 +660,17 @@ void TestVerticalVelocityDeltaConfigValidation() {
     threw = std::string(exception.what()).find("sigma ceiling") != std::string::npos;
   }
   ExpectTrue(threw, "velocity delta sigma ceiling below floor should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.vertical_position_velocity_consistency_sigma_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical position-velocity consistency settings") !=
+            std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive position-velocity consistency sigma should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_vertical_velocity_delta_constraint = true;
@@ -1370,6 +1407,9 @@ int main() {
     RunTest("TestPhase17BiasConsistentDvzConfigLoads", TestPhase17BiasConsistentDvzConfigLoads);
     RunTest("TestPhase18AttitudeRefBiasAwareDvzConfigLoads", TestPhase18AttitudeRefBiasAwareDvzConfigLoads);
     RunTest("TestPhase19GateInsideRtkWeightConfigLoads", TestPhase19GateInsideRtkWeightConfigLoads);
+    RunTest(
+      "TestPhase20PositionVelocityConsistentHeightConfigLoads",
+      TestPhase20PositionVelocityConsistentHeightConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

@@ -92,6 +92,8 @@ void VerticalJumpBiasConstraintBuilder::Build() const {
       request_.body_z_diagnostics,
       &segmenter_inputs});
   request_.diagnostics->reserve(request_.diagnostics->size() + segments.size());
+  const bool add_position_velocity_consistency =
+    !request_.config->enable_vertical_position_velocity_consistency_all_states;
   const auto position_velocity_noise = gtsam::noiseModel::Isotropic::Sigma(
     1,
     request_.config->vertical_jump_bias_position_velocity_sigma_m);
@@ -228,15 +230,17 @@ void VerticalJumpBiasConstraintBuilder::Build() const {
       ++row.velocity_factor_count;
       ++request_.run_summary->vertical_jump_bias_velocity_factor_count;
 
-      request_.graph->add(factor::VerticalPositionVelocityConsistencyFactor(
-        symbol::X(record.state_index_i),
-        symbol::V(record.state_index_i),
-        symbol::X(record.state_index_j),
-        symbol::V(record.state_index_j),
-        dt_s,
-        position_velocity_noise));
-      ++row.position_velocity_factor_count;
-      ++request_.run_summary->vertical_jump_bias_position_velocity_factor_count;
+      if (add_position_velocity_consistency) {
+        request_.graph->add(factor::VerticalPositionVelocityConsistencyFactor(
+          symbol::X(record.state_index_i),
+          symbol::V(record.state_index_i),
+          symbol::X(record.state_index_j),
+          symbol::V(record.state_index_j),
+          dt_s,
+          position_velocity_noise));
+        ++row.position_velocity_factor_count;
+        ++request_.run_summary->vertical_jump_bias_position_velocity_factor_count;
+      }
     }
 
     row.factor_added = true;

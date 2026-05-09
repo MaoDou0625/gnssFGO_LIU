@@ -458,6 +458,39 @@ void WriteVerticalVelocityDeltaDiagnosticsCsv(
   }
 }
 
+void WriteVerticalPositionVelocityConsistencyDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalPositionVelocityConsistencyDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "state_i,state_j,start_time_s,end_time_s,dt_s,interval_type,factor_added,skip_reason,"
+       "sigma_m,initial_delta_z_m,initial_trapezoid_vz_integral_m,initial_mismatch_m,"
+       "optimized_delta_z_m,optimized_trapezoid_vz_integral_m,optimized_mismatch_m,"
+       "normalized_residual\n";
+  for (const auto &row : rows) {
+    stream << row.state_index_i << ','
+           << row.state_index_j << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.dt_s << ','
+           << row.interval_type << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << row.sigma_m << ','
+           << row.initial_delta_z_m << ','
+           << row.initial_trapezoid_vz_integral_m << ','
+           << row.initial_mismatch_m << ','
+           << row.optimized_delta_z_m << ','
+           << row.optimized_trapezoid_vz_integral_m << ','
+           << row.optimized_mismatch_m << ','
+           << row.normalized_residual << '\n';
+  }
+}
+
 void WriteAttitudeReferenceDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<AttitudeReferenceDiagnosticRow> &rows) {

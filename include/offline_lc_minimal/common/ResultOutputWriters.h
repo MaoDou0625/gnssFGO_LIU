@@ -54,6 +54,10 @@ void WriteVerticalVelocityDeltaDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalVelocityDeltaDiagnosticRow> &rows);
 
+void WriteVerticalPositionVelocityConsistencyDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalPositionVelocityConsistencyDiagnosticRow> &rows);
+
 void WriteAttitudeReferenceDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<AttitudeReferenceDiagnosticRow> &rows);

@@ -400,6 +400,94 @@ void TestVerticalJumpBiasBuilderAddsPerIntervalFactors() {
   ExpectNear(diagnostics.front().residual_mps, 0.0, 1e-12, "jump-bias diagnostic residual is wrong");
 }
 
+void TestVerticalJumpBiasBuilderSkipsLocalPositionVelocityWhenAllStateEnabled() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  config.enable_vertical_position_velocity_consistency_all_states = true;
+  config.vertical_jump_bias_padding_s = 0.0;
+  const auto pim = MakePreintegratedMeasurements();
+
+  gtsam::NonlinearFactorGraph graph;
+  graph.add(gtsam::CombinedImuFactor(symbol::X(0), symbol::V(0), symbol::X(1), symbol::V(1), symbol::B(0), symbol::B(1), pim));
+  graph.add(gtsam::CombinedImuFactor(symbol::X(1), symbol::V(1), symbol::X(2), symbol::V(2), symbol::B(1), symbol::B(2), pim));
+  graph.add(gtsam::CombinedImuFactor(symbol::X(2), symbol::V(2), symbol::X(3), symbol::V(3), symbol::B(2), symbol::B(3), pim));
+  const std::vector<double> state_timestamps{0.0, 0.5, 1.0, 1.5};
+  const std::vector<offline_lc_minimal::VerticalJumpImuIntervalRecord> intervals{
+    {0, 1, 0.0, 0.5, 0, pim},
+    {1, 2, 0.5, 1.0, 1, pim},
+    {2, 3, 1.0, 1.5, 2, pim},
+  };
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> propagation_records{
+    {0, 1, 0.0, 0.5, -0.10},
+    {1, 2, 0.5, 1.0, -0.20},
+    {2, 3, 1.0, 1.5, -0.30},
+  };
+  std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(0.6, 1.2)};
+  windows.front().signed_delta_velocity_mps = -0.30;
+  gtsam::Values initial_values;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpBiasDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalJumpBiasConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.imu_intervals = &intervals;
+  request.propagation_records = &propagation_records;
+  request.graph = &graph;
+  request.initial_values = &initial_values;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalJumpBiasConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_velocity_factor_count),
+    2.0,
+    0.0,
+    "jump-bias velocity factors should still be added");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_bias_position_velocity_factor_count),
+    0.0,
+    0.0,
+    "global all-state consistency should suppress local jump-bias position-velocity factors");
+  ExpectNear(
+    static_cast<double>(diagnostics.front().position_velocity_factor_count),
+    0.0,
+    0.0,
+    "diagnostic local position-velocity count should be zero");
+}
+
+void TestVerticalJumpShapeSkipsLocalPositionVelocityWhenAllStateEnabled() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_position_velocity_consistency = true;
+  config.enable_vertical_position_velocity_consistency_all_states = true;
+  const std::vector<double> state_timestamps{0.0, 0.5, 1.0};
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(0.25, 0.75)};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpVelocityRampDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::VerticalJumpContinuityDiagnosticRow> continuity_diagnostics;
+
+  offline_lc_minimal::VerticalJumpShapeConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  request.continuity_diagnostics = &continuity_diagnostics;
+  offline_lc_minimal::VerticalJumpShapeConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 0.0, 0.0, "local jump-shape PV factors should be suppressed");
+  ExpectNear(
+    static_cast<double>(summary.vertical_jump_position_velocity_consistency_factor_count),
+    0.0,
+    0.0,
+    "local jump-shape PV count should stay zero");
+}
+
 void TestVerticalJumpBiasBuilderSkipsMissingDetectedBias() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -1674,6 +1762,12 @@ int main() {
     RunTest(
       "TestVerticalJumpBiasBuilderAddsPerIntervalFactors",
       TestVerticalJumpBiasBuilderAddsPerIntervalFactors);
+    RunTest(
+      "TestVerticalJumpBiasBuilderSkipsLocalPositionVelocityWhenAllStateEnabled",
+      TestVerticalJumpBiasBuilderSkipsLocalPositionVelocityWhenAllStateEnabled);
+    RunTest(
+      "TestVerticalJumpShapeSkipsLocalPositionVelocityWhenAllStateEnabled",
+      TestVerticalJumpShapeSkipsLocalPositionVelocityWhenAllStateEnabled);
     RunTest(
       "TestVerticalJumpBiasBuilderSkipsMissingDetectedBias",
       TestVerticalJumpBiasBuilderSkipsMissingDetectedBias);

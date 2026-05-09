@@ -56,6 +56,14 @@ struct RunSummary {
   double vertical_velocity_delta_sigma_max_mps = std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_velocity_delta_sigma_clamped_floor_count = 0;
   std::size_t vertical_velocity_delta_sigma_clamped_ceiling_count = 0;
+  std::size_t vertical_position_velocity_consistency_factor_count = 0;
+  std::size_t vertical_position_velocity_consistency_skipped_invalid_count = 0;
+  double vertical_position_velocity_consistency_max_abs_mismatch_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_position_velocity_consistency_static_dynamic_boundary_mismatch_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_position_velocity_consistency_jump_padding_max_abs_mismatch_m =
+    std::numeric_limits<double>::quiet_NaN();
   std::size_t attitude_reference_factor_count = 0;
   std::size_t body_z_nhc_velocity_factor_count = 0;
   std::size_t body_z_nhc_displacement_factor_count = 0;
@@ -206,6 +214,16 @@ struct RunSummary {
         << vertical_velocity_delta_sigma_clamped_floor_count << '\n'
         << "vertical_velocity_delta_sigma_clamped_ceiling_count="
         << vertical_velocity_delta_sigma_clamped_ceiling_count << '\n'
+        << "vertical_position_velocity_consistency_factor_count="
+        << vertical_position_velocity_consistency_factor_count << '\n'
+        << "vertical_position_velocity_consistency_skipped_invalid_count="
+        << vertical_position_velocity_consistency_skipped_invalid_count << '\n'
+        << "vertical_position_velocity_consistency_max_abs_mismatch_m="
+        << vertical_position_velocity_consistency_max_abs_mismatch_m << '\n'
+        << "vertical_position_velocity_consistency_static_dynamic_boundary_mismatch_m="
+        << vertical_position_velocity_consistency_static_dynamic_boundary_mismatch_m << '\n'
+        << "vertical_position_velocity_consistency_jump_padding_max_abs_mismatch_m="
+        << vertical_position_velocity_consistency_jump_padding_max_abs_mismatch_m << '\n'
         << "attitude_reference_factor_count=" << attitude_reference_factor_count << '\n'
         << "body_z_nhc_velocity_factor_count=" << body_z_nhc_velocity_factor_count << '\n'
         << "body_z_nhc_displacement_factor_count=" << body_z_nhc_displacement_factor_count << '\n'
@@ -339,6 +357,8 @@ struct OfflineRunResult {
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
   std::vector<StaticAlignmentValidationRow> static_alignment_validation;
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;
+  std::vector<VerticalPositionVelocityConsistencyDiagnosticRow>
+    vertical_position_velocity_consistency_diagnostics;
   std::vector<AttitudeReferenceDiagnosticRow> attitude_reference_diagnostics;
   std::vector<BodyZNHCDiagnosticRow> body_z_nhc_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;

@@ -133,7 +133,8 @@ void VerticalJumpShapeConstraintBuilder::Build() const {
   const bool add_context_mean_continuity =
     request_.config->enable_vertical_jump_context_mean_continuity;
   const bool add_position_velocity_consistency =
-    request_.config->enable_vertical_jump_position_velocity_consistency;
+    request_.config->enable_vertical_jump_position_velocity_consistency &&
+    !request_.config->enable_vertical_position_velocity_consistency_all_states;
   const bool add_velocity_height_slope =
     request_.config->enable_vertical_jump_velocity_height_slope_constraint;
   if (!add_velocity_ramp && !add_position_ramp && !add_velocity_continuity &&

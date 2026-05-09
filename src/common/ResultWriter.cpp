@@ -84,6 +84,11 @@ void ResultWriter::WriteOutputs(
       output_path / "vertical_velocity_delta_diagnostics.csv",
       result.vertical_velocity_delta_diagnostics);
   }
+  if (!result.vertical_position_velocity_consistency_diagnostics.empty()) {
+    WriteVerticalPositionVelocityConsistencyDiagnosticsCsv(
+      output_path / "vertical_position_velocity_consistency_diagnostics.csv",
+      result.vertical_position_velocity_consistency_diagnostics);
+  }
   if (!result.attitude_reference_diagnostics.empty()) {
     WriteAttitudeReferenceDiagnosticsCsv(
       output_path / "attitude_reference_diagnostics.csv",
