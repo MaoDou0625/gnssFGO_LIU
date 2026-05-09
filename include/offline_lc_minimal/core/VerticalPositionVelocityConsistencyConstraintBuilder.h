@@ -31,6 +31,8 @@ class VerticalPositionVelocityConsistencyConstraintBuilder {
   void Build() const;
 
  private:
+  void BuildAdjacentFactors() const;
+  void BuildWindowFactors() const;
   [[nodiscard]] bool OverlapsJumpPadding(double start_time_s, double end_time_s) const;
   [[nodiscard]] std::string IntervalType(
     std::size_t state_i,

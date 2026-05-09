@@ -885,7 +885,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.vertical_velocity_delta_bias_aware_target_enabled = false;
   run_result.run_summary.vertical_velocity_delta_bias_aware_factor_count = 0;
   run_result.run_summary.vertical_position_velocity_consistency_factor_count = 0;
+  run_result.run_summary.vertical_position_velocity_window_consistency_factor_count = 0;
   run_result.run_summary.vertical_position_velocity_consistency_skipped_invalid_count = 0;
+  run_result.run_summary.vertical_position_velocity_window_consistency_skipped_invalid_count = 0;
   run_result.run_summary.attitude_reference_factor_count = 0;
   run_result.run_summary.body_z_nhc_velocity_factor_count = 0;
   run_result.run_summary.body_z_nhc_displacement_factor_count = 0;

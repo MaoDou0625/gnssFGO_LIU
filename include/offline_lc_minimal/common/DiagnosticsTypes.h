@@ -212,11 +212,14 @@ struct VerticalVelocityDeltaDiagnosticRow {
 };
 
 struct VerticalPositionVelocityConsistencyDiagnosticRow {
+  std::string constraint_type = "adjacent";
   std::size_t state_index_i = 0;
   std::size_t state_index_j = 0;
+  std::size_t state_count = 0;
   double start_time_s = std::numeric_limits<double>::quiet_NaN();
   double end_time_s = std::numeric_limits<double>::quiet_NaN();
   double dt_s = std::numeric_limits<double>::quiet_NaN();
+  std::vector<double> state_times_s;
   std::string interval_type = "UNSET";
   bool factor_added = false;
   std::string skip_reason = "UNSET";

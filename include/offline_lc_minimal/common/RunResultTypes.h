@@ -57,8 +57,12 @@ struct RunSummary {
   std::size_t vertical_velocity_delta_sigma_clamped_floor_count = 0;
   std::size_t vertical_velocity_delta_sigma_clamped_ceiling_count = 0;
   std::size_t vertical_position_velocity_consistency_factor_count = 0;
+  std::size_t vertical_position_velocity_window_consistency_factor_count = 0;
   std::size_t vertical_position_velocity_consistency_skipped_invalid_count = 0;
+  std::size_t vertical_position_velocity_window_consistency_skipped_invalid_count = 0;
   double vertical_position_velocity_consistency_max_abs_mismatch_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_position_velocity_window_consistency_max_abs_mismatch_m =
     std::numeric_limits<double>::quiet_NaN();
   double vertical_position_velocity_consistency_static_dynamic_boundary_mismatch_m =
     std::numeric_limits<double>::quiet_NaN();
@@ -216,10 +220,16 @@ struct RunSummary {
         << vertical_velocity_delta_sigma_clamped_ceiling_count << '\n'
         << "vertical_position_velocity_consistency_factor_count="
         << vertical_position_velocity_consistency_factor_count << '\n'
+        << "vertical_position_velocity_window_consistency_factor_count="
+        << vertical_position_velocity_window_consistency_factor_count << '\n'
         << "vertical_position_velocity_consistency_skipped_invalid_count="
         << vertical_position_velocity_consistency_skipped_invalid_count << '\n'
+        << "vertical_position_velocity_window_consistency_skipped_invalid_count="
+        << vertical_position_velocity_window_consistency_skipped_invalid_count << '\n'
         << "vertical_position_velocity_consistency_max_abs_mismatch_m="
         << vertical_position_velocity_consistency_max_abs_mismatch_m << '\n'
+        << "vertical_position_velocity_window_consistency_max_abs_mismatch_m="
+        << vertical_position_velocity_window_consistency_max_abs_mismatch_m << '\n'
         << "vertical_position_velocity_consistency_static_dynamic_boundary_mismatch_m="
         << vertical_position_velocity_consistency_static_dynamic_boundary_mismatch_m << '\n'
         << "vertical_position_velocity_consistency_jump_padding_max_abs_mismatch_m="

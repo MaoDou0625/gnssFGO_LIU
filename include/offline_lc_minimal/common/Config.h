@@ -141,6 +141,10 @@ struct OfflineRunnerConfig {
   double vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
   bool enable_vertical_position_velocity_consistency_all_states = false;
   double vertical_position_velocity_consistency_sigma_m = 0.001;
+  bool enable_vertical_position_velocity_window_consistency = false;
+  double vertical_position_velocity_window_s = 1.0;
+  double vertical_position_velocity_window_stride_s = 0.5;
+  double vertical_position_velocity_window_sigma_m = 0.0005;
   bool enable_attitude_reference_constraint = false;
   double attitude_reference_sigma_rad = 0.01;
   bool enable_body_z_nhc_constraint = false;

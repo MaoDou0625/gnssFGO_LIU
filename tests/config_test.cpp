@@ -526,9 +526,43 @@ void TestPhase20PositionVelocityConsistentHeightConfigLoads() {
   ExpectTrue(
     std::abs(config.vertical_position_velocity_consistency_sigma_m - 0.001) < 1e-15,
     "phase20 position-velocity consistency sigma should be 1 mm");
+  ExpectTrue(
+    !config.enable_vertical_position_velocity_window_consistency,
+    "phase20 should not enable window position-velocity consistency");
   ExpectTrue(config.enable_vertical_velocity_delta_initial_static_constraint, "phase20 should keep static dvz enabled");
   ExpectTrue(config.enable_attitude_reference_constraint, "phase20 should keep attitude reference constraints");
   ExpectTrue(config.enable_body_z_nhc_constraint, "phase20 should keep fixed-axis body-z NHC enabled");
+}
+
+void TestPhase21PositionVelocityWindowConsistencyConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase21_pv_window_consistency.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase21 config should use envelope constraints");
+  ExpectTrue(
+    config.enable_vertical_position_velocity_consistency_all_states,
+    "phase21 should keep adjacent all-state position-velocity consistency");
+  ExpectTrue(
+    std::abs(config.vertical_position_velocity_consistency_sigma_m - 0.0001) < 1e-15,
+    "phase21 adjacent position-velocity consistency sigma should be 0.1 mm");
+  ExpectTrue(
+    config.enable_vertical_position_velocity_window_consistency,
+    "phase21 should enable window position-velocity consistency");
+  ExpectTrue(
+    std::abs(config.vertical_position_velocity_window_s - 1.0) < 1e-15,
+    "phase21 window duration should load");
+  ExpectTrue(
+    std::abs(config.vertical_position_velocity_window_stride_s - 0.5) < 1e-15,
+    "phase21 window stride should load");
+  ExpectTrue(
+    std::abs(config.vertical_position_velocity_window_sigma_m - 0.0005) < 1e-15,
+    "phase21 window sigma should load");
+  ExpectTrue(config.enable_vertical_envelope_center_pull, "phase21 should keep gate-inside RTK center pull");
+  ExpectTrue(config.enable_attitude_reference_constraint, "phase21 should keep attitude reference constraints");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase21 should keep fixed-axis body-z NHC enabled");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
@@ -671,6 +705,18 @@ void TestVerticalVelocityDeltaConfigValidation() {
             std::string::npos;
   }
   ExpectTrue(threw, "non-positive position-velocity consistency sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_vertical_position_velocity_window_consistency = true;
+  config.vertical_position_velocity_window_sigma_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical position-velocity window consistency settings") !=
+            std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive position-velocity window sigma should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_vertical_velocity_delta_constraint = true;
@@ -1410,6 +1456,9 @@ int main() {
     RunTest(
       "TestPhase20PositionVelocityConsistentHeightConfigLoads",
       TestPhase20PositionVelocityConsistentHeightConfigLoads);
+    RunTest(
+      "TestPhase21PositionVelocityWindowConsistencyConfigLoads",
+      TestPhase21PositionVelocityWindowConsistencyConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

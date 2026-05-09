@@ -307,6 +307,14 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_position_velocity_consistency_sigma_m <= 0.0) {
     throw std::runtime_error("vertical position-velocity consistency settings must be positive");
   }
+  if (!std::isfinite(config.vertical_position_velocity_window_s) ||
+      !std::isfinite(config.vertical_position_velocity_window_stride_s) ||
+      !std::isfinite(config.vertical_position_velocity_window_sigma_m) ||
+      config.vertical_position_velocity_window_s <= 0.0 ||
+      config.vertical_position_velocity_window_stride_s <= 0.0 ||
+      config.vertical_position_velocity_window_sigma_m <= 0.0) {
+    throw std::runtime_error("vertical position-velocity window consistency settings must be positive");
+  }
   if (config.attitude_reference_sigma_rad <= 0.0) {
     throw std::runtime_error("attitude reference settings must be positive");
   }
@@ -718,6 +726,14 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_vertical_position_velocity_consistency_all_states = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_position_velocity_consistency_sigma_m") {
     config.vertical_position_velocity_consistency_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_position_velocity_window_consistency") {
+    config.enable_vertical_position_velocity_window_consistency = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_position_velocity_window_s") {
+    config.vertical_position_velocity_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_position_velocity_window_stride_s") {
+    config.vertical_position_velocity_window_stride_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_position_velocity_window_sigma_m") {
+    config.vertical_position_velocity_window_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_attitude_reference_constraint") {
     config.enable_attitude_reference_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "attitude_reference_sigma_rad") {
@@ -1055,6 +1071,14 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.enable_vertical_position_velocity_consistency_all_states ? "true" : "false") << '\n'
     << "vertical_position_velocity_consistency_sigma_m="
     << config.vertical_position_velocity_consistency_sigma_m << '\n'
+    << "enable_vertical_position_velocity_window_consistency="
+    << (config.enable_vertical_position_velocity_window_consistency ? "true" : "false") << '\n'
+    << "vertical_position_velocity_window_s="
+    << config.vertical_position_velocity_window_s << '\n'
+    << "vertical_position_velocity_window_stride_s="
+    << config.vertical_position_velocity_window_stride_s << '\n'
+    << "vertical_position_velocity_window_sigma_m="
+    << config.vertical_position_velocity_window_sigma_m << '\n'
     << "enable_attitude_reference_constraint="
     << (config.enable_attitude_reference_constraint ? "true" : "false") << '\n'
     << "attitude_reference_sigma_rad=" << config.attitude_reference_sigma_rad << '\n'

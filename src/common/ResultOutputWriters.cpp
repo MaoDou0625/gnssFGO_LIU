@@ -467,13 +467,16 @@ void WriteVerticalPositionVelocityConsistencyDiagnosticsCsv(
   }
   stream << std::setprecision(17);
   stream
-    << "state_i,state_j,start_time_s,end_time_s,dt_s,interval_type,factor_added,skip_reason,"
+    << "constraint_type,state_i,state_j,state_count,start_time_s,end_time_s,dt_s,interval_type,"
+       "factor_added,skip_reason,"
        "sigma_m,initial_delta_z_m,initial_trapezoid_vz_integral_m,initial_mismatch_m,"
        "optimized_delta_z_m,optimized_trapezoid_vz_integral_m,optimized_mismatch_m,"
        "normalized_residual\n";
   for (const auto &row : rows) {
-    stream << row.state_index_i << ','
+    stream << row.constraint_type << ','
+           << row.state_index_i << ','
            << row.state_index_j << ','
+           << row.state_count << ','
            << row.start_time_s << ','
            << row.end_time_s << ','
            << row.dt_s << ','
