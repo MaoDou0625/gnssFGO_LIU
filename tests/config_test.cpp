@@ -620,6 +620,35 @@ void TestPhase23PointOneUgBiasStrengthConfigLoads() {
     "phase23 dvz jump padding should match body-z NHC jump padding");
 }
 
+void TestPhase24ThreeCentimeterRtkGateConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase24_3cm_rtk_gate.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase24 config should use envelope constraints");
+  ExpectTrue(
+    std::abs(config.gnss_vertical_fixed_sigma_m - 0.015) < 1e-15,
+    "phase24 fixed RTK vertical sigma should be 1.5cm");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_gate_sigma_multiple - 2.0) < 1e-15,
+    "phase24 should keep a 2-sigma RTK gate");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_min_half_width_m - 0.03) < 1e-15,
+    "phase24 RTK gate minimum half-width should be 3cm");
+  ExpectTrue(
+    config.vertical_envelope_center_sigma_mode ==
+      offline_lc_minimal::VerticalEnvelopeCenterSigmaMode::kGateSigma,
+    "phase24 center pull sigma should derive from the 3cm gate");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_center_deadband_m) < 1e-15,
+    "phase24 center pull should not use a deadband");
+  ExpectTrue(config.enable_vertical_envelope_center_pull, "phase24 should keep gate-inside RTK center pull");
+  ExpectTrue(config.enable_attitude_reference_constraint, "phase24 should keep attitude reference constraints");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase24 should keep fixed-axis body-z NHC enabled");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -1520,6 +1549,9 @@ int main() {
     RunTest(
       "TestPhase23PointOneUgBiasStrengthConfigLoads",
       TestPhase23PointOneUgBiasStrengthConfigLoads);
+    RunTest(
+      "TestPhase24ThreeCentimeterRtkGateConfigLoads",
+      TestPhase24ThreeCentimeterRtkGateConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
