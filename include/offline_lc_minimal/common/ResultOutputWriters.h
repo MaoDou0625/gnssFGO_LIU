@@ -62,6 +62,10 @@ void WriteAttitudeReferenceDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<AttitudeReferenceDiagnosticRow> &rows);
 
+void WriteBodyZHorizontalLeakageDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<BodyZHorizontalLeakageDiagnosticRow> &rows);
+
 void WriteBodyZNHCDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<BodyZNHCDiagnosticRow> &rows);

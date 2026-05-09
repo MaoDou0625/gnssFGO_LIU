@@ -680,6 +680,35 @@ void TestPhase25StaticHoldTightenedConfigLoads() {
   ExpectTrue(config.enable_body_z_nhc_constraint, "phase25 should keep fixed-axis body-z NHC enabled");
 }
 
+void TestPhase26LeakageCorrectedNHCConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase26_leakage_corrected_nhc.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase26 config should use envelope constraints");
+  ExpectTrue(config.enable_body_z_nhc_constraint, "phase26 should keep body-z NHC enabled");
+  ExpectTrue(
+    config.enable_body_z_nhc_global_weak_constraint,
+    "phase26 should enable outside-window body-z NHC");
+  ExpectTrue(
+    config.enable_body_z_nhc_horizontal_leakage_correction,
+    "phase26 should enable horizontal leakage correction");
+  ExpectTrue(
+    std::abs(config.body_z_nhc_global_velocity_sigma_mps - 0.02) < 1e-15,
+    "phase26 outside-window velocity sigma should be 0.02m/s");
+  ExpectTrue(
+    std::abs(config.body_z_nhc_global_displacement_sigma_m - 0.02) < 1e-15,
+    "phase26 outside-window displacement sigma should be 0.02m");
+  ExpectTrue(
+    std::abs(config.body_z_nhc_horizontal_leakage_min_speed_mps - 0.5) < 1e-15,
+    "phase26 leakage min speed should load");
+  ExpectTrue(
+    config.body_z_nhc_horizontal_leakage_min_sample_count == 30,
+    "phase26 leakage min sample count should load");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -1531,8 +1560,17 @@ void TestBodyZNHCConfigValidation() {
   offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_global_stride_s", "1.0");
   offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_global_velocity_sigma_mps", "0.05");
   offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_global_displacement_sigma_m", "0.05");
+  offline_lc_minimal::OverrideConfigField(config, "enable_body_z_nhc_horizontal_leakage_correction", "true");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_horizontal_leakage_min_speed_mps", "0.5");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_horizontal_leakage_min_sample_count", "30");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_horizontal_leakage_huber_sigma_mps", "0.02");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_horizontal_leakage_max_abs_coeff_rad", "0.02");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_nhc_horizontal_leakage_guard_s", "0.30");
   ExpectTrue(config.enable_body_z_nhc_constraint, "body-z NHC flag should load");
   ExpectTrue(config.enable_body_z_nhc_global_weak_constraint, "body-z NHC global flag should load");
+  ExpectTrue(
+    config.enable_body_z_nhc_horizontal_leakage_correction,
+    "body-z horizontal leakage flag should load");
   ExpectTrue(std::abs(config.body_z_nhc_global_window_s - 3.0) < 1e-12, "global NHC window should load");
 
   config = offline_lc_minimal::DefaultConfig();
@@ -1556,6 +1594,26 @@ void TestBodyZNHCConfigValidation() {
     threw = std::string(exception.what()).find("requires enable_body_z_nhc_constraint") != std::string::npos;
   }
   ExpectTrue(threw, "global body-z NHC should require the main NHC flag");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_nhc_horizontal_leakage_correction = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("requires enable_body_z_nhc_constraint") != std::string::npos;
+  }
+  ExpectTrue(threw, "body-z horizontal leakage should require the main NHC flag");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.body_z_nhc_horizontal_leakage_huber_sigma_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("horizontal leakage settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive horizontal leakage sigma should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   config.body_z_nhc_jump_velocity_sigma_mps = 0.0;
@@ -1607,6 +1665,9 @@ int main() {
     RunTest(
       "TestPhase25StaticHoldTightenedConfigLoads",
       TestPhase25StaticHoldTightenedConfigLoads);
+    RunTest(
+      "TestPhase26LeakageCorrectedNHCConfigLoads",
+      TestPhase26LeakageCorrectedNHCConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

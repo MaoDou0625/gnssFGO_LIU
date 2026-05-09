@@ -355,6 +355,22 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.body_z_nhc_global_displacement_sigma_m <= 0.0) {
     throw std::runtime_error("body-z NHC settings are invalid");
   }
+  if (!std::isfinite(config.body_z_nhc_horizontal_leakage_min_speed_mps) ||
+      config.body_z_nhc_horizontal_leakage_min_speed_mps < 0.0 ||
+      config.body_z_nhc_horizontal_leakage_min_sample_count <= 0 ||
+      !std::isfinite(config.body_z_nhc_horizontal_leakage_huber_sigma_mps) ||
+      config.body_z_nhc_horizontal_leakage_huber_sigma_mps <= 0.0 ||
+      !std::isfinite(config.body_z_nhc_horizontal_leakage_max_abs_coeff_rad) ||
+      config.body_z_nhc_horizontal_leakage_max_abs_coeff_rad <= 0.0 ||
+      !std::isfinite(config.body_z_nhc_horizontal_leakage_guard_s) ||
+      config.body_z_nhc_horizontal_leakage_guard_s < 0.0) {
+    throw std::runtime_error("body-z NHC horizontal leakage settings are invalid");
+  }
+  if (config.enable_body_z_nhc_horizontal_leakage_correction &&
+      !config.enable_body_z_nhc_constraint) {
+    throw std::runtime_error(
+      "enable_body_z_nhc_horizontal_leakage_correction requires enable_body_z_nhc_constraint");
+  }
   if (config.body_z_nhc_global_window_s < config.body_z_nhc_min_window_s) {
     throw std::runtime_error("body-z NHC global window must be at least the minimum window duration");
   }
@@ -769,6 +785,18 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.body_z_nhc_global_velocity_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "body_z_nhc_global_displacement_sigma_m") {
     config.body_z_nhc_global_displacement_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_body_z_nhc_horizontal_leakage_correction") {
+    config.enable_body_z_nhc_horizontal_leakage_correction = ParseBool(normalized_value);
+  } else if (normalized_key == "body_z_nhc_horizontal_leakage_min_speed_mps") {
+    config.body_z_nhc_horizontal_leakage_min_speed_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_nhc_horizontal_leakage_min_sample_count") {
+    config.body_z_nhc_horizontal_leakage_min_sample_count = ParseInt(normalized_value);
+  } else if (normalized_key == "body_z_nhc_horizontal_leakage_huber_sigma_mps") {
+    config.body_z_nhc_horizontal_leakage_huber_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_nhc_horizontal_leakage_max_abs_coeff_rad") {
+    config.body_z_nhc_horizontal_leakage_max_abs_coeff_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "body_z_nhc_horizontal_leakage_guard_s") {
+    config.body_z_nhc_horizontal_leakage_guard_s = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_jump_masked_imu") {
     config.enable_vertical_jump_masked_imu = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_jump_masked_imu_padding_s") {
@@ -1107,6 +1135,18 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "body_z_nhc_global_stride_s=" << config.body_z_nhc_global_stride_s << '\n'
     << "body_z_nhc_global_velocity_sigma_mps=" << config.body_z_nhc_global_velocity_sigma_mps << '\n'
     << "body_z_nhc_global_displacement_sigma_m=" << config.body_z_nhc_global_displacement_sigma_m << '\n'
+    << "enable_body_z_nhc_horizontal_leakage_correction="
+    << (config.enable_body_z_nhc_horizontal_leakage_correction ? "true" : "false") << '\n'
+    << "body_z_nhc_horizontal_leakage_min_speed_mps="
+    << config.body_z_nhc_horizontal_leakage_min_speed_mps << '\n'
+    << "body_z_nhc_horizontal_leakage_min_sample_count="
+    << config.body_z_nhc_horizontal_leakage_min_sample_count << '\n'
+    << "body_z_nhc_horizontal_leakage_huber_sigma_mps="
+    << config.body_z_nhc_horizontal_leakage_huber_sigma_mps << '\n'
+    << "body_z_nhc_horizontal_leakage_max_abs_coeff_rad="
+    << config.body_z_nhc_horizontal_leakage_max_abs_coeff_rad << '\n'
+    << "body_z_nhc_horizontal_leakage_guard_s="
+    << config.body_z_nhc_horizontal_leakage_guard_s << '\n'
     << "enable_vertical_jump_masked_imu=" << (config.enable_vertical_jump_masked_imu ? "true" : "false") << '\n'
     << "vertical_jump_masked_imu_padding_s=" << config.vertical_jump_masked_imu_padding_s << '\n'
     << "enable_vertical_jump_impulse=" << (config.enable_vertical_jump_impulse ? "true" : "false") << '\n'

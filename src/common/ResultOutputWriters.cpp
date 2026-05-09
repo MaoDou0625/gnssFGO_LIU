@@ -537,10 +537,15 @@ void WriteBodyZNHCDiagnosticsCsv(
     << "window_index,window_type,from_jump_window,source_window_index,source_window_count,"
        "start_state_index,end_state_index,state_count,start_time_s,end_time_s,duration_s,"
        "actual_state_span_s,factor_added,skip_reason,velocity_factor_count,displacement_factor_count,"
-        "velocity_sigma_mps,displacement_sigma_m,initial_mean_abs_body_z_velocity_mps,"
+        "velocity_sigma_mps,displacement_sigma_m,horizontal_leakage_correction_enabled,"
+        "horizontal_leakage_x_rad,horizontal_leakage_y_rad,initial_mean_abs_body_z_velocity_mps,"
         "initial_max_abs_body_z_velocity_mps,initial_body_z_displacement_m,"
+        "initial_mean_abs_corrected_body_z_velocity_mps,"
+        "initial_max_abs_corrected_body_z_velocity_mps,initial_corrected_body_z_displacement_m,"
         "optimized_mean_abs_body_z_velocity_mps,optimized_max_abs_body_z_velocity_mps,"
         "optimized_body_z_displacement_m,optimized_pose_mean_abs_body_z_velocity_mps,"
+        "optimized_mean_abs_corrected_body_z_velocity_mps,"
+        "optimized_max_abs_corrected_body_z_velocity_mps,optimized_corrected_body_z_displacement_m,"
         "optimized_pose_max_abs_body_z_velocity_mps,optimized_pose_body_z_displacement_m,"
         "optimized_pitch_range_rad,optimized_roll_range_rad,max_velocity_residual_mps,"
         "displacement_residual_m\n";
@@ -563,19 +568,64 @@ void WriteBodyZNHCDiagnosticsCsv(
            << row.displacement_factor_count << ','
            << row.velocity_sigma_mps << ','
            << row.displacement_sigma_m << ','
+           << (row.horizontal_leakage_correction_enabled ? 1 : 0) << ','
+           << row.horizontal_leakage_x_rad << ','
+           << row.horizontal_leakage_y_rad << ','
            << row.initial_mean_abs_body_z_velocity_mps << ','
            << row.initial_max_abs_body_z_velocity_mps << ','
            << row.initial_body_z_displacement_m << ','
+           << row.initial_mean_abs_corrected_body_z_velocity_mps << ','
+           << row.initial_max_abs_corrected_body_z_velocity_mps << ','
+           << row.initial_corrected_body_z_displacement_m << ','
             << row.optimized_mean_abs_body_z_velocity_mps << ','
             << row.optimized_max_abs_body_z_velocity_mps << ','
             << row.optimized_body_z_displacement_m << ','
             << row.optimized_pose_mean_abs_body_z_velocity_mps << ','
+            << row.optimized_mean_abs_corrected_body_z_velocity_mps << ','
+            << row.optimized_max_abs_corrected_body_z_velocity_mps << ','
+            << row.optimized_corrected_body_z_displacement_m << ','
             << row.optimized_pose_max_abs_body_z_velocity_mps << ','
             << row.optimized_pose_body_z_displacement_m << ','
             << row.optimized_pitch_range_rad << ','
             << row.optimized_roll_range_rad << ','
             << row.max_velocity_residual_mps << ','
             << row.displacement_residual_m << '\n';
+  }
+}
+
+void WriteBodyZHorizontalLeakageDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<BodyZHorizontalLeakageDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "enabled,estimate_valid,velocity_source,skip_reason,candidate_sample_count,"
+       "used_sample_count,skipped_window_count,skipped_low_speed_count,skipped_invalid_count,"
+       "min_speed_mps,huber_sigma_mps,max_abs_coeff_rad,leak_x_rad,leak_y_rad,"
+       "raw_rms_body_z_mps,raw_max_abs_body_z_mps,corrected_rms_body_z_mps,"
+       "corrected_max_abs_body_z_mps\n";
+  for (const auto &row : rows) {
+    stream << (row.enabled ? 1 : 0) << ','
+           << (row.estimate_valid ? 1 : 0) << ','
+           << row.velocity_source << ','
+           << row.skip_reason << ','
+           << row.candidate_sample_count << ','
+           << row.used_sample_count << ','
+           << row.skipped_window_count << ','
+           << row.skipped_low_speed_count << ','
+           << row.skipped_invalid_count << ','
+           << row.min_speed_mps << ','
+           << row.huber_sigma_mps << ','
+           << row.max_abs_coeff_rad << ','
+           << row.leak_x_rad << ','
+           << row.leak_y_rad << ','
+           << row.raw_rms_body_z_mps << ','
+           << row.raw_max_abs_body_z_mps << ','
+           << row.corrected_rms_body_z_mps << ','
+           << row.corrected_max_abs_body_z_mps << '\n';
   }
 }
 
@@ -589,7 +639,9 @@ void WriteBodyZNHCStateDiagnosticsCsv(
   stream << std::setprecision(17);
   stream
     << "window_index,state_index,time_s,fixed_axis_x,fixed_axis_y,fixed_axis_z,"
-       "vx_mps,vy_mps,vz_mps,horizontal_speed_mps,fixed_horizontal_projection_mps,"
+       "vx_mps,vy_mps,vz_mps,horizontal_speed_mps,v_body_x_mps,v_body_y_mps,"
+       "raw_v_body_z_mps,horizontal_leakage_x_rad,horizontal_leakage_y_rad,"
+       "leakage_correction_mps,corrected_v_body_z_mps,fixed_horizontal_projection_mps,"
        "fixed_vertical_projection_mps,fixed_body_z_velocity_mps,optimized_pose_axis_x,"
        "optimized_pose_axis_y,optimized_pose_axis_z,optimized_pose_horizontal_projection_mps,"
        "optimized_pose_vertical_projection_mps,optimized_pose_body_z_velocity_mps\n";
@@ -604,6 +656,13 @@ void WriteBodyZNHCStateDiagnosticsCsv(
            << row.vy_mps << ','
            << row.vz_mps << ','
            << row.horizontal_speed_mps << ','
+           << row.v_body_x_mps << ','
+           << row.v_body_y_mps << ','
+           << row.raw_v_body_z_mps << ','
+           << row.horizontal_leakage_x_rad << ','
+           << row.horizontal_leakage_y_rad << ','
+           << row.leakage_correction_mps << ','
+           << row.corrected_v_body_z_mps << ','
            << row.fixed_horizontal_projection_mps << ','
            << row.fixed_vertical_projection_mps << ','
            << row.fixed_body_z_velocity_mps << ','

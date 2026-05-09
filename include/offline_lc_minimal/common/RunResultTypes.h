@@ -75,6 +75,19 @@ struct RunSummary {
   std::size_t body_z_nhc_window_count = 0;
   std::size_t body_z_nhc_skipped_short_window_count = 0;
   std::size_t body_z_nhc_skipped_invalid_count = 0;
+  bool body_z_nhc_horizontal_leakage_correction_enabled = false;
+  bool body_z_nhc_horizontal_leakage_estimate_valid = false;
+  std::size_t body_z_nhc_horizontal_leakage_sample_count = 0;
+  std::size_t body_z_nhc_horizontal_leakage_skipped_window_count = 0;
+  std::size_t body_z_nhc_horizontal_leakage_skipped_low_speed_count = 0;
+  std::size_t body_z_nhc_horizontal_leakage_skipped_invalid_count = 0;
+  std::size_t body_z_nhc_leakage_corrected_velocity_factor_count = 0;
+  std::size_t body_z_nhc_leakage_corrected_displacement_factor_count = 0;
+  double body_z_nhc_horizontal_leakage_x_rad = std::numeric_limits<double>::quiet_NaN();
+  double body_z_nhc_horizontal_leakage_y_rad = std::numeric_limits<double>::quiet_NaN();
+  double body_z_nhc_corrected_max_velocity_residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double body_z_nhc_corrected_max_abs_displacement_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_jump_combined_imu_factor_count = 0;
   std::size_t vertical_jump_masked_imu_factor_count = 0;
   std::size_t vertical_jump_impulse_factor_count = 0;
@@ -243,6 +256,28 @@ struct RunSummary {
         << "body_z_nhc_window_count=" << body_z_nhc_window_count << '\n'
         << "body_z_nhc_skipped_short_window_count=" << body_z_nhc_skipped_short_window_count << '\n'
         << "body_z_nhc_skipped_invalid_count=" << body_z_nhc_skipped_invalid_count << '\n'
+        << "body_z_nhc_horizontal_leakage_correction_enabled="
+        << (body_z_nhc_horizontal_leakage_correction_enabled ? "true" : "false") << '\n'
+        << "body_z_nhc_horizontal_leakage_estimate_valid="
+        << (body_z_nhc_horizontal_leakage_estimate_valid ? "true" : "false") << '\n'
+        << "body_z_nhc_horizontal_leakage_sample_count="
+        << body_z_nhc_horizontal_leakage_sample_count << '\n'
+        << "body_z_nhc_horizontal_leakage_skipped_window_count="
+        << body_z_nhc_horizontal_leakage_skipped_window_count << '\n'
+        << "body_z_nhc_horizontal_leakage_skipped_low_speed_count="
+        << body_z_nhc_horizontal_leakage_skipped_low_speed_count << '\n'
+        << "body_z_nhc_horizontal_leakage_skipped_invalid_count="
+        << body_z_nhc_horizontal_leakage_skipped_invalid_count << '\n'
+        << "body_z_nhc_leakage_corrected_velocity_factor_count="
+        << body_z_nhc_leakage_corrected_velocity_factor_count << '\n'
+        << "body_z_nhc_leakage_corrected_displacement_factor_count="
+        << body_z_nhc_leakage_corrected_displacement_factor_count << '\n'
+        << "body_z_nhc_horizontal_leakage_x_rad=" << body_z_nhc_horizontal_leakage_x_rad << '\n'
+        << "body_z_nhc_horizontal_leakage_y_rad=" << body_z_nhc_horizontal_leakage_y_rad << '\n'
+        << "body_z_nhc_corrected_max_velocity_residual_mps="
+        << body_z_nhc_corrected_max_velocity_residual_mps << '\n'
+        << "body_z_nhc_corrected_max_abs_displacement_residual_m="
+        << body_z_nhc_corrected_max_abs_displacement_residual_m << '\n'
         << "vertical_jump_combined_imu_factor_count=" << vertical_jump_combined_imu_factor_count << '\n'
         << "vertical_jump_masked_imu_factor_count=" << vertical_jump_masked_imu_factor_count << '\n'
         << "vertical_jump_impulse_factor_count=" << vertical_jump_impulse_factor_count << '\n'
@@ -373,6 +408,7 @@ struct OfflineRunResult {
   std::vector<VerticalPositionVelocityConsistencyDiagnosticRow>
     vertical_position_velocity_consistency_diagnostics;
   std::vector<AttitudeReferenceDiagnosticRow> attitude_reference_diagnostics;
+  std::vector<BodyZHorizontalLeakageDiagnosticRow> body_z_nhc_horizontal_leakage_diagnostics;
   std::vector<BodyZNHCDiagnosticRow> body_z_nhc_diagnostics;
   std::vector<BodyZNHCStateDiagnosticRow> body_z_nhc_state_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;

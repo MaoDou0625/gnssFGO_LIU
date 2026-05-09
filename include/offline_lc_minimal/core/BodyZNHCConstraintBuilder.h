@@ -18,10 +18,12 @@ struct BodyZNHCConstraintBuildRequest {
   const std::vector<double> *state_timestamps = nullptr;
   const std::vector<BodyZSeedJumpWindowRow> *jump_windows = nullptr;
   const gtsam::Values *initial_values = nullptr;
+  const std::vector<ReferenceNodeState> *reference_states = nullptr;
   std::size_t dynamic_start_index = 0;
   gtsam::NonlinearFactorGraph *graph = nullptr;
   RunSummary *run_summary = nullptr;
   std::vector<BodyZNHCDiagnosticRow> *diagnostics = nullptr;
+  std::vector<BodyZHorizontalLeakageDiagnosticRow> *horizontal_leakage_diagnostics = nullptr;
 };
 
 class BodyZNHCConstraintBuilder {
@@ -56,6 +58,8 @@ void PopulateBodyZNHCDiagnostics(
   const gtsam::Values &optimized_values,
   const std::vector<double> &state_timestamps,
   std::vector<BodyZNHCDiagnosticRow> &diagnostics,
-  std::vector<BodyZNHCStateDiagnosticRow> *state_diagnostics = nullptr);
+  std::vector<BodyZNHCStateDiagnosticRow> *state_diagnostics = nullptr,
+  const std::vector<ReferenceNodeState> *reference_states = nullptr,
+  RunSummary *run_summary = nullptr);
 
 }  // namespace offline_lc_minimal

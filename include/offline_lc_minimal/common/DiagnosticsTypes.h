@@ -246,6 +246,27 @@ struct AttitudeReferenceDiagnosticRow {
   double residual_norm_rad = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct BodyZHorizontalLeakageDiagnosticRow {
+  bool enabled = false;
+  bool estimate_valid = false;
+  std::string velocity_source = "UNSET";
+  std::string skip_reason = "UNSET";
+  std::size_t candidate_sample_count = 0;
+  std::size_t used_sample_count = 0;
+  std::size_t skipped_window_count = 0;
+  std::size_t skipped_low_speed_count = 0;
+  std::size_t skipped_invalid_count = 0;
+  double min_speed_mps = std::numeric_limits<double>::quiet_NaN();
+  double huber_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double max_abs_coeff_rad = std::numeric_limits<double>::quiet_NaN();
+  double leak_x_rad = std::numeric_limits<double>::quiet_NaN();
+  double leak_y_rad = std::numeric_limits<double>::quiet_NaN();
+  double raw_rms_body_z_mps = std::numeric_limits<double>::quiet_NaN();
+  double raw_max_abs_body_z_mps = std::numeric_limits<double>::quiet_NaN();
+  double corrected_rms_body_z_mps = std::numeric_limits<double>::quiet_NaN();
+  double corrected_max_abs_body_z_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct BodyZNHCDiagnosticRow {
   std::size_t window_index = 0;
   std::string window_type = "UNSET";
@@ -265,12 +286,21 @@ struct BodyZNHCDiagnosticRow {
   std::size_t displacement_factor_count = 0;
   double velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
   double displacement_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  bool horizontal_leakage_correction_enabled = false;
+  double horizontal_leakage_x_rad = std::numeric_limits<double>::quiet_NaN();
+  double horizontal_leakage_y_rad = std::numeric_limits<double>::quiet_NaN();
   double initial_mean_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
   double initial_max_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
   double initial_body_z_displacement_m = std::numeric_limits<double>::quiet_NaN();
+  double initial_mean_abs_corrected_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double initial_max_abs_corrected_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double initial_corrected_body_z_displacement_m = std::numeric_limits<double>::quiet_NaN();
   double optimized_mean_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
   double optimized_max_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
   double optimized_body_z_displacement_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_mean_abs_corrected_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_max_abs_corrected_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_corrected_body_z_displacement_m = std::numeric_limits<double>::quiet_NaN();
   double optimized_pose_mean_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
   double optimized_pose_max_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
   double optimized_pose_body_z_displacement_m = std::numeric_limits<double>::quiet_NaN();
@@ -291,6 +321,13 @@ struct BodyZNHCStateDiagnosticRow {
   double vy_mps = std::numeric_limits<double>::quiet_NaN();
   double vz_mps = std::numeric_limits<double>::quiet_NaN();
   double horizontal_speed_mps = std::numeric_limits<double>::quiet_NaN();
+  double v_body_x_mps = std::numeric_limits<double>::quiet_NaN();
+  double v_body_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double raw_v_body_z_mps = std::numeric_limits<double>::quiet_NaN();
+  double horizontal_leakage_x_rad = std::numeric_limits<double>::quiet_NaN();
+  double horizontal_leakage_y_rad = std::numeric_limits<double>::quiet_NaN();
+  double leakage_correction_mps = std::numeric_limits<double>::quiet_NaN();
+  double corrected_v_body_z_mps = std::numeric_limits<double>::quiet_NaN();
   double fixed_horizontal_projection_mps = std::numeric_limits<double>::quiet_NaN();
   double fixed_vertical_projection_mps = std::numeric_limits<double>::quiet_NaN();
   double fixed_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();

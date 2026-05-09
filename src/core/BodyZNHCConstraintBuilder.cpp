@@ -11,6 +11,9 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
 
+#include "offline_lc_minimal/core/BodyZHorizontalLeakageEstimator.h"
+#include "offline_lc_minimal/factor/BodyZLeakageCorrectedVelocityFactor.h"
+#include "offline_lc_minimal/factor/BodyZLeakageCorrectedWindowDisplacementFactor.h"
 #include "offline_lc_minimal/factor/BodyZVelocityZeroFactor.h"
 #include "offline_lc_minimal/factor/BodyZWindowDisplacementZeroFactor.h"
 
@@ -35,6 +38,12 @@ struct BodyZNHCMetrics {
   double max_abs_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
   double body_z_displacement_m = std::numeric_limits<double>::quiet_NaN();
 };
+
+bool HasReferenceStates(
+  const std::vector<ReferenceNodeState> *reference_states,
+  const std::vector<double> &state_timestamps) {
+  return reference_states != nullptr && reference_states->size() == state_timestamps.size();
+}
 
 std::optional<BodyZNHCMetrics> ComputeMetrics(
   const gtsam::Values &values,
@@ -92,6 +101,63 @@ std::optional<BodyZNHCMetrics> ComputeMetrics(
   return metrics;
 }
 
+std::optional<BodyZNHCMetrics> ComputeCorrectedMetrics(
+  const gtsam::Values &values,
+  const std::vector<double> &state_timestamps,
+  const std::vector<std::size_t> &state_indices,
+  const std::vector<factor::BodyFrameAxesNav> &body_axes_nav,
+  const factor::BodyZHorizontalLeakageModel &leakage) {
+  if (state_indices.size() < 2U) {
+    return std::nullopt;
+  }
+  if (body_axes_nav.size() != state_indices.size()) {
+    return std::nullopt;
+  }
+
+  std::vector<double> corrected_velocities_mps;
+  corrected_velocities_mps.reserve(state_indices.size());
+  for (std::size_t offset = 0U; offset < state_indices.size(); ++offset) {
+    const std::size_t state_index = state_indices[offset];
+    if (state_index >= state_timestamps.size()) {
+      return std::nullopt;
+    }
+    const auto velocity = values.at<gtsam::Vector3>(symbol::V(state_index));
+    const double corrected_velocity_mps =
+      factor::BodyZLeakageCorrectedVelocityMps(body_axes_nav[offset], leakage, velocity);
+    if (!std::isfinite(corrected_velocity_mps)) {
+      return std::nullopt;
+    }
+    corrected_velocities_mps.push_back(corrected_velocity_mps);
+  }
+
+  double abs_sum = 0.0;
+  double max_abs = 0.0;
+  for (const double corrected_velocity_mps : corrected_velocities_mps) {
+    const double abs_velocity = std::abs(corrected_velocity_mps);
+    abs_sum += abs_velocity;
+    max_abs = std::max(max_abs, abs_velocity);
+  }
+
+  double displacement_m = 0.0;
+  for (std::size_t index = 1U; index < state_indices.size(); ++index) {
+    const double prev_time_s = state_timestamps[state_indices[index - 1U]];
+    const double current_time_s = state_timestamps[state_indices[index]];
+    const double dt_s = current_time_s - prev_time_s;
+    if (!std::isfinite(dt_s) || dt_s <= 0.0) {
+      return std::nullopt;
+    }
+    displacement_m +=
+      0.5 * dt_s * (corrected_velocities_mps[index - 1U] + corrected_velocities_mps[index]);
+  }
+
+  BodyZNHCMetrics metrics;
+  metrics.mean_abs_body_z_velocity_mps =
+    abs_sum / static_cast<double>(corrected_velocities_mps.size());
+  metrics.max_abs_body_z_velocity_mps = max_abs;
+  metrics.body_z_displacement_m = displacement_m;
+  return metrics;
+}
+
 std::optional<BodyZNHCMetrics> ComputePoseBodyZMetrics(
   const gtsam::Values &values,
   const std::vector<double> &state_timestamps,
@@ -121,6 +187,39 @@ std::optional<std::vector<gtsam::Vector3>> BodyZAxesNavFromInitialValues(
     } catch (const std::exception &) {
       return std::nullopt;
     }
+  }
+  return body_z_axes_nav;
+}
+
+std::optional<std::vector<factor::BodyFrameAxesNav>> BodyFrameAxesNavFromStateSource(
+  const gtsam::Values &initial_values,
+  const std::vector<double> &state_timestamps,
+  const std::vector<ReferenceNodeState> *reference_states,
+  const std::vector<std::size_t> &state_indices,
+  const bool prefer_reference_states) {
+  std::vector<factor::BodyFrameAxesNav> body_axes_nav;
+  body_axes_nav.reserve(state_indices.size());
+  const bool use_reference_states =
+    prefer_reference_states && HasReferenceStates(reference_states, state_timestamps);
+  for (const std::size_t state_index : state_indices) {
+    try {
+      const gtsam::Pose3 pose = use_reference_states
+        ? (*reference_states)[state_index].pose
+        : initial_values.at<gtsam::Pose3>(symbol::X(state_index));
+      body_axes_nav.push_back(factor::BodyFrameAxesNavFromPose(pose));
+    } catch (const std::exception &) {
+      return std::nullopt;
+    }
+  }
+  return body_axes_nav;
+}
+
+std::vector<gtsam::Vector3> BodyZAxesFromBodyFrameAxes(
+  const std::vector<factor::BodyFrameAxesNav> &body_axes_nav) {
+  std::vector<gtsam::Vector3> body_z_axes_nav;
+  body_z_axes_nav.reserve(body_axes_nav.size());
+  for (const auto &axes : body_axes_nav) {
+    body_z_axes_nav.push_back(axes.body_z_axis_nav);
   }
   return body_z_axes_nav;
 }
@@ -174,6 +273,35 @@ void BodyZNHCConstraintBuilder::Build() const {
   }
 
   std::vector<BodyZJumpConstraintWindow> windows = BuildJumpWindows();
+  BodyZHorizontalLeakageEstimate leakage_estimate;
+  if (request_.config->enable_body_z_nhc_horizontal_leakage_correction) {
+    BodyZHorizontalLeakageEstimateRequest leakage_request;
+    leakage_request.config = request_.config;
+    leakage_request.state_timestamps = request_.state_timestamps;
+    leakage_request.excluded_windows = &windows;
+    leakage_request.initial_values = request_.initial_values;
+    leakage_request.reference_states = request_.reference_states;
+    leakage_request.dynamic_start_index = request_.dynamic_start_index;
+    leakage_estimate = BodyZHorizontalLeakageEstimator(std::move(leakage_request)).Estimate();
+    if (request_.horizontal_leakage_diagnostics != nullptr) {
+      request_.horizontal_leakage_diagnostics->push_back(leakage_estimate.diagnostic);
+    }
+    request_.run_summary->body_z_nhc_horizontal_leakage_correction_enabled = true;
+    request_.run_summary->body_z_nhc_horizontal_leakage_estimate_valid = leakage_estimate.valid;
+    request_.run_summary->body_z_nhc_horizontal_leakage_sample_count =
+      leakage_estimate.diagnostic.used_sample_count;
+    request_.run_summary->body_z_nhc_horizontal_leakage_skipped_window_count =
+      leakage_estimate.diagnostic.skipped_window_count;
+    request_.run_summary->body_z_nhc_horizontal_leakage_skipped_low_speed_count =
+      leakage_estimate.diagnostic.skipped_low_speed_count;
+    request_.run_summary->body_z_nhc_horizontal_leakage_skipped_invalid_count =
+      leakage_estimate.diagnostic.skipped_invalid_count;
+    request_.run_summary->body_z_nhc_horizontal_leakage_x_rad =
+      leakage_estimate.diagnostic.leak_x_rad;
+    request_.run_summary->body_z_nhc_horizontal_leakage_y_rad =
+      leakage_estimate.diagnostic.leak_y_rad;
+  }
+  const bool use_leakage_correction = leakage_estimate.valid;
   const std::vector<BodyZJumpConstraintWindow> global_windows = BuildGlobalWindows(windows);
   windows.insert(windows.end(), global_windows.begin(), global_windows.end());
   request_.diagnostics->reserve(request_.diagnostics->size() + windows.size());
@@ -219,13 +347,27 @@ void BodyZNHCConstraintBuilder::Build() const {
       request_.diagnostics->push_back(row);
       continue;
     }
+    const auto body_axes_nav = BodyFrameAxesNavFromStateSource(
+      *request_.initial_values,
+      *request_.state_timestamps,
+      request_.reference_states,
+      state_indices,
+      use_leakage_correction);
+    if (!body_axes_nav.has_value()) {
+      row.skip_reason = "INVALID_FIXED_AXES";
+      ++request_.run_summary->body_z_nhc_skipped_invalid_count;
+      request_.diagnostics->push_back(row);
+      continue;
+    }
+    const std::vector<gtsam::Vector3> effective_body_z_axes_nav =
+      BodyZAxesFromBodyFrameAxes(*body_axes_nav);
 
     const auto initial_metrics =
       ComputeMetrics(
         *request_.initial_values,
         *request_.state_timestamps,
         state_indices,
-        *body_z_axes_nav);
+        effective_body_z_axes_nav);
     if (!initial_metrics.has_value()) {
       row.skip_reason = "INVALID_METRICS";
       ++request_.run_summary->body_z_nhc_skipped_invalid_count;
@@ -235,6 +377,29 @@ void BodyZNHCConstraintBuilder::Build() const {
     row.initial_mean_abs_body_z_velocity_mps = initial_metrics->mean_abs_body_z_velocity_mps;
     row.initial_max_abs_body_z_velocity_mps = initial_metrics->max_abs_body_z_velocity_mps;
     row.initial_body_z_displacement_m = initial_metrics->body_z_displacement_m;
+    row.horizontal_leakage_correction_enabled = use_leakage_correction;
+    if (use_leakage_correction) {
+      row.horizontal_leakage_x_rad = leakage_estimate.model.leak_x_rad;
+      row.horizontal_leakage_y_rad = leakage_estimate.model.leak_y_rad;
+      const auto initial_corrected_metrics = ComputeCorrectedMetrics(
+        *request_.initial_values,
+        *request_.state_timestamps,
+        state_indices,
+        *body_axes_nav,
+        leakage_estimate.model);
+      if (!initial_corrected_metrics.has_value()) {
+        row.skip_reason = "INVALID_CORRECTED_METRICS";
+        ++request_.run_summary->body_z_nhc_skipped_invalid_count;
+        request_.diagnostics->push_back(row);
+        continue;
+      }
+      row.initial_mean_abs_corrected_body_z_velocity_mps =
+        initial_corrected_metrics->mean_abs_body_z_velocity_mps;
+      row.initial_max_abs_corrected_body_z_velocity_mps =
+        initial_corrected_metrics->max_abs_body_z_velocity_mps;
+      row.initial_corrected_body_z_displacement_m =
+        initial_corrected_metrics->body_z_displacement_m;
+    }
 
     std::vector<gtsam::Key> velocity_keys;
     std::vector<double> state_times_s;
@@ -244,18 +409,37 @@ void BodyZNHCConstraintBuilder::Build() const {
       const std::size_t state_index = state_indices[offset];
       velocity_keys.push_back(symbol::V(state_index));
       state_times_s.push_back((*request_.state_timestamps)[state_index]);
-      request_.graph->add(factor::BodyZVelocityZeroFactor(
-        symbol::V(state_index),
-        (*body_z_axes_nav)[offset],
-        gtsam::noiseModel::Isotropic::Sigma(1, velocity_sigma_mps)));
+      if (use_leakage_correction) {
+        request_.graph->add(factor::BodyZLeakageCorrectedVelocityZeroFactor(
+          symbol::V(state_index),
+          (*body_axes_nav)[offset],
+          leakage_estimate.model,
+          gtsam::noiseModel::Isotropic::Sigma(1, velocity_sigma_mps)));
+        ++request_.run_summary->body_z_nhc_leakage_corrected_velocity_factor_count;
+      } else {
+        request_.graph->add(factor::BodyZVelocityZeroFactor(
+          symbol::V(state_index),
+          effective_body_z_axes_nav[offset],
+          gtsam::noiseModel::Isotropic::Sigma(1, velocity_sigma_mps)));
+      }
       ++row.velocity_factor_count;
     }
 
-    request_.graph->add(factor::BodyZWindowDisplacementZeroFactor(
-      velocity_keys,
-      *body_z_axes_nav,
-      state_times_s,
-      gtsam::noiseModel::Isotropic::Sigma(1, displacement_sigma_m)));
+    if (use_leakage_correction) {
+      request_.graph->add(factor::BodyZLeakageCorrectedWindowDisplacementZeroFactor(
+        velocity_keys,
+        *body_axes_nav,
+        leakage_estimate.model,
+        state_times_s,
+        gtsam::noiseModel::Isotropic::Sigma(1, displacement_sigma_m)));
+      ++request_.run_summary->body_z_nhc_leakage_corrected_displacement_factor_count;
+    } else {
+      request_.graph->add(factor::BodyZWindowDisplacementZeroFactor(
+        velocity_keys,
+        effective_body_z_axes_nav,
+        state_times_s,
+        gtsam::noiseModel::Isotropic::Sigma(1, displacement_sigma_m)));
+    }
     row.displacement_factor_count = 1U;
     row.factor_added = true;
     row.skip_reason = "ADDED";
@@ -302,19 +486,36 @@ std::vector<BodyZJumpConstraintWindow> BodyZNHCConstraintBuilder::BuildGlobalWin
     return windows;
   }
 
-  double start_time_s = (*request_.state_timestamps)[request_.dynamic_start_index];
+  const double dynamic_start_time_s = (*request_.state_timestamps)[request_.dynamic_start_index];
   const double final_time_s = request_.state_timestamps->back();
-  while (start_time_s + request_.config->body_z_nhc_min_window_s <= final_time_s + kTimeEpsilonS) {
-    const double end_time_s =
-      std::min(start_time_s + request_.config->body_z_nhc_global_window_s, final_time_s);
-    if (!OverlapsAnyWindow(start_time_s, end_time_s, jump_windows)) {
+  double segment_start_s = dynamic_start_time_s;
+  for (const auto &jump_window : jump_windows) {
+    const double segment_end_s =
+      std::clamp(jump_window.start_time_s, dynamic_start_time_s, final_time_s);
+    double start_time_s = segment_start_s;
+    while (start_time_s + request_.config->body_z_nhc_min_window_s <= segment_end_s + kTimeEpsilonS) {
+      const double end_time_s =
+        std::min(start_time_s + request_.config->body_z_nhc_global_window_s, segment_end_s);
       BodyZJumpConstraintWindow window;
       window.source_window_index = 0U;
       window.source_window_count = 0U;
       window.start_time_s = start_time_s;
       window.end_time_s = end_time_s;
       windows.push_back(window);
+      start_time_s += request_.config->body_z_nhc_global_stride_s;
     }
+    segment_start_s = std::max(segment_start_s, jump_window.end_time_s);
+  }
+  double start_time_s = segment_start_s;
+  while (start_time_s + request_.config->body_z_nhc_min_window_s <= final_time_s + kTimeEpsilonS) {
+    const double end_time_s =
+      std::min(start_time_s + request_.config->body_z_nhc_global_window_s, final_time_s);
+    BodyZJumpConstraintWindow window;
+    window.source_window_index = 0U;
+    window.source_window_count = 0U;
+    window.start_time_s = start_time_s;
+    window.end_time_s = end_time_s;
+    windows.push_back(window);
     start_time_s += request_.config->body_z_nhc_global_stride_s;
   }
   return windows;
@@ -387,7 +588,9 @@ void PopulateBodyZNHCDiagnostics(
   const gtsam::Values &optimized_values,
   const std::vector<double> &state_timestamps,
   std::vector<BodyZNHCDiagnosticRow> &diagnostics,
-  std::vector<BodyZNHCStateDiagnosticRow> *state_diagnostics) {
+  std::vector<BodyZNHCStateDiagnosticRow> *state_diagnostics,
+  const std::vector<ReferenceNodeState> *reference_states,
+  RunSummary *run_summary) {
   if (state_diagnostics != nullptr) {
     state_diagnostics->clear();
   }
@@ -404,15 +607,32 @@ void PopulateBodyZNHCDiagnostics(
     if (!body_z_axes_nav.has_value()) {
       continue;
     }
+    const auto body_axes_nav = BodyFrameAxesNavFromStateSource(
+      initial_values,
+      state_timestamps,
+      reference_states,
+      state_indices,
+      row.horizontal_leakage_correction_enabled);
+    if (!body_axes_nav.has_value()) {
+      continue;
+    }
+    const std::vector<gtsam::Vector3> effective_body_z_axes_nav =
+      BodyZAxesFromBodyFrameAxes(*body_axes_nav);
     if (state_diagnostics != nullptr) {
       state_diagnostics->reserve(state_diagnostics->size() + state_indices.size());
       for (std::size_t offset = 0U; offset < state_indices.size(); ++offset) {
         const std::size_t state_index = state_indices[offset];
         const auto velocity = optimized_values.at<gtsam::Vector3>(symbol::V(state_index));
-        const gtsam::Vector3 fixed_axis = (*body_z_axes_nav)[offset];
+        const factor::BodyFrameAxesNav fixed_body_axes = (*body_axes_nav)[offset];
+        const gtsam::Vector3 fixed_axis = fixed_body_axes.body_z_axis_nav;
         const auto optimized_pose = optimized_values.at<gtsam::Pose3>(symbol::X(state_index));
         const gtsam::Vector3 optimized_pose_axis =
           factor::BodyZAxisNavFromPose(optimized_pose);
+        factor::BodyZHorizontalLeakageModel leakage;
+        if (row.horizontal_leakage_correction_enabled) {
+          leakage.leak_x_rad = row.horizontal_leakage_x_rad;
+          leakage.leak_y_rad = row.horizontal_leakage_y_rad;
+        }
 
         BodyZNHCStateDiagnosticRow state_row;
         state_row.window_index = row.window_index;
@@ -426,6 +646,15 @@ void PopulateBodyZNHCDiagnostics(
         state_row.vz_mps = velocity.z();
         state_row.horizontal_speed_mps =
           std::hypot(velocity.x(), velocity.y());
+        state_row.v_body_x_mps = factor::BodyXVelocityMps(fixed_body_axes, velocity);
+        state_row.v_body_y_mps = factor::BodyYVelocityMps(fixed_body_axes, velocity);
+        state_row.raw_v_body_z_mps = factor::BodyZRawVelocityMps(fixed_body_axes, velocity);
+        state_row.horizontal_leakage_x_rad = leakage.leak_x_rad;
+        state_row.horizontal_leakage_y_rad = leakage.leak_y_rad;
+        state_row.leakage_correction_mps =
+          factor::BodyZLeakageCorrectionMps(fixed_body_axes, leakage, velocity);
+        state_row.corrected_v_body_z_mps =
+          factor::BodyZLeakageCorrectedVelocityMps(fixed_body_axes, leakage, velocity);
         state_row.fixed_horizontal_projection_mps =
           fixed_axis.x() * velocity.x() + fixed_axis.y() * velocity.y();
         state_row.fixed_vertical_projection_mps =
@@ -447,7 +676,8 @@ void PopulateBodyZNHCDiagnostics(
         state_diagnostics->push_back(state_row);
       }
     }
-    const auto metrics = ComputeMetrics(optimized_values, state_timestamps, state_indices, *body_z_axes_nav);
+    const auto metrics =
+      ComputeMetrics(optimized_values, state_timestamps, state_indices, effective_body_z_axes_nav);
     if (!metrics.has_value()) {
       continue;
     }
@@ -456,6 +686,40 @@ void PopulateBodyZNHCDiagnostics(
     row.optimized_body_z_displacement_m = metrics->body_z_displacement_m;
     row.max_velocity_residual_mps = metrics->max_abs_body_z_velocity_mps;
     row.displacement_residual_m = metrics->body_z_displacement_m;
+
+    if (row.horizontal_leakage_correction_enabled) {
+      factor::BodyZHorizontalLeakageModel leakage;
+      leakage.leak_x_rad = row.horizontal_leakage_x_rad;
+      leakage.leak_y_rad = row.horizontal_leakage_y_rad;
+      const auto corrected_metrics =
+        ComputeCorrectedMetrics(optimized_values, state_timestamps, state_indices, *body_axes_nav, leakage);
+      if (corrected_metrics.has_value()) {
+        row.optimized_mean_abs_corrected_body_z_velocity_mps =
+          corrected_metrics->mean_abs_body_z_velocity_mps;
+        row.optimized_max_abs_corrected_body_z_velocity_mps =
+          corrected_metrics->max_abs_body_z_velocity_mps;
+        row.optimized_corrected_body_z_displacement_m =
+          corrected_metrics->body_z_displacement_m;
+        row.max_velocity_residual_mps =
+          corrected_metrics->max_abs_body_z_velocity_mps;
+        row.displacement_residual_m =
+          corrected_metrics->body_z_displacement_m;
+        if (run_summary != nullptr) {
+          if (!std::isfinite(run_summary->body_z_nhc_corrected_max_velocity_residual_mps)) {
+            run_summary->body_z_nhc_corrected_max_velocity_residual_mps = 0.0;
+          }
+          if (!std::isfinite(run_summary->body_z_nhc_corrected_max_abs_displacement_residual_m)) {
+            run_summary->body_z_nhc_corrected_max_abs_displacement_residual_m = 0.0;
+          }
+          run_summary->body_z_nhc_corrected_max_velocity_residual_mps = std::max(
+            run_summary->body_z_nhc_corrected_max_velocity_residual_mps,
+            corrected_metrics->max_abs_body_z_velocity_mps);
+          run_summary->body_z_nhc_corrected_max_abs_displacement_residual_m = std::max(
+            run_summary->body_z_nhc_corrected_max_abs_displacement_residual_m,
+            std::abs(corrected_metrics->body_z_displacement_m));
+        }
+      }
+    }
 
     const auto pose_metrics = ComputePoseBodyZMetrics(optimized_values, state_timestamps, state_indices);
     if (pose_metrics.has_value()) {

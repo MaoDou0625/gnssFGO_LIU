@@ -160,6 +160,12 @@ struct OfflineRunnerConfig {
   double body_z_nhc_global_stride_s = 1.0;
   double body_z_nhc_global_velocity_sigma_mps = 0.05;
   double body_z_nhc_global_displacement_sigma_m = 0.05;
+  bool enable_body_z_nhc_horizontal_leakage_correction = false;
+  double body_z_nhc_horizontal_leakage_min_speed_mps = 0.5;
+  int body_z_nhc_horizontal_leakage_min_sample_count = 30;
+  double body_z_nhc_horizontal_leakage_huber_sigma_mps = 0.02;
+  double body_z_nhc_horizontal_leakage_max_abs_coeff_rad = 0.02;
+  double body_z_nhc_horizontal_leakage_guard_s = 0.30;
   bool enable_vertical_jump_masked_imu = false;
   double vertical_jump_masked_imu_padding_s = 0.25;
   bool enable_vertical_jump_impulse = false;

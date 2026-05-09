@@ -23,6 +23,28 @@ namespace offline_lc_minimal::factor {
   return NormalizeBodyZAxisNav(pose.rotation().matrix().col(2));
 }
 
+[[nodiscard]] inline gtsam::Vector3 BodyXAxisNavFromPose(const gtsam::Pose3 &pose) {
+  return NormalizeBodyZAxisNav(pose.rotation().matrix().col(0));
+}
+
+[[nodiscard]] inline gtsam::Vector3 BodyYAxisNavFromPose(const gtsam::Pose3 &pose) {
+  return NormalizeBodyZAxisNav(pose.rotation().matrix().col(1));
+}
+
+struct BodyFrameAxesNav {
+  gtsam::Vector3 body_x_axis_nav = gtsam::Vector3::UnitX();
+  gtsam::Vector3 body_y_axis_nav = gtsam::Vector3::UnitY();
+  gtsam::Vector3 body_z_axis_nav = gtsam::Vector3::UnitZ();
+};
+
+[[nodiscard]] inline BodyFrameAxesNav BodyFrameAxesNavFromPose(const gtsam::Pose3 &pose) {
+  BodyFrameAxesNav axes;
+  axes.body_x_axis_nav = BodyXAxisNavFromPose(pose);
+  axes.body_y_axis_nav = BodyYAxisNavFromPose(pose);
+  axes.body_z_axis_nav = BodyZAxisNavFromPose(pose);
+  return axes;
+}
+
 [[nodiscard]] inline double BodyZVelocityMps(
   const gtsam::Vector3 &body_z_axis_nav,
   const gtsam::Vector3 &nav_velocity) {

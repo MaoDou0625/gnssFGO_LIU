@@ -94,6 +94,11 @@ void ResultWriter::WriteOutputs(
       output_path / "attitude_reference_diagnostics.csv",
       result.attitude_reference_diagnostics);
   }
+  if (!result.body_z_nhc_horizontal_leakage_diagnostics.empty()) {
+    WriteBodyZHorizontalLeakageDiagnosticsCsv(
+      output_path / "body_z_nhc_horizontal_leakage_diagnostics.csv",
+      result.body_z_nhc_horizontal_leakage_diagnostics);
+  }
   if (!result.body_z_nhc_diagnostics.empty()) {
     WriteBodyZNHCDiagnosticsCsv(
       output_path / "body_z_nhc_diagnostics.csv",

@@ -231,6 +231,36 @@ def read_nhc_windows(path: Path) -> list[tuple[float, float]]:
     return windows
 
 
+def read_body_z_nhc_state_rows(path: Path) -> list[dict[str, float]]:
+    if not path.exists():
+        return []
+    buckets: dict[float, list[tuple[float, float]]] = {}
+    with path.open("r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        for raw in reader:
+            time_s = safe_float(raw.get("time_s"))
+            raw_body_z = safe_float(raw.get("raw_v_body_z_mps", raw.get("fixed_body_z_velocity_mps")))
+            corrected_body_z = safe_float(raw.get("corrected_v_body_z_mps"))
+            if not math.isfinite(corrected_body_z):
+                corrected_body_z = raw_body_z
+            if not (math.isfinite(time_s) and math.isfinite(raw_body_z) and math.isfinite(corrected_body_z)):
+                continue
+            buckets.setdefault(time_s, []).append((raw_body_z, corrected_body_z))
+    rows: list[dict[str, float]] = []
+    for time_s, values in buckets.items():
+        raw_mean = sum(value[0] for value in values) / len(values)
+        corrected_mean = sum(value[1] for value in values) / len(values)
+        rows.append(
+            {
+                "time_s": time_s,
+                "raw_v_body_z_mps": raw_mean,
+                "corrected_v_body_z_mps": corrected_mean,
+            }
+        )
+    rows.sort(key=lambda row: row["time_s"])
+    return rows
+
+
 def nearest_time(rows: list[dict[str, float]], target_time_s: float) -> float:
     return min(rows, key=lambda row: abs(row["time_s"] - target_time_s))["time_s"]
 
@@ -330,6 +360,7 @@ def plot_alignment_continuity(
     trajectory_rows: list[dict[str, float]],
     envelope_rows: list[dict[str, float]],
     nhc_windows: list[tuple[float, float]],
+    body_z_state_rows: list[dict[str, float]],
     context: PlotContext,
     output_path: Path,
     title: str,
@@ -339,7 +370,9 @@ def plot_alignment_continuity(
     x = relative_time(plot_rows, context.reference_time_s)
     up_reference_m = plot_rows[0]["up_m"]
 
-    fig, axes = plt.subplots(4, 1, figsize=(15, 11), sharex=True, constrained_layout=True)
+    body_z_state_rows = rows_from_time(body_z_state_rows, context.reference_time_s)
+
+    fig, axes = plt.subplots(5, 1, figsize=(15, 13), sharex=True, constrained_layout=True)
     fig.suptitle(title, fontsize=14)
 
     for axis in axes:
@@ -380,14 +413,36 @@ def plot_alignment_continuity(
     axes[2].set_ylabel("ba_z [ug]")
     axes[2].set_title("Vertical accelerometer bias")
 
+    if body_z_state_rows:
+        body_z_x = relative_time(body_z_state_rows, context.reference_time_s)
+        axes[3].plot(
+            body_z_x,
+            [row["raw_v_body_z_mps"] for row in body_z_state_rows],
+            color="#7f7f7f",
+            linewidth=0.8,
+            alpha=0.8,
+            label="raw body-z velocity",
+        )
+        axes[3].plot(
+            body_z_x,
+            [row["corrected_v_body_z_mps"] for row in body_z_state_rows],
+            color="#d62728",
+            linewidth=0.9,
+            label="corrected body-z velocity",
+        )
+    axes[3].axhline(0.0, color="#222222", linewidth=0.7, alpha=0.5)
+    axes[3].set_ylabel("Body-z v [m/s]")
+    axes[3].set_title("Raw vs leakage-corrected Body-Z velocity")
+    axes[3].legend(loc="upper left", fontsize=8)
+
     pitch_deg = [math.degrees(row["pitch_rad"]) for row in plot_rows]
     roll_deg = [math.degrees(row["roll_rad"]) for row in plot_rows]
-    axes[3].plot(x, pitch_deg, color="#ff7f0e", linewidth=0.9, label="pitch")
-    axes[3].plot(x, roll_deg, color="#d62728", linewidth=0.9, linestyle="--", label="roll")
-    axes[3].set_ylabel("Attitude [deg]")
-    axes[3].set_title("Pitch and roll")
-    axes[3].set_xlabel("Time since static alignment start [s]")
-    axes[3].legend(loc="upper left", fontsize=8)
+    axes[4].plot(x, pitch_deg, color="#ff7f0e", linewidth=0.9, label="pitch")
+    axes[4].plot(x, roll_deg, color="#d62728", linewidth=0.9, linestyle="--", label="roll")
+    axes[4].set_ylabel("Attitude [deg]")
+    axes[4].set_title("Pitch and roll")
+    axes[4].set_xlabel("Time since static alignment start [s]")
+    axes[4].legend(loc="upper left", fontsize=8)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=180)
@@ -403,6 +458,7 @@ def main() -> int:
     envelope_rows = raw_rtk_rows.rows or read_envelope_rows(run_dir / "vertical_envelope_diagnostics.csv")
     rtk_source = raw_rtk_rows.source if raw_rtk_rows.rows else "vertical_envelope_diagnostics"
     nhc_windows = read_nhc_windows(run_dir / "body_z_nhc_diagnostics.csv")
+    body_z_state_rows = read_body_z_nhc_state_rows(run_dir / "body_z_nhc_state_diagnostics.csv")
     context = resolve_plot_context(summary, trajectory_rows)
     output_path = Path(args.output)
 
@@ -410,6 +466,7 @@ def main() -> int:
         trajectory_rows,
         envelope_rows,
         nhc_windows,
+        body_z_state_rows,
         context,
         output_path,
         args.title,

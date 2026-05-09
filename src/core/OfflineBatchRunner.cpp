@@ -901,6 +901,22 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.body_z_nhc_window_count = 0;
   run_result.run_summary.body_z_nhc_skipped_short_window_count = 0;
   run_result.run_summary.body_z_nhc_skipped_invalid_count = 0;
+  run_result.run_summary.body_z_nhc_horizontal_leakage_correction_enabled = false;
+  run_result.run_summary.body_z_nhc_horizontal_leakage_estimate_valid = false;
+  run_result.run_summary.body_z_nhc_horizontal_leakage_sample_count = 0;
+  run_result.run_summary.body_z_nhc_horizontal_leakage_skipped_window_count = 0;
+  run_result.run_summary.body_z_nhc_horizontal_leakage_skipped_low_speed_count = 0;
+  run_result.run_summary.body_z_nhc_horizontal_leakage_skipped_invalid_count = 0;
+  run_result.run_summary.body_z_nhc_leakage_corrected_velocity_factor_count = 0;
+  run_result.run_summary.body_z_nhc_leakage_corrected_displacement_factor_count = 0;
+  run_result.run_summary.body_z_nhc_horizontal_leakage_x_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.body_z_nhc_horizontal_leakage_y_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.body_z_nhc_corrected_max_velocity_residual_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.body_z_nhc_corrected_max_abs_displacement_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.vertical_jump_combined_imu_factor_count = 0;
   run_result.run_summary.vertical_jump_masked_imu_factor_count = 0;
   run_result.run_summary.vertical_jump_impulse_factor_count = 0;
@@ -926,6 +942,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.vertical_velocity_delta_diagnostics.clear();
   run_result.vertical_position_velocity_consistency_diagnostics.clear();
   run_result.attitude_reference_diagnostics.clear();
+  run_result.body_z_nhc_horizontal_leakage_diagnostics.clear();
   run_result.body_z_nhc_diagnostics.clear();
   run_result.vertical_jump_masked_imu_diagnostics.clear();
   run_result.vertical_jump_impulse_diagnostics.clear();
@@ -1046,10 +1063,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   body_z_nhc_request.state_timestamps = &state_timestamps;
   body_z_nhc_request.jump_windows = &run_result.body_z_seed_jump_windows;
   body_z_nhc_request.initial_values = &optimization_initial_values;
+  body_z_nhc_request.reference_states = &run_result.attitude_reference_states;
   body_z_nhc_request.dynamic_start_index = graph_timeline.dynamic_start_index;
   body_z_nhc_request.graph = &graph_with_gnss;
   body_z_nhc_request.run_summary = &run_result.run_summary;
   body_z_nhc_request.diagnostics = &run_result.body_z_nhc_diagnostics;
+  body_z_nhc_request.horizontal_leakage_diagnostics =
+    &run_result.body_z_nhc_horizontal_leakage_diagnostics;
   BodyZNHCConstraintBuilder(std::move(body_z_nhc_request)).Build();
 
   AttitudeReferenceConstraintBuildRequest attitude_reference_request;
@@ -1111,7 +1131,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     optimized_values,
     state_timestamps,
     run_result.body_z_nhc_diagnostics,
-    &run_result.body_z_nhc_state_diagnostics);
+    &run_result.body_z_nhc_state_diagnostics,
+    &run_result.attitude_reference_states,
+    &run_result.run_summary);
   PopulateAttitudeReferenceDiagnostics(
     optimized_values,
     run_result.attitude_reference_diagnostics);

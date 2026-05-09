@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -11,6 +12,9 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/core/BodyZNHCConstraintBuilder.h"
+#include "offline_lc_minimal/core/BodyZHorizontalLeakageEstimator.h"
+#include "offline_lc_minimal/factor/BodyZLeakageCorrectedVelocityFactor.h"
+#include "offline_lc_minimal/factor/BodyZLeakageCorrectedWindowDisplacementFactor.h"
 #include "offline_lc_minimal/factor/BodyZVelocityZeroFactor.h"
 #include "offline_lc_minimal/factor/BodyZWindowDisplacementZeroFactor.h"
 
@@ -127,6 +131,118 @@ void TestBodyZWindowDisplacementZeroFactorIntegratesBodyZVelocity() {
     3.0,
     0.0,
     "fixed-axis displacement factor should only connect velocity keys");
+}
+
+void TestLeakageCorrectedVelocityFactorUsesVelocityOnly() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
+  const auto axes = offline_lc_minimal::factor::BodyFrameAxesNavFromPose(gtsam::Pose3());
+  offline_lc_minimal::factor::BodyZHorizontalLeakageModel leakage;
+  leakage.leak_x_rad = 0.10;
+  leakage.leak_y_rad = -0.20;
+  const offline_lc_minimal::factor::BodyZLeakageCorrectedVelocityZeroFactor factor(
+    symbol::V(0),
+    axes,
+    leakage,
+    noise);
+
+  const gtsam::Vector3 velocity(2.0, 3.0, 1.0);
+  ExpectNear(
+    factor.evaluateError(velocity)(0),
+    1.0 - 0.10 * 2.0 - (-0.20) * 3.0,
+    1e-12,
+    "leakage-corrected velocity residual is wrong");
+  ExpectNear(
+    static_cast<double>(factor.keys().size()),
+    1.0,
+    0.0,
+    "leakage-corrected velocity factor should only connect velocity");
+
+  gtsam::Matrix h_velocity;
+  const gtsam::Vector unused = factor.evaluateError(velocity, h_velocity);
+  (void)unused;
+  ExpectNear(h_velocity(0, 0), -0.10, 1e-12, "x leakage Jacobian is wrong");
+  ExpectNear(h_velocity(0, 1), 0.20, 1e-12, "y leakage Jacobian is wrong");
+  ExpectNear(h_velocity(0, 2), 1.0, 1e-12, "z leakage Jacobian is wrong");
+}
+
+void TestLeakageCorrectedWindowDisplacementFactorIntegratesCorrectedVelocity() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
+  const std::vector<gtsam::Key> velocity_keys{symbol::V(0), symbol::V(1), symbol::V(2)};
+  const auto axes = offline_lc_minimal::factor::BodyFrameAxesNavFromPose(gtsam::Pose3());
+  const std::vector<offline_lc_minimal::factor::BodyFrameAxesNav> body_axes{axes, axes, axes};
+  offline_lc_minimal::factor::BodyZHorizontalLeakageModel leakage;
+  leakage.leak_x_rad = 0.10;
+  const std::vector<double> times{0.0, 0.5, 1.0};
+  const offline_lc_minimal::factor::BodyZLeakageCorrectedWindowDisplacementZeroFactor factor(
+    velocity_keys,
+    body_axes,
+    leakage,
+    times,
+    noise);
+
+  const gtsam::Values values =
+    MakeValues(times, gtsam::Rot3(), gtsam::Vector3(1.0, 0.0, 0.10));
+  ExpectNear(
+    factor.unwhitenedError(values)(0),
+    0.0,
+    1e-12,
+    "constant leakage-corrected zero body-z velocity should integrate to zero");
+}
+
+void TestBodyZHorizontalLeakageEstimatorUsesOutsideWindowSamples() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_nhc_constraint = true;
+  config.enable_body_z_nhc_horizontal_leakage_correction = true;
+  config.body_z_nhc_horizontal_leakage_min_speed_mps = 0.0;
+  config.body_z_nhc_horizontal_leakage_min_sample_count = 3;
+  config.body_z_nhc_horizontal_leakage_huber_sigma_mps = 0.01;
+  config.body_z_nhc_horizontal_leakage_max_abs_coeff_rad = 0.50;
+  config.body_z_nhc_horizontal_leakage_guard_s = 0.0;
+  const std::vector<double> timestamps{0.0, 0.5, 1.0, 1.5, 2.0};
+  const std::vector<gtsam::Vector3> velocities{
+    gtsam::Vector3(1.0, 0.0, 0.10),
+    gtsam::Vector3(0.0, 1.0, -0.02),
+    gtsam::Vector3(5.0, 5.0, 0.0),
+    gtsam::Vector3(5.0, 5.0, 0.0),
+    gtsam::Vector3(1.0, 2.0, 0.06),
+  };
+  gtsam::Values values;
+  std::vector<offline_lc_minimal::ReferenceNodeState> reference_states;
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    const gtsam::Pose3 pose(gtsam::Rot3(), gtsam::Point3(0.0, 0.0, 0.0));
+    values.insert(symbol::X(index), pose);
+    values.insert(symbol::V(index), velocities[index]);
+    offline_lc_minimal::ReferenceNodeState state;
+    state.time_s = timestamps[index];
+    state.pose = pose;
+    state.velocity = velocities[index];
+    reference_states.push_back(state);
+  }
+  const std::vector<offline_lc_minimal::BodyZJumpConstraintWindow> excluded_windows{
+    offline_lc_minimal::BodyZJumpConstraintWindow{0U, 1U, 1.0, 1.5},
+  };
+
+  offline_lc_minimal::BodyZHorizontalLeakageEstimateRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.excluded_windows = &excluded_windows;
+  request.initial_values = &values;
+  request.reference_states = &reference_states;
+  request.dynamic_start_index = 0U;
+  const auto estimate =
+    offline_lc_minimal::BodyZHorizontalLeakageEstimator(std::move(request)).Estimate();
+
+  ExpectTrue(estimate.valid, "leakage estimator should accept outside-window samples");
+  ExpectNear(estimate.model.leak_x_rad, 0.10, 1e-12, "estimated x leakage is wrong");
+  ExpectNear(estimate.model.leak_y_rad, -0.02, 1e-12, "estimated y leakage is wrong");
+  ExpectNear(
+    static_cast<double>(estimate.diagnostic.skipped_window_count),
+    2.0,
+    0.0,
+    "estimator should exclude jump-window samples");
+  ExpectTrue(
+    estimate.diagnostic.velocity_source == "REFERENCE_STATES",
+    "estimator should prefer reference states when available");
 }
 
 void TestFixedAxisGraphErrorIgnoresPoseChanges() {
@@ -391,12 +507,107 @@ void TestBuilderAddsGlobalWeakWindowsWhenEnabled() {
     "global weak NHC should use global velocity sigma");
 }
 
+void TestBuilderAddsLeakageCorrectedFactorsAcrossJumpAndGlobalWindows() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_body_z_nhc_constraint = true;
+  config.enable_body_z_nhc_global_weak_constraint = true;
+  config.enable_body_z_nhc_horizontal_leakage_correction = true;
+  config.body_z_nhc_jump_padding_s = 0.0;
+  config.body_z_nhc_min_window_s = 0.5;
+  config.body_z_nhc_global_window_s = 1.0;
+  config.body_z_nhc_global_stride_s = 1.0;
+  config.body_z_nhc_global_velocity_sigma_mps = 0.02;
+  config.body_z_nhc_global_displacement_sigma_m = 0.02;
+  config.body_z_nhc_horizontal_leakage_min_speed_mps = 0.0;
+  config.body_z_nhc_horizontal_leakage_min_sample_count = 3;
+  config.body_z_nhc_horizontal_leakage_max_abs_coeff_rad = 0.50;
+  config.body_z_nhc_horizontal_leakage_guard_s = 0.0;
+  const std::vector<double> timestamps{0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0};
+  const std::vector<gtsam::Vector3> velocities{
+    gtsam::Vector3(1.0, 0.0, 0.10),
+    gtsam::Vector3(0.0, 1.0, 0.0),
+    gtsam::Vector3(1.0, 1.0, 0.10),
+    gtsam::Vector3(2.0, 1.0, 0.20),
+    gtsam::Vector3(9.0, 9.0, 0.0),
+    gtsam::Vector3(9.0, 9.0, 0.0),
+    gtsam::Vector3(1.0, 2.0, 0.10),
+    gtsam::Vector3(2.0, 0.0, 0.20),
+    gtsam::Vector3(0.0, 2.0, 0.0),
+  };
+  gtsam::Values values;
+  std::vector<offline_lc_minimal::ReferenceNodeState> reference_states;
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    const gtsam::Pose3 pose(gtsam::Rot3(), gtsam::Point3(0.0, 0.0, 0.0));
+    values.insert(symbol::X(index), pose);
+    values.insert(symbol::V(index), velocities[index]);
+    offline_lc_minimal::ReferenceNodeState state;
+    state.time_s = timestamps[index];
+    state.pose = pose;
+    state.velocity = velocities[index];
+    reference_states.push_back(state);
+  }
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows{
+    MakeJumpWindow(2.0, 2.5),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::BodyZNHCDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::BodyZHorizontalLeakageDiagnosticRow> leakage_diagnostics;
+
+  offline_lc_minimal::BodyZNHCConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.jump_windows = &jump_windows;
+  request.initial_values = &values;
+  request.reference_states = &reference_states;
+  request.dynamic_start_index = 0U;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  request.horizontal_leakage_diagnostics = &leakage_diagnostics;
+  offline_lc_minimal::BodyZNHCConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(summary.body_z_nhc_horizontal_leakage_estimate_valid, "leakage estimate should be valid");
+  ExpectTrue(!leakage_diagnostics.empty(), "leakage diagnostic should be recorded");
+  ExpectNear(summary.body_z_nhc_horizontal_leakage_x_rad, 0.10, 1e-12, "builder leakage x is wrong");
+  ExpectNear(
+    static_cast<double>(summary.body_z_nhc_leakage_corrected_velocity_factor_count),
+    static_cast<double>(summary.body_z_nhc_velocity_factor_count),
+    0.0,
+    "leakage-corrected factors should replace raw velocity factors");
+  ExpectNear(
+    static_cast<double>(summary.body_z_nhc_leakage_corrected_displacement_factor_count),
+    static_cast<double>(summary.body_z_nhc_displacement_factor_count),
+    0.0,
+    "leakage-corrected factors should replace raw displacement factors");
+  ExpectTrue(
+    std::any_of(
+      diagnostics.begin(),
+      diagnostics.end(),
+      [](const offline_lc_minimal::BodyZNHCDiagnosticRow &row) {
+        return row.from_jump_window && row.horizontal_leakage_correction_enabled;
+      }),
+    "jump windows should use leakage-corrected NHC");
+  ExpectTrue(
+    std::any_of(
+      diagnostics.begin(),
+      diagnostics.end(),
+      [](const offline_lc_minimal::BodyZNHCDiagnosticRow &row) {
+        return !row.from_jump_window && row.horizontal_leakage_correction_enabled;
+      }),
+    "global windows should use leakage-corrected NHC");
+}
+
 }  // namespace
 
 int main() {
   try {
     RunTest("TestBodyZVelocityZeroFactorUsesBodyFrameZ", TestBodyZVelocityZeroFactorUsesBodyFrameZ);
     RunTest("TestBodyZWindowDisplacementZeroFactorIntegratesBodyZVelocity", TestBodyZWindowDisplacementZeroFactorIntegratesBodyZVelocity);
+    RunTest("TestLeakageCorrectedVelocityFactorUsesVelocityOnly", TestLeakageCorrectedVelocityFactorUsesVelocityOnly);
+    RunTest("TestLeakageCorrectedWindowDisplacementFactorIntegratesCorrectedVelocity", TestLeakageCorrectedWindowDisplacementFactorIntegratesCorrectedVelocity);
+    RunTest("TestBodyZHorizontalLeakageEstimatorUsesOutsideWindowSamples", TestBodyZHorizontalLeakageEstimatorUsesOutsideWindowSamples);
     RunTest("TestFixedAxisGraphErrorIgnoresPoseChanges", TestFixedAxisGraphErrorIgnoresPoseChanges);
     RunTest("TestPopulateBodyZNHCDiagnosticsUsesFixedInitialAxis", TestPopulateBodyZNHCDiagnosticsUsesFixedInitialAxis);
     RunTest("TestBuilderAddsJumpWindowNHC", TestBuilderAddsJumpWindowNHC);
@@ -404,6 +615,7 @@ int main() {
     RunTest("TestBuilderSkipsShortWindow", TestBuilderSkipsShortWindow);
     RunTest("TestBuilderDoesNotAddGlobalWeakWindowsWhenDisabled", TestBuilderDoesNotAddGlobalWeakWindowsWhenDisabled);
     RunTest("TestBuilderAddsGlobalWeakWindowsWhenEnabled", TestBuilderAddsGlobalWeakWindowsWhenEnabled);
+    RunTest("TestBuilderAddsLeakageCorrectedFactorsAcrossJumpAndGlobalWindows", TestBuilderAddsLeakageCorrectedFactorsAcrossJumpAndGlobalWindows);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;
