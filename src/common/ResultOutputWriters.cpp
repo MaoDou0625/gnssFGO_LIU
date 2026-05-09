@@ -579,6 +579,43 @@ void WriteBodyZNHCDiagnosticsCsv(
   }
 }
 
+void WriteBodyZNHCStateDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<BodyZNHCStateDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,state_index,time_s,fixed_axis_x,fixed_axis_y,fixed_axis_z,"
+       "vx_mps,vy_mps,vz_mps,horizontal_speed_mps,fixed_horizontal_projection_mps,"
+       "fixed_vertical_projection_mps,fixed_body_z_velocity_mps,optimized_pose_axis_x,"
+       "optimized_pose_axis_y,optimized_pose_axis_z,optimized_pose_horizontal_projection_mps,"
+       "optimized_pose_vertical_projection_mps,optimized_pose_body_z_velocity_mps\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.state_index << ','
+           << row.time_s << ','
+           << row.fixed_axis_x << ','
+           << row.fixed_axis_y << ','
+           << row.fixed_axis_z << ','
+           << row.vx_mps << ','
+           << row.vy_mps << ','
+           << row.vz_mps << ','
+           << row.horizontal_speed_mps << ','
+           << row.fixed_horizontal_projection_mps << ','
+           << row.fixed_vertical_projection_mps << ','
+           << row.fixed_body_z_velocity_mps << ','
+           << row.optimized_pose_axis_x << ','
+           << row.optimized_pose_axis_y << ','
+           << row.optimized_pose_axis_z << ','
+           << row.optimized_pose_horizontal_projection_mps << ','
+           << row.optimized_pose_vertical_projection_mps << ','
+           << row.optimized_pose_body_z_velocity_mps << '\n';
+  }
+}
+
 void WriteVerticalJumpMaskedImuDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpMaskedImuDiagnosticRow> &rows) {

@@ -99,6 +99,11 @@ void ResultWriter::WriteOutputs(
       output_path / "body_z_nhc_diagnostics.csv",
       result.body_z_nhc_diagnostics);
   }
+  if (!result.body_z_nhc_state_diagnostics.empty()) {
+    WriteBodyZNHCStateDiagnosticsCsv(
+      output_path / "body_z_nhc_state_diagnostics.csv",
+      result.body_z_nhc_state_diagnostics);
+  }
   if (!result.vertical_jump_masked_imu_diagnostics.empty()) {
     WriteVerticalJumpMaskedImuDiagnosticsCsv(
       output_path / "vertical_jump_masked_imu_diagnostics.csv",

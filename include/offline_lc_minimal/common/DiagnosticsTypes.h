@@ -280,6 +280,28 @@ struct BodyZNHCDiagnosticRow {
   double displacement_residual_m = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct BodyZNHCStateDiagnosticRow {
+  std::size_t window_index = 0;
+  std::size_t state_index = 0;
+  double time_s = std::numeric_limits<double>::quiet_NaN();
+  double fixed_axis_x = std::numeric_limits<double>::quiet_NaN();
+  double fixed_axis_y = std::numeric_limits<double>::quiet_NaN();
+  double fixed_axis_z = std::numeric_limits<double>::quiet_NaN();
+  double vx_mps = std::numeric_limits<double>::quiet_NaN();
+  double vy_mps = std::numeric_limits<double>::quiet_NaN();
+  double vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double horizontal_speed_mps = std::numeric_limits<double>::quiet_NaN();
+  double fixed_horizontal_projection_mps = std::numeric_limits<double>::quiet_NaN();
+  double fixed_vertical_projection_mps = std::numeric_limits<double>::quiet_NaN();
+  double fixed_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_pose_axis_x = std::numeric_limits<double>::quiet_NaN();
+  double optimized_pose_axis_y = std::numeric_limits<double>::quiet_NaN();
+  double optimized_pose_axis_z = std::numeric_limits<double>::quiet_NaN();
+  double optimized_pose_horizontal_projection_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_pose_vertical_projection_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_pose_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct VerticalJumpMaskedImuDiagnosticRow {
   std::size_t state_index_i = 0;
   std::size_t state_index_j = 0;

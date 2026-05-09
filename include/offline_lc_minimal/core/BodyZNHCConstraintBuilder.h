@@ -55,6 +55,7 @@ void PopulateBodyZNHCDiagnostics(
   const gtsam::Values &initial_values,
   const gtsam::Values &optimized_values,
   const std::vector<double> &state_timestamps,
-  std::vector<BodyZNHCDiagnosticRow> &diagnostics);
+  std::vector<BodyZNHCDiagnosticRow> &diagnostics,
+  std::vector<BodyZNHCStateDiagnosticRow> *state_diagnostics = nullptr);
 
 }  // namespace offline_lc_minimal

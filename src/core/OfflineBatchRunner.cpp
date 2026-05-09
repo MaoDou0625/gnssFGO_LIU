@@ -1103,7 +1103,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     optimization_initial_values,
     optimized_values,
     state_timestamps,
-    run_result.body_z_nhc_diagnostics);
+    run_result.body_z_nhc_diagnostics,
+    &run_result.body_z_nhc_state_diagnostics);
   PopulateAttitudeReferenceDiagnostics(
     optimized_values,
     run_result.attitude_reference_diagnostics);

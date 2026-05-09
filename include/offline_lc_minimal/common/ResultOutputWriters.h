@@ -66,6 +66,10 @@ void WriteBodyZNHCDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<BodyZNHCDiagnosticRow> &rows);
 
+void WriteBodyZNHCStateDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<BodyZNHCStateDiagnosticRow> &rows);
+
 void WriteVerticalJumpMaskedImuDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpMaskedImuDiagnosticRow> &rows);

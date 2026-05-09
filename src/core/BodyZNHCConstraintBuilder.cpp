@@ -386,7 +386,11 @@ void PopulateBodyZNHCDiagnostics(
   const gtsam::Values &initial_values,
   const gtsam::Values &optimized_values,
   const std::vector<double> &state_timestamps,
-  std::vector<BodyZNHCDiagnosticRow> &diagnostics) {
+  std::vector<BodyZNHCDiagnosticRow> &diagnostics,
+  std::vector<BodyZNHCStateDiagnosticRow> *state_diagnostics) {
+  if (state_diagnostics != nullptr) {
+    state_diagnostics->clear();
+  }
   for (auto &row : diagnostics) {
     if (!row.factor_added || row.end_state_index < row.start_state_index) {
       continue;
@@ -399,6 +403,49 @@ void PopulateBodyZNHCDiagnostics(
     const auto body_z_axes_nav = BodyZAxesNavFromInitialValues(initial_values, state_indices);
     if (!body_z_axes_nav.has_value()) {
       continue;
+    }
+    if (state_diagnostics != nullptr) {
+      state_diagnostics->reserve(state_diagnostics->size() + state_indices.size());
+      for (std::size_t offset = 0U; offset < state_indices.size(); ++offset) {
+        const std::size_t state_index = state_indices[offset];
+        const auto velocity = optimized_values.at<gtsam::Vector3>(symbol::V(state_index));
+        const gtsam::Vector3 fixed_axis = (*body_z_axes_nav)[offset];
+        const auto optimized_pose = optimized_values.at<gtsam::Pose3>(symbol::X(state_index));
+        const gtsam::Vector3 optimized_pose_axis =
+          factor::BodyZAxisNavFromPose(optimized_pose);
+
+        BodyZNHCStateDiagnosticRow state_row;
+        state_row.window_index = row.window_index;
+        state_row.state_index = state_index;
+        state_row.time_s = state_timestamps[state_index];
+        state_row.fixed_axis_x = fixed_axis.x();
+        state_row.fixed_axis_y = fixed_axis.y();
+        state_row.fixed_axis_z = fixed_axis.z();
+        state_row.vx_mps = velocity.x();
+        state_row.vy_mps = velocity.y();
+        state_row.vz_mps = velocity.z();
+        state_row.horizontal_speed_mps =
+          std::hypot(velocity.x(), velocity.y());
+        state_row.fixed_horizontal_projection_mps =
+          fixed_axis.x() * velocity.x() + fixed_axis.y() * velocity.y();
+        state_row.fixed_vertical_projection_mps =
+          fixed_axis.z() * velocity.z();
+        state_row.fixed_body_z_velocity_mps =
+          state_row.fixed_horizontal_projection_mps +
+          state_row.fixed_vertical_projection_mps;
+        state_row.optimized_pose_axis_x = optimized_pose_axis.x();
+        state_row.optimized_pose_axis_y = optimized_pose_axis.y();
+        state_row.optimized_pose_axis_z = optimized_pose_axis.z();
+        state_row.optimized_pose_horizontal_projection_mps =
+          optimized_pose_axis.x() * velocity.x() +
+          optimized_pose_axis.y() * velocity.y();
+        state_row.optimized_pose_vertical_projection_mps =
+          optimized_pose_axis.z() * velocity.z();
+        state_row.optimized_pose_body_z_velocity_mps =
+          state_row.optimized_pose_horizontal_projection_mps +
+          state_row.optimized_pose_vertical_projection_mps;
+        state_diagnostics->push_back(state_row);
+      }
     }
     const auto metrics = ComputeMetrics(optimized_values, state_timestamps, state_indices, *body_z_axes_nav);
     if (!metrics.has_value()) {

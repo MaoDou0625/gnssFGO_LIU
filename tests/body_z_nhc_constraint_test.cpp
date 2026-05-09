@@ -179,12 +179,14 @@ void TestPopulateBodyZNHCDiagnosticsUsesFixedInitialAxis() {
   row.end_state_index = 2U;
   row.state_count = 3U;
   std::vector<offline_lc_minimal::BodyZNHCDiagnosticRow> diagnostics{row};
+  std::vector<offline_lc_minimal::BodyZNHCStateDiagnosticRow> state_diagnostics;
 
   offline_lc_minimal::PopulateBodyZNHCDiagnostics(
     initial_values,
     optimized_values,
     timestamps,
-    diagnostics);
+    diagnostics,
+    &state_diagnostics);
 
   ExpectNear(
     diagnostics.front().optimized_mean_abs_body_z_velocity_mps,
@@ -201,6 +203,22 @@ void TestPopulateBodyZNHCDiagnosticsUsesFixedInitialAxis() {
     1.0,
     1e-12,
     "fixed-axis postfit displacement should use the initial fixed body-z axis");
+  ExpectTrue(state_diagnostics.size() == 3U, "state diagnostics should include each NHC state");
+  ExpectNear(
+    state_diagnostics.front().fixed_horizontal_projection_mps,
+    1.0,
+    1e-12,
+    "state diagnostics should expose the fixed-axis horizontal projection");
+  ExpectNear(
+    state_diagnostics.front().fixed_vertical_projection_mps,
+    0.0,
+    1e-12,
+    "state diagnostics should expose the fixed-axis vertical projection");
+  ExpectNear(
+    state_diagnostics.front().fixed_body_z_velocity_mps,
+    1.0,
+    1e-12,
+    "state diagnostics should decompose fixed-axis body-z velocity");
 }
 
 void TestBuilderAddsJumpWindowNHC() {

@@ -371,6 +371,7 @@ struct OfflineRunResult {
     vertical_position_velocity_consistency_diagnostics;
   std::vector<AttitudeReferenceDiagnosticRow> attitude_reference_diagnostics;
   std::vector<BodyZNHCDiagnosticRow> body_z_nhc_diagnostics;
+  std::vector<BodyZNHCStateDiagnosticRow> body_z_nhc_state_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;
   std::vector<VerticalJumpImpulseDiagnosticRow> vertical_jump_impulse_diagnostics;
   std::vector<VerticalJumpBiasDiagnosticRow> vertical_jump_bias_diagnostics;
