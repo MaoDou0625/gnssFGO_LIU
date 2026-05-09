@@ -197,6 +197,46 @@ class PlotOptimizedVerticalProfileTests(unittest.TestCase):
             windows = plot_optimized_vertical_profile.read_jump_windows(window_path)
             self.assertEqual(windows, [(10.0, 11.0)])
 
+    def test_make_plot_shades_jump_windows_on_all_subplots(self) -> None:
+        trajectory_rows = [
+            {"time_s": 0.0, "up_m": 1.0, "vz_mps": 0.0},
+            {"time_s": 1.0, "up_m": 1.1, "vz_mps": 0.1},
+        ]
+        rtk_rows = [
+            {"time_s": 0.0, "up_m": 1.0, "vz_mps": 0.0},
+            {"time_s": 1.0, "up_m": 1.05, "vz_mps": 0.05},
+        ]
+        rtk_speed_rows = [
+            {"time_s": 0.0, "vz_mps": 0.0},
+            {"time_s": 1.0, "vz_mps": 0.05},
+        ]
+        origin = plot_optimized_vertical_profile.PlotTimeOrigin(0.0, None, "test")
+        calls = []
+        original = plot_optimized_vertical_profile.shade_jump_windows
+
+        def fake_shade_jump_windows(axis, jump_windows, reference_time_s):
+            calls.append((axis, jump_windows, reference_time_s))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            try:
+                plot_optimized_vertical_profile.shade_jump_windows = fake_shade_jump_windows
+                plot_optimized_vertical_profile.make_plot(
+                    trajectory_rows,
+                    rtk_rows,
+                    rtk_speed_rows,
+                    [],
+                    [(0.2, 0.4)],
+                    pathlib.Path(temp_dir) / "plot.png",
+                    "test",
+                    origin,
+                )
+            finally:
+                plot_optimized_vertical_profile.shade_jump_windows = original
+
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(call[1] == [(0.2, 0.4)] for call in calls))
+        self.assertTrue(all(call[2] == 0.0 for call in calls))
+
 
 if __name__ == "__main__":
     unittest.main()
