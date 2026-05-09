@@ -173,18 +173,18 @@ void BodyZNHCConstraintBuilder::Build() const {
     return;
   }
 
-  std::vector<Window> windows = BuildJumpWindows();
-  const std::vector<Window> global_windows = BuildGlobalWindows(windows);
+  std::vector<BodyZJumpConstraintWindow> windows = BuildJumpWindows();
+  const std::vector<BodyZJumpConstraintWindow> global_windows = BuildGlobalWindows(windows);
   windows.insert(windows.end(), global_windows.begin(), global_windows.end());
   request_.diagnostics->reserve(request_.diagnostics->size() + windows.size());
 
   const std::size_t window_index_offset = request_.diagnostics->size();
   for (std::size_t window_index = 0U; window_index < windows.size(); ++window_index) {
-    const Window &window = windows[window_index];
-    const double velocity_sigma_mps = window.from_jump_window
+    const BodyZJumpConstraintWindow &window = windows[window_index];
+    const double velocity_sigma_mps = window.source_window_count > 0U
       ? request_.config->body_z_nhc_jump_velocity_sigma_mps
       : request_.config->body_z_nhc_global_velocity_sigma_mps;
-    const double displacement_sigma_m = window.from_jump_window
+    const double displacement_sigma_m = window.source_window_count > 0U
       ? request_.config->body_z_nhc_jump_displacement_sigma_m
       : request_.config->body_z_nhc_global_displacement_sigma_m;
     const std::vector<std::size_t> state_indices =
@@ -267,9 +267,7 @@ void BodyZNHCConstraintBuilder::Build() const {
   }
 }
 
-std::vector<BodyZNHCConstraintBuilder::Window> BodyZNHCConstraintBuilder::BuildJumpWindows() const {
-  std::vector<Window> windows;
-  windows.reserve(request_.jump_windows->size());
+std::vector<BodyZJumpConstraintWindow> BodyZNHCConstraintBuilder::BuildJumpWindows() const {
   for (std::size_t index = 0U; index < request_.jump_windows->size(); ++index) {
     const auto &jump_window = (*request_.jump_windows)[index];
     if (!std::isfinite(jump_window.start_time_s) ||
@@ -288,42 +286,16 @@ std::vector<BodyZNHCConstraintBuilder::Window> BodyZNHCConstraintBuilder::BuildJ
       row.skip_reason = "INVALID_WINDOW";
       ++request_.run_summary->body_z_nhc_skipped_invalid_count;
       request_.diagnostics->push_back(row);
-      continue;
     }
-    Window window;
-    window.source_window_index = index;
-    window.source_window_count = 1U;
-    window.type = "JUMP";
-    window.from_jump_window = true;
-    window.start_time_s = jump_window.start_time_s - request_.config->body_z_nhc_jump_padding_s;
-    window.end_time_s = jump_window.end_time_s + request_.config->body_z_nhc_jump_padding_s;
-    windows.push_back(window);
   }
-
-  std::sort(
-    windows.begin(),
-    windows.end(),
-    [](const Window &left, const Window &right) {
-      return left.start_time_s < right.start_time_s;
-    });
-
-  std::vector<Window> merged_windows;
-  for (const auto &window : windows) {
-    if (merged_windows.empty() ||
-        window.start_time_s > merged_windows.back().end_time_s + request_.config->body_z_nhc_merge_gap_s) {
-      merged_windows.push_back(window);
-      continue;
-    }
-    merged_windows.back().end_time_s =
-      std::max(merged_windows.back().end_time_s, window.end_time_s);
-    merged_windows.back().source_window_count += window.source_window_count;
-  }
-  return merged_windows;
+  return BuildBodyZJumpConstraintWindows(
+    *request_.jump_windows,
+    BodyZNHCJumpConstraintWindowOptions(*request_.config));
 }
 
-std::vector<BodyZNHCConstraintBuilder::Window> BodyZNHCConstraintBuilder::BuildGlobalWindows(
-  const std::vector<Window> &jump_windows) const {
-  std::vector<Window> windows;
+std::vector<BodyZJumpConstraintWindow> BodyZNHCConstraintBuilder::BuildGlobalWindows(
+  const std::vector<BodyZJumpConstraintWindow> &jump_windows) const {
+  std::vector<BodyZJumpConstraintWindow> windows;
   if (!request_.config->enable_body_z_nhc_global_weak_constraint ||
       request_.state_timestamps->empty() ||
       request_.dynamic_start_index >= request_.state_timestamps->size()) {
@@ -336,11 +308,9 @@ std::vector<BodyZNHCConstraintBuilder::Window> BodyZNHCConstraintBuilder::BuildG
     const double end_time_s =
       std::min(start_time_s + request_.config->body_z_nhc_global_window_s, final_time_s);
     if (!OverlapsAnyWindow(start_time_s, end_time_s, jump_windows)) {
-      Window window;
+      BodyZJumpConstraintWindow window;
       window.source_window_index = 0U;
       window.source_window_count = 0U;
-      window.type = "GLOBAL";
-      window.from_jump_window = false;
       window.start_time_s = start_time_s;
       window.end_time_s = end_time_s;
       windows.push_back(window);
@@ -375,7 +345,7 @@ std::vector<std::size_t> BodyZNHCConstraintBuilder::StateIndicesInWindow(
 bool BodyZNHCConstraintBuilder::OverlapsAnyWindow(
   const double start_time_s,
   const double end_time_s,
-  const std::vector<Window> &windows) const {
+  const std::vector<BodyZJumpConstraintWindow> &windows) const {
   for (const auto &window : windows) {
     if (IntervalsOverlap(start_time_s, end_time_s, window.start_time_s, window.end_time_s)) {
       return true;
@@ -386,14 +356,14 @@ bool BodyZNHCConstraintBuilder::OverlapsAnyWindow(
 
 BodyZNHCDiagnosticRow BodyZNHCConstraintBuilder::MakeDiagnosticRow(
   const std::size_t window_index,
-  const Window &window,
+  const BodyZJumpConstraintWindow &window,
   const std::vector<std::size_t> &state_indices,
   const double velocity_sigma_mps,
   const double displacement_sigma_m) const {
   BodyZNHCDiagnosticRow row;
   row.window_index = window_index;
-  row.window_type = window.type;
-  row.from_jump_window = window.from_jump_window;
+  row.window_type = window.source_window_count > 0U ? "JUMP" : "GLOBAL";
+  row.from_jump_window = window.source_window_count > 0U;
   row.source_window_index = window.source_window_index;
   row.source_window_count = window.source_window_count;
   row.start_time_s = window.start_time_s;

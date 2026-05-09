@@ -9,6 +9,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Types.h"
+#include "offline_lc_minimal/core/BodyZJumpConstraintWindowPlanner.h"
 
 namespace offline_lc_minimal {
 
@@ -39,7 +40,10 @@ class VerticalMotionConstraintBuilder {
   void Build() const;
 
  private:
-  [[nodiscard]] bool OverlapsJumpPadding(double start_time_s, double end_time_s) const;
+  [[nodiscard]] bool OverlapsJumpPadding(
+    double start_time_s,
+    double end_time_s,
+    const std::vector<BodyZJumpConstraintWindow> &jump_constraint_windows) const;
   [[nodiscard]] double TargetDeltaVzMps(const VerticalVelocityDeltaPropagationRecord &record, double dt_s) const;
 
   VerticalMotionConstraintBuildRequest request_;

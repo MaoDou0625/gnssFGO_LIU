@@ -58,6 +58,7 @@ add_library(offline_lc_minimal_lib
   src/core/AttitudeReferenceConstraintBuilder.cpp
   src/core/InitialStaticConstraintBuilder.cpp
   src/core/BodyZBidirectionalJumpDetector.cpp
+  src/core/BodyZJumpConstraintWindowPlanner.cpp
   src/core/BodyZNHCConstraintBuilder.cpp
   src/core/BodyZWindowPipeline.cpp
   src/core/GnssFactorBuilder.cpp

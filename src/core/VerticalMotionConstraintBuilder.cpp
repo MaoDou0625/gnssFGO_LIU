@@ -84,6 +84,10 @@ void VerticalMotionConstraintBuilder::Build() const {
     request_.config->enable_vertical_velocity_delta_bias_aware_target;
   double added_sigma_sum_mps = 0.0;
   double added_sigma_max_mps = -std::numeric_limits<double>::infinity();
+  const std::vector<BodyZJumpConstraintWindow> jump_constraint_windows =
+    BuildBodyZJumpConstraintWindows(
+      *request_.jump_windows,
+      VerticalVelocityDeltaJumpConstraintWindowOptions(*request_.config));
 
   request_.diagnostics->reserve(request_.diagnostics->size() + request_.propagation_records->size());
   for (const auto &record : *request_.propagation_records) {
@@ -119,7 +123,7 @@ void VerticalMotionConstraintBuilder::Build() const {
       request_.diagnostics->push_back(row);
       continue;
     }
-    if (OverlapsJumpPadding(record.start_time_s, record.end_time_s)) {
+    if (OverlapsJumpPadding(record.start_time_s, record.end_time_s, jump_constraint_windows)) {
       row.in_jump_padding = true;
       row.skip_reason = "JUMP_PADDING";
       ++request_.run_summary->vertical_velocity_delta_skipped_jump_count;
@@ -177,15 +181,10 @@ void VerticalMotionConstraintBuilder::Build() const {
 
 bool VerticalMotionConstraintBuilder::OverlapsJumpPadding(
   const double start_time_s,
-  const double end_time_s) const {
-  const double padding_s = request_.config->vertical_velocity_delta_jump_padding_s;
-  for (const auto &window : *request_.jump_windows) {
-    if (!std::isfinite(window.start_time_s) || !std::isfinite(window.end_time_s)) {
-      continue;
-    }
-    const double padded_start_s = window.start_time_s - padding_s;
-    const double padded_end_s = window.end_time_s + padding_s;
-    if (IntervalsOverlap(start_time_s, end_time_s, padded_start_s, padded_end_s)) {
+  const double end_time_s,
+  const std::vector<BodyZJumpConstraintWindow> &jump_constraint_windows) const {
+  for (const auto &window : jump_constraint_windows) {
+    if (IntervalsOverlap(start_time_s, end_time_s, window.start_time_s, window.end_time_s)) {
       return true;
     }
   }

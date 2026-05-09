@@ -341,6 +341,48 @@ void TestBuilderSkipsStaticDynamicBoundaryInsideJumpPadding() {
   ExpectTrue(diagnostics.front().skip_reason == "JUMP_PADDING", "boundary interval should be skipped by jump padding");
 }
 
+void TestBuilderUsesNHCJumpWindowsWhenNHCEnabled() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_body_z_nhc_constraint = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.5;
+  config.vertical_velocity_delta_min_sigma_mps = 0.02;
+  config.vertical_velocity_delta_jump_padding_s = 0.0;
+  config.body_z_nhc_jump_padding_s = 0.10;
+  config.body_z_nhc_merge_gap_s = 0.50;
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {1, 2, 1.35, 1.45, 0.02},
+  };
+  offline_lc_minimal::BodyZSeedJumpWindowRow first_window;
+  first_window.start_time_s = 1.0;
+  first_window.end_time_s = 1.1;
+  offline_lc_minimal::BodyZSeedJumpWindowRow second_window;
+  second_window.start_time_s = 1.7;
+  second_window.end_time_s = 1.8;
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows{
+    first_window,
+    second_window,
+  };
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.dynamic_start_index = 1;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.empty(), "dvz should skip intervals inside merged NHC jump windows");
+  ExpectNear(static_cast<double>(summary.vertical_velocity_delta_skipped_jump_count), 1.0, 0.0, "jump skip count is wrong");
+  ExpectTrue(diagnostics.front().in_jump_padding, "diagnostic should mark merged NHC window overlap");
+}
+
 void TestBuilderDisabledDoesNotMutateGraph() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -606,6 +648,9 @@ int main() {
     RunTest(
       "TestBuilderSkipsStaticDynamicBoundaryInsideJumpPadding",
       TestBuilderSkipsStaticDynamicBoundaryInsideJumpPadding);
+    RunTest(
+      "TestBuilderUsesNHCJumpWindowsWhenNHCEnabled",
+      TestBuilderUsesNHCJumpWindowsWhenNHCEnabled);
     RunTest("TestBuilderDisabledDoesNotMutateGraph", TestBuilderDisabledDoesNotMutateGraph);
     RunTest("TestBuilderSkipsIntervalsAfterGnssSupport", TestBuilderSkipsIntervalsAfterGnssSupport);
     RunTest("TestBuilderClampsVelocityDeltaTarget", TestBuilderClampsVelocityDeltaTarget);

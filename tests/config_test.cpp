@@ -615,6 +615,9 @@ void TestPhase23PointOneUgBiasStrengthConfigLoads() {
   ExpectTrue(config.enable_vertical_envelope_center_pull, "phase23 should keep gate-inside RTK center pull");
   ExpectTrue(config.enable_attitude_reference_constraint, "phase23 should keep attitude reference constraints");
   ExpectTrue(config.enable_body_z_nhc_constraint, "phase23 should keep fixed-axis body-z NHC enabled");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_jump_padding_s - config.body_z_nhc_jump_padding_s) < 1e-12,
+    "phase23 dvz jump padding should match body-z NHC jump padding");
 }
 
 void TestOldCompatibilityKeysAreRejected() {

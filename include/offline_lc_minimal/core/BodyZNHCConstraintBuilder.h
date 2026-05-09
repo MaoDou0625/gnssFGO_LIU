@@ -9,6 +9,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Types.h"
+#include "offline_lc_minimal/core/BodyZJumpConstraintWindowPlanner.h"
 
 namespace offline_lc_minimal {
 
@@ -30,28 +31,19 @@ class BodyZNHCConstraintBuilder {
   void Build() const;
 
  private:
-  struct Window {
-    std::size_t source_window_index = 0;
-    std::size_t source_window_count = 1;
-    std::string type = "JUMP";
-    bool from_jump_window = true;
-    double start_time_s = 0.0;
-    double end_time_s = 0.0;
-  };
-
-  [[nodiscard]] std::vector<Window> BuildJumpWindows() const;
-  [[nodiscard]] std::vector<Window> BuildGlobalWindows(
-    const std::vector<Window> &jump_windows) const;
+  [[nodiscard]] std::vector<BodyZJumpConstraintWindow> BuildJumpWindows() const;
+  [[nodiscard]] std::vector<BodyZJumpConstraintWindow> BuildGlobalWindows(
+    const std::vector<BodyZJumpConstraintWindow> &jump_windows) const;
   [[nodiscard]] std::vector<std::size_t> StateIndicesInWindow(
     double start_time_s,
     double end_time_s) const;
   [[nodiscard]] bool OverlapsAnyWindow(
     double start_time_s,
     double end_time_s,
-    const std::vector<Window> &windows) const;
+    const std::vector<BodyZJumpConstraintWindow> &windows) const;
   [[nodiscard]] BodyZNHCDiagnosticRow MakeDiagnosticRow(
     std::size_t window_index,
-    const Window &window,
+    const BodyZJumpConstraintWindow &window,
     const std::vector<std::size_t> &state_indices,
     double velocity_sigma_mps,
     double displacement_sigma_m) const;
