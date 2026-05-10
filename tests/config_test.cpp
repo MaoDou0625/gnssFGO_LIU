@@ -746,6 +746,34 @@ void TestPhase27AdaptiveMotionReweightConfigLoads() {
   ExpectTrue(config.enable_vertical_envelope_center_pull, "phase27 should keep gate-inside RTK center pull");
 }
 
+void TestPhase28RtkLowpassReferenceConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase28_rtk_lowpass_reference.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase28 config should use envelope constraints");
+  ExpectTrue(
+    config.enable_vertical_motion_adaptive_reweighting,
+    "phase28 should keep adaptive vertical motion reweighting");
+  ExpectTrue(
+    config.enable_rtk_vertical_lowpass_reference,
+    "phase28 should enable RTK vertical low-pass reference");
+  ExpectTrue(
+    std::abs(config.rtk_vertical_lowpass_window_s - 5.0) < 1e-15,
+    "phase28 low-pass window should load");
+  ExpectTrue(
+    config.rtk_vertical_lowpass_min_sample_count == 5,
+    "phase28 low-pass minimum sample count should load");
+  ExpectTrue(
+    std::abs(config.rtk_vertical_lowpass_huber_sigma_m - 0.03) < 1e-15,
+    "phase28 low-pass Huber sigma should load");
+  ExpectTrue(
+    config.rtk_vertical_lowpass_use_for_center_pull,
+    "phase28 should use low-pass reference for center pull");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -977,6 +1005,27 @@ void TestVerticalEnvelopeCenterPullConfigValidation() {
     threw = std::string(exception.what()).find("vertical envelope center sigma mode") != std::string::npos;
   }
   ExpectTrue(threw, "unknown center pull sigma mode should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.rtk_vertical_lowpass_window_s = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK vertical low-pass") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive RTK low-pass window should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_vertical_lowpass_reference = true;
+  config.enable_gnss = false;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("enable_rtk_vertical_lowpass_reference") != std::string::npos;
+  }
+  ExpectTrue(threw, "RTK low-pass reference should require GNSS");
 }
 
 void TestInitialStaticVerticalBiasConfigValidation() {
@@ -1708,6 +1757,9 @@ int main() {
     RunTest(
       "TestPhase27AdaptiveMotionReweightConfigLoads",
       TestPhase27AdaptiveMotionReweightConfigLoads);
+    RunTest(
+      "TestPhase28RtkLowpassReferenceConfigLoads",
+      TestPhase28RtkLowpassReferenceConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

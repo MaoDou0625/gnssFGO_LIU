@@ -69,6 +69,11 @@ void ResultWriter::WriteOutputs(
   if (!result.gnss_consistency_records.empty()) {
     WriteGnssConsistencyCsv(output_path / "gnss_consistency.csv", result.gnss_consistency_records);
   }
+  if (!result.rtk_vertical_lowpass_reference_diagnostics.empty()) {
+    WriteRtkVerticalLowpassReferenceDiagnosticsCsv(
+      output_path / "rtk_vertical_lowpass_reference_diagnostics.csv",
+      result.rtk_vertical_lowpass_reference_diagnostics);
+  }
   if (!result.vertical_envelope_diagnostics.empty()) {
     WriteVerticalEnvelopeDiagnosticsCsv(
       output_path / "vertical_envelope_diagnostics.csv",

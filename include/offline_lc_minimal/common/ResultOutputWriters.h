@@ -42,6 +42,10 @@ void WriteGnssConsistencyCsv(
   const std::filesystem::path &path,
   const std::vector<GnssConsistencyRecord> &records);
 
+void WriteRtkVerticalLowpassReferenceDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkVerticalLowpassReferenceRow> &rows);
+
 void WriteVerticalEnvelopeDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalEnvelopeDiagnosticRow> &rows);
