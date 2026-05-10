@@ -11,6 +11,7 @@
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 
 #include "offline_lc_minimal/common/Units.h"
 
@@ -406,6 +407,82 @@ void WriteRtkVerticalLatentReferenceDiagnosticsCsv(
            << row.smoothness_residual_to_next_m << ','
            << row.smoothness_sigma_to_next_m << ','
            << row.skip_reason << '\n';
+  }
+}
+
+void WriteRtkVerticalLatentReferenceSampleComparisonCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalEnvelopeDiagnosticRow> &envelope_rows,
+  const std::vector<RtkVerticalLatentReferenceDiagnosticRow> &latent_rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  std::unordered_map<std::size_t, const RtkVerticalLatentReferenceDiagnosticRow *> latent_by_key;
+  latent_by_key.reserve(latent_rows.size());
+  for (const auto &row : latent_rows) {
+    latent_by_key.emplace(row.key_index, &row);
+  }
+
+  stream << std::setprecision(17);
+  stream
+    << "sample_index,raw_time_s,corrected_time_s,sync_status,latent_reference_key_index,"
+       "raw_rtk_up_m,bin_raw_mean_up_m,bin_raw_median_up_m,bin_raw_std_up_m,bin_raw_range_up_m,"
+       "initial_latent_reference_up_m,optimized_latent_reference_up_m,"
+       "raw_minus_initial_latent_m,raw_minus_optimized_latent_m,optimized_minus_initial_latent_m,"
+       "predicted_up_m,nav_minus_raw_rtk_m,nav_minus_optimized_latent_m,"
+       "half_width_m,latent_gate_violation_m,inside_latent_gate,center_pull_residual_m\n";
+  for (const auto &row : envelope_rows) {
+    if (!row.factor_used || !row.latent_reference_used ||
+        row.gate_reference_type != "rtk_latent") {
+      continue;
+    }
+    const auto latent_it = latent_by_key.find(row.latent_reference_key_index);
+    const RtkVerticalLatentReferenceDiagnosticRow *latent_row =
+      latent_it != latent_by_key.end() ? latent_it->second : nullptr;
+    const double initial_reference_up_m =
+      latent_row != nullptr ? latent_row->initial_reference_up_m : std::numeric_limits<double>::quiet_NaN();
+    const double optimized_reference_up_m =
+      std::isfinite(row.gate_reference_up_m)
+        ? row.gate_reference_up_m
+        : (latent_row != nullptr ? latent_row->optimized_reference_up_m
+                                 : std::numeric_limits<double>::quiet_NaN());
+    const double raw_minus_initial_m =
+      std::isfinite(initial_reference_up_m) ? row.rtk_up_m - initial_reference_up_m
+                                            : std::numeric_limits<double>::quiet_NaN();
+    const double raw_minus_optimized_m =
+      std::isfinite(optimized_reference_up_m) ? row.rtk_up_m - optimized_reference_up_m
+                                              : std::numeric_limits<double>::quiet_NaN();
+    const double optimized_minus_initial_m =
+      std::isfinite(initial_reference_up_m) && std::isfinite(optimized_reference_up_m)
+        ? optimized_reference_up_m - initial_reference_up_m
+        : std::numeric_limits<double>::quiet_NaN();
+    const double nav_minus_optimized_m =
+      std::isfinite(optimized_reference_up_m) ? row.predicted_up_m - optimized_reference_up_m
+                                              : std::numeric_limits<double>::quiet_NaN();
+
+    stream << row.sample_index << ','
+           << row.raw_time_s << ','
+           << row.corrected_time_s << ','
+           << ToString(row.sync_status) << ','
+           << row.latent_reference_key_index << ','
+           << row.rtk_up_m << ','
+           << (latent_row != nullptr ? latent_row->raw_mean_up_m : std::numeric_limits<double>::quiet_NaN()) << ','
+           << (latent_row != nullptr ? latent_row->raw_median_up_m : std::numeric_limits<double>::quiet_NaN()) << ','
+           << (latent_row != nullptr ? latent_row->raw_std_up_m : std::numeric_limits<double>::quiet_NaN()) << ','
+           << (latent_row != nullptr ? latent_row->raw_range_up_m : std::numeric_limits<double>::quiet_NaN()) << ','
+           << initial_reference_up_m << ','
+           << optimized_reference_up_m << ','
+           << raw_minus_initial_m << ','
+           << raw_minus_optimized_m << ','
+           << optimized_minus_initial_m << ','
+           << row.predicted_up_m << ','
+           << row.raw_residual_m << ','
+           << nav_minus_optimized_m << ','
+           << row.half_width_m << ','
+           << row.violation_m << ','
+           << (row.inside_envelope ? 1 : 0) << ','
+           << row.center_pull_residual_m << '\n';
   }
 }
 

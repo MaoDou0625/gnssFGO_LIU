@@ -290,6 +290,36 @@ def read_rtk_latent_reference_rows(path: Path) -> list[dict[str, float]]:
     return rows
 
 
+def read_rtk_latent_sample_comparison_rows(path: Path) -> list[dict[str, float]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, float]] = []
+    with path.open("r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        for raw in reader:
+            time_s = safe_float(raw.get("corrected_time_s"))
+            raw_up_m = safe_float(raw.get("raw_rtk_up_m"))
+            latent_up_m = safe_float(raw.get("optimized_latent_reference_up_m"))
+            raw_minus_latent_m = safe_float(raw.get("raw_minus_optimized_latent_m"))
+            if not (
+                math.isfinite(time_s)
+                and math.isfinite(raw_up_m)
+                and math.isfinite(latent_up_m)
+                and math.isfinite(raw_minus_latent_m)
+            ):
+                continue
+            rows.append(
+                {
+                    "time_s": time_s,
+                    "raw_rtk_up_m": raw_up_m,
+                    "latent_reference_up_m": latent_up_m,
+                    "raw_minus_latent_m": raw_minus_latent_m,
+                }
+            )
+    rows.sort(key=lambda row: row["time_s"])
+    return rows
+
+
 def read_nhc_windows(path: Path) -> list[tuple[float, float]]:
     if not path.exists():
         return []
@@ -370,6 +400,20 @@ def relative_values(rows: list[dict[str, float]], key: str) -> list[float]:
 
 def values_minus_reference(rows: list[dict[str, float]], key: str, reference: float) -> list[float]:
     return [row[key] - reference for row in rows]
+
+
+def scalar_stats(values: list[float]) -> dict[str, float]:
+    finite_values = [value for value in values if math.isfinite(value)]
+    if not finite_values:
+        return {"count": 0.0, "mean": math.nan, "std": math.nan, "max_abs": math.nan}
+    mean = sum(finite_values) / len(finite_values)
+    variance = sum((value - mean) ** 2 for value in finite_values) / len(finite_values)
+    return {
+        "count": float(len(finite_values)),
+        "mean": mean,
+        "std": math.sqrt(variance),
+        "max_abs": max(abs(value) for value in finite_values),
+    }
 
 
 def padded_axis_limits(
@@ -563,6 +607,9 @@ def main() -> int:
     rtk_source = raw_rtk_rows.source if raw_rtk_rows.rows else "vertical_envelope_diagnostics"
     lowpass_rtk_rows = read_rtk_lowpass_rows(run_dir / "rtk_vertical_lowpass_reference_diagnostics.csv")
     latent_rtk_rows = read_rtk_latent_reference_rows(run_dir / "rtk_vertical_latent_reference_diagnostics.csv")
+    latent_sample_rows = read_rtk_latent_sample_comparison_rows(
+        run_dir / "rtk_vertical_latent_reference_sample_comparison.csv"
+    )
     nhc_windows = read_nhc_windows(run_dir / "body_z_nhc_diagnostics.csv")
     body_z_state_rows = read_body_z_nhc_state_rows(run_dir / "body_z_nhc_state_diagnostics.csv")
     context = resolve_plot_context(summary, trajectory_rows)
@@ -591,6 +638,12 @@ def main() -> int:
         print(f"lowpass_rtk_count={len(lowpass_rtk_rows)}")
     if latent_rtk_rows:
         print(f"latent_rtk_reference_count={len(latent_rtk_rows)}")
+    if latent_sample_rows:
+        stats = scalar_stats([row["raw_minus_latent_m"] for row in latent_sample_rows])
+        print(f"latent_sample_comparison_count={int(stats['count'])}")
+        print(f"raw_minus_latent_mean_m={stats['mean']:.9g}")
+        print(f"raw_minus_latent_std_m={stats['std']:.9g}")
+        print(f"raw_minus_latent_max_abs_m={stats['max_abs']:.9g}")
     return 0
 
 

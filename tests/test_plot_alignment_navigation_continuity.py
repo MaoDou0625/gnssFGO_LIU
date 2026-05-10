@@ -108,6 +108,27 @@ class PlotAlignmentNavigationContinuityTests(unittest.TestCase):
             self.assertAlmostEqual(rows[0]["latent_reference_up_m"], 1.2, places=9)
             self.assertAlmostEqual(rows[1]["latent_reference_up_m"], 2.0, places=9)
 
+    def test_read_rtk_latent_sample_comparison_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = pathlib.Path(temp_dir) / "rtk_vertical_latent_reference_sample_comparison.csv"
+            path.write_text(
+                "corrected_time_s,raw_rtk_up_m,optimized_latent_reference_up_m,raw_minus_optimized_latent_m\n"
+                "10.0,1.00,0.98,0.02\n"
+                "11.0,1.03,1.01,0.02\n"
+                "12.0,,1.02,\n",
+                encoding="utf-8",
+            )
+
+            rows = plot_alignment_navigation_continuity.read_rtk_latent_sample_comparison_rows(path)
+            stats = plot_alignment_navigation_continuity.scalar_stats(
+                [row["raw_minus_latent_m"] for row in rows]
+            )
+
+            self.assertEqual(len(rows), 2)
+            self.assertAlmostEqual(rows[0]["raw_minus_latent_m"], 0.02, places=9)
+            self.assertEqual(int(stats["count"]), 2)
+            self.assertAlmostEqual(stats["max_abs"], 0.02, places=9)
+
     def test_padded_axis_limits_uses_height_values_without_gate_width(self) -> None:
         limits = plot_alignment_navigation_continuity.padded_axis_limits([0.0, 0.02, -0.01, 0.01])
 

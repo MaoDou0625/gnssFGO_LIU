@@ -84,6 +84,13 @@ void ResultWriter::WriteOutputs(
       output_path / "vertical_envelope_diagnostics.csv",
       result.vertical_envelope_diagnostics);
   }
+  if (!result.vertical_envelope_diagnostics.empty() &&
+      !result.rtk_vertical_latent_reference_diagnostics.empty()) {
+    WriteRtkVerticalLatentReferenceSampleComparisonCsv(
+      output_path / "rtk_vertical_latent_reference_sample_comparison.csv",
+      result.vertical_envelope_diagnostics,
+      result.rtk_vertical_latent_reference_diagnostics);
+  }
   if (!result.static_alignment_validation.empty()) {
     WriteStaticAlignmentValidationCsv(
       output_path / "static_alignment_validation.csv",

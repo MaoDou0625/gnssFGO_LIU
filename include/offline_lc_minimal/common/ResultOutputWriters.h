@@ -50,6 +50,11 @@ void WriteRtkVerticalLatentReferenceDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkVerticalLatentReferenceDiagnosticRow> &rows);
 
+void WriteRtkVerticalLatentReferenceSampleComparisonCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalEnvelopeDiagnosticRow> &envelope_rows,
+  const std::vector<RtkVerticalLatentReferenceDiagnosticRow> &latent_rows);
+
 void WriteVerticalEnvelopeDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalEnvelopeDiagnosticRow> &rows);
