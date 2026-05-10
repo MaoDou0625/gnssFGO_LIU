@@ -3,6 +3,7 @@
 #include <string>
 
 #include "offline_lc_minimal/common/Config.h"
+#include "offline_lc_minimal/common/DiagnosticsTypes.h"
 
 namespace offline_lc_minimal {
 
@@ -23,8 +24,19 @@ class VerticalVelocityDeltaSigmaModel {
   explicit VerticalVelocityDeltaSigmaModel(const OfflineRunnerConfig &config);
 
   [[nodiscard]] VerticalVelocityDeltaSigmaResult Compute(double dt_s) const;
+  [[nodiscard]] VerticalVelocityDeltaSigmaResult Compute(
+    double dt_s,
+    const VerticalMotionAdaptiveReweightingDiagnosticRow *stability_entry) const;
 
  private:
+  [[nodiscard]] VerticalVelocityDeltaSigmaResult ComputeBiasConsistent(
+    double dt_s,
+    double bias_sigma_mps2,
+    double attitude_sigma_rad,
+    double floor_mps,
+    double ceiling_mps,
+    std::string model) const;
+
   const OfflineRunnerConfig &config_;
 };
 

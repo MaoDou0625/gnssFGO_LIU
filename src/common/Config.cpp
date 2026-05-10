@@ -302,11 +302,26 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_velocity_delta_bias_sigma_mps2 <= 0.0 ||
       config.vertical_velocity_delta_attitude_sigma_rad <= 0.0 ||
       config.vertical_velocity_delta_sigma_floor_mps <= 0.0 ||
-      config.vertical_velocity_delta_sigma_ceiling_mps <= 0.0) {
+      config.vertical_velocity_delta_sigma_ceiling_mps <= 0.0 ||
+      config.vertical_motion_adaptive_outer_iterations < 0 ||
+      config.vertical_motion_adaptive_convergence_score_epsilon <= 0.0 ||
+      config.vertical_motion_adaptive_stability_window_s <= 0.0 ||
+      config.vertical_motion_adaptive_static_horizontal_speed_rms_mps <= 0.0 ||
+      config.vertical_motion_adaptive_static_vz_rms_mps <= 0.0 ||
+      config.vertical_motion_adaptive_static_target_acc_rms_mps2 <= 0.0 ||
+      config.vertical_motion_adaptive_static_dvz_bias_sigma_mps2 <= 0.0 ||
+      config.vertical_motion_adaptive_static_attitude_sigma_rad <= 0.0 ||
+      config.vertical_motion_adaptive_static_sigma_floor_mps <= 0.0 ||
+      config.vertical_motion_adaptive_static_sigma_ceiling_mps <= 0.0 ||
+      config.vertical_motion_adaptive_static_baz_gm_sigma_mps2 <= 0.0) {
     throw std::runtime_error("vertical velocity delta settings must be positive");
   }
   if (config.vertical_velocity_delta_sigma_ceiling_mps < config.vertical_velocity_delta_sigma_floor_mps) {
     throw std::runtime_error("vertical velocity delta sigma ceiling must be >= floor");
+  }
+  if (config.vertical_motion_adaptive_static_sigma_ceiling_mps <
+      config.vertical_motion_adaptive_static_sigma_floor_mps) {
+    throw std::runtime_error("adaptive vertical velocity delta sigma ceiling must be >= floor");
   }
   if (!std::isfinite(config.vertical_position_velocity_consistency_sigma_m) ||
       config.vertical_position_velocity_consistency_sigma_m <= 0.0) {
@@ -747,6 +762,36 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_velocity_delta_sigma_floor_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_sigma_ceiling_mps") {
     config.vertical_velocity_delta_sigma_ceiling_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_motion_adaptive_reweighting") {
+    config.enable_vertical_motion_adaptive_reweighting = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_motion_adaptive_outer_iterations") {
+    config.vertical_motion_adaptive_outer_iterations = ParseInt(normalized_value);
+  } else if (normalized_key == "vertical_motion_adaptive_convergence_score_epsilon") {
+    config.vertical_motion_adaptive_convergence_score_epsilon = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_motion_adaptive_stability_window_s") {
+    config.vertical_motion_adaptive_stability_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_motion_adaptive_static_horizontal_speed_rms_mps") {
+    config.vertical_motion_adaptive_static_horizontal_speed_rms_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_motion_adaptive_static_vz_rms_mps") {
+    config.vertical_motion_adaptive_static_vz_rms_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_motion_adaptive_static_target_acc_rms_mps2") {
+    config.vertical_motion_adaptive_static_target_acc_rms_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_motion_adaptive_static_dvz_bias_sigma_ug") {
+    config.vertical_motion_adaptive_static_dvz_bias_sigma_mps2 =
+      MicroGToMps2(ParseDouble(normalized_value));
+  } else if (normalized_key == "vertical_motion_adaptive_static_dvz_bias_sigma_mps2") {
+    config.vertical_motion_adaptive_static_dvz_bias_sigma_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_motion_adaptive_static_attitude_sigma_rad") {
+    config.vertical_motion_adaptive_static_attitude_sigma_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_motion_adaptive_static_sigma_floor_mps") {
+    config.vertical_motion_adaptive_static_sigma_floor_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_motion_adaptive_static_sigma_ceiling_mps") {
+    config.vertical_motion_adaptive_static_sigma_ceiling_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_motion_adaptive_static_baz_gm_sigma_ug") {
+    config.vertical_motion_adaptive_static_baz_gm_sigma_mps2 =
+      MicroGToMps2(ParseDouble(normalized_value));
+  } else if (normalized_key == "vertical_motion_adaptive_static_baz_gm_sigma_mps2") {
+    config.vertical_motion_adaptive_static_baz_gm_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_position_velocity_consistency_all_states") {
     config.enable_vertical_position_velocity_consistency_all_states = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_position_velocity_consistency_sigma_m") {
@@ -1108,6 +1153,30 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.vertical_velocity_delta_sigma_floor_mps << '\n'
     << "vertical_velocity_delta_sigma_ceiling_mps="
     << config.vertical_velocity_delta_sigma_ceiling_mps << '\n'
+    << "enable_vertical_motion_adaptive_reweighting="
+    << (config.enable_vertical_motion_adaptive_reweighting ? "true" : "false") << '\n'
+    << "vertical_motion_adaptive_outer_iterations="
+    << config.vertical_motion_adaptive_outer_iterations << '\n'
+    << "vertical_motion_adaptive_convergence_score_epsilon="
+    << config.vertical_motion_adaptive_convergence_score_epsilon << '\n'
+    << "vertical_motion_adaptive_stability_window_s="
+    << config.vertical_motion_adaptive_stability_window_s << '\n'
+    << "vertical_motion_adaptive_static_horizontal_speed_rms_mps="
+    << config.vertical_motion_adaptive_static_horizontal_speed_rms_mps << '\n'
+    << "vertical_motion_adaptive_static_vz_rms_mps="
+    << config.vertical_motion_adaptive_static_vz_rms_mps << '\n'
+    << "vertical_motion_adaptive_static_target_acc_rms_mps2="
+    << config.vertical_motion_adaptive_static_target_acc_rms_mps2 << '\n'
+    << "vertical_motion_adaptive_static_dvz_bias_sigma_ug="
+    << Mps2ToMicroG(config.vertical_motion_adaptive_static_dvz_bias_sigma_mps2) << '\n'
+    << "vertical_motion_adaptive_static_attitude_sigma_rad="
+    << config.vertical_motion_adaptive_static_attitude_sigma_rad << '\n'
+    << "vertical_motion_adaptive_static_sigma_floor_mps="
+    << config.vertical_motion_adaptive_static_sigma_floor_mps << '\n'
+    << "vertical_motion_adaptive_static_sigma_ceiling_mps="
+    << config.vertical_motion_adaptive_static_sigma_ceiling_mps << '\n'
+    << "vertical_motion_adaptive_static_baz_gm_sigma_ug="
+    << Mps2ToMicroG(config.vertical_motion_adaptive_static_baz_gm_sigma_mps2) << '\n'
     << "enable_vertical_position_velocity_consistency_all_states="
     << (config.enable_vertical_position_velocity_consistency_all_states ? "true" : "false") << '\n'
     << "vertical_position_velocity_consistency_sigma_m="

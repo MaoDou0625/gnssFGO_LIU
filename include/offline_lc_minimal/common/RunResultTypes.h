@@ -57,6 +57,20 @@ struct RunSummary {
   double vertical_velocity_delta_sigma_max_mps = std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_velocity_delta_sigma_clamped_floor_count = 0;
   std::size_t vertical_velocity_delta_sigma_clamped_ceiling_count = 0;
+  bool vertical_motion_adaptive_reweighting_enabled = false;
+  int vertical_motion_adaptive_pass_count = 1;
+  bool vertical_motion_adaptive_converged = false;
+  std::size_t vertical_motion_adaptive_first20_static_like_interval_count = 0;
+  double vertical_motion_adaptive_first20_dvz_sigma_mean_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_motion_adaptive_first20_dvz_sigma_max_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_motion_adaptive_first20_baz_gm_sigma_mean_ug =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_motion_adaptive_first20_baz_gm_sigma_max_ug =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_motion_adaptive_first20_sum_optimized_minus_target_dvz_mps =
+    std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_position_velocity_consistency_factor_count = 0;
   std::size_t vertical_position_velocity_window_consistency_factor_count = 0;
   std::size_t vertical_position_velocity_consistency_skipped_invalid_count = 0;
@@ -234,6 +248,23 @@ struct RunSummary {
         << vertical_velocity_delta_sigma_clamped_floor_count << '\n'
         << "vertical_velocity_delta_sigma_clamped_ceiling_count="
         << vertical_velocity_delta_sigma_clamped_ceiling_count << '\n'
+        << "vertical_motion_adaptive_reweighting_enabled="
+        << (vertical_motion_adaptive_reweighting_enabled ? "true" : "false") << '\n'
+        << "vertical_motion_adaptive_pass_count=" << vertical_motion_adaptive_pass_count << '\n'
+        << "vertical_motion_adaptive_converged="
+        << (vertical_motion_adaptive_converged ? "true" : "false") << '\n'
+        << "vertical_motion_adaptive_first20_static_like_interval_count="
+        << vertical_motion_adaptive_first20_static_like_interval_count << '\n'
+        << "vertical_motion_adaptive_first20_dvz_sigma_mean_mps="
+        << vertical_motion_adaptive_first20_dvz_sigma_mean_mps << '\n'
+        << "vertical_motion_adaptive_first20_dvz_sigma_max_mps="
+        << vertical_motion_adaptive_first20_dvz_sigma_max_mps << '\n'
+        << "vertical_motion_adaptive_first20_baz_gm_sigma_mean_ug="
+        << vertical_motion_adaptive_first20_baz_gm_sigma_mean_ug << '\n'
+        << "vertical_motion_adaptive_first20_baz_gm_sigma_max_ug="
+        << vertical_motion_adaptive_first20_baz_gm_sigma_max_ug << '\n'
+        << "vertical_motion_adaptive_first20_sum_optimized_minus_target_dvz_mps="
+        << vertical_motion_adaptive_first20_sum_optimized_minus_target_dvz_mps << '\n'
         << "vertical_position_velocity_consistency_factor_count="
         << vertical_position_velocity_consistency_factor_count << '\n'
         << "vertical_position_velocity_window_consistency_factor_count="
@@ -405,6 +436,8 @@ struct OfflineRunResult {
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
   std::vector<StaticAlignmentValidationRow> static_alignment_validation;
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;
+  std::vector<VerticalMotionAdaptiveReweightingDiagnosticRow>
+    vertical_motion_adaptive_reweighting_diagnostics;
   std::vector<VerticalPositionVelocityConsistencyDiagnosticRow>
     vertical_position_velocity_consistency_diagnostics;
   std::vector<AttitudeReferenceDiagnosticRow> attitude_reference_diagnostics;

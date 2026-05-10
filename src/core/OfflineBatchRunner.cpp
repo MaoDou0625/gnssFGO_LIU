@@ -9,6 +9,7 @@
 #include <numeric>
 #include <optional>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <gtsam/inference/Symbol.h>
@@ -34,11 +35,14 @@
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
+#include "offline_lc_minimal/core/VerticalAdaptiveReweightingLoop.h"
+#include "offline_lc_minimal/core/VerticalAccelBiasGmConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpBiasConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpImpulseConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpImuMasker.h"
 #include "offline_lc_minimal/core/VerticalJumpShapeConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalMotionConstraintBuilder.h"
+#include "offline_lc_minimal/core/VerticalMotionStabilityEstimator.h"
 #include "offline_lc_minimal/core/VerticalPositionVelocityConsistencyConstraintBuilder.h"
 #include "offline_lc_minimal/factor/AngularRateFactor.h"
 #include "offline_lc_minimal/factor/BiasGmTransitionFactor.h"
@@ -50,7 +54,6 @@
 #include "offline_lc_minimal/factor/StaticSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/StaticVerticalSpecificForceFactor.h"
 #include "offline_lc_minimal/factor/StaticAttitudeDriftFactor.h"
-#include "offline_lc_minimal/factor/VerticalAccelBiasGmTransitionFactor.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
 
 namespace offline_lc_minimal {
@@ -76,20 +79,6 @@ double ComputeBiasDecay(const double dt_s, const double tau_s) {
 
 gtsam::Matrix3 ComputeBiasPhi(const double dt_s, const double tau_s) {
   return ComputeBiasDecay(dt_s, tau_s) * gtsam::I_3x3;
-}
-
-double ComputeVerticalAccBiasProcessVariance(
-  const double dt_s,
-  const OfflineRunnerConfig &config,
-  const bool is_initial_static_interval) {
-  const double bounded_dt_s = std::max(dt_s, 1e-6);
-  return std::pow(
-           InitialStaticBiasConstraintBuilder::ResolveVerticalGmSigmaMps2(
-             config,
-             is_initial_static_interval),
-           2.0) *
-         config.vertical_acc_bias_process_noise_scale *
-         std::max(1.0 - std::exp(-2.0 * bounded_dt_s / std::max(config.vertical_acc_bias_tau_s, 1e-9)), 1e-9);
 }
 
 gtsam::Matrix66 ComputeBiasProcessCovariance(const double dt_s, const OfflineRunnerConfig &config) {
@@ -558,6 +547,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   std::vector<std::optional<std::size_t>> trajectory_row_index_by_state(state_timestamps.size(), std::nullopt);
   std::vector<VerticalVelocityDeltaPropagationRecord> vertical_velocity_delta_records;
   vertical_velocity_delta_records.reserve(state_timestamps.size() > 0U ? state_timestamps.size() - 1U : 0U);
+  std::vector<VerticalAccelBiasGmTransitionRecord> vertical_acc_bias_gm_records;
+  vertical_acc_bias_gm_records.reserve(state_timestamps.size() > 0U ? state_timestamps.size() - 1U : 0U);
   std::vector<VerticalJumpImuIntervalRecord> vertical_jump_imu_interval_records;
   vertical_jump_imu_interval_records.reserve(state_timestamps.size() > 0U ? state_timestamps.size() - 1U : 0U);
   run_result.trajectory.reserve(state_timestamps.size());
@@ -664,22 +655,15 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         gtsam::noiseModel::Isotropic::Sigma(3, config_.global_gyro_bias_tie_sigma_radps)));
     }
     if (config_.enable_vertical_acc_bias_gm_process) {
-      const double delta_time_s = current_time_s - previous_time_s;
-      const double phi_vertical_acc = ComputeBiasDecay(delta_time_s, config_.vertical_acc_bias_tau_s);
       const bool is_initial_static_interval =
         config_.enable_initial_static_subgraph &&
         current_time_s <= alignment_end_time_s + kTimeEpsilonS;
-      const double vertical_acc_variance =
-        ComputeVerticalAccBiasProcessVariance(delta_time_s, config_, is_initial_static_interval);
-      graph.add(factor::VerticalAccelBiasGmTransitionFactor(
-        B(state_index - 1U),
-        B(state_index),
-        global_acc_bias_key,
-        phi_vertical_acc,
-        gtsam::noiseModel::Isotropic::Sigma(1, std::sqrt(std::max(vertical_acc_variance, 1e-12)))));
-      if (is_initial_static_interval && config_.enable_initial_static_vertical_bias_gm_tightening) {
-        ++run_result.run_summary.initial_static_vertical_bias_gm_tightened_factor_count;
-      }
+      vertical_acc_bias_gm_records.push_back(VerticalAccelBiasGmTransitionRecord{
+        state_index - 1U,
+        state_index,
+        previous_time_s,
+        current_time_s,
+        is_initial_static_interval});
     }
     if (config_.enable_segment_error_feedback) {
       const double delta_time_s = current_time_s - previous_time_s;
@@ -832,14 +816,30 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   optimizer_params.lambdaInitial = config_.lm_lambda_initial;
   optimizer_params.setVerbosity(config_.verbose ? "ERROR" : "SILENT");
   optimizer_params.setVerbosityLM(config_.verbose ? "TRYLAMBDA" : "SILENT");
+  const auto add_vertical_acc_bias_gm_constraints =
+    [&](gtsam::NonlinearFactorGraph &target_graph,
+        RunSummary &target_summary,
+        const VerticalMotionStabilityProfile *stability_profile) {
+      VerticalAccelBiasGmConstraintBuildRequest request;
+      request.config = &config_;
+      request.records = &vertical_acc_bias_gm_records;
+      request.stability_profile = stability_profile;
+      request.global_acc_bias_key = global_acc_bias_key;
+      request.graph = &target_graph;
+      request.run_summary = &target_summary;
+      VerticalAccelBiasGmConstraintBuilder(std::move(request)).Build();
+    };
 
   if (config_.enable_body_z_jump_detection) {
+    gtsam::NonlinearFactorGraph body_z_base_graph = base_graph;
+    RunSummary body_z_seed_summary = base_run_summary;
+    add_vertical_acc_bias_gm_constraints(body_z_base_graph, body_z_seed_summary, nullptr);
     BodyZWindowPipelineRequest body_z_request;
     body_z_request.config = &config_;
     body_z_request.imu_samples = &dataset.imu_samples;
     body_z_request.gnss_samples = &dataset.gnss_samples;
     body_z_request.state_timestamps = &state_timestamps;
-    body_z_request.base_graph = &base_graph;
+    body_z_request.base_graph = &body_z_base_graph;
     body_z_request.base_initial_values = &base_initial_values;
     body_z_request.optimizer_params = optimizer_params;
     body_z_request.navigation_start_index = navigation_start_index;
@@ -866,7 +866,23 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.attitude_reference_states = body_z_result.seed_reference_states;
   }
 
+  std::vector<VerticalMotionAdaptiveReweightingDiagnosticRow> adaptive_reweighting_diagnostics;
+  VerticalMotionStabilityProfile active_stability_profile;
+  const VerticalMotionStabilityProfile *active_stability_profile_ptr = nullptr;
+  gtsam::Values adaptive_initial_values = base_initial_values;
+  bool adaptive_converged = false;
+  const int adaptive_pass_limit =
+    config_.enable_vertical_motion_adaptive_reweighting
+      ? 1 + std::max(0, config_.vertical_motion_adaptive_outer_iterations)
+      : 1;
+  int completed_adaptive_pass_count = 0;
+
+  for (int adaptive_pass = 0; adaptive_pass < adaptive_pass_limit; ++adaptive_pass) {
   run_result.run_summary = base_run_summary;
+  run_result.run_summary.vertical_motion_adaptive_reweighting_enabled =
+    config_.enable_vertical_motion_adaptive_reweighting;
+  run_result.run_summary.vertical_motion_adaptive_pass_count = adaptive_pass + 1;
+  run_result.run_summary.vertical_motion_adaptive_converged = adaptive_converged;
   run_result.run_summary.gnss_factor_count = 0;
   run_result.run_summary.gnss_synced_factor_count = 0;
   run_result.run_summary.gnss_interpolated_factor_count = 0;
@@ -940,6 +956,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.gnss_consistency_records.clear();
   run_result.vertical_envelope_diagnostics.clear();
   run_result.vertical_velocity_delta_diagnostics.clear();
+  run_result.vertical_motion_adaptive_reweighting_diagnostics.clear();
   run_result.vertical_position_velocity_consistency_diagnostics.clear();
   run_result.attitude_reference_diagnostics.clear();
   run_result.body_z_nhc_horizontal_leakage_diagnostics.clear();
@@ -952,7 +969,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.vertical_state_corrections.clear();
 
   gtsam::NonlinearFactorGraph graph_with_gnss = base_graph;
-  gtsam::Values optimization_initial_values = base_initial_values;
+  add_vertical_acc_bias_gm_constraints(
+    graph_with_gnss,
+    run_result.run_summary,
+    active_stability_profile_ptr);
+  gtsam::Values optimization_initial_values = adaptive_initial_values;
   if (config_.enable_vertical_jump_impulse) {
     VerticalJumpImpulseConstraintBuildRequest vertical_jump_impulse_request;
     vertical_jump_impulse_request.config = &config_;
@@ -1038,8 +1059,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   vertical_motion_request.config = &config_;
   vertical_motion_request.propagation_records = &vertical_velocity_delta_records;
   vertical_motion_request.jump_windows = &run_result.body_z_seed_jump_windows;
+  vertical_motion_request.stability_profile = active_stability_profile_ptr;
   vertical_motion_request.gnss_support_end_time_s = vertical_velocity_delta_support_end_time_s;
   vertical_motion_request.dynamic_start_index = graph_timeline.dynamic_start_index;
+  vertical_motion_request.outer_pass = adaptive_pass;
   vertical_motion_request.graph = &graph_with_gnss;
   vertical_motion_request.run_summary = &run_result.run_summary;
   vertical_motion_request.diagnostics = &run_result.vertical_velocity_delta_diagnostics;
@@ -1107,6 +1130,40 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.initial_error = optimizer.error();
   const gtsam::Values optimized_values = optimizer.optimize();
   run_result.run_summary.final_error = graph_with_gnss.error(optimized_values);
+  completed_adaptive_pass_count = adaptive_pass + 1;
+
+  bool finalize_adaptive_pass = adaptive_pass + 1 >= adaptive_pass_limit;
+  if (config_.enable_vertical_motion_adaptive_reweighting && !finalize_adaptive_pass) {
+    VerticalMotionStabilityEstimateRequest stability_request;
+    stability_request.config = &config_;
+    stability_request.state_timestamps = &state_timestamps;
+    stability_request.propagation_records = &vertical_velocity_delta_records;
+    stability_request.bias_gm_records = &vertical_acc_bias_gm_records;
+    stability_request.imu_samples = &dataset.imu_samples;
+    stability_request.jump_windows = &run_result.body_z_seed_jump_windows;
+    stability_request.optimized_values = &optimized_values;
+    stability_request.outer_pass = adaptive_pass + 1;
+    VerticalMotionStabilityProfile next_profile =
+      VerticalMotionStabilityEstimator(std::move(stability_request)).Estimate();
+    if (active_stability_profile_ptr != nullptr &&
+        MaxMotionScoreDelta(active_stability_profile, next_profile) <=
+          config_.vertical_motion_adaptive_convergence_score_epsilon) {
+      adaptive_converged = true;
+      finalize_adaptive_pass = true;
+    } else {
+      adaptive_reweighting_diagnostics.insert(
+        adaptive_reweighting_diagnostics.end(),
+        next_profile.begin(),
+        next_profile.end());
+      active_stability_profile = std::move(next_profile);
+      active_stability_profile_ptr = &active_stability_profile;
+      adaptive_initial_values = optimized_values;
+      continue;
+    }
+  }
+  run_result.run_summary.vertical_motion_adaptive_pass_count = completed_adaptive_pass_count;
+  run_result.run_summary.vertical_motion_adaptive_converged = adaptive_converged;
+  run_result.vertical_motion_adaptive_reweighting_diagnostics = adaptive_reweighting_diagnostics;
 
   PopulateGnssPostfitResiduals(
     optimized_values,
@@ -1122,6 +1179,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateVerticalVelocityDeltaDiagnostics(
     optimized_values,
     run_result.vertical_velocity_delta_diagnostics);
+  AccumulateAdaptiveReweightingSummary(
+    active_stability_profile_ptr != nullptr
+      ? *active_stability_profile_ptr
+      : VerticalMotionStabilityProfile{},
+    run_result.vertical_velocity_delta_diagnostics,
+    dynamic_start_time_s,
+    run_result.run_summary);
   PopulateVerticalPositionVelocityConsistencyDiagnostics(
     optimized_values,
     run_result.vertical_position_velocity_consistency_diagnostics,
@@ -1296,6 +1360,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       run_result.gnss_consistency_records,
       config_);
     run_result.run_summary.segment_error_count = run_result.segment_error_diagnostics.size();
+  }
+
+  break;
   }
 
   return run_result;

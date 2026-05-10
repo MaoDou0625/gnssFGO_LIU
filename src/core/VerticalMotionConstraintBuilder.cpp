@@ -32,10 +32,13 @@ bool IntervalsOverlap(
 VerticalVelocityDeltaDiagnosticRow MakeDiagnosticRow(
   const VerticalVelocityDeltaPropagationRecord &record,
   const VerticalVelocityDeltaSigmaResult &sigma,
-  const double target_delta_vz_mps) {
+  const double target_delta_vz_mps,
+  const int outer_pass,
+  const VerticalMotionAdaptiveReweightingDiagnosticRow *stability_entry) {
   VerticalVelocityDeltaDiagnosticRow row;
   row.state_index_i = record.state_index_i;
   row.state_index_j = record.state_index_j;
+  row.outer_pass = outer_pass;
   row.start_time_s = record.start_time_s;
   row.end_time_s = record.end_time_s;
   row.dt_s = record.end_time_s - record.start_time_s;
@@ -53,15 +56,36 @@ VerticalVelocityDeltaDiagnosticRow MakeDiagnosticRow(
   row.sigma_floor_mps = sigma.sigma_floor_mps;
   row.sigma_ceiling_mps = sigma.sigma_ceiling_mps;
   row.reference_ba_z_ug = Mps2ToMicroG(record.reference_ba_z_mps2);
+  if (stability_entry != nullptr) {
+    row.adaptive_motion_score = stability_entry->motion_score;
+    row.adaptive_sigma_mps = sigma.sigma_mps;
+    row.adaptive_sigma_ratio =
+      stability_entry->dvz_sigma_before_mps > 0.0
+        ? sigma.sigma_mps / stability_entry->dvz_sigma_before_mps
+        : std::numeric_limits<double>::quiet_NaN();
+    row.local_horizontal_speed_rms_mps = stability_entry->horizontal_speed_rms_mps;
+    row.local_vz_rms_mps = stability_entry->vz_rms_mps;
+    row.local_vz_range_mps = stability_entry->vz_range_mps;
+    row.local_target_acc_rms_mps2 = stability_entry->target_vertical_acc_rms_mps2;
+  }
   return row;
 }
 
 bool ApplyClampedTargetSigmaFallback(VerticalVelocityDeltaDiagnosticRow &row) {
-  if (!row.target_clamped || row.sigma_model != "bias_consistent") {
+  if (!row.target_clamped ||
+      row.sigma_model == "legacy" ||
+      row.sigma_model == "legacy_clamped_target") {
     return false;
   }
   row.sigma_model = "legacy_clamped_target";
   row.sigma_mps = row.legacy_sigma_mps;
+  if (std::isfinite(row.adaptive_motion_score)) {
+    row.adaptive_sigma_mps = row.sigma_mps;
+    row.adaptive_sigma_ratio =
+      row.legacy_sigma_mps > 0.0
+        ? row.sigma_mps / row.legacy_sigma_mps
+        : std::numeric_limits<double>::quiet_NaN();
+  }
   return true;
 }
 
@@ -92,9 +116,13 @@ void VerticalMotionConstraintBuilder::Build() const {
   request_.diagnostics->reserve(request_.diagnostics->size() + request_.propagation_records->size());
   for (const auto &record : *request_.propagation_records) {
     const double dt_s = record.end_time_s - record.start_time_s;
-    const VerticalVelocityDeltaSigmaResult sigma = sigma_model.Compute(dt_s);
+    const auto *stability_entry = FindStabilityProfileEntry(
+      request_.stability_profile,
+      record.state_index_i,
+      record.state_index_j);
+    const VerticalVelocityDeltaSigmaResult sigma = sigma_model.Compute(dt_s, stability_entry);
     VerticalVelocityDeltaDiagnosticRow row =
-      MakeDiagnosticRow(record, sigma, TargetDeltaVzMps(record, dt_s));
+      MakeDiagnosticRow(record, sigma, TargetDeltaVzMps(record, dt_s), request_.outer_pass, stability_entry);
     const bool used_clamped_target_fallback = ApplyClampedTargetSigmaFallback(row);
 
     if (!request_.config->enable_vertical_velocity_delta_constraint) {

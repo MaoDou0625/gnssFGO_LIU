@@ -10,6 +10,7 @@
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Types.h"
 #include "offline_lc_minimal/core/BodyZJumpConstraintWindowPlanner.h"
+#include "offline_lc_minimal/core/VerticalMotionStabilityProfile.h"
 
 namespace offline_lc_minimal {
 
@@ -26,8 +27,10 @@ struct VerticalMotionConstraintBuildRequest {
   const OfflineRunnerConfig *config = nullptr;
   const std::vector<VerticalVelocityDeltaPropagationRecord> *propagation_records = nullptr;
   const std::vector<BodyZSeedJumpWindowRow> *jump_windows = nullptr;
+  const VerticalMotionStabilityProfile *stability_profile = nullptr;
   std::optional<double> gnss_support_end_time_s;
   std::size_t dynamic_start_index = 0;
+  int outer_pass = 0;
   gtsam::NonlinearFactorGraph *graph = nullptr;
   RunSummary *run_summary = nullptr;
   std::vector<VerticalVelocityDeltaDiagnosticRow> *diagnostics = nullptr;

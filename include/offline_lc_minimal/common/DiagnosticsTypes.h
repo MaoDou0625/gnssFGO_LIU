@@ -186,6 +186,7 @@ struct StaticAlignmentValidationRow {
 struct VerticalVelocityDeltaDiagnosticRow {
   std::size_t state_index_i = 0;
   std::size_t state_index_j = 0;
+  int outer_pass = 0;
   double start_time_s = std::numeric_limits<double>::quiet_NaN();
   double end_time_s = std::numeric_limits<double>::quiet_NaN();
   double dt_s = std::numeric_limits<double>::quiet_NaN();
@@ -204,11 +205,39 @@ struct VerticalVelocityDeltaDiagnosticRow {
   double attitude_sigma_mps = std::numeric_limits<double>::quiet_NaN();
   double sigma_floor_mps = std::numeric_limits<double>::quiet_NaN();
   double sigma_ceiling_mps = std::numeric_limits<double>::quiet_NaN();
+  double adaptive_motion_score = std::numeric_limits<double>::quiet_NaN();
+  double adaptive_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double adaptive_sigma_ratio = std::numeric_limits<double>::quiet_NaN();
+  double local_horizontal_speed_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double local_vz_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double local_vz_range_mps = std::numeric_limits<double>::quiet_NaN();
+  double local_target_acc_rms_mps2 = std::numeric_limits<double>::quiet_NaN();
   bool bias_aware_factor = false;
   double reference_ba_z_ug = std::numeric_limits<double>::quiet_NaN();
   double optimized_ba_z_ug = std::numeric_limits<double>::quiet_NaN();
   double bias_delta_ug = std::numeric_limits<double>::quiet_NaN();
   double bias_delta_velocity_correction_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct VerticalMotionAdaptiveReweightingDiagnosticRow {
+  int outer_pass = 0;
+  std::size_t state_index_i = 0;
+  std::size_t state_index_j = 0;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double dt_s = std::numeric_limits<double>::quiet_NaN();
+  double motion_score = std::numeric_limits<double>::quiet_NaN();
+  std::string stability_class = "UNSET";
+  double horizontal_speed_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double vz_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double vz_range_mps = std::numeric_limits<double>::quiet_NaN();
+  double target_vertical_acc_rms_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double dvz_sigma_before_mps = std::numeric_limits<double>::quiet_NaN();
+  double dvz_sigma_after_mps = std::numeric_limits<double>::quiet_NaN();
+  double baz_gm_sigma_before_ug = std::numeric_limits<double>::quiet_NaN();
+  double baz_gm_sigma_after_ug = std::numeric_limits<double>::quiet_NaN();
+  bool in_jump_padding = false;
+  std::string skip_reason = "UNSET";
 };
 
 struct VerticalPositionVelocityConsistencyDiagnosticRow {

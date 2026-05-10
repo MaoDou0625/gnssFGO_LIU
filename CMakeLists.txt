@@ -74,11 +74,15 @@ add_library(offline_lc_minimal_lib
   src/core/TrajectoryResultBuilder.cpp
   src/core/TrajectoryInitializer.cpp
   src/core/VerticalConstraintPolicy.cpp
+  src/core/VerticalAdaptiveReweightingLoop.cpp
+  src/core/VerticalAccelBiasGmConstraintBuilder.cpp
   src/core/VerticalJumpBiasConstraintBuilder.cpp
   src/core/VerticalJumpBiasSegmenter.cpp
   src/core/VerticalJumpImpulseConstraintBuilder.cpp
   src/core/VerticalJumpImuMasker.cpp
   src/core/VerticalJumpShapeConstraintBuilder.cpp
+  src/core/VerticalMotionStabilityEstimator.cpp
+  src/core/VerticalMotionStabilityProfile.cpp
   src/core/VerticalMotionConstraintBuilder.cpp
   src/core/VerticalPositionVelocityConsistencyConstraintBuilder.cpp
   src/core/VerticalVelocityDeltaSigmaModel.cpp

@@ -8,9 +8,12 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/common/Units.h"
+#include "offline_lc_minimal/core/VerticalAccelBiasGmConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalMotionConstraintBuilder.h"
+#include "offline_lc_minimal/core/VerticalMotionStabilityEstimator.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaBiasFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaFactor.h"
@@ -210,6 +213,181 @@ void TestSigmaModelClampFlags() {
   ExpectTrue(ceiling_clamped.clamped_ceiling, "large attitude sigma should clamp to ceiling");
 }
 
+void TestAdaptiveSigmaUsesStaticAndDynamicLimits() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.gravity_mps2 = 9.80665;
+  config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
+  config.enable_vertical_motion_adaptive_reweighting = true;
+  config.vertical_velocity_delta_jump_padding_s = 0.0;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.10;
+  config.vertical_velocity_delta_min_sigma_mps = 0.003;
+  config.vertical_velocity_delta_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(0.1);
+  config.vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
+  config.vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
+  config.vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+  config.vertical_acc_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(0.1);
+  config.vertical_motion_adaptive_static_baz_gm_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(0.02);
+  config.vertical_motion_adaptive_static_dvz_bias_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(0.02);
+  config.vertical_motion_adaptive_static_attitude_sigma_rad = 1.0e-5;
+  config.vertical_motion_adaptive_static_sigma_floor_mps = 2.0e-6;
+  config.vertical_motion_adaptive_static_sigma_ceiling_mps = 5.0e-5;
+
+  offline_lc_minimal::VerticalMotionAdaptiveReweightingDiagnosticRow low_motion;
+  low_motion.motion_score = 0.0;
+  const offline_lc_minimal::VerticalVelocityDeltaSigmaModel model(config);
+  const auto adaptive_static = model.Compute(0.05, &low_motion);
+  const double expected_bias = offline_lc_minimal::MicroGToMps2(0.02) * 0.05;
+  const double expected_attitude = 9.80665 * 1.0e-5 * 0.05;
+  const double expected_static_sigma =
+    std::sqrt(expected_bias * expected_bias + expected_attitude * expected_attitude + 2.0e-6 * 2.0e-6);
+  ExpectTrue(adaptive_static.model == "adaptive_static", "low motion should use static adaptive model");
+  ExpectNear(
+    adaptive_static.sigma_mps,
+    expected_static_sigma,
+    1e-15,
+    "static adaptive sigma is wrong");
+
+  low_motion.motion_score = 1.0;
+  const auto adaptive_dynamic = model.Compute(0.05, &low_motion);
+  const auto base = model.Compute(0.05);
+  ExpectNear(
+    adaptive_dynamic.sigma_mps,
+    base.sigma_mps,
+    1e-15,
+    "dynamic adaptive sigma should match base sigma");
+}
+
+void TestAdaptiveSigmaIntermediateScoreRespectsFloor() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.gravity_mps2 = 9.80665;
+  config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
+  config.enable_vertical_motion_adaptive_reweighting = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.10;
+  config.vertical_velocity_delta_min_sigma_mps = 0.003;
+  config.vertical_velocity_delta_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(0.1);
+  config.vertical_velocity_delta_attitude_sigma_rad = 1.0e-9;
+  config.vertical_velocity_delta_sigma_floor_mps = 1.0e-2;
+  config.vertical_velocity_delta_sigma_ceiling_mps = 2.0e-2;
+  config.vertical_motion_adaptive_static_dvz_bias_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(0.02);
+  config.vertical_motion_adaptive_static_attitude_sigma_rad = 1.0e-9;
+  config.vertical_motion_adaptive_static_sigma_floor_mps = 1.0e-4;
+  config.vertical_motion_adaptive_static_sigma_ceiling_mps = 1.0e-3;
+
+  offline_lc_minimal::VerticalMotionAdaptiveReweightingDiagnosticRow mixed_motion;
+  mixed_motion.motion_score = 0.5;
+  const offline_lc_minimal::VerticalVelocityDeltaSigmaModel model(config);
+  const auto sigma = model.Compute(0.05, &mixed_motion);
+  const double expected_floor = 0.5 * config.vertical_motion_adaptive_static_sigma_floor_mps +
+                                0.5 * config.vertical_velocity_delta_sigma_floor_mps;
+
+  ExpectTrue(sigma.model == "adaptive_motion", "mixed score should use adaptive motion model");
+  ExpectNear(sigma.sigma_floor_mps, expected_floor, 1e-15, "blended floor is wrong");
+  ExpectNear(sigma.sigma_mps, expected_floor, 1e-15, "adaptive sigma should respect blended floor");
+  ExpectTrue(sigma.clamped_floor, "mixed adaptive sigma should report floor clamp");
+}
+
+void TestAdaptiveGmTransitionKeepsLegacyFloorWithoutProfile() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_vertical_motion_adaptive_reweighting = true;
+  config.vertical_acc_bias_tau_s = 100.0;
+  config.vertical_acc_bias_process_noise_scale = 1.0;
+  config.vertical_acc_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(0.1);
+  config.vertical_motion_adaptive_static_baz_gm_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(0.02);
+
+  const double no_profile_sigma = offline_lc_minimal::VerticalAccelBiasGmConstraintBuilder::TransitionSigmaMps2(
+    config,
+    0.05,
+    false,
+    nullptr);
+  ExpectNear(no_profile_sigma, 1.0e-6, 1e-15, "pass0/no-profile GM sigma should keep legacy floor");
+
+  offline_lc_minimal::VerticalMotionAdaptiveReweightingDiagnosticRow low_motion;
+  low_motion.motion_score = 0.0;
+  const double low_motion_sigma = offline_lc_minimal::VerticalAccelBiasGmConstraintBuilder::TransitionSigmaMps2(
+    config,
+    0.05,
+    false,
+    &low_motion);
+  ExpectTrue(
+    low_motion_sigma < no_profile_sigma,
+    "low-motion profile should tighten ba_z GM transition sigma");
+
+  offline_lc_minimal::VerticalMotionAdaptiveReweightingDiagnosticRow dynamic_motion;
+  dynamic_motion.motion_score = 1.0;
+  const double dynamic_sigma = offline_lc_minimal::VerticalAccelBiasGmConstraintBuilder::TransitionSigmaMps2(
+    config,
+    0.05,
+    false,
+    &dynamic_motion);
+  ExpectNear(dynamic_sigma, no_profile_sigma, 1e-15, "dynamic profile should preserve legacy GM floor");
+
+  low_motion.in_jump_padding = true;
+  const double jump_sigma = offline_lc_minimal::VerticalAccelBiasGmConstraintBuilder::TransitionSigmaMps2(
+    config,
+    0.05,
+    false,
+    &low_motion);
+  ExpectNear(jump_sigma, no_profile_sigma, 1e-15, "jump padding should preserve legacy GM floor");
+}
+
+void TestStabilityEstimatorClassifiesLowMotionAndJumpPadding() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
+  config.enable_vertical_motion_adaptive_reweighting = true;
+  config.vertical_velocity_delta_jump_padding_s = 0.0;
+  config.vertical_motion_adaptive_static_horizontal_speed_rms_mps = 0.15;
+  config.vertical_motion_adaptive_static_vz_rms_mps = 0.003;
+  config.vertical_motion_adaptive_static_target_acc_rms_mps2 = 0.03;
+  config.vertical_velocity_delta_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(0.1);
+  config.vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
+  config.vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
+  config.vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+  config.vertical_acc_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(0.1);
+  config.vertical_motion_adaptive_static_baz_gm_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(0.02);
+
+  const std::vector<double> state_timestamps{0.0, 0.05, 0.10, 0.15};
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {0, 1, 0.0, 0.05, 0.0001, 0.0},
+    {1, 2, 0.05, 0.10, 0.0001, 0.0},
+    {2, 3, 0.10, 0.15, 0.0001, 0.0},
+  };
+  offline_lc_minimal::BodyZSeedJumpWindowRow jump_window;
+  jump_window.start_time_s = 0.10;
+  jump_window.end_time_s = 0.15;
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows{jump_window};
+  gtsam::Values values;
+  for (std::size_t i = 0; i < state_timestamps.size(); ++i) {
+    values.insert(gtsam::symbol_shorthand::V(i), gtsam::Vector3(0.001, 0.0, 0.0002));
+  }
+
+  offline_lc_minimal::VerticalMotionStabilityEstimateRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.optimized_values = &values;
+  request.outer_pass = 1;
+  const auto profile = offline_lc_minimal::VerticalMotionStabilityEstimator(std::move(request)).Estimate();
+  ExpectTrue(profile.size() == records.size(), "profile size should match records");
+  ExpectTrue(profile[0].motion_score < 0.25, "first interval should be low motion");
+  ExpectTrue(profile[0].stability_class == "LOW_MOTION", "first interval class is wrong");
+  ExpectNear(profile[0].baz_gm_sigma_before_ug, 0.1, 1e-12, "base ba_z GM sigma diagnostic is wrong");
+  ExpectTrue(
+    profile[0].baz_gm_sigma_after_ug < 0.03,
+    "low-motion ba_z GM sigma should be close to the static adaptive limit");
+  ExpectTrue(
+    profile[0].baz_gm_sigma_after_ug < profile[0].baz_gm_sigma_before_ug,
+    "adaptive ba_z GM sigma should tighten low-motion intervals");
+  ExpectTrue(profile[2].in_jump_padding, "jump interval should be marked");
+  ExpectNear(profile[2].motion_score, 1.0, 1e-12, "jump interval should keep dynamic score");
+}
+
 void TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -242,6 +420,120 @@ void TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary() {
   ExpectTrue(diagnostics[0].skip_reason == "STATIC_INTERIOR", "static interior interval should be skipped");
   ExpectTrue(diagnostics[1].factor_added, "last static to first dynamic interval should receive a factor");
   ExpectTrue(diagnostics[1].skip_reason == "ADDED", "boundary interval should be marked as added");
+}
+
+void TestBuilderUsesAdaptiveMotionProfileSigma() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
+  config.enable_vertical_motion_adaptive_reweighting = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.10;
+  config.vertical_velocity_delta_min_sigma_mps = 0.003;
+  config.vertical_velocity_delta_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(0.1);
+  config.vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
+  config.vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
+  config.vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+  config.vertical_motion_adaptive_static_dvz_bias_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(0.02);
+  config.vertical_motion_adaptive_static_attitude_sigma_rad = 1.0e-5;
+  config.vertical_motion_adaptive_static_sigma_floor_mps = 2.0e-6;
+  config.vertical_motion_adaptive_static_sigma_ceiling_mps = 5.0e-5;
+
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {1, 2, 1.0, 1.05, 0.0001, 0.0},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  offline_lc_minimal::VerticalMotionAdaptiveReweightingDiagnosticRow profile_row;
+  profile_row.state_index_i = 1;
+  profile_row.state_index_j = 2;
+  profile_row.motion_score = 0.0;
+  profile_row.dvz_sigma_before_mps =
+    offline_lc_minimal::VerticalVelocityDeltaSigmaModel(config).Compute(0.05).sigma_mps;
+  const offline_lc_minimal::VerticalMotionStabilityProfile profile{profile_row};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.stability_profile = &profile;
+  request.dynamic_start_index = 1;
+  request.outer_pass = 1;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "adaptive interval should add a factor");
+  ExpectTrue(diagnostics.front().sigma_model == "adaptive_static", "builder should use adaptive static sigma");
+  ExpectNear(diagnostics.front().outer_pass, 1.0, 0.0, "diagnostic should record outer pass");
+  ExpectNear(diagnostics.front().adaptive_motion_score, 0.0, 1e-12, "motion score should be copied");
+  ExpectTrue(
+    diagnostics.front().sigma_mps < diagnostics.front().legacy_sigma_mps,
+    "adaptive sigma should be tighter than legacy sigma");
+  ExpectNear(
+    diagnostics.front().adaptive_sigma_mps,
+    diagnostics.front().sigma_mps,
+    1e-15,
+    "adaptive sigma diagnostic should match factor sigma");
+}
+
+void TestBuilderKeepsLegacySigmaForClampedAdaptiveTarget() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
+  config.enable_vertical_motion_adaptive_reweighting = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.5;
+  config.vertical_velocity_delta_min_sigma_mps = 0.02;
+  config.vertical_velocity_delta_target_acc_limit_mps2 = 0.1;
+  config.vertical_velocity_delta_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(0.1);
+  config.vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
+  config.vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
+  config.vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+  config.vertical_motion_adaptive_static_dvz_bias_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(0.02);
+  config.vertical_motion_adaptive_static_attitude_sigma_rad = 1.0e-5;
+  config.vertical_motion_adaptive_static_sigma_floor_mps = 2.0e-6;
+  config.vertical_motion_adaptive_static_sigma_ceiling_mps = 5.0e-5;
+
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {1, 2, 1.0, 1.5, 1.0, 0.0},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  offline_lc_minimal::VerticalMotionAdaptiveReweightingDiagnosticRow profile_row;
+  profile_row.state_index_i = 1;
+  profile_row.state_index_j = 2;
+  profile_row.motion_score = 0.0;
+  profile_row.dvz_sigma_before_mps =
+    offline_lc_minimal::VerticalVelocityDeltaSigmaModel(config).Compute(0.5).sigma_mps;
+  const offline_lc_minimal::VerticalMotionStabilityProfile profile{profile_row};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.stability_profile = &profile;
+  request.dynamic_start_index = 1;
+  request.outer_pass = 1;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "clamped adaptive interval should add a factor");
+  ExpectTrue(diagnostics.front().target_clamped, "adaptive target should be clamped");
+  ExpectTrue(
+    diagnostics.front().sigma_model == "legacy_clamped_target",
+    "clamped adaptive target should fall back to legacy sigma");
+  ExpectNear(diagnostics.front().target_delta_vz_mps, 0.05, 1e-12, "clamped target value is wrong");
+  ExpectNear(diagnostics.front().sigma_mps, 0.25, 1e-12, "clamped adaptive target should use legacy sigma");
 }
 
 void TestBuilderAddsStaticInteriorWhenConfigured() {
@@ -638,12 +930,24 @@ int main() {
     RunTest("TestSigmaModelLegacyMatchesExistingFormula", TestSigmaModelLegacyMatchesExistingFormula);
     RunTest("TestSigmaModelBiasConsistentComponents", TestSigmaModelBiasConsistentComponents);
     RunTest("TestSigmaModelClampFlags", TestSigmaModelClampFlags);
+    RunTest("TestAdaptiveSigmaUsesStaticAndDynamicLimits", TestAdaptiveSigmaUsesStaticAndDynamicLimits);
+    RunTest("TestAdaptiveSigmaIntermediateScoreRespectsFloor", TestAdaptiveSigmaIntermediateScoreRespectsFloor);
+    RunTest(
+      "TestAdaptiveGmTransitionKeepsLegacyFloorWithoutProfile",
+      TestAdaptiveGmTransitionKeepsLegacyFloorWithoutProfile);
+    RunTest(
+      "TestStabilityEstimatorClassifiesLowMotionAndJumpPadding",
+      TestStabilityEstimatorClassifiesLowMotionAndJumpPadding);
     RunTest(
       "TestBuilderAddsDynamicBoundaryAndDynamicNonJumpIntervals",
       TestBuilderAddsDynamicBoundaryAndDynamicNonJumpIntervals);
     RunTest(
       "TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary",
       TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary);
+    RunTest("TestBuilderUsesAdaptiveMotionProfileSigma", TestBuilderUsesAdaptiveMotionProfileSigma);
+    RunTest(
+      "TestBuilderKeepsLegacySigmaForClampedAdaptiveTarget",
+      TestBuilderKeepsLegacySigmaForClampedAdaptiveTarget);
     RunTest("TestBuilderAddsStaticInteriorWhenConfigured", TestBuilderAddsStaticInteriorWhenConfigured);
     RunTest(
       "TestBuilderSkipsStaticDynamicBoundaryInsideJumpPadding",

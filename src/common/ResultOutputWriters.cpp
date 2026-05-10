@@ -423,15 +423,19 @@ void WriteVerticalVelocityDeltaDiagnosticsCsv(
   }
   stream << std::setprecision(17);
   stream
-    << "state_i,state_j,start_time_s,end_time_s,dt_s,factor_added,skip_reason,in_jump_padding,"
+    << "state_i,state_j,outer_pass,start_time_s,end_time_s,dt_s,factor_added,skip_reason,in_jump_padding,"
        "target_clamped,raw_target_delta_vz_mps,"
        "target_delta_vz_mps,optimized_delta_vz_mps,residual_mps,sigma_mps,sigma_model,"
        "legacy_sigma_mps,bias_sigma_mps,attitude_sigma_mps,sigma_floor_mps,sigma_ceiling_mps,"
+       "adaptive_motion_score,adaptive_sigma_mps,adaptive_sigma_ratio,"
+       "local_horizontal_speed_rms_mps,local_vz_rms_mps,local_vz_range_mps,"
+       "local_target_acc_rms_mps2,"
        "bias_aware_factor,reference_ba_z_ug,optimized_ba_z_ug,bias_delta_ug,"
        "bias_delta_velocity_correction_mps\n";
   for (const auto &row : rows) {
     stream << row.state_index_i << ','
            << row.state_index_j << ','
+           << row.outer_pass << ','
            << row.start_time_s << ','
            << row.end_time_s << ','
            << row.dt_s << ','
@@ -450,11 +454,53 @@ void WriteVerticalVelocityDeltaDiagnosticsCsv(
            << row.attitude_sigma_mps << ','
            << row.sigma_floor_mps << ','
            << row.sigma_ceiling_mps << ','
+           << row.adaptive_motion_score << ','
+           << row.adaptive_sigma_mps << ','
+           << row.adaptive_sigma_ratio << ','
+           << row.local_horizontal_speed_rms_mps << ','
+           << row.local_vz_rms_mps << ','
+           << row.local_vz_range_mps << ','
+           << row.local_target_acc_rms_mps2 << ','
            << (row.bias_aware_factor ? 1 : 0) << ','
            << row.reference_ba_z_ug << ','
            << row.optimized_ba_z_ug << ','
            << row.bias_delta_ug << ','
            << row.bias_delta_velocity_correction_mps << '\n';
+  }
+}
+
+void WriteVerticalMotionAdaptiveReweightingDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<VerticalMotionAdaptiveReweightingDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "outer_pass,state_i,state_j,start_time_s,end_time_s,dt_s,motion_score,stability_class,"
+       "horizontal_speed_rms_mps,vz_rms_mps,vz_range_mps,target_vertical_acc_rms_mps2,"
+       "dvz_sigma_before_mps,dvz_sigma_after_mps,baz_gm_sigma_before_ug,baz_gm_sigma_after_ug,"
+       "in_jump_padding,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.outer_pass << ','
+           << row.state_index_i << ','
+           << row.state_index_j << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.dt_s << ','
+           << row.motion_score << ','
+           << row.stability_class << ','
+           << row.horizontal_speed_rms_mps << ','
+           << row.vz_rms_mps << ','
+           << row.vz_range_mps << ','
+           << row.target_vertical_acc_rms_mps2 << ','
+           << row.dvz_sigma_before_mps << ','
+           << row.dvz_sigma_after_mps << ','
+           << row.baz_gm_sigma_before_ug << ','
+           << row.baz_gm_sigma_after_ug << ','
+           << (row.in_jump_padding ? 1 : 0) << ','
+           << row.skip_reason << '\n';
   }
 }
 

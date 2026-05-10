@@ -709,6 +709,43 @@ void TestPhase26LeakageCorrectedNHCConfigLoads() {
     "phase26 leakage min sample count should load");
 }
 
+void TestPhase27AdaptiveMotionReweightConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase27_adaptive_motion_reweight.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase27 config should use envelope constraints");
+  ExpectTrue(
+    config.enable_vertical_motion_adaptive_reweighting,
+    "phase27 should enable adaptive vertical motion reweighting");
+  ExpectTrue(
+    config.vertical_motion_adaptive_outer_iterations == 2,
+    "phase27 should run two adaptive outer iterations");
+  ExpectTrue(
+    std::abs(
+      config.vertical_motion_adaptive_static_dvz_bias_sigma_mps2 -
+      offline_lc_minimal::MicroGToMps2(0.02)) < 1e-15,
+    "phase27 static dvz bias sigma should parse in ug");
+  ExpectTrue(
+    std::abs(config.vertical_motion_adaptive_static_attitude_sigma_rad - 1e-5) < 1e-15,
+    "phase27 static attitude sigma should load");
+  ExpectTrue(
+    std::abs(config.vertical_motion_adaptive_static_sigma_floor_mps - 2e-6) < 1e-15,
+    "phase27 adaptive floor should load");
+  ExpectTrue(
+    std::abs(config.vertical_motion_adaptive_static_sigma_ceiling_mps - 5e-5) < 1e-15,
+    "phase27 adaptive ceiling should load");
+  ExpectTrue(
+    std::abs(
+      config.vertical_motion_adaptive_static_baz_gm_sigma_mps2 -
+      offline_lc_minimal::MicroGToMps2(0.02)) < 1e-15,
+    "phase27 static ba_z GM sigma should parse in ug");
+  ExpectTrue(config.enable_body_z_nhc_horizontal_leakage_correction, "phase27 should keep leakage correction");
+  ExpectTrue(config.enable_vertical_envelope_center_pull, "phase27 should keep gate-inside RTK center pull");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -1668,6 +1705,9 @@ int main() {
     RunTest(
       "TestPhase26LeakageCorrectedNHCConfigLoads",
       TestPhase26LeakageCorrectedNHCConfigLoads);
+    RunTest(
+      "TestPhase27AdaptiveMotionReweightConfigLoads",
+      TestPhase27AdaptiveMotionReweightConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

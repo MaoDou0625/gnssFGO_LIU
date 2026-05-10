@@ -84,6 +84,11 @@ void ResultWriter::WriteOutputs(
       output_path / "vertical_velocity_delta_diagnostics.csv",
       result.vertical_velocity_delta_diagnostics);
   }
+  if (!result.vertical_motion_adaptive_reweighting_diagnostics.empty()) {
+    WriteVerticalMotionAdaptiveReweightingDiagnosticsCsv(
+      output_path / "vertical_motion_adaptive_reweighting_diagnostics.csv",
+      result.vertical_motion_adaptive_reweighting_diagnostics);
+  }
   if (!result.vertical_position_velocity_consistency_diagnostics.empty()) {
     WriteVerticalPositionVelocityConsistencyDiagnosticsCsv(
       output_path / "vertical_position_velocity_consistency_diagnostics.csv",
