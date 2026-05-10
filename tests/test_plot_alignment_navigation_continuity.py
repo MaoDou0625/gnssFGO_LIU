@@ -62,6 +62,7 @@ class PlotAlignmentNavigationContinuityTests(unittest.TestCase):
                 "gnss_vertical_fixed_sigma_m=0.20\n"
                 "gnss_sigma_scale_up=1.0\n"
                 "rtkfix_scale=1.0\n"
+                "drop_non_rtkfix=true\n"
                 "vertical_envelope_gate_sigma_multiple=2.0\n",
                 encoding="utf-8",
             )
@@ -90,6 +91,22 @@ class PlotAlignmentNavigationContinuityTests(unittest.TestCase):
             windows = plot_alignment_navigation_continuity.read_nhc_windows(path)
 
             self.assertEqual(windows, [(10.0, 11.0)])
+
+    def test_read_rtk_latent_reference_rows_prefers_optimized_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = pathlib.Path(temp_dir) / "rtk_vertical_latent_reference_diagnostics.csv"
+            path.write_text(
+                "bin_center_time_s,initial_reference_up_m,optimized_reference_up_m,sample_count\n"
+                "10.5,1.0,1.2,5\n"
+                "11.5,2.0,,4\n",
+                encoding="utf-8",
+            )
+
+            rows = plot_alignment_navigation_continuity.read_rtk_latent_reference_rows(path)
+
+            self.assertEqual(len(rows), 2)
+            self.assertAlmostEqual(rows[0]["latent_reference_up_m"], 1.2, places=9)
+            self.assertAlmostEqual(rows[1]["latent_reference_up_m"], 2.0, places=9)
 
     def test_padded_axis_limits_uses_height_values_without_gate_width(self) -> None:
         limits = plot_alignment_navigation_continuity.padded_axis_limits([0.0, 0.02, -0.01, 0.01])

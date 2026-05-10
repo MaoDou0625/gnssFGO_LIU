@@ -47,6 +47,21 @@ struct RunSummary {
   double rtk_vertical_lowpass_raw_minus_lowpass_max_abs_m =
     std::numeric_limits<double>::quiet_NaN();
   std::size_t rtk_vertical_lowpass_center_pull_factor_count = 0;
+  bool rtk_vertical_latent_reference_enabled = false;
+  std::size_t rtk_vertical_latent_reference_bin_count = 0;
+  std::size_t rtk_vertical_latent_reference_low_sample_bin_count = 0;
+  std::size_t rtk_vertical_latent_reference_measurement_factor_count = 0;
+  std::size_t rtk_vertical_latent_reference_smoothness_factor_count = 0;
+  std::size_t rtk_vertical_latent_reference_envelope_factor_count = 0;
+  std::size_t rtk_vertical_latent_reference_center_pull_factor_count = 0;
+  double rtk_vertical_latent_reference_raw_residual_rms_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double rtk_vertical_latent_reference_raw_residual_max_abs_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double rtk_vertical_latent_reference_smoothness_rms_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double rtk_vertical_latent_reference_smoothness_max_abs_m =
+    std::numeric_limits<double>::quiet_NaN();
   std::size_t error_state_count = 0;
   std::size_t segment_error_count = 0;
   std::size_t vertical_velocity_delta_factor_count = 0;
@@ -240,6 +255,28 @@ struct RunSummary {
         << rtk_vertical_lowpass_raw_minus_lowpass_max_abs_m << '\n'
         << "rtk_vertical_lowpass_center_pull_factor_count="
         << rtk_vertical_lowpass_center_pull_factor_count << '\n'
+        << "rtk_vertical_latent_reference_enabled="
+        << (rtk_vertical_latent_reference_enabled ? "true" : "false") << '\n'
+        << "rtk_vertical_latent_reference_bin_count="
+        << rtk_vertical_latent_reference_bin_count << '\n'
+        << "rtk_vertical_latent_reference_low_sample_bin_count="
+        << rtk_vertical_latent_reference_low_sample_bin_count << '\n'
+        << "rtk_vertical_latent_reference_measurement_factor_count="
+        << rtk_vertical_latent_reference_measurement_factor_count << '\n'
+        << "rtk_vertical_latent_reference_smoothness_factor_count="
+        << rtk_vertical_latent_reference_smoothness_factor_count << '\n'
+        << "rtk_vertical_latent_reference_envelope_factor_count="
+        << rtk_vertical_latent_reference_envelope_factor_count << '\n'
+        << "rtk_vertical_latent_reference_center_pull_factor_count="
+        << rtk_vertical_latent_reference_center_pull_factor_count << '\n'
+        << "rtk_vertical_latent_reference_raw_residual_rms_m="
+        << rtk_vertical_latent_reference_raw_residual_rms_m << '\n'
+        << "rtk_vertical_latent_reference_raw_residual_max_abs_m="
+        << rtk_vertical_latent_reference_raw_residual_max_abs_m << '\n'
+        << "rtk_vertical_latent_reference_smoothness_rms_m="
+        << rtk_vertical_latent_reference_smoothness_rms_m << '\n'
+        << "rtk_vertical_latent_reference_smoothness_max_abs_m="
+        << rtk_vertical_latent_reference_smoothness_max_abs_m << '\n'
         << "error_state_count=" << error_state_count << '\n'
         << "segment_error_count=" << segment_error_count << '\n'
         << "vertical_velocity_delta_factor_count=" << vertical_velocity_delta_factor_count << '\n'
@@ -450,6 +487,7 @@ struct OfflineRunResult {
   std::vector<GnssFactorRecord> gnss_factor_records;
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
   std::vector<RtkVerticalLowpassReferenceRow> rtk_vertical_lowpass_reference_diagnostics;
+  std::vector<RtkVerticalLatentReferenceDiagnosticRow> rtk_vertical_latent_reference_diagnostics;
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
   std::vector<StaticAlignmentValidationRow> static_alignment_validation;
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;

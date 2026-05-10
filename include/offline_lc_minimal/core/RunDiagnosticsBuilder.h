@@ -35,6 +35,12 @@ void PopulateVerticalEnvelopeDiagnostics(
   const gp::GPWNOJInterpolator &base_interpolator,
   std::vector<VerticalEnvelopeDiagnosticRow> &vertical_envelope_diagnostics);
 
+void PopulateRtkVerticalLatentReferenceDiagnostics(
+  const gtsam::Values &optimized_values,
+  const std::vector<GnssSolutionSample> &gnss_samples,
+  std::vector<RtkVerticalLatentReferenceDiagnosticRow> &diagnostics,
+  RunSummary &run_summary);
+
 [[nodiscard]] ForwardDriftSummary ComputeFeedbackForwardDriftSummary(
   const std::vector<ImuSample> &imu_samples,
   const gtsam::Pose3 &start_pose,

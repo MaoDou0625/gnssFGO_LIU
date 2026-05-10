@@ -8,6 +8,7 @@
 
 #include <Eigen/Core>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Types.h"
@@ -24,7 +25,9 @@ struct GnssFactorBuildRequest {
   RunSummary *run_summary = nullptr;
   std::vector<GnssFactorRecord> *factor_records = nullptr;
   std::vector<GnssConsistencyRecord> *consistency_records = nullptr;
+  gtsam::Values *initial_values = nullptr;
   std::vector<RtkVerticalLowpassReferenceRow> *rtk_vertical_lowpass_reference_diagnostics = nullptr;
+  std::vector<RtkVerticalLatentReferenceDiagnosticRow> *rtk_vertical_latent_reference_diagnostics = nullptr;
   std::vector<VerticalEnvelopeDiagnosticRow> *vertical_envelope_diagnostics = nullptr;
   bool collect_consistency_records = false;
   double dynamic_start_time_s = 0.0;
@@ -51,14 +54,16 @@ class GnssFactorBuilder {
     double corrected_time_s,
     const StateMeasSyncResult &sync_result,
     const Eigen::Vector3d &sigma_m,
-    const VerticalConstraintPolicy &vertical_policy) const;
+    const VerticalConstraintPolicy &vertical_policy,
+    const std::vector<RtkVerticalLatentReferenceSampleReference> *latent_references) const;
   void AddInterpolatedFactors(
     const GnssSolutionSample &sample,
     std::size_t sample_index,
     double corrected_time_s,
     const StateMeasSyncResult &sync_result,
     const Eigen::Vector3d &sigma_m,
-    const VerticalConstraintPolicy &vertical_policy) const;
+    const VerticalConstraintPolicy &vertical_policy,
+    const std::vector<RtkVerticalLatentReferenceSampleReference> *latent_references) const;
   void UpdateTrajectoryRows(const GnssSolutionSample &sample, const GnssFactorRecord &record) const;
 
   GnssFactorBuildRequest request_;

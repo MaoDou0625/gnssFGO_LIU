@@ -266,6 +266,30 @@ def read_rtk_lowpass_rows(path: Path) -> list[dict[str, float]]:
     return rows
 
 
+def read_rtk_latent_reference_rows(path: Path) -> list[dict[str, float]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, float]] = []
+    with path.open("r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        for raw in reader:
+            time_s = safe_float(raw.get("bin_center_time_s"))
+            up_m = safe_float(raw.get("optimized_reference_up_m"))
+            if not math.isfinite(up_m):
+                up_m = safe_float(raw.get("initial_reference_up_m"))
+            sample_count = safe_float(raw.get("sample_count"))
+            if math.isfinite(time_s) and math.isfinite(up_m):
+                rows.append(
+                    {
+                        "time_s": time_s,
+                        "latent_reference_up_m": up_m,
+                        "sample_count": sample_count,
+                    }
+                )
+    rows.sort(key=lambda row: row["time_s"])
+    return rows
+
+
 def read_nhc_windows(path: Path) -> list[tuple[float, float]]:
     if not path.exists():
         return []
@@ -412,6 +436,7 @@ def plot_alignment_continuity(
     trajectory_rows: list[dict[str, float]],
     envelope_rows: list[dict[str, float]],
     lowpass_rtk_rows: list[dict[str, float]],
+    latent_rtk_rows: list[dict[str, float]],
     nhc_windows: list[tuple[float, float]],
     body_z_state_rows: list[dict[str, float]],
     context: PlotContext,
@@ -421,6 +446,7 @@ def plot_alignment_continuity(
     plot_rows = rows_from_time(trajectory_rows, context.reference_time_s)
     envelope_rows = rows_from_time(envelope_rows, context.reference_time_s)
     lowpass_rtk_rows = rows_from_time(lowpass_rtk_rows, context.reference_time_s)
+    latent_rtk_rows = rows_from_time(latent_rtk_rows, context.reference_time_s)
     x = relative_time(plot_rows, context.reference_time_s)
     up_reference_m = plot_rows[0]["up_m"]
 
@@ -462,6 +488,18 @@ def plot_alignment_continuity(
             linewidth=1.2,
             alpha=0.9,
             label="low-pass RTK center",
+        )
+    if latent_rtk_rows:
+        latent_x = relative_time(latent_rtk_rows, context.reference_time_s)
+        latent_delta = values_minus_reference(latent_rtk_rows, "latent_reference_up_m", up_reference_m)
+        height_axis_values.extend(latent_delta)
+        axes[0].plot(
+            latent_x,
+            latent_delta,
+            color="#17becf",
+            linewidth=1.3,
+            alpha=0.95,
+            label="latent RTK reference",
         )
     height_limits = padded_axis_limits(height_axis_values)
     if height_limits is not None:
@@ -524,6 +562,7 @@ def main() -> int:
     envelope_rows = raw_rtk_rows.rows or read_envelope_rows(run_dir / "vertical_envelope_diagnostics.csv")
     rtk_source = raw_rtk_rows.source if raw_rtk_rows.rows else "vertical_envelope_diagnostics"
     lowpass_rtk_rows = read_rtk_lowpass_rows(run_dir / "rtk_vertical_lowpass_reference_diagnostics.csv")
+    latent_rtk_rows = read_rtk_latent_reference_rows(run_dir / "rtk_vertical_latent_reference_diagnostics.csv")
     nhc_windows = read_nhc_windows(run_dir / "body_z_nhc_diagnostics.csv")
     body_z_state_rows = read_body_z_nhc_state_rows(run_dir / "body_z_nhc_state_diagnostics.csv")
     context = resolve_plot_context(summary, trajectory_rows)
@@ -533,6 +572,7 @@ def main() -> int:
         trajectory_rows,
         envelope_rows,
         lowpass_rtk_rows,
+        latent_rtk_rows,
         nhc_windows,
         body_z_state_rows,
         context,
@@ -549,6 +589,8 @@ def main() -> int:
         print(f"rtk_plot_source={rtk_source}")
     if lowpass_rtk_rows:
         print(f"lowpass_rtk_count={len(lowpass_rtk_rows)}")
+    if latent_rtk_rows:
+        print(f"latent_rtk_reference_count={len(latent_rtk_rows)}")
     return 0
 
 

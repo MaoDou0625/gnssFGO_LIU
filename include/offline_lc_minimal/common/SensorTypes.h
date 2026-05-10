@@ -53,6 +53,10 @@ enum class VerticalEnvelopeCenterSigmaMode : int {
   kGateSigma = 1,
 };
 
+enum class RtkVerticalLatentReferenceMeasurementSigmaMode : int {
+  kGateSigma = 0,
+};
+
 enum class StateMeasSyncStatus : int {
   kDropped = 0,
   kSynchronizedI = 1,
@@ -133,6 +137,14 @@ inline std::string ToString(const VerticalEnvelopeCenterSigmaMode mode) {
     case VerticalEnvelopeCenterSigmaMode::kFixed:
     default:
       return "fixed";
+  }
+}
+
+inline std::string ToString(const RtkVerticalLatentReferenceMeasurementSigmaMode mode) {
+  switch (mode) {
+    case RtkVerticalLatentReferenceMeasurementSigmaMode::kGateSigma:
+    default:
+      return "gate_sigma";
   }
 }
 

@@ -13,6 +13,7 @@
 #include "offline_lc_minimal/core/ImuIntegrationUtils.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/factor/VerticalRtkFactors.h"
+#include "offline_lc_minimal/core/RtkVerticalLatentReferenceBuilder.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -276,7 +277,22 @@ void PopulateVerticalEnvelopeDiagnostics(
     }
     row.predicted_up_m = *predicted_up_m;
     row.raw_residual_m = row.predicted_up_m - row.rtk_up_m;
-    row.violation_m = factor::VerticalEnvelopeResidual(row.raw_residual_m, row.half_width_m);
+    if (row.latent_reference_used) {
+      const gtsam::Key reference_key = RtkVerticalLatentReferenceKey(row.latent_reference_key_index);
+      if (optimized_values.exists(reference_key)) {
+        row.gate_reference_up_m = optimized_values.at<double>(reference_key);
+        if (row.center_pull_factor_used && row.center_pull_reference_type == "rtk_latent") {
+          row.center_pull_reference_up_m = row.gate_reference_up_m;
+        }
+      }
+    }
+    if (!std::isfinite(row.gate_reference_up_m)) {
+      row.gate_reference_up_m = row.rtk_up_m;
+      row.gate_reference_type = "raw_rtk";
+    }
+    row.raw_minus_gate_reference_m = row.rtk_up_m - row.gate_reference_up_m;
+    row.gate_reference_residual_m = row.predicted_up_m - row.gate_reference_up_m;
+    row.violation_m = factor::VerticalEnvelopeResidual(row.gate_reference_residual_m, row.half_width_m);
     row.inside_envelope = std::abs(row.violation_m) <= 1e-12;
     if (row.center_pull_factor_used) {
       if (!std::isfinite(row.center_pull_reference_up_m)) {
@@ -292,6 +308,89 @@ void PopulateVerticalEnvelopeDiagnostics(
           row.center_pull_deadband_m);
     }
   }
+}
+
+void PopulateRtkVerticalLatentReferenceDiagnostics(
+  const gtsam::Values &optimized_values,
+  const std::vector<GnssSolutionSample> &gnss_samples,
+  std::vector<RtkVerticalLatentReferenceDiagnosticRow> &diagnostics,
+  RunSummary &run_summary) {
+  std::vector<double> raw_residuals;
+  std::vector<double> smoothness_residuals;
+  raw_residuals.reserve(gnss_samples.size());
+  smoothness_residuals.reserve(diagnostics.size());
+
+  for (auto &row : diagnostics) {
+    const gtsam::Key reference_key = RtkVerticalLatentReferenceKey(row.key_index);
+    if (!optimized_values.exists(reference_key)) {
+      continue;
+    }
+    row.optimized_reference_up_m = optimized_values.at<double>(reference_key);
+    row.optimized_minus_initial_m = row.optimized_reference_up_m - row.initial_reference_up_m;
+
+    double residual_sum = 0.0;
+    double residual_sq_sum = 0.0;
+    double residual_max_abs = std::numeric_limits<double>::quiet_NaN();
+    std::size_t residual_count = 0;
+    for (const std::size_t sample_index : row.sample_indices) {
+      if (sample_index >= gnss_samples.size()) {
+        continue;
+      }
+      const auto &sample = gnss_samples[sample_index];
+      if (!sample.has_enu_position || !std::isfinite(sample.enu_position_m.z())) {
+        continue;
+      }
+      const double residual_m = row.optimized_reference_up_m - sample.enu_position_m.z();
+      residual_sum += residual_m;
+      residual_sq_sum += residual_m * residual_m;
+      residual_max_abs = std::isfinite(residual_max_abs)
+                           ? std::max(residual_max_abs, std::abs(residual_m))
+                           : std::abs(residual_m);
+      ++residual_count;
+      raw_residuals.push_back(residual_m);
+    }
+    if (residual_count > 0U) {
+      row.raw_to_optimized_residual_mean_m = residual_sum / static_cast<double>(residual_count);
+      row.raw_to_optimized_residual_rms_m =
+        std::sqrt(residual_sq_sum / static_cast<double>(residual_count));
+      row.raw_to_optimized_residual_max_abs_m = residual_max_abs;
+    }
+  }
+
+  for (std::size_t index = 1U; index < diagnostics.size(); ++index) {
+    auto &prev = diagnostics[index - 1U];
+    const auto &curr = diagnostics[index];
+    if (!std::isfinite(prev.optimized_reference_up_m) ||
+        !std::isfinite(curr.optimized_reference_up_m)) {
+      continue;
+    }
+    prev.smoothness_residual_to_next_m =
+      curr.optimized_reference_up_m - prev.optimized_reference_up_m;
+    smoothness_residuals.push_back(prev.smoothness_residual_to_next_m);
+  }
+
+  const auto accumulate_rms = [](const std::vector<double> &values) {
+    if (values.empty()) {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+    double sum_sq = 0.0;
+    for (const double value : values) {
+      sum_sq += value * value;
+    }
+    return std::sqrt(sum_sq / static_cast<double>(values.size()));
+  };
+  const auto max_abs = [](const std::vector<double> &values) {
+    double result = std::numeric_limits<double>::quiet_NaN();
+    for (const double value : values) {
+      result = std::isfinite(result) ? std::max(result, std::abs(value)) : std::abs(value);
+    }
+    return result;
+  };
+
+  run_summary.rtk_vertical_latent_reference_raw_residual_rms_m = accumulate_rms(raw_residuals);
+  run_summary.rtk_vertical_latent_reference_raw_residual_max_abs_m = max_abs(raw_residuals);
+  run_summary.rtk_vertical_latent_reference_smoothness_rms_m = accumulate_rms(smoothness_residuals);
+  run_summary.rtk_vertical_latent_reference_smoothness_max_abs_m = max_abs(smoothness_residuals);
 }
 
 ForwardDriftSummary ComputeFeedbackForwardDriftSummary(

@@ -134,6 +134,16 @@ struct OfflineRunnerConfig {
   int rtk_vertical_lowpass_min_sample_count = 5;
   double rtk_vertical_lowpass_huber_sigma_m = 0.03;
   bool rtk_vertical_lowpass_use_for_center_pull = true;
+  bool enable_rtk_vertical_latent_reference = false;
+  double rtk_vertical_latent_reference_bin_s = 1.0;
+  int rtk_vertical_latent_reference_min_sample_count = 3;
+  RtkVerticalLatentReferenceMeasurementSigmaMode
+    rtk_vertical_latent_reference_measurement_sigma_mode =
+      RtkVerticalLatentReferenceMeasurementSigmaMode::kGateSigma;
+  double rtk_vertical_latent_reference_measurement_huber_sigma_m = 0.03;
+  double rtk_vertical_latent_reference_smooth_sigma_m = 0.005;
+  bool rtk_vertical_latent_reference_use_for_center_pull = true;
+  bool rtk_vertical_latent_reference_use_for_envelope_gate = true;
   bool enable_vertical_velocity_delta_constraint = false;
   double vertical_velocity_delta_acc_sigma_mps2 = 0.50;
   double vertical_velocity_delta_min_sigma_mps = 0.02;

@@ -370,6 +370,45 @@ void WriteRtkVerticalLowpassReferenceDiagnosticsCsv(
   }
 }
 
+void WriteRtkVerticalLatentReferenceDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkVerticalLatentReferenceDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "bin_index,key_index,bin_start_time_s,bin_end_time_s,bin_center_time_s,"
+       "sample_count,low_sample_count,raw_mean_up_m,raw_median_up_m,raw_std_up_m,"
+       "raw_range_up_m,initial_reference_up_m,optimized_reference_up_m,"
+       "optimized_minus_initial_m,raw_to_optimized_residual_mean_m,"
+       "raw_to_optimized_residual_rms_m,raw_to_optimized_residual_max_abs_m,"
+       "smoothness_residual_to_next_m,smoothness_sigma_to_next_m,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.bin_index << ','
+           << row.key_index << ','
+           << row.bin_start_time_s << ','
+           << row.bin_end_time_s << ','
+           << row.bin_center_time_s << ','
+           << row.sample_count << ','
+           << (row.low_sample_count ? 1 : 0) << ','
+           << row.raw_mean_up_m << ','
+           << row.raw_median_up_m << ','
+           << row.raw_std_up_m << ','
+           << row.raw_range_up_m << ','
+           << row.initial_reference_up_m << ','
+           << row.optimized_reference_up_m << ','
+           << row.optimized_minus_initial_m << ','
+           << row.raw_to_optimized_residual_mean_m << ','
+           << row.raw_to_optimized_residual_rms_m << ','
+           << row.raw_to_optimized_residual_max_abs_m << ','
+           << row.smoothness_residual_to_next_m << ','
+           << row.smoothness_sigma_to_next_m << ','
+           << row.skip_reason << '\n';
+  }
+}
+
 void WriteVerticalEnvelopeDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalEnvelopeDiagnosticRow> &rows) {
@@ -382,7 +421,9 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
     << "sample_index,raw_time_s,corrected_time_s,sync_status,state_index_i,state_index_j,"
        "synchronized_state_index,state_time_i_s,state_time_j_s,duration_from_state_i_s,"
        "factor_used,rtk_up_m,sigma_u_m,half_width_m,predicted_up_m,raw_residual_m,"
-       "violation_m,inside_envelope,center_pull_factor_used,center_pull_sigma_m,"
+       "gate_reference_up_m,gate_reference_type,gate_reference_residual_m,"
+       "raw_minus_gate_reference_m,gate_reference_skip_reason,latent_reference_key_index,"
+       "latent_reference_used,violation_m,inside_envelope,center_pull_factor_used,center_pull_sigma_m,"
        "center_pull_deadband_m,center_pull_residual_m,center_pull_reference_up_m,"
        "center_pull_reference_type,center_pull_reference_residual_m,center_pull_skip_reason\n";
   for (const auto &row : rows) {
@@ -402,6 +443,13 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
            << row.half_width_m << ','
            << row.predicted_up_m << ','
            << row.raw_residual_m << ','
+           << row.gate_reference_up_m << ','
+           << row.gate_reference_type << ','
+           << row.gate_reference_residual_m << ','
+           << row.raw_minus_gate_reference_m << ','
+           << row.gate_reference_skip_reason << ','
+           << row.latent_reference_key_index << ','
+           << (row.latent_reference_used ? 1 : 0) << ','
            << row.violation_m << ','
            << (row.inside_envelope ? 1 : 0) << ','
            << (row.center_pull_factor_used ? 1 : 0) << ','

@@ -774,6 +774,47 @@ void TestPhase28RtkLowpassReferenceConfigLoads() {
     "phase28 should use low-pass reference for center pull");
 }
 
+void TestPhase29RtkLatentReferenceConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase29_rtk_latent_reference.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase29 config should use envelope constraints");
+  ExpectTrue(
+    config.enable_vertical_motion_adaptive_reweighting,
+    "phase29 should keep adaptive vertical motion reweighting");
+  ExpectTrue(
+    !config.enable_rtk_vertical_lowpass_reference,
+    "phase29 should disable fixed low-pass center reference");
+  ExpectTrue(
+    config.enable_rtk_vertical_latent_reference,
+    "phase29 should enable RTK vertical latent reference");
+  ExpectTrue(
+    std::abs(config.rtk_vertical_latent_reference_bin_s - 1.0) < 1e-15,
+    "phase29 latent reference bin size should load");
+  ExpectTrue(
+    config.rtk_vertical_latent_reference_min_sample_count == 3,
+    "phase29 latent reference min sample count should load");
+  ExpectTrue(
+    config.rtk_vertical_latent_reference_measurement_sigma_mode ==
+      offline_lc_minimal::RtkVerticalLatentReferenceMeasurementSigmaMode::kGateSigma,
+    "phase29 latent reference should use gate-sigma measurement mode");
+  ExpectTrue(
+    std::abs(config.rtk_vertical_latent_reference_measurement_huber_sigma_m - 0.03) < 1e-15,
+    "phase29 latent reference Huber sigma should load");
+  ExpectTrue(
+    std::abs(config.rtk_vertical_latent_reference_smooth_sigma_m - 0.005) < 1e-15,
+    "phase29 latent reference smoothness sigma should load");
+  ExpectTrue(
+    config.rtk_vertical_latent_reference_use_for_center_pull,
+    "phase29 should use latent reference for center pull");
+  ExpectTrue(
+    config.rtk_vertical_latent_reference_use_for_envelope_gate,
+    "phase29 should use latent reference for envelope gate");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -1026,6 +1067,49 @@ void TestVerticalEnvelopeCenterPullConfigValidation() {
     threw = std::string(exception.what()).find("enable_rtk_vertical_lowpass_reference") != std::string::npos;
   }
   ExpectTrue(threw, "RTK low-pass reference should require GNSS");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_vertical_latent_reference", "true");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_vertical_latent_reference_measurement_sigma_mode", "gate_sigma");
+  ExpectTrue(
+    config.rtk_vertical_latent_reference_measurement_sigma_mode ==
+      offline_lc_minimal::RtkVerticalLatentReferenceMeasurementSigmaMode::kGateSigma,
+    "latent reference gate-sigma mode should parse");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
+  config.rtk_vertical_latent_reference_bin_s = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK vertical latent reference") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive RTK latent reference bin size should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_vertical_latent_reference = true;
+  config.enable_gnss = false;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("enable_rtk_vertical_latent_reference") != std::string::npos;
+  }
+  ExpectTrue(threw, "RTK latent reference should require GNSS");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
+  config.enable_rtk_vertical_lowpass_reference = true;
+  config.enable_rtk_vertical_latent_reference = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("cannot both drive center pull") != std::string::npos;
+  }
+  ExpectTrue(threw, "low-pass and latent references should not both drive center pull");
 }
 
 void TestInitialStaticVerticalBiasConfigValidation() {
@@ -1760,6 +1844,9 @@ int main() {
     RunTest(
       "TestPhase28RtkLowpassReferenceConfigLoads",
       TestPhase28RtkLowpassReferenceConfigLoads);
+    RunTest(
+      "TestPhase29RtkLatentReferenceConfigLoads",
+      TestPhase29RtkLatentReferenceConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

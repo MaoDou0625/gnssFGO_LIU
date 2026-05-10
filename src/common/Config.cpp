@@ -125,6 +125,15 @@ VerticalEnvelopeCenterSigmaMode ParseVerticalEnvelopeCenterSigmaMode(const std::
   throw std::runtime_error("invalid vertical envelope center sigma mode: " + value);
 }
 
+RtkVerticalLatentReferenceMeasurementSigmaMode ParseRtkVerticalLatentReferenceMeasurementSigmaMode(
+  const std::string &value) {
+  const std::string lowered = Lowercase(value);
+  if (lowered == "gate_sigma") {
+    return RtkVerticalLatentReferenceMeasurementSigmaMode::kGateSigma;
+  }
+  throw std::runtime_error("invalid RTK vertical latent reference measurement sigma mode: " + value);
+}
+
 }  // namespace
 
 void ValidateConfig(const OfflineRunnerConfig &config) {
@@ -301,6 +310,35 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   }
   if (config.enable_rtk_vertical_lowpass_reference && !config.enable_gnss) {
     throw std::runtime_error("enable_rtk_vertical_lowpass_reference requires enable_gnss");
+  }
+  if (!std::isfinite(config.rtk_vertical_latent_reference_bin_s) ||
+      config.rtk_vertical_latent_reference_bin_s <= 0.0 ||
+      config.rtk_vertical_latent_reference_min_sample_count <= 0 ||
+      !std::isfinite(config.rtk_vertical_latent_reference_measurement_huber_sigma_m) ||
+      config.rtk_vertical_latent_reference_measurement_huber_sigma_m <= 0.0 ||
+      !std::isfinite(config.rtk_vertical_latent_reference_smooth_sigma_m) ||
+      config.rtk_vertical_latent_reference_smooth_sigma_m <= 0.0) {
+    throw std::runtime_error("RTK vertical latent reference settings are invalid");
+  }
+  if (config.enable_rtk_vertical_latent_reference && !config.enable_gnss) {
+    throw std::runtime_error("enable_rtk_vertical_latent_reference requires enable_gnss");
+  }
+  if (config.enable_rtk_vertical_latent_reference &&
+      config.vertical_constraint_mode != VerticalConstraintMode::kEnvelope) {
+    throw std::runtime_error("enable_rtk_vertical_latent_reference requires envelope vertical mode");
+  }
+  if (config.enable_rtk_vertical_latent_reference &&
+      !config.rtk_vertical_latent_reference_use_for_center_pull &&
+      !config.rtk_vertical_latent_reference_use_for_envelope_gate) {
+    throw std::runtime_error(
+      "enable_rtk_vertical_latent_reference requires at least one latent reference use flag");
+  }
+  if (config.enable_rtk_vertical_latent_reference &&
+      config.enable_rtk_vertical_lowpass_reference &&
+      config.rtk_vertical_latent_reference_use_for_center_pull &&
+      config.rtk_vertical_lowpass_use_for_center_pull) {
+    throw std::runtime_error(
+      "RTK vertical low-pass and latent references cannot both drive center pull");
   }
   if (config.enable_vertical_velocity_delta_constraint && !config.enable_body_z_jump_detection) {
     throw std::runtime_error("enable_vertical_velocity_delta_constraint requires enable_body_z_jump_detection");
@@ -756,6 +794,23 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.rtk_vertical_lowpass_huber_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "rtk_vertical_lowpass_use_for_center_pull") {
     config.rtk_vertical_lowpass_use_for_center_pull = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_rtk_vertical_latent_reference") {
+    config.enable_rtk_vertical_latent_reference = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_vertical_latent_reference_bin_s") {
+    config.rtk_vertical_latent_reference_bin_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_vertical_latent_reference_min_sample_count") {
+    config.rtk_vertical_latent_reference_min_sample_count = ParseInt(normalized_value);
+  } else if (normalized_key == "rtk_vertical_latent_reference_measurement_sigma_mode") {
+    config.rtk_vertical_latent_reference_measurement_sigma_mode =
+      ParseRtkVerticalLatentReferenceMeasurementSigmaMode(normalized_value);
+  } else if (normalized_key == "rtk_vertical_latent_reference_measurement_huber_sigma_m") {
+    config.rtk_vertical_latent_reference_measurement_huber_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_vertical_latent_reference_smooth_sigma_m") {
+    config.rtk_vertical_latent_reference_smooth_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_vertical_latent_reference_use_for_center_pull") {
+    config.rtk_vertical_latent_reference_use_for_center_pull = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_vertical_latent_reference_use_for_envelope_gate") {
+    config.rtk_vertical_latent_reference_use_for_envelope_gate = ParseBool(normalized_value);
   } else if (normalized_key == "enable_vertical_velocity_delta_constraint") {
     config.enable_vertical_velocity_delta_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_acc_sigma_mps2") {
@@ -1159,6 +1214,22 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "rtk_vertical_lowpass_huber_sigma_m=" << config.rtk_vertical_lowpass_huber_sigma_m << '\n'
     << "rtk_vertical_lowpass_use_for_center_pull="
     << (config.rtk_vertical_lowpass_use_for_center_pull ? "true" : "false") << '\n'
+    << "enable_rtk_vertical_latent_reference="
+    << (config.enable_rtk_vertical_latent_reference ? "true" : "false") << '\n'
+    << "rtk_vertical_latent_reference_bin_s="
+    << config.rtk_vertical_latent_reference_bin_s << '\n'
+    << "rtk_vertical_latent_reference_min_sample_count="
+    << config.rtk_vertical_latent_reference_min_sample_count << '\n'
+    << "rtk_vertical_latent_reference_measurement_sigma_mode="
+    << ToString(config.rtk_vertical_latent_reference_measurement_sigma_mode) << '\n'
+    << "rtk_vertical_latent_reference_measurement_huber_sigma_m="
+    << config.rtk_vertical_latent_reference_measurement_huber_sigma_m << '\n'
+    << "rtk_vertical_latent_reference_smooth_sigma_m="
+    << config.rtk_vertical_latent_reference_smooth_sigma_m << '\n'
+    << "rtk_vertical_latent_reference_use_for_center_pull="
+    << (config.rtk_vertical_latent_reference_use_for_center_pull ? "true" : "false") << '\n'
+    << "rtk_vertical_latent_reference_use_for_envelope_gate="
+    << (config.rtk_vertical_latent_reference_use_for_envelope_gate ? "true" : "false") << '\n'
     << "enable_vertical_velocity_delta_constraint="
     << (config.enable_vertical_velocity_delta_constraint ? "true" : "false") << '\n'
     << "vertical_velocity_delta_acc_sigma_mps2=" << config.vertical_velocity_delta_acc_sigma_mps2 << '\n'

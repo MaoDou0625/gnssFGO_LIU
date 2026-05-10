@@ -7,6 +7,7 @@
 
 #include <Eigen/Core>
 #include <gtsam/geometry/Pose3.h>
+#include <gtsam/inference/Key.h>
 #include <gtsam/navigation/ImuBias.h>
 
 #include "offline_lc_minimal/common/SensorTypes.h"
@@ -161,6 +162,13 @@ struct VerticalEnvelopeDiagnosticRow {
   double half_width_m = std::numeric_limits<double>::quiet_NaN();
   double predicted_up_m = std::numeric_limits<double>::quiet_NaN();
   double raw_residual_m = std::numeric_limits<double>::quiet_NaN();
+  double gate_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  std::string gate_reference_type = "raw_rtk";
+  double gate_reference_residual_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_minus_gate_reference_m = std::numeric_limits<double>::quiet_NaN();
+  std::string gate_reference_skip_reason = "NONE";
+  std::size_t latent_reference_key_index = 0;
+  bool latent_reference_used = false;
   double violation_m = std::numeric_limits<double>::quiet_NaN();
   bool inside_envelope = false;
   bool center_pull_factor_used = false;
@@ -182,6 +190,41 @@ struct RtkVerticalLowpassReferenceRow {
   int window_sample_count = 0;
   bool lowpass_valid = false;
   std::string skip_reason = "UNSET";
+};
+
+struct RtkVerticalLatentReferenceSampleReference {
+  std::size_t sample_index = 0;
+  bool valid = false;
+  std::size_t bin_index = 0;
+  std::size_t key_index = 0;
+  gtsam::Key key = 0;
+  double initial_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  bool low_sample_count = false;
+  std::string skip_reason = "UNSET";
+};
+
+struct RtkVerticalLatentReferenceDiagnosticRow {
+  std::size_t bin_index = 0;
+  std::size_t key_index = 0;
+  std::vector<std::size_t> sample_indices;
+  double bin_start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double bin_end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double bin_center_time_s = std::numeric_limits<double>::quiet_NaN();
+  int sample_count = 0;
+  bool low_sample_count = false;
+  double raw_mean_up_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_median_up_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_std_up_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_range_up_m = std::numeric_limits<double>::quiet_NaN();
+  double initial_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_minus_initial_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_to_optimized_residual_mean_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_to_optimized_residual_rms_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_to_optimized_residual_max_abs_m = std::numeric_limits<double>::quiet_NaN();
+  double smoothness_residual_to_next_m = std::numeric_limits<double>::quiet_NaN();
+  double smoothness_sigma_to_next_m = std::numeric_limits<double>::quiet_NaN();
+  std::string skip_reason = "NONE";
 };
 
 struct StaticAlignmentValidationRow {
