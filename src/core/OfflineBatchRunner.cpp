@@ -33,6 +33,7 @@
 #include "offline_lc_minimal/core/InitialStaticRtkHeightConstraintBuilder.h"
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
+#include "offline_lc_minimal/core/RtkVerticalDriftReferenceEstimator.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
 #include "offline_lc_minimal/core/VerticalAdaptiveReweightingLoop.h"
@@ -353,6 +354,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   if (initial_static_rtk_height_reference.valid) {
     run_result.run_summary.initial_static_rtk_height_reference_up_m =
       initial_static_rtk_height_reference.reference_up_m;
+  }
+  if (config_.enable_rtk_vertical_drift_reference && !initial_static_rtk_height_reference.valid) {
+    throw std::runtime_error(
+      "RTK vertical drift reference requires a valid initial static RTK height reference");
   }
   AccumulateStaticSpecificForceWindowMetrics(
     dataset.imu_samples,
@@ -869,20 +874,45 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   std::vector<VerticalMotionAdaptiveReweightingDiagnosticRow> adaptive_reweighting_diagnostics;
   VerticalMotionStabilityProfile active_stability_profile;
   const VerticalMotionStabilityProfile *active_stability_profile_ptr = nullptr;
+  std::vector<RtkVerticalDriftReferenceDiagnosticRow> active_rtk_vertical_drift_profile;
+  const std::vector<RtkVerticalDriftReferenceDiagnosticRow> *active_rtk_vertical_drift_profile_ptr =
+    nullptr;
   gtsam::Values adaptive_initial_values = base_initial_values;
   bool adaptive_converged = false;
-  const int adaptive_pass_limit =
+  const int adaptive_extra_iterations =
     config_.enable_vertical_motion_adaptive_reweighting
-      ? 1 + std::max(0, config_.vertical_motion_adaptive_outer_iterations)
-      : 1;
+      ? std::max(0, config_.vertical_motion_adaptive_outer_iterations)
+      : 0;
+  const int rtk_drift_extra_iterations =
+    config_.enable_rtk_vertical_drift_reference ? 2 : 0;
+  const int adaptive_pass_limit =
+    1 + std::max(adaptive_extra_iterations, rtk_drift_extra_iterations);
   int completed_adaptive_pass_count = 0;
 
   for (int adaptive_pass = 0; adaptive_pass < adaptive_pass_limit; ++adaptive_pass) {
   run_result.run_summary = base_run_summary;
   run_result.run_summary.vertical_motion_adaptive_reweighting_enabled =
     config_.enable_vertical_motion_adaptive_reweighting;
-  run_result.run_summary.vertical_motion_adaptive_pass_count = adaptive_pass + 1;
+  run_result.run_summary.vertical_motion_adaptive_pass_count =
+    config_.enable_vertical_motion_adaptive_reweighting ? adaptive_pass + 1 : 1;
   run_result.run_summary.vertical_motion_adaptive_converged = adaptive_converged;
+  run_result.run_summary.rtk_vertical_drift_reference_enabled =
+    config_.enable_rtk_vertical_drift_reference;
+  run_result.run_summary.rtk_vertical_drift_reference_pass_count =
+    config_.enable_rtk_vertical_drift_reference ? adaptive_pass + 1 : 0;
+  run_result.run_summary.rtk_vertical_drift_reference_valid_count = 0;
+  run_result.run_summary.rtk_vertical_drift_static_range_m =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.rtk_vertical_drift_static_std_m =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.rtk_vertical_drift_white_residual_std_m =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.rtk_vertical_drift_max_abs_correction_m =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.rtk_vertical_drift_first20_mean_correction_m =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.rtk_vertical_drift_first20_max_abs_correction_m =
+    std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.gnss_factor_count = 0;
   run_result.run_summary.gnss_synced_factor_count = 0;
   run_result.run_summary.gnss_interpolated_factor_count = 0;
@@ -955,6 +985,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.gnss_factor_records.clear();
   run_result.gnss_consistency_records.clear();
   run_result.vertical_envelope_diagnostics.clear();
+  run_result.rtk_vertical_drift_reference_diagnostics =
+    active_rtk_vertical_drift_profile_ptr != nullptr
+      ? *active_rtk_vertical_drift_profile_ptr
+      : std::vector<RtkVerticalDriftReferenceDiagnosticRow>{};
   run_result.vertical_velocity_delta_diagnostics.clear();
   run_result.vertical_motion_adaptive_reweighting_diagnostics.clear();
   run_result.vertical_position_velocity_consistency_diagnostics.clear();
@@ -1022,6 +1056,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   gnss_request.factor_records = &run_result.gnss_factor_records;
   gnss_request.consistency_records = &run_result.gnss_consistency_records;
   gnss_request.vertical_envelope_diagnostics = &run_result.vertical_envelope_diagnostics;
+  gnss_request.rtk_vertical_drift_reference_profile = active_rtk_vertical_drift_profile_ptr;
   gnss_request.collect_consistency_records = collect_gnss_consistency;
   gnss_request.dynamic_start_time_s = dynamic_start_time_s;
   gnss_request.should_use_sample = [&](const GnssSolutionSample &sample) {
@@ -1133,7 +1168,44 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   completed_adaptive_pass_count = adaptive_pass + 1;
 
   bool finalize_adaptive_pass = adaptive_pass + 1 >= adaptive_pass_limit;
-  if (config_.enable_vertical_motion_adaptive_reweighting && !finalize_adaptive_pass) {
+  bool continue_with_reweighted_graph = false;
+  if (!finalize_adaptive_pass && config_.enable_rtk_vertical_drift_reference) {
+    RtkVerticalDriftReferenceEstimateRequest drift_request;
+    drift_request.config = &config_;
+    drift_request.gnss_samples = &dataset.gnss_samples;
+    drift_request.optimized_values = &optimized_values;
+    drift_request.alignment_start_time_s = alignment_start_time_s;
+    drift_request.alignment_end_time_s = alignment_end_time_s;
+    drift_request.static_reference_up_m = initial_static_rtk_height_reference.reference_up_m;
+    drift_request.dynamic_start_time_s = dynamic_start_time_s;
+    drift_request.pass_index = adaptive_pass + 1;
+    drift_request.should_use_sample = [&](const GnssSolutionSample &sample) {
+      return sample.has_enu_position && PassesGnssQualityFilters(sample);
+    };
+    drift_request.is_within_imu_coverage = [&](const double corrected_time_s) {
+      return IsWithinImuCoverage(dataset.imu_samples, corrected_time_s);
+    };
+    drift_request.corrected_time_s = [&](const GnssSolutionSample &sample) {
+      return CorrectedGnssTime(sample);
+    };
+    drift_request.find_state_for_time_s = [&](const double corrected_time_s) {
+      return FindStateForMeasurement(state_timestamp_map, corrected_time_s, config_);
+    };
+    RtkVerticalDriftReferenceEstimateResult next_drift_profile =
+      RtkVerticalDriftReferenceEstimator(std::move(drift_request)).Estimate(
+        active_rtk_vertical_drift_profile_ptr);
+    if (active_rtk_vertical_drift_profile_ptr != nullptr &&
+        next_drift_profile.max_abs_profile_delta_m <=
+          config_.rtk_vertical_drift_convergence_threshold_m) {
+      // Current graph already used a converged fixed drift profile.
+    } else {
+      active_rtk_vertical_drift_profile = std::move(next_drift_profile.profile);
+      active_rtk_vertical_drift_profile_ptr = &active_rtk_vertical_drift_profile;
+      run_result.rtk_vertical_drift_reference_diagnostics = active_rtk_vertical_drift_profile;
+      continue_with_reweighted_graph = true;
+    }
+  }
+  if (!finalize_adaptive_pass && config_.enable_vertical_motion_adaptive_reweighting) {
     VerticalMotionStabilityEstimateRequest stability_request;
     stability_request.config = &config_;
     stability_request.state_timestamps = &state_timestamps;
@@ -1149,7 +1221,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         MaxMotionScoreDelta(active_stability_profile, next_profile) <=
           config_.vertical_motion_adaptive_convergence_score_epsilon) {
       adaptive_converged = true;
-      finalize_adaptive_pass = true;
     } else {
       adaptive_reweighting_diagnostics.insert(
         adaptive_reweighting_diagnostics.end(),
@@ -1157,13 +1228,22 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         next_profile.end());
       active_stability_profile = std::move(next_profile);
       active_stability_profile_ptr = &active_stability_profile;
-      adaptive_initial_values = optimized_values;
-      continue;
+      continue_with_reweighted_graph = true;
     }
   }
-  run_result.run_summary.vertical_motion_adaptive_pass_count = completed_adaptive_pass_count;
+  if (continue_with_reweighted_graph) {
+    adaptive_initial_values = optimized_values;
+    continue;
+  }
+  run_result.run_summary.vertical_motion_adaptive_pass_count =
+    config_.enable_vertical_motion_adaptive_reweighting ? completed_adaptive_pass_count : 1;
   run_result.run_summary.vertical_motion_adaptive_converged = adaptive_converged;
+  run_result.run_summary.rtk_vertical_drift_reference_pass_count =
+    config_.enable_rtk_vertical_drift_reference ? completed_adaptive_pass_count : 0;
   run_result.vertical_motion_adaptive_reweighting_diagnostics = adaptive_reweighting_diagnostics;
+  if (active_rtk_vertical_drift_profile_ptr != nullptr) {
+    run_result.rtk_vertical_drift_reference_diagnostics = *active_rtk_vertical_drift_profile_ptr;
+  }
 
   PopulateGnssPostfitResiduals(
     optimized_values,
@@ -1176,6 +1256,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     optimized_values,
     base_interpolator,
     run_result.vertical_envelope_diagnostics);
+  PopulateRtkVerticalDriftReferenceSummary(
+    config_,
+    run_result.rtk_vertical_drift_reference_diagnostics,
+    run_result.run_summary);
   PopulateVerticalVelocityDeltaDiagnostics(
     optimized_values,
     run_result.vertical_velocity_delta_diagnostics);

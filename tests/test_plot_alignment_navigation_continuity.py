@@ -43,6 +43,25 @@ class PlotAlignmentNavigationContinuityTests(unittest.TestCase):
             self.assertAlmostEqual(rows[0]["half_width_m"], 0.4, places=9)
             self.assertAlmostEqual(rows[1]["time_s"], 3.0, places=9)
 
+    def test_read_rtk_drift_rows_keeps_valid_drift_references(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = pathlib.Path(temp_dir) / "rtk_vertical_drift_reference_diagnostics.csv"
+            path.write_text(
+                "sample_index,time_s,raw_rtk_up_m,nav_reference_up_m,residual_m,constant_bias_m,"
+                "drift_estimate_m,corrected_center_up_m,white_residual_m,drift_sigma_m,"
+                "white_sigma_m,tau_s,static_window_flag,valid,skip_reason\n"
+                "0,1.0,2.0,1.0,1.0,0.9,0.02,1.98,0.08,0.01,0.002,5.3,1,1,OK\n"
+                "1,2.0,2.1,1.0,1.1,0.9,0.03,2.07,0.17,0.01,0.002,5.3,1,0,skip\n",
+                encoding="utf-8",
+            )
+
+            rows = plot_alignment_navigation_continuity.read_rtk_drift_rows(path)
+
+            self.assertEqual(len(rows), 1)
+            self.assertAlmostEqual(rows[0]["raw_rtk_up_m"], 2.0, places=9)
+            self.assertAlmostEqual(rows[0]["corrected_center_up_m"], 1.98, places=9)
+            self.assertAlmostEqual(rows[0]["drift_estimate_m"], 0.02, places=9)
+
     def test_read_raw_rtk_rows_uses_config_snapshot_and_static_samples(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = pathlib.Path(temp_dir)

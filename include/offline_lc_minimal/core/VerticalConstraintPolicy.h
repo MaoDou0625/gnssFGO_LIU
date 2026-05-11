@@ -15,6 +15,8 @@ namespace offline_lc_minimal {
 struct VerticalConstraintPolicyContext {
   gtsam::NonlinearFactorGraph *graph = nullptr;
   std::vector<VerticalEnvelopeDiagnosticRow> *envelope_diagnostics = nullptr;
+  const std::vector<RtkVerticalDriftReferenceDiagnosticRow> *rtk_vertical_drift_reference_profile =
+    nullptr;
 };
 
 class VerticalConstraintPolicy {

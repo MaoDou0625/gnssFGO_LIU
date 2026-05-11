@@ -746,6 +746,31 @@ void TestPhase27AdaptiveMotionReweightConfigLoads() {
   ExpectTrue(config.enable_vertical_envelope_center_pull, "phase27 should keep gate-inside RTK center pull");
 }
 
+void TestPhase30RtkDriftReferenceConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase30_rtk_drift_reference.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase30 config should use envelope constraints");
+  ExpectTrue(config.enable_vertical_envelope_center_pull, "phase30 should keep center pull enabled");
+  ExpectTrue(config.enable_rtk_vertical_drift_reference, "phase30 should enable RTK drift reference");
+  ExpectTrue(
+    std::abs(config.rtk_vertical_drift_correlation_time_s - 5.3) < 1e-15,
+    "phase30 drift correlation time should load");
+  ExpectTrue(
+    std::abs(config.rtk_vertical_drift_sigma_m - 0.010) < 1e-15,
+    "phase30 drift sigma should load");
+  ExpectTrue(
+    std::abs(config.rtk_vertical_white_noise_sigma_m - 0.002) < 1e-15,
+    "phase30 white noise sigma should load");
+  ExpectTrue(config.rtk_vertical_drift_use_for_center_pull, "phase30 should use drift for center pull");
+  ExpectTrue(
+    !config.rtk_vertical_drift_use_for_envelope_gate,
+    "phase30 should preserve the raw RTK envelope gate");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -1708,6 +1733,9 @@ int main() {
     RunTest(
       "TestPhase27AdaptiveMotionReweightConfigLoads",
       TestPhase27AdaptiveMotionReweightConfigLoads);
+    RunTest(
+      "TestPhase30RtkDriftReferenceConfigLoads",
+      TestPhase30RtkDriftReferenceConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

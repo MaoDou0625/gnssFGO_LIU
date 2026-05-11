@@ -214,6 +214,40 @@ def read_envelope_rows(path: Path) -> list[dict[str, float]]:
     return rows
 
 
+def read_rtk_drift_rows(path: Path) -> list[dict[str, float]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, float]] = []
+    with path.open("r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        for raw in reader:
+            if raw.get("valid", "0") == "0":
+                continue
+            time_s = safe_float(raw.get("time_s"))
+            raw_rtk_up_m = safe_float(raw.get("raw_rtk_up_m"))
+            corrected_center_up_m = safe_float(raw.get("corrected_center_up_m"))
+            drift_estimate_m = safe_float(raw.get("drift_estimate_m"))
+            white_residual_m = safe_float(raw.get("white_residual_m"))
+            if not (
+                math.isfinite(time_s)
+                and math.isfinite(raw_rtk_up_m)
+                and math.isfinite(corrected_center_up_m)
+                and math.isfinite(drift_estimate_m)
+            ):
+                continue
+            rows.append(
+                {
+                    "time_s": time_s,
+                    "raw_rtk_up_m": raw_rtk_up_m,
+                    "corrected_center_up_m": corrected_center_up_m,
+                    "drift_estimate_m": drift_estimate_m,
+                    "white_residual_m": white_residual_m,
+                }
+            )
+    rows.sort(key=lambda row: row["time_s"])
+    return rows
+
+
 def read_nhc_windows(path: Path) -> list[tuple[float, float]]:
     if not path.exists():
         return []
@@ -359,6 +393,7 @@ def shade_nhc_windows(axis, windows: list[tuple[float, float]], reference_time_s
 def plot_alignment_continuity(
     trajectory_rows: list[dict[str, float]],
     envelope_rows: list[dict[str, float]],
+    rtk_drift_rows: list[dict[str, float]],
     nhc_windows: list[tuple[float, float]],
     body_z_state_rows: list[dict[str, float]],
     context: PlotContext,
@@ -371,8 +406,9 @@ def plot_alignment_continuity(
     up_reference_m = plot_rows[0]["up_m"]
 
     body_z_state_rows = rows_from_time(body_z_state_rows, context.reference_time_s)
+    rtk_drift_rows = rows_from_time(rtk_drift_rows, context.reference_time_s)
 
-    fig, axes = plt.subplots(5, 1, figsize=(15, 13), sharex=True, constrained_layout=True)
+    fig, axes = plt.subplots(6, 1, figsize=(15, 15), sharex=True, constrained_layout=True)
     fig.suptitle(title, fontsize=14)
 
     for axis in axes:
@@ -397,6 +433,31 @@ def plot_alignment_continuity(
         height_axis_values.extend(rtk_delta)
         axes[0].plot(rtk_x, rtk_delta, color="#9467bd", linewidth=0.9, alpha=0.85, label="RTK up center")
         axes[0].fill_between(rtk_x, lower, upper, color="#9467bd", alpha=0.10, linewidth=0.0, label="RTK gate")
+    if rtk_drift_rows:
+        drift_x = relative_time(rtk_drift_rows, context.reference_time_s)
+        drift_raw_delta = values_minus_reference(rtk_drift_rows, "raw_rtk_up_m", up_reference_m)
+        drift_corrected_delta = values_minus_reference(
+            rtk_drift_rows,
+            "corrected_center_up_m",
+            up_reference_m,
+        )
+        height_axis_values.extend(drift_raw_delta)
+        height_axis_values.extend(drift_corrected_delta)
+        axes[0].plot(
+            drift_x,
+            drift_raw_delta,
+            color="#9467bd",
+            linewidth=0.7,
+            alpha=0.35,
+            label="raw RTK",
+        )
+        axes[0].plot(
+            drift_x,
+            drift_corrected_delta,
+            color="#e377c2",
+            linewidth=1.0,
+            label="drift-corrected RTK center",
+        )
     height_limits = padded_axis_limits(height_axis_values)
     if height_limits is not None:
         axes[0].set_ylim(*height_limits)
@@ -435,14 +496,36 @@ def plot_alignment_continuity(
     axes[3].set_title("Raw vs leakage-corrected Body-Z velocity")
     axes[3].legend(loc="upper left", fontsize=8)
 
+    if rtk_drift_rows:
+        drift_x = relative_time(rtk_drift_rows, context.reference_time_s)
+        axes[4].plot(
+            drift_x,
+            [row["drift_estimate_m"] for row in rtk_drift_rows],
+            color="#e377c2",
+            linewidth=1.0,
+            label="RTK drift estimate",
+        )
+        axes[4].plot(
+            drift_x,
+            [row["white_residual_m"] for row in rtk_drift_rows],
+            color="#7f7f7f",
+            linewidth=0.8,
+            alpha=0.8,
+            label="white residual",
+        )
+    axes[4].axhline(0.0, color="#222222", linewidth=0.7, alpha=0.5)
+    axes[4].set_ylabel("RTK err [m]")
+    axes[4].set_title("RTK vertical drift model")
+    axes[4].legend(loc="upper left", fontsize=8)
+
     pitch_deg = [math.degrees(row["pitch_rad"]) for row in plot_rows]
     roll_deg = [math.degrees(row["roll_rad"]) for row in plot_rows]
-    axes[4].plot(x, pitch_deg, color="#ff7f0e", linewidth=0.9, label="pitch")
-    axes[4].plot(x, roll_deg, color="#d62728", linewidth=0.9, linestyle="--", label="roll")
-    axes[4].set_ylabel("Attitude [deg]")
-    axes[4].set_title("Pitch and roll")
-    axes[4].set_xlabel("Time since static alignment start [s]")
-    axes[4].legend(loc="upper left", fontsize=8)
+    axes[5].plot(x, pitch_deg, color="#ff7f0e", linewidth=0.9, label="pitch")
+    axes[5].plot(x, roll_deg, color="#d62728", linewidth=0.9, linestyle="--", label="roll")
+    axes[5].set_ylabel("Attitude [deg]")
+    axes[5].set_title("Pitch and roll")
+    axes[5].set_xlabel("Time since static alignment start [s]")
+    axes[5].legend(loc="upper left", fontsize=8)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=180)
@@ -457,6 +540,7 @@ def main() -> int:
     raw_rtk_rows = read_raw_rtk_rows(run_dir / "config_snapshot.cfg", summary)
     envelope_rows = raw_rtk_rows.rows or read_envelope_rows(run_dir / "vertical_envelope_diagnostics.csv")
     rtk_source = raw_rtk_rows.source if raw_rtk_rows.rows else "vertical_envelope_diagnostics"
+    rtk_drift_rows = read_rtk_drift_rows(run_dir / "rtk_vertical_drift_reference_diagnostics.csv")
     nhc_windows = read_nhc_windows(run_dir / "body_z_nhc_diagnostics.csv")
     body_z_state_rows = read_body_z_nhc_state_rows(run_dir / "body_z_nhc_state_diagnostics.csv")
     context = resolve_plot_context(summary, trajectory_rows)
@@ -465,6 +549,7 @@ def main() -> int:
     plot_alignment_continuity(
         trajectory_rows,
         envelope_rows,
+        rtk_drift_rows,
         nhc_windows,
         body_z_state_rows,
         context,
@@ -479,6 +564,8 @@ def main() -> int:
     if envelope_rows:
         print(f"first_rtk_gate_half_width_m={envelope_rows[0]['half_width_m']}")
         print(f"rtk_plot_source={rtk_source}")
+    if rtk_drift_rows:
+        print(f"rtk_drift_reference_count={len(rtk_drift_rows)}")
     return 0
 
 

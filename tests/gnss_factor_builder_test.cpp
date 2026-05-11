@@ -359,6 +359,103 @@ void TestEnvelopeModeUsesGateSigmaCenterPullWhenConfigured() {
   ExpectNear(envelope_diagnostics.front().center_pull_residual_m, 0.25, 1e-12, "zero-deadband residual should keep raw residual inside gate");
 }
 
+void TestEnvelopeCenterPullUsesDriftCorrectedReferenceWhenAvailable() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
+  config.vertical_envelope_gate_sigma_multiple = 2.0;
+  config.vertical_envelope_min_half_width_m = 0.10;
+  config.vertical_envelope_factor_sigma_m = 0.20;
+  config.enable_vertical_envelope_center_pull = true;
+  config.vertical_envelope_center_sigma_mode =
+    offline_lc_minimal::VerticalEnvelopeCenterSigmaMode::kGateSigma;
+  config.vertical_envelope_center_deadband_m = 0.0;
+  config.enable_rtk_vertical_drift_reference = true;
+  config.rtk_vertical_drift_use_for_center_pull = true;
+  config.early_gnss_relaxation_duration_s = 0.0;
+
+  std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeGnssSample(0.0),
+    MakeGnssSample(1.0),
+  };
+  std::vector<offline_lc_minimal::RtkVerticalDriftReferenceDiagnosticRow> drift_profile(samples.size());
+  drift_profile[1].sample_index = 1;
+  drift_profile[1].valid = true;
+  drift_profile[1].drift_estimate_m = 0.10;
+  drift_profile[1].corrected_center_up_m = 5.90;
+
+  gtsam::NonlinearFactorGraph graph;
+  std::vector<offline_lc_minimal::TrajectoryRow> trajectory(2);
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::GnssFactorRecord> factor_records;
+  std::vector<offline_lc_minimal::GnssConsistencyRecord> consistency_records;
+  std::vector<offline_lc_minimal::VerticalEnvelopeDiagnosticRow> envelope_diagnostics;
+
+  offline_lc_minimal::GnssFactorBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.navigation_start_index = 0;
+  request.graph = &graph;
+  request.trajectory = &trajectory;
+  request.run_summary = &summary;
+  request.factor_records = &factor_records;
+  request.consistency_records = &consistency_records;
+  request.vertical_envelope_diagnostics = &envelope_diagnostics;
+  request.rtk_vertical_drift_reference_profile = &drift_profile;
+  request.collect_consistency_records = true;
+  request.dynamic_start_time_s = 1.0;
+  request.should_use_sample = [](const auto &) { return true; };
+  request.is_within_imu_coverage = [](double) { return true; };
+  request.corrected_time_s = [](const auto &sample) { return sample.time_s; };
+  request.clamped_sigma_m = [](const auto &) { return Eigen::Vector3d(0.1, 0.2, 0.3); };
+  request.find_state_for_time_s = [](double) {
+    offline_lc_minimal::StateMeasSyncResult result;
+    result.status = offline_lc_minimal::StateMeasSyncStatus::kSynchronizedI;
+    result.key_index_i = 1;
+    result.key_index_j = 1;
+    result.timestamp_i_s = 1.0;
+    result.timestamp_j_s = 1.0;
+    return result;
+  };
+  request.trajectory_row_index_for_state = [](std::size_t state_index) {
+    return static_cast<long long>(state_index);
+  };
+
+  offline_lc_minimal::GnssFactorBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 3.0, 0.0, "drift center should not change factor count");
+  ExpectNear(static_cast<double>(envelope_diagnostics.size()), 1.0, 0.0, "one envelope diagnostic should be emitted");
+  ExpectTrue(
+    envelope_diagnostics.front().center_pull_reference_type == "rtk_drift_corrected",
+    "diagnostic should record drift-corrected center reference");
+  ExpectNear(
+    envelope_diagnostics.front().center_pull_reference_up_m,
+    5.90,
+    1e-12,
+    "center-pull reference should use corrected RTK height");
+  ExpectNear(
+    envelope_diagnostics.front().rtk_drift_estimate_m,
+    0.10,
+    1e-12,
+    "diagnostic should record drift estimate");
+
+  gtsam::Values optimized_values;
+  optimized_values.insert(
+    gtsam::symbol_shorthand::X(1),
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(0.0, 0.0, 0.0), gtsam::Point3(4.0, 5.0, 6.0)));
+  const auto qc_model = gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(10000.0));
+  const offline_lc_minimal::gp::GPWNOJInterpolator interpolator(qc_model, 1.0, 0.0);
+  offline_lc_minimal::PopulateVerticalEnvelopeDiagnostics(
+    optimized_values,
+    interpolator,
+    envelope_diagnostics);
+  ExpectNear(envelope_diagnostics.front().raw_residual_m, 0.0, 1e-12, "raw gate residual should remain raw RTK");
+  ExpectNear(
+    envelope_diagnostics.front().center_pull_residual_m,
+    0.10,
+    1e-12,
+    "center pull residual should use drift-corrected reference");
+}
+
 void TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
@@ -652,6 +749,9 @@ int main() {
     RunTest(
       "TestEnvelopeModeUsesGateSigmaCenterPullWhenConfigured",
       TestEnvelopeModeUsesGateSigmaCenterPullWhenConfigured);
+    RunTest(
+      "TestEnvelopeCenterPullUsesDriftCorrectedReferenceWhenAvailable",
+      TestEnvelopeCenterPullUsesDriftCorrectedReferenceWhenAvailable);
     RunTest(
       "TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled",
       TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled);

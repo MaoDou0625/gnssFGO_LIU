@@ -129,6 +129,15 @@ struct OfflineRunnerConfig {
   double vertical_envelope_center_sigma_m = 0.60;
   VerticalEnvelopeCenterSigmaMode vertical_envelope_center_sigma_mode = VerticalEnvelopeCenterSigmaMode::kFixed;
   double vertical_envelope_center_deadband_m = 0.01;
+  bool enable_rtk_vertical_drift_reference = false;
+  double rtk_vertical_drift_correlation_time_s = 5.3;
+  double rtk_vertical_drift_sigma_m = 0.010;
+  double rtk_vertical_white_noise_sigma_m = 0.002;
+  double rtk_vertical_drift_huber_sigma_m = 0.030;
+  double rtk_vertical_drift_max_abs_correction_m = 0.050;
+  double rtk_vertical_drift_convergence_threshold_m = 0.001;
+  bool rtk_vertical_drift_use_for_center_pull = true;
+  bool rtk_vertical_drift_use_for_envelope_gate = false;
   bool enable_vertical_velocity_delta_constraint = false;
   double vertical_velocity_delta_acc_sigma_mps2 = 0.50;
   double vertical_velocity_delta_min_sigma_mps = 0.02;

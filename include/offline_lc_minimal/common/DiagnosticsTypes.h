@@ -164,9 +164,30 @@ struct VerticalEnvelopeDiagnosticRow {
   double violation_m = std::numeric_limits<double>::quiet_NaN();
   bool inside_envelope = false;
   bool center_pull_factor_used = false;
+  std::string center_pull_reference_type = "raw_rtk";
+  double center_pull_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double rtk_drift_estimate_m = std::numeric_limits<double>::quiet_NaN();
   double center_pull_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double center_pull_deadband_m = std::numeric_limits<double>::quiet_NaN();
   double center_pull_residual_m = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct RtkVerticalDriftReferenceDiagnosticRow {
+  std::size_t sample_index = 0;
+  double time_s = std::numeric_limits<double>::quiet_NaN();
+  double raw_rtk_up_m = std::numeric_limits<double>::quiet_NaN();
+  double nav_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double residual_m = std::numeric_limits<double>::quiet_NaN();
+  double constant_bias_m = std::numeric_limits<double>::quiet_NaN();
+  double drift_estimate_m = std::numeric_limits<double>::quiet_NaN();
+  double corrected_center_up_m = std::numeric_limits<double>::quiet_NaN();
+  double white_residual_m = std::numeric_limits<double>::quiet_NaN();
+  double drift_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double white_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double tau_s = std::numeric_limits<double>::quiet_NaN();
+  bool static_window_flag = false;
+  bool valid = false;
+  std::string skip_reason = "UNSET";
 };
 
 struct StaticAlignmentValidationRow {

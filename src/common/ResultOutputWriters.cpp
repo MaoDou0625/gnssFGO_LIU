@@ -359,7 +359,8 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
     << "sample_index,raw_time_s,corrected_time_s,sync_status,state_index_i,state_index_j,"
        "synchronized_state_index,state_time_i_s,state_time_j_s,duration_from_state_i_s,"
        "factor_used,rtk_up_m,sigma_u_m,half_width_m,predicted_up_m,raw_residual_m,"
-       "violation_m,inside_envelope,center_pull_factor_used,center_pull_sigma_m,"
+       "violation_m,inside_envelope,center_pull_factor_used,center_pull_reference_type,"
+       "center_pull_reference_up_m,rtk_drift_estimate_m,center_pull_sigma_m,"
        "center_pull_deadband_m,center_pull_residual_m\n";
   for (const auto &row : rows) {
     stream << row.sample_index << ','
@@ -381,9 +382,43 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
            << row.violation_m << ','
            << (row.inside_envelope ? 1 : 0) << ','
            << (row.center_pull_factor_used ? 1 : 0) << ','
+           << row.center_pull_reference_type << ','
+           << row.center_pull_reference_up_m << ','
+           << row.rtk_drift_estimate_m << ','
            << row.center_pull_sigma_m << ','
            << row.center_pull_deadband_m << ','
            << row.center_pull_residual_m << '\n';
+  }
+}
+
+void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkVerticalDriftReferenceDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "sample_index,time_s,raw_rtk_up_m,nav_reference_up_m,residual_m,constant_bias_m,"
+       "drift_estimate_m,corrected_center_up_m,white_residual_m,drift_sigma_m,"
+       "white_sigma_m,tau_s,static_window_flag,valid,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.sample_index << ','
+           << row.time_s << ','
+           << row.raw_rtk_up_m << ','
+           << row.nav_reference_up_m << ','
+           << row.residual_m << ','
+           << row.constant_bias_m << ','
+           << row.drift_estimate_m << ','
+           << row.corrected_center_up_m << ','
+           << row.white_residual_m << ','
+           << row.drift_sigma_m << ','
+           << row.white_sigma_m << ','
+           << row.tau_s << ','
+           << (row.static_window_flag ? 1 : 0) << ','
+           << (row.valid ? 1 : 0) << ','
+           << row.skip_reason << '\n';
   }
 }
 

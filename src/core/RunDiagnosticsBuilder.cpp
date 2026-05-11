@@ -279,9 +279,12 @@ void PopulateVerticalEnvelopeDiagnostics(
     row.violation_m = factor::VerticalEnvelopeResidual(row.raw_residual_m, row.half_width_m);
     row.inside_envelope = std::abs(row.violation_m) <= 1e-12;
     if (row.center_pull_factor_used) {
+      const double center_reference_up_m =
+        std::isfinite(row.center_pull_reference_up_m) ? row.center_pull_reference_up_m : row.rtk_up_m;
+      const double center_residual_m = row.predicted_up_m - center_reference_up_m;
       row.center_pull_residual_m =
         factor::VerticalEnvelopeCenterResidual(
-          row.raw_residual_m,
+          center_residual_m,
           row.half_width_m,
           row.center_pull_deadband_m);
     }

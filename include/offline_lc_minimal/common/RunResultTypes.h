@@ -71,6 +71,15 @@ struct RunSummary {
     std::numeric_limits<double>::quiet_NaN();
   double vertical_motion_adaptive_first20_sum_optimized_minus_target_dvz_mps =
     std::numeric_limits<double>::quiet_NaN();
+  bool rtk_vertical_drift_reference_enabled = false;
+  int rtk_vertical_drift_reference_pass_count = 0;
+  std::size_t rtk_vertical_drift_reference_valid_count = 0;
+  double rtk_vertical_drift_static_range_m = std::numeric_limits<double>::quiet_NaN();
+  double rtk_vertical_drift_static_std_m = std::numeric_limits<double>::quiet_NaN();
+  double rtk_vertical_drift_white_residual_std_m = std::numeric_limits<double>::quiet_NaN();
+  double rtk_vertical_drift_max_abs_correction_m = std::numeric_limits<double>::quiet_NaN();
+  double rtk_vertical_drift_first20_mean_correction_m = std::numeric_limits<double>::quiet_NaN();
+  double rtk_vertical_drift_first20_max_abs_correction_m = std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_position_velocity_consistency_factor_count = 0;
   std::size_t vertical_position_velocity_window_consistency_factor_count = 0;
   std::size_t vertical_position_velocity_consistency_skipped_invalid_count = 0;
@@ -265,6 +274,22 @@ struct RunSummary {
         << vertical_motion_adaptive_first20_baz_gm_sigma_max_ug << '\n'
         << "vertical_motion_adaptive_first20_sum_optimized_minus_target_dvz_mps="
         << vertical_motion_adaptive_first20_sum_optimized_minus_target_dvz_mps << '\n'
+        << "rtk_vertical_drift_reference_enabled="
+        << (rtk_vertical_drift_reference_enabled ? "true" : "false") << '\n'
+        << "rtk_vertical_drift_reference_pass_count=" << rtk_vertical_drift_reference_pass_count
+        << '\n'
+        << "rtk_vertical_drift_reference_valid_count=" << rtk_vertical_drift_reference_valid_count
+        << '\n'
+        << "rtk_vertical_drift_static_range_m=" << rtk_vertical_drift_static_range_m << '\n'
+        << "rtk_vertical_drift_static_std_m=" << rtk_vertical_drift_static_std_m << '\n'
+        << "rtk_vertical_drift_white_residual_std_m="
+        << rtk_vertical_drift_white_residual_std_m << '\n'
+        << "rtk_vertical_drift_max_abs_correction_m="
+        << rtk_vertical_drift_max_abs_correction_m << '\n'
+        << "rtk_vertical_drift_first20_mean_correction_m="
+        << rtk_vertical_drift_first20_mean_correction_m << '\n'
+        << "rtk_vertical_drift_first20_max_abs_correction_m="
+        << rtk_vertical_drift_first20_max_abs_correction_m << '\n'
         << "vertical_position_velocity_consistency_factor_count="
         << vertical_position_velocity_consistency_factor_count << '\n'
         << "vertical_position_velocity_window_consistency_factor_count="
@@ -434,6 +459,7 @@ struct OfflineRunResult {
   std::vector<GnssFactorRecord> gnss_factor_records;
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
+  std::vector<RtkVerticalDriftReferenceDiagnosticRow> rtk_vertical_drift_reference_diagnostics;
   std::vector<StaticAlignmentValidationRow> static_alignment_validation;
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;
   std::vector<VerticalMotionAdaptiveReweightingDiagnosticRow>

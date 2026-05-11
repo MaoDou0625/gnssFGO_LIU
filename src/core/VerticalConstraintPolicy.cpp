@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
+#include <string>
 
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
@@ -22,6 +24,14 @@ struct EnvelopePolicyParams {
   double center_sigma_m = 0.60;
   VerticalEnvelopeCenterSigmaMode center_sigma_mode = VerticalEnvelopeCenterSigmaMode::kFixed;
   double center_deadband_m = 0.01;
+  bool enable_rtk_vertical_drift_reference = false;
+  bool rtk_vertical_drift_use_for_center_pull = true;
+};
+
+struct CenterPullReference {
+  double up_m = std::numeric_limits<double>::quiet_NaN();
+  std::string type = "raw_rtk";
+  double rtk_drift_estimate_m = std::numeric_limits<double>::quiet_NaN();
 };
 
 gtsam::SharedNoiseModel MakeDirectVerticalNoiseModel(const Eigen::Vector3d &sigma_m) {
@@ -51,6 +61,29 @@ double ComputeEnvelopeCenterSigmaM(
   return params.center_sigma_m;
 }
 
+CenterPullReference SelectCenterPullReference(
+  const GnssSolutionSample &sample,
+  const std::size_t sample_index,
+  const EnvelopePolicyParams &params,
+  const VerticalConstraintPolicyContext &context) {
+  CenterPullReference reference;
+  reference.up_m = sample.enu_position_m.z();
+  if (!params.enable_rtk_vertical_drift_reference ||
+      !params.rtk_vertical_drift_use_for_center_pull ||
+      context.rtk_vertical_drift_reference_profile == nullptr ||
+      sample_index >= context.rtk_vertical_drift_reference_profile->size()) {
+    return reference;
+  }
+  const auto &row = (*context.rtk_vertical_drift_reference_profile)[sample_index];
+  if (!row.valid || !std::isfinite(row.corrected_center_up_m)) {
+    return reference;
+  }
+  reference.up_m = row.corrected_center_up_m;
+  reference.type = "rtk_drift_corrected";
+  reference.rtk_drift_estimate_m = row.drift_estimate_m;
+  return reference;
+}
+
 VerticalEnvelopeDiagnosticRow MakeEnvelopeDiagnosticRow(
   const GnssSolutionSample &sample,
   const std::size_t sample_index,
@@ -59,6 +92,7 @@ VerticalEnvelopeDiagnosticRow MakeEnvelopeDiagnosticRow(
   const Eigen::Vector3d &sigma_m,
   const double half_width_m,
   const double center_sigma_m,
+  const CenterPullReference &center_reference,
   const EnvelopePolicyParams &params) {
   VerticalEnvelopeDiagnosticRow row;
   row.sample_index = sample_index;
@@ -82,6 +116,9 @@ VerticalEnvelopeDiagnosticRow MakeEnvelopeDiagnosticRow(
   row.sigma_u_m = sigma_m.z();
   row.half_width_m = half_width_m;
   row.center_pull_factor_used = params.enable_center_pull;
+  row.center_pull_reference_type = center_reference.type;
+  row.center_pull_reference_up_m = center_reference.up_m;
+  row.rtk_drift_estimate_m = center_reference.rtk_drift_estimate_m;
   if (params.enable_center_pull) {
     row.center_pull_sigma_m = center_sigma_m;
     row.center_pull_deadband_m = params.center_deadband_m;
@@ -155,7 +192,9 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
           config.enable_vertical_envelope_center_pull,
           config.vertical_envelope_center_sigma_m,
           config.vertical_envelope_center_sigma_mode,
-          config.vertical_envelope_center_deadband_m} {}
+          config.vertical_envelope_center_deadband_m,
+          config.enable_rtk_vertical_drift_reference,
+          config.rtk_vertical_drift_use_for_center_pull} {}
 
   [[nodiscard]] bool UsesDirectPositionFactor() const override { return false; }
 
@@ -180,6 +219,8 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
         : sync_result.key_index_j;
     const double half_width_m = ComputeEnvelopeHalfWidthM(params_, sigma_m);
     const double center_sigma_m = ComputeEnvelopeCenterSigmaM(params_, half_width_m);
+    const CenterPullReference center_reference =
+      SelectCenterPullReference(sample, sample_index, params_, context);
     context.graph->add(factor::VerticalEnvelopeFactor(
       symbol::X(state_index),
       sample.enu_position_m.z(),
@@ -188,7 +229,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
     if (params_.enable_center_pull) {
       context.graph->add(factor::VerticalEnvelopeCenterPullFactor(
         symbol::X(state_index),
-        sample.enu_position_m.z(),
+        center_reference.up_m,
         half_width_m,
         params_.center_deadband_m,
         MakeEnvelopeCenterNoiseModel(center_sigma_m)));
@@ -202,6 +243,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
         sigma_m,
         half_width_m,
         center_sigma_m,
+        center_reference,
         params_));
   }
 
@@ -219,6 +261,8 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
     }
     const double half_width_m = ComputeEnvelopeHalfWidthM(params_, sigma_m);
     const double center_sigma_m = ComputeEnvelopeCenterSigmaM(params_, half_width_m);
+    const CenterPullReference center_reference =
+      SelectCenterPullReference(sample, sample_index, params_, context);
     context.graph->add(factor::GPInterpolatedVerticalEnvelopeFactor(
       symbol::X(sync_result.key_index_i),
       symbol::V(sync_result.key_index_i),
@@ -238,7 +282,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
         symbol::X(sync_result.key_index_j),
         symbol::V(sync_result.key_index_j),
         symbol::W(sync_result.key_index_j),
-        sample.enu_position_m.z(),
+        center_reference.up_m,
         half_width_m,
         params_.center_deadband_m,
         interpolator,
@@ -253,6 +297,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
         sigma_m,
         half_width_m,
         center_sigma_m,
+        center_reference,
         params_));
   }
 

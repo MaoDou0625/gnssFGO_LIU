@@ -265,6 +265,7 @@ void GnssFactorBuilder::AddSynchronizedFactors(
   VerticalConstraintPolicyContext context;
   context.graph = request_.graph;
   context.envelope_diagnostics = request_.vertical_envelope_diagnostics;
+  context.rtk_vertical_drift_reference_profile = request_.rtk_vertical_drift_reference_profile;
   vertical_policy.AddSynchronized(sample, sample_index, corrected_time_s, sync_result, sigma_m, context);
 }
 
@@ -299,6 +300,7 @@ void GnssFactorBuilder::AddInterpolatedFactors(
   VerticalConstraintPolicyContext context;
   context.graph = request_.graph;
   context.envelope_diagnostics = request_.vertical_envelope_diagnostics;
+  context.rtk_vertical_drift_reference_profile = request_.rtk_vertical_drift_reference_profile;
   vertical_policy.AddInterpolated(sample, sample_index, corrected_time_s, sync_result, sigma_m, interpolator, context);
 }
 

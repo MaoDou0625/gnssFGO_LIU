@@ -292,6 +292,38 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (config.vertical_envelope_center_deadband_m >= config.vertical_envelope_min_half_width_m) {
     throw std::runtime_error("vertical envelope center deadband must be smaller than the minimum half-width");
   }
+  if (!std::isfinite(config.rtk_vertical_drift_correlation_time_s) ||
+      !std::isfinite(config.rtk_vertical_drift_sigma_m) ||
+      !std::isfinite(config.rtk_vertical_white_noise_sigma_m) ||
+      !std::isfinite(config.rtk_vertical_drift_huber_sigma_m) ||
+      !std::isfinite(config.rtk_vertical_drift_max_abs_correction_m) ||
+      !std::isfinite(config.rtk_vertical_drift_convergence_threshold_m) ||
+      config.rtk_vertical_drift_correlation_time_s <= 0.0 ||
+      config.rtk_vertical_drift_sigma_m <= 0.0 ||
+      config.rtk_vertical_white_noise_sigma_m <= 0.0 ||
+      config.rtk_vertical_drift_huber_sigma_m <= 0.0 ||
+      config.rtk_vertical_drift_max_abs_correction_m <= 0.0 ||
+      config.rtk_vertical_drift_convergence_threshold_m <= 0.0) {
+    throw std::runtime_error("RTK vertical drift reference settings must be positive");
+  }
+  if (config.enable_rtk_vertical_drift_reference) {
+    if (!config.enable_gnss ||
+        config.vertical_constraint_mode != VerticalConstraintMode::kEnvelope ||
+        !config.enable_vertical_envelope_center_pull ||
+        !config.rtk_vertical_drift_use_for_center_pull) {
+      throw std::runtime_error(
+        "RTK vertical drift reference requires GNSS envelope center-pull constraints");
+    }
+    if (config.rtk_vertical_drift_use_for_envelope_gate) {
+      throw std::runtime_error(
+        "rtk_vertical_drift_use_for_envelope_gate is not supported; raw RTK gate is preserved");
+    }
+    if (!config.enable_initial_static_rtk_height_reference ||
+        config.static_alignment_duration_s <= 0.0) {
+      throw std::runtime_error(
+        "RTK vertical drift reference requires the initial static RTK height reference");
+    }
+  }
   if (config.enable_vertical_velocity_delta_constraint && !config.enable_body_z_jump_detection) {
     throw std::runtime_error("enable_vertical_velocity_delta_constraint requires enable_body_z_jump_detection");
   }
@@ -736,6 +768,24 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_envelope_center_sigma_mode = ParseVerticalEnvelopeCenterSigmaMode(normalized_value);
   } else if (normalized_key == "vertical_envelope_center_deadband_m") {
     config.vertical_envelope_center_deadband_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_rtk_vertical_drift_reference") {
+    config.enable_rtk_vertical_drift_reference = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_vertical_drift_correlation_time_s") {
+    config.rtk_vertical_drift_correlation_time_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_vertical_drift_sigma_m") {
+    config.rtk_vertical_drift_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_vertical_white_noise_sigma_m") {
+    config.rtk_vertical_white_noise_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_vertical_drift_huber_sigma_m") {
+    config.rtk_vertical_drift_huber_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_vertical_drift_max_abs_correction_m") {
+    config.rtk_vertical_drift_max_abs_correction_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_vertical_drift_convergence_threshold_m") {
+    config.rtk_vertical_drift_convergence_threshold_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_vertical_drift_use_for_center_pull") {
+    config.rtk_vertical_drift_use_for_center_pull = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_vertical_drift_use_for_envelope_gate") {
+    config.rtk_vertical_drift_use_for_envelope_gate = ParseBool(normalized_value);
   } else if (normalized_key == "enable_vertical_velocity_delta_constraint") {
     config.enable_vertical_velocity_delta_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_acc_sigma_mps2") {
@@ -1132,6 +1182,21 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "vertical_envelope_center_sigma_m=" << config.vertical_envelope_center_sigma_m << '\n'
     << "vertical_envelope_center_sigma_mode=" << ToString(config.vertical_envelope_center_sigma_mode) << '\n'
     << "vertical_envelope_center_deadband_m=" << config.vertical_envelope_center_deadband_m << '\n'
+    << "enable_rtk_vertical_drift_reference="
+    << (config.enable_rtk_vertical_drift_reference ? "true" : "false") << '\n'
+    << "rtk_vertical_drift_correlation_time_s="
+    << config.rtk_vertical_drift_correlation_time_s << '\n'
+    << "rtk_vertical_drift_sigma_m=" << config.rtk_vertical_drift_sigma_m << '\n'
+    << "rtk_vertical_white_noise_sigma_m=" << config.rtk_vertical_white_noise_sigma_m << '\n'
+    << "rtk_vertical_drift_huber_sigma_m=" << config.rtk_vertical_drift_huber_sigma_m << '\n'
+    << "rtk_vertical_drift_max_abs_correction_m="
+    << config.rtk_vertical_drift_max_abs_correction_m << '\n'
+    << "rtk_vertical_drift_convergence_threshold_m="
+    << config.rtk_vertical_drift_convergence_threshold_m << '\n'
+    << "rtk_vertical_drift_use_for_center_pull="
+    << (config.rtk_vertical_drift_use_for_center_pull ? "true" : "false") << '\n'
+    << "rtk_vertical_drift_use_for_envelope_gate="
+    << (config.rtk_vertical_drift_use_for_envelope_gate ? "true" : "false") << '\n'
     << "enable_vertical_velocity_delta_constraint="
     << (config.enable_vertical_velocity_delta_constraint ? "true" : "false") << '\n'
     << "vertical_velocity_delta_acc_sigma_mps2=" << config.vertical_velocity_delta_acc_sigma_mps2 << '\n'

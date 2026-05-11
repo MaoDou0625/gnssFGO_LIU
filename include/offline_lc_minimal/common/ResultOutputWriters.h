@@ -46,6 +46,10 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalEnvelopeDiagnosticRow> &rows);
 
+void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkVerticalDriftReferenceDiagnosticRow> &rows);
+
 void WriteStaticAlignmentValidationCsv(
   const std::filesystem::path &path,
   const std::vector<StaticAlignmentValidationRow> &rows);

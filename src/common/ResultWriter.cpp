@@ -74,6 +74,11 @@ void ResultWriter::WriteOutputs(
       output_path / "vertical_envelope_diagnostics.csv",
       result.vertical_envelope_diagnostics);
   }
+  if (!result.rtk_vertical_drift_reference_diagnostics.empty()) {
+    WriteRtkVerticalDriftReferenceDiagnosticsCsv(
+      output_path / "rtk_vertical_drift_reference_diagnostics.csv",
+      result.rtk_vertical_drift_reference_diagnostics);
+  }
   if (!result.static_alignment_validation.empty()) {
     WriteStaticAlignmentValidationCsv(
       output_path / "static_alignment_validation.csv",
