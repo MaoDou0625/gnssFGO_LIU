@@ -46,10 +46,6 @@ void WriteRtkVerticalLowpassReferenceDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkVerticalLowpassReferenceRow> &rows);
 
-void WriteRtkVerticalLatentReferenceDiagnosticsCsv(
-  const std::filesystem::path &path,
-  const std::vector<RtkVerticalLatentReferenceDiagnosticRow> &rows);
-
 void WriteVerticalEnvelopeDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalEnvelopeDiagnosticRow> &rows);

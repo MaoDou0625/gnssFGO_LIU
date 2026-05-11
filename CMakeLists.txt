@@ -70,7 +70,6 @@ add_library(offline_lc_minimal_lib
   src/core/InitialStaticPositionConstraintBuilder.cpp
   src/core/InitialStaticRtkHeightConstraintBuilder.cpp
   src/core/RunDiagnosticsBuilder.cpp
-  src/core/RtkVerticalLatentReferenceBuilder.cpp
   src/core/RtkVerticalLowpassReferenceBuilder.cpp
   src/core/StaticImuAlignment.cpp
   src/core/TrajectoryResultBuilder.cpp
@@ -150,10 +149,6 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     tests/rtk_vertical_lowpass_reference_test.cpp
   )
 
-  add_executable(rtk_vertical_latent_reference_test
-    tests/rtk_vertical_latent_reference_test.cpp
-  )
-
   add_executable(body_z_bidirectional_jump_detector_test
     tests/body_z_bidirectional_jump_detector_test.cpp
   )
@@ -202,11 +197,6 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(rtk_vertical_lowpass_reference_test
-    PRIVATE
-      offline_lc_minimal_lib
-  )
-
-  target_link_libraries(rtk_vertical_latent_reference_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -266,12 +256,6 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       rtk_vertical_lowpass_reference_test
-      PROPERTIES
-        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
-        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
-    )
-    set_target_properties(
-      rtk_vertical_latent_reference_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -356,13 +340,6 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         $<TARGET_FILE:rtk_vertical_lowpass_reference_test>
     )
     add_test(
-      NAME rtk_vertical_latent_reference_test
-      COMMAND
-        ${CMAKE_COMMAND} -E env
-        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
-        $<TARGET_FILE:rtk_vertical_latent_reference_test>
-    )
-    add_test(
       NAME config_test
       COMMAND
         ${CMAKE_COMMAND} -E env
@@ -427,10 +404,6 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     add_test(
       NAME rtk_vertical_lowpass_reference_test
       COMMAND $<TARGET_FILE:rtk_vertical_lowpass_reference_test>
-    )
-    add_test(
-      NAME rtk_vertical_latent_reference_test
-      COMMAND $<TARGET_FILE:rtk_vertical_latent_reference_test>
     )
     add_test(
       NAME config_test

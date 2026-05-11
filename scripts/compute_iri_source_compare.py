@@ -16,7 +16,7 @@ DEFAULT_IRI_SCRIPT = Path("D:/Code/michalsorel_iri_repo/python/iri.py")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare 50 m IRI from nav, raw RTK, low-pass/latent RTK, and nav sampled at RTK times."
+        description="Compare 50 m IRI from nav, raw RTK, low-pass RTK, and nav sampled at RTK times."
     )
     parser.add_argument("--run-dir", required=True, help="Offline run output directory")
     parser.add_argument("--output-dir", default=None, help="Output directory")
@@ -113,23 +113,6 @@ def read_lowpass_rows(path: Path) -> list[dict[str, float]]:
                 continue
             time_s = safe_float(raw.get("time_s"))
             up_m = safe_float(raw.get("lowpass_up_m"))
-            if math.isfinite(time_s) and math.isfinite(up_m):
-                rows.append({"time_s": time_s, "up_m": up_m})
-    rows.sort(key=lambda row: row["time_s"])
-    return rows
-
-
-def read_latent_reference_rows(path: Path) -> list[dict[str, float]]:
-    if not path.exists():
-        return []
-    rows: list[dict[str, float]] = []
-    with path.open("r", encoding="utf-8", newline="") as file:
-        reader = csv.DictReader(file)
-        for raw in reader:
-            time_s = safe_float(raw.get("bin_center_time_s"))
-            up_m = safe_float(raw.get("optimized_reference_up_m"))
-            if not math.isfinite(up_m):
-                up_m = safe_float(raw.get("initial_reference_up_m"))
             if math.isfinite(time_s) and math.isfinite(up_m):
                 rows.append({"time_s": time_s, "up_m": up_m})
     rows.sort(key=lambda row: row["time_s"])
@@ -330,7 +313,6 @@ def main() -> int:
 
     raw_rtk_rows = read_envelope_rows(run_dir / "vertical_envelope_diagnostics.csv")
     lowpass_rtk_rows = read_lowpass_rows(run_dir / "rtk_vertical_lowpass_reference_diagnostics.csv")
-    latent_rtk_rows = read_latent_reference_rows(run_dir / "rtk_vertical_latent_reference_diagnostics.csv")
     rtk_stations, rtk_heights = build_time_sampled_profile(
         raw_rtk_rows,
         trajectory_rows,
@@ -339,12 +321,6 @@ def main() -> int:
     )
     lowpass_stations, lowpass_heights = build_time_sampled_profile(
         lowpass_rtk_rows,
-        trajectory_rows,
-        trim_start_time_s,
-        trim_end_time_s,
-    )
-    latent_stations, latent_heights = build_time_sampled_profile(
-        latent_rtk_rows,
         trajectory_rows,
         trim_start_time_s,
         trim_end_time_s,
@@ -388,18 +364,6 @@ def main() -> int:
                 "rtk_lowpass",
                 lowpass_stations,
                 lowpass_heights,
-                output_dir,
-                iri_script,
-                args.grid_step_m,
-                args.segment_length_m,
-            )
-        )
-    if latent_stations and latent_heights:
-        summaries.append(
-            process_source(
-                "rtk_latent_reference",
-                latent_stations,
-                latent_heights,
                 output_dir,
                 iri_script,
                 args.grid_step_m,

@@ -12,7 +12,6 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/core/GnssFactorBuilder.h"
-#include "offline_lc_minimal/core/RtkVerticalLatentReferenceBuilder.h"
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/factor/GPInterpolatedHorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
@@ -603,133 +602,6 @@ void TestLowpassPrecomputeDoesNotDoubleCountDroppedSamples() {
     "rejected low-pass diagnostic should be marked without invoking the drop-count callback");
 }
 
-void TestEnvelopeUsesLatentReferenceForGateAndCenterPull() {
-  auto config = offline_lc_minimal::DefaultConfig();
-  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
-  config.vertical_envelope_gate_sigma_multiple = 2.0;
-  config.vertical_envelope_min_half_width_m = 0.03;
-  config.vertical_envelope_factor_sigma_m = 0.20;
-  config.enable_vertical_envelope_center_pull = true;
-  config.vertical_envelope_center_sigma_mode = offline_lc_minimal::VerticalEnvelopeCenterSigmaMode::kGateSigma;
-  config.vertical_envelope_center_deadband_m = 0.0;
-  config.enable_rtk_vertical_latent_reference = true;
-  config.rtk_vertical_latent_reference_bin_s = 1.0;
-  config.rtk_vertical_latent_reference_min_sample_count = 1;
-  config.rtk_vertical_latent_reference_measurement_huber_sigma_m = 0.03;
-  config.rtk_vertical_latent_reference_smooth_sigma_m = 0.005;
-  config.rtk_vertical_latent_reference_use_for_center_pull = true;
-  config.rtk_vertical_latent_reference_use_for_envelope_gate = true;
-  config.early_gnss_relaxation_duration_s = 0.0;
-
-  std::vector<offline_lc_minimal::GnssSolutionSample> samples{
-    MakeGnssSample(0.0),
-    MakeGnssSample(1.0),
-    MakeGnssSample(1.2),
-    MakeGnssSample(2.1),
-  };
-  samples[1].enu_position_m.z() = 6.0;
-  samples[2].enu_position_m.z() = 7.0;
-  samples[3].enu_position_m.z() = 10.0;
-  gtsam::NonlinearFactorGraph graph;
-  gtsam::Values initial_values;
-  std::vector<offline_lc_minimal::TrajectoryRow> trajectory(2);
-  offline_lc_minimal::RunSummary summary;
-  std::vector<offline_lc_minimal::GnssFactorRecord> factor_records;
-  std::vector<offline_lc_minimal::GnssConsistencyRecord> consistency_records;
-  std::vector<offline_lc_minimal::RtkVerticalLatentReferenceDiagnosticRow> latent_diagnostics;
-  std::vector<offline_lc_minimal::VerticalEnvelopeDiagnosticRow> envelope_diagnostics;
-
-  offline_lc_minimal::GnssFactorBuildRequest request;
-  request.config = &config;
-  request.gnss_samples = &samples;
-  request.navigation_start_index = 0;
-  request.graph = &graph;
-  request.trajectory = &trajectory;
-  request.run_summary = &summary;
-  request.factor_records = &factor_records;
-  request.consistency_records = &consistency_records;
-  request.initial_values = &initial_values;
-  request.rtk_vertical_latent_reference_diagnostics = &latent_diagnostics;
-  request.vertical_envelope_diagnostics = &envelope_diagnostics;
-  request.collect_consistency_records = true;
-  request.dynamic_start_time_s = 1.0;
-  request.should_use_sample = [](const auto &) { return true; };
-  request.is_within_imu_coverage = [](double) { return true; };
-  request.corrected_time_s = [](const auto &sample) { return sample.time_s; };
-  request.clamped_sigma_m = [](const auto &) { return Eigen::Vector3d(0.1, 0.2, 0.015); };
-  request.find_state_for_time_s = [](double) {
-    offline_lc_minimal::StateMeasSyncResult result;
-    result.status = offline_lc_minimal::StateMeasSyncStatus::kSynchronizedI;
-    result.key_index_i = 1;
-    result.key_index_j = 1;
-    result.timestamp_i_s = 1.0;
-    result.timestamp_j_s = 1.0;
-    return result;
-  };
-  request.trajectory_row_index_for_state = [](std::size_t state_index) {
-    return static_cast<long long>(state_index);
-  };
-
-  offline_lc_minimal::GnssFactorBuilder(std::move(request)).Build();
-
-  ExpectNear(static_cast<double>(latent_diagnostics.size()), 3.0, 0.0, "full-navigation latent bins should be created");
-  ExpectNear(static_cast<double>(summary.rtk_vertical_latent_reference_measurement_factor_count),
-             4.0,
-             0.0,
-             "raw RTK should observe latent bins");
-  ExpectNear(static_cast<double>(summary.rtk_vertical_latent_reference_smoothness_factor_count),
-             2.0,
-             0.0,
-             "adjacent latent bins should be smoothed");
-  ExpectNear(static_cast<double>(summary.rtk_vertical_latent_reference_envelope_factor_count),
-             4.0,
-             0.0,
-             "all vertical envelope factors should use latent references");
-  ExpectNear(static_cast<double>(summary.rtk_vertical_latent_reference_center_pull_factor_count),
-             4.0,
-             0.0,
-             "all center-pull factors should use latent references");
-  ExpectNear(static_cast<double>(envelope_diagnostics.size()), 4.0, 0.0, "diagnostics should cover used samples");
-  ExpectTrue(envelope_diagnostics[0].gate_reference_type == "rtk_latent", "gate should use latent reference");
-  ExpectTrue(envelope_diagnostics[0].center_pull_reference_type == "rtk_latent", "center should use latent reference");
-  ExpectTrue(envelope_diagnostics[0].latent_reference_used, "diagnostic should mark latent reference use");
-  bool has_latent_gate = false;
-  bool has_latent_center = false;
-  for (const auto &factor : graph) {
-    has_latent_gate =
-      has_latent_gate ||
-      static_cast<bool>(
-        boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalEnvelopeLatentReferenceFactor>(factor));
-    has_latent_center =
-      has_latent_center ||
-      static_cast<bool>(
-        boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalEnvelopeLatentCenterPullFactor>(factor));
-  }
-  ExpectTrue(
-    has_latent_gate,
-    "synchronized vertical gate factor should connect pose and latent reference");
-  ExpectTrue(
-    has_latent_center,
-    "synchronized center factor should connect pose and latent reference");
-
-  gtsam::Values optimized_values;
-  optimized_values.insert(
-    gtsam::symbol_shorthand::X(1),
-    gtsam::Pose3(gtsam::Rot3::RzRyRx(0.0, 0.0, 0.0), gtsam::Point3(4.0, 5.0, 6.25)));
-  optimized_values.insert(offline_lc_minimal::RtkVerticalLatentReferenceKey(0), 0.0);
-  optimized_values.insert(offline_lc_minimal::RtkVerticalLatentReferenceKey(1), 6.5);
-  optimized_values.insert(offline_lc_minimal::RtkVerticalLatentReferenceKey(2), 10.0);
-  const auto qc_model = gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(10000.0));
-  const offline_lc_minimal::gp::GPWNOJInterpolator interpolator(qc_model, 1.0, 0.0);
-  offline_lc_minimal::PopulateVerticalEnvelopeDiagnostics(
-    optimized_values,
-    interpolator,
-    envelope_diagnostics);
-  ExpectNear(envelope_diagnostics[1].raw_residual_m, 0.25, 1e-12, "raw RTK residual should remain diagnostic-only");
-  ExpectNear(envelope_diagnostics[1].gate_reference_residual_m, -0.25, 1e-12, "gate residual should use optimized latent reference");
-  ExpectNear(envelope_diagnostics[1].center_pull_reference_residual_m, -0.25, 1e-12, "center residual should use optimized latent reference");
-}
-
 void TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
@@ -1032,9 +904,6 @@ int main() {
     RunTest(
       "TestLowpassPrecomputeDoesNotDoubleCountDroppedSamples",
       TestLowpassPrecomputeDoesNotDoubleCountDroppedSamples);
-    RunTest(
-      "TestEnvelopeUsesLatentReferenceForGateAndCenterPull",
-      TestEnvelopeUsesLatentReferenceForGateAndCenterPull);
     RunTest(
       "TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled",
       TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled);

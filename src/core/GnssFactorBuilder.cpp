@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -13,7 +12,6 @@
 
 #include "offline_lc_minimal/factor/GPInterpolatedHorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
-#include "offline_lc_minimal/core/RtkVerticalLatentReferenceBuilder.h"
 #include "offline_lc_minimal/core/RtkVerticalLowpassReferenceBuilder.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
 
@@ -162,11 +160,6 @@ void GnssFactorBuilder::Validate() const {
       request_.rtk_vertical_lowpass_reference_diagnostics == nullptr) {
     throw std::runtime_error("RTK vertical low-pass reference requested without diagnostics storage");
   }
-  if (request_.config->enable_rtk_vertical_latent_reference &&
-      (request_.initial_values == nullptr ||
-       request_.rtk_vertical_latent_reference_diagnostics == nullptr)) {
-    throw std::runtime_error("RTK vertical latent reference requested without initial values or diagnostics storage");
-  }
 }
 
 void GnssFactorBuilder::Build() const {
@@ -178,30 +171,7 @@ void GnssFactorBuilder::Build() const {
     CreateVerticalConstraintPolicy(*request_.config);
 
   const std::size_t first_sample =
-    request_.config->enable_rtk_vertical_latent_reference
-      ? 0U
-      : std::min(request_.navigation_start_index + 1U, request_.gnss_samples->size());
-  std::optional<RtkVerticalLatentReferenceBuildResult> latent_result;
-  if (request_.config->enable_rtk_vertical_latent_reference) {
-    RtkVerticalLatentReferenceBuildRequest latent_request;
-    latent_request.config = request_.config;
-    latent_request.gnss_samples = request_.gnss_samples;
-    latent_request.first_sample_index = first_sample;
-    latent_request.dynamic_start_time_s = request_.dynamic_start_time_s;
-    if (first_sample < request_.gnss_samples->size()) {
-      latent_request.reference_epoch_s =
-        request_.corrected_time_s((*request_.gnss_samples)[first_sample]);
-    }
-    latent_request.graph = request_.graph;
-    latent_request.initial_values = request_.initial_values;
-    latent_request.run_summary = request_.run_summary;
-    latent_request.is_within_imu_coverage = request_.is_within_imu_coverage;
-    latent_request.corrected_time_s = request_.corrected_time_s;
-    latent_request.clamped_sigma_m = request_.clamped_sigma_m;
-    latent_result = RtkVerticalLatentReferenceBuilder(std::move(latent_request)).Build();
-    *request_.rtk_vertical_latent_reference_diagnostics =
-      latent_result->diagnostics;
-  }
+    std::min(request_.navigation_start_index + 1U, request_.gnss_samples->size());
   if (request_.config->enable_rtk_vertical_lowpass_reference) {
     RtkVerticalLowpassReferenceBuildRequest lowpass_request;
     lowpass_request.config = request_.config;
@@ -260,7 +230,6 @@ void GnssFactorBuilder::Build() const {
     Eigen::Vector3d sigma_m = request_.clamped_sigma_m(sample);
     const double elapsed_s = corrected_time_s - request_.dynamic_start_time_s;
     if (request_.config->early_gnss_relaxation_duration_s > 0.0 &&
-        elapsed_s >= 0.0 &&
         elapsed_s < request_.config->early_gnss_relaxation_duration_s) {
       const double alpha = 1.0 - (elapsed_s / request_.config->early_gnss_relaxation_duration_s);
       sigma_m *= 1.0 + alpha * (request_.config->early_gnss_relaxation_scale - 1.0);
@@ -270,26 +239,12 @@ void GnssFactorBuilder::Build() const {
     bool factor_used = false;
     if (sync_result.status == StateMeasSyncStatus::kSynchronizedI ||
         sync_result.status == StateMeasSyncStatus::kSynchronizedJ) {
-      AddSynchronizedFactors(
-        sample,
-        sample_index,
-        corrected_time_s,
-        sync_result,
-        sigma_m,
-        *vertical_policy,
-        latent_result ? &latent_result->sample_references : nullptr);
+      AddSynchronizedFactors(sample, sample_index, corrected_time_s, sync_result, sigma_m, *vertical_policy);
       factor_used = true;
       ++request_.run_summary->gnss_synced_factor_count;
     } else if (sync_result.status == StateMeasSyncStatus::kInterpolated &&
                request_.config->enable_gp_interpolated_gnss) {
-      AddInterpolatedFactors(
-        sample,
-        sample_index,
-        corrected_time_s,
-        sync_result,
-        sigma_m,
-        *vertical_policy,
-        latent_result ? &latent_result->sample_references : nullptr);
+      AddInterpolatedFactors(sample, sample_index, corrected_time_s, sync_result, sigma_m, *vertical_policy);
       factor_used = true;
       ++request_.run_summary->gnss_interpolated_factor_count;
     } else if (sync_result.status == StateMeasSyncStatus::kCached) {
@@ -318,8 +273,7 @@ void GnssFactorBuilder::AddSynchronizedFactors(
   const double corrected_time_s,
   const StateMeasSyncResult &sync_result,
   const Eigen::Vector3d &sigma_m,
-  const VerticalConstraintPolicy &vertical_policy,
-  const std::vector<RtkVerticalLatentReferenceSampleReference> *latent_references) const {
+  const VerticalConstraintPolicy &vertical_policy) const {
   const std::size_t state_index =
     sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i
                                                               : sync_result.key_index_j;
@@ -338,9 +292,6 @@ void GnssFactorBuilder::AddSynchronizedFactors(
   if (request_.config->enable_rtk_vertical_lowpass_reference) {
     context.rtk_lowpass_references = request_.rtk_vertical_lowpass_reference_diagnostics;
   }
-  if (request_.config->enable_rtk_vertical_latent_reference) {
-    context.rtk_latent_references = latent_references;
-  }
   vertical_policy.AddSynchronized(sample, sample_index, corrected_time_s, sync_result, sigma_m, context);
 }
 
@@ -350,8 +301,7 @@ void GnssFactorBuilder::AddInterpolatedFactors(
   const double corrected_time_s,
   const StateMeasSyncResult &sync_result,
   const Eigen::Vector3d &sigma_m,
-  const VerticalConstraintPolicy &vertical_policy,
-  const std::vector<RtkVerticalLatentReferenceSampleReference> *latent_references) const {
+  const VerticalConstraintPolicy &vertical_policy) const {
   const auto qc_model =
     gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(kInterpolatorQcVariance));
   const gp::GPWNOJInterpolator interpolator(
@@ -379,9 +329,6 @@ void GnssFactorBuilder::AddInterpolatedFactors(
   context.envelope_diagnostics = request_.vertical_envelope_diagnostics;
   if (request_.config->enable_rtk_vertical_lowpass_reference) {
     context.rtk_lowpass_references = request_.rtk_vertical_lowpass_reference_diagnostics;
-  }
-  if (request_.config->enable_rtk_vertical_latent_reference) {
-    context.rtk_latent_references = latent_references;
   }
   vertical_policy.AddInterpolated(sample, sample_index, corrected_time_s, sync_result, sigma_m, interpolator, context);
 }

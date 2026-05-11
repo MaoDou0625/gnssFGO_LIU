@@ -74,11 +74,6 @@ void ResultWriter::WriteOutputs(
       output_path / "rtk_vertical_lowpass_reference_diagnostics.csv",
       result.rtk_vertical_lowpass_reference_diagnostics);
   }
-  if (!result.rtk_vertical_latent_reference_diagnostics.empty()) {
-    WriteRtkVerticalLatentReferenceDiagnosticsCsv(
-      output_path / "rtk_vertical_latent_reference_diagnostics.csv",
-      result.rtk_vertical_latent_reference_diagnostics);
-  }
   if (!result.vertical_envelope_diagnostics.empty()) {
     WriteVerticalEnvelopeDiagnosticsCsv(
       output_path / "vertical_envelope_diagnostics.csv",

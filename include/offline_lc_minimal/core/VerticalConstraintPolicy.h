@@ -17,7 +17,6 @@ struct VerticalConstraintPolicyContext {
   RunSummary *run_summary = nullptr;
   std::vector<VerticalEnvelopeDiagnosticRow> *envelope_diagnostics = nullptr;
   const std::vector<RtkVerticalLowpassReferenceRow> *rtk_lowpass_references = nullptr;
-  const std::vector<RtkVerticalLatentReferenceSampleReference> *rtk_latent_references = nullptr;
 };
 
 class VerticalConstraintPolicy {
