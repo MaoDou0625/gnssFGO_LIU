@@ -24,7 +24,6 @@ struct GnssFactorBuildRequest {
   RunSummary *run_summary = nullptr;
   std::vector<GnssFactorRecord> *factor_records = nullptr;
   std::vector<GnssConsistencyRecord> *consistency_records = nullptr;
-  std::vector<RtkVerticalLowpassReferenceRow> *rtk_vertical_lowpass_reference_diagnostics = nullptr;
   std::vector<VerticalEnvelopeDiagnosticRow> *vertical_envelope_diagnostics = nullptr;
   bool collect_consistency_records = false;
   double dynamic_start_time_s = 0.0;

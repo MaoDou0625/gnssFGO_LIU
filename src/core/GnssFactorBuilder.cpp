@@ -12,7 +12,6 @@
 
 #include "offline_lc_minimal/factor/GPInterpolatedHorizontalPositionFactor.h"
 #include "offline_lc_minimal/factor/HorizontalPositionFactor.h"
-#include "offline_lc_minimal/core/RtkVerticalLowpassReferenceBuilder.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
 
 namespace offline_lc_minimal {
@@ -156,10 +155,6 @@ void GnssFactorBuilder::Validate() const {
       request_.vertical_envelope_diagnostics == nullptr) {
     throw std::runtime_error("envelope vertical constraints requested without diagnostics storage");
   }
-  if (request_.config->enable_rtk_vertical_lowpass_reference &&
-      request_.rtk_vertical_lowpass_reference_diagnostics == nullptr) {
-    throw std::runtime_error("RTK vertical low-pass reference requested without diagnostics storage");
-  }
 }
 
 void GnssFactorBuilder::Build() const {
@@ -172,24 +167,6 @@ void GnssFactorBuilder::Build() const {
 
   const std::size_t first_sample =
     std::min(request_.navigation_start_index + 1U, request_.gnss_samples->size());
-  if (request_.config->enable_rtk_vertical_lowpass_reference) {
-    RtkVerticalLowpassReferenceBuildRequest lowpass_request;
-    lowpass_request.config = request_.config;
-    lowpass_request.gnss_samples = request_.gnss_samples;
-    lowpass_request.first_sample_index = first_sample;
-    lowpass_request.is_within_imu_coverage = request_.is_within_imu_coverage;
-    lowpass_request.corrected_time_s = request_.corrected_time_s;
-    lowpass_request.clamped_sigma_m = request_.clamped_sigma_m;
-    RtkVerticalLowpassReferenceBuildResult lowpass_result =
-      RtkVerticalLowpassReferenceBuilder(std::move(lowpass_request)).Build();
-    request_.run_summary->rtk_vertical_lowpass_reference_enabled = true;
-    request_.run_summary->rtk_vertical_lowpass_valid_count = lowpass_result.valid_count;
-    request_.run_summary->rtk_vertical_lowpass_raw_minus_lowpass_std_m =
-      lowpass_result.raw_minus_lowpass_std_m;
-    request_.run_summary->rtk_vertical_lowpass_raw_minus_lowpass_max_abs_m =
-      lowpass_result.raw_minus_lowpass_max_abs_m;
-    *request_.rtk_vertical_lowpass_reference_diagnostics = std::move(lowpass_result.rows);
-  }
   for (std::size_t sample_index = first_sample; sample_index < request_.gnss_samples->size();
        ++sample_index) {
     const GnssSolutionSample &sample = (*request_.gnss_samples)[sample_index];
@@ -287,11 +264,7 @@ void GnssFactorBuilder::AddSynchronizedFactors(
     horizontal_noise));
   VerticalConstraintPolicyContext context;
   context.graph = request_.graph;
-  context.run_summary = request_.run_summary;
   context.envelope_diagnostics = request_.vertical_envelope_diagnostics;
-  if (request_.config->enable_rtk_vertical_lowpass_reference) {
-    context.rtk_lowpass_references = request_.rtk_vertical_lowpass_reference_diagnostics;
-  }
   vertical_policy.AddSynchronized(sample, sample_index, corrected_time_s, sync_result, sigma_m, context);
 }
 
@@ -325,11 +298,7 @@ void GnssFactorBuilder::AddInterpolatedFactors(
     interpolator));
   VerticalConstraintPolicyContext context;
   context.graph = request_.graph;
-  context.run_summary = request_.run_summary;
   context.envelope_diagnostics = request_.vertical_envelope_diagnostics;
-  if (request_.config->enable_rtk_vertical_lowpass_reference) {
-    context.rtk_lowpass_references = request_.rtk_vertical_lowpass_reference_diagnostics;
-  }
   vertical_policy.AddInterpolated(sample, sample_index, corrected_time_s, sync_result, sigma_m, interpolator, context);
 }
 

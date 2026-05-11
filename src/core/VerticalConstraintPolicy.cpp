@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
-#include <string>
 
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
@@ -23,15 +22,6 @@ struct EnvelopePolicyParams {
   double center_sigma_m = 0.60;
   VerticalEnvelopeCenterSigmaMode center_sigma_mode = VerticalEnvelopeCenterSigmaMode::kFixed;
   double center_deadband_m = 0.01;
-  bool enable_lowpass_reference = false;
-  bool lowpass_use_for_center_pull = true;
-};
-
-struct CenterPullReference {
-  bool factor_used = false;
-  double reference_up_m = std::numeric_limits<double>::quiet_NaN();
-  std::string reference_type = "raw_rtk";
-  std::string skip_reason = "NONE";
 };
 
 gtsam::SharedNoiseModel MakeDirectVerticalNoiseModel(const Eigen::Vector3d &sigma_m) {
@@ -69,11 +59,7 @@ VerticalEnvelopeDiagnosticRow MakeEnvelopeDiagnosticRow(
   const Eigen::Vector3d &sigma_m,
   const double half_width_m,
   const double center_sigma_m,
-  const double center_deadband_m,
-  const double center_reference_up_m,
-  const std::string &center_reference_type,
-  const std::string &center_skip_reason,
-  const bool center_factor_used) {
+  const EnvelopePolicyParams &params) {
   VerticalEnvelopeDiagnosticRow row;
   row.sample_index = sample_index;
   row.raw_time_s = sample.time_s;
@@ -95,53 +81,12 @@ VerticalEnvelopeDiagnosticRow MakeEnvelopeDiagnosticRow(
   row.rtk_up_m = sample.enu_position_m.z();
   row.sigma_u_m = sigma_m.z();
   row.half_width_m = half_width_m;
-  row.center_pull_factor_used = center_factor_used;
-  row.center_pull_reference_up_m = center_reference_up_m;
-  row.center_pull_reference_type = center_reference_type;
-  row.center_pull_skip_reason = center_skip_reason;
-  if (center_factor_used) {
+  row.center_pull_factor_used = params.enable_center_pull;
+  if (params.enable_center_pull) {
     row.center_pull_sigma_m = center_sigma_m;
-    row.center_pull_deadband_m = center_deadband_m;
+    row.center_pull_deadband_m = params.center_deadband_m;
   }
   return row;
-}
-
-CenterPullReference SelectCenterPullReference(
-  const GnssSolutionSample &sample,
-  const std::size_t sample_index,
-  const EnvelopePolicyParams &params,
-  const VerticalConstraintPolicyContext &context) {
-  CenterPullReference reference;
-  reference.factor_used = params.enable_center_pull;
-  reference.reference_up_m = sample.enu_position_m.z();
-  reference.reference_type = "raw_rtk";
-
-  if (!params.enable_center_pull) {
-    reference.factor_used = false;
-    reference.skip_reason = "CENTER_PULL_DISABLED";
-    return reference;
-  }
-  if (!params.enable_lowpass_reference || !params.lowpass_use_for_center_pull) {
-    return reference;
-  }
-  if (context.rtk_lowpass_references == nullptr ||
-      sample_index >= context.rtk_lowpass_references->size()) {
-    reference.factor_used = false;
-    reference.reference_type = "rtk_lowpass";
-    reference.skip_reason = "LOWPASS_REFERENCE_MISSING";
-    return reference;
-  }
-
-  const RtkVerticalLowpassReferenceRow &lowpass_row =
-    (*context.rtk_lowpass_references)[sample_index];
-  reference.reference_type = "rtk_lowpass";
-  reference.reference_up_m = lowpass_row.lowpass_up_m;
-  if (!lowpass_row.lowpass_valid || !std::isfinite(lowpass_row.lowpass_up_m)) {
-    reference.factor_used = false;
-    reference.skip_reason =
-      lowpass_row.skip_reason.empty() ? "LOWPASS_REFERENCE_INVALID" : lowpass_row.skip_reason;
-  }
-  return reference;
 }
 
 void RequireGraph(const VerticalConstraintPolicyContext &context) {
@@ -210,9 +155,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
           config.enable_vertical_envelope_center_pull,
           config.vertical_envelope_center_sigma_m,
           config.vertical_envelope_center_sigma_mode,
-          config.vertical_envelope_center_deadband_m,
-          config.enable_rtk_vertical_lowpass_reference,
-          config.rtk_vertical_lowpass_use_for_center_pull} {}
+          config.vertical_envelope_center_deadband_m} {}
 
   [[nodiscard]] bool UsesDirectPositionFactor() const override { return false; }
 
@@ -242,18 +185,13 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
       sample.enu_position_m.z(),
       half_width_m,
       MakeEnvelopeNoiseModel(params_)));
-    const CenterPullReference center_reference =
-      SelectCenterPullReference(sample, sample_index, params_, context);
-    if (center_reference.factor_used) {
+    if (params_.enable_center_pull) {
       context.graph->add(factor::VerticalEnvelopeCenterPullFactor(
         symbol::X(state_index),
-        center_reference.reference_up_m,
+        sample.enu_position_m.z(),
         half_width_m,
         params_.center_deadband_m,
         MakeEnvelopeCenterNoiseModel(center_sigma_m)));
-      if (context.run_summary != nullptr && center_reference.reference_type == "rtk_lowpass") {
-        ++context.run_summary->rtk_vertical_lowpass_center_pull_factor_count;
-      }
     }
     context.envelope_diagnostics->push_back(
       MakeEnvelopeDiagnosticRow(
@@ -264,11 +202,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
         sigma_m,
         half_width_m,
         center_sigma_m,
-        params_.center_deadband_m,
-        center_reference.reference_up_m,
-        center_reference.reference_type,
-        center_reference.skip_reason,
-        center_reference.factor_used));
+        params_));
   }
 
   void AddInterpolated(
@@ -296,9 +230,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
       half_width_m,
       interpolator,
       MakeEnvelopeNoiseModel(params_)));
-    const CenterPullReference center_reference =
-      SelectCenterPullReference(sample, sample_index, params_, context);
-    if (center_reference.factor_used) {
+    if (params_.enable_center_pull) {
       context.graph->add(factor::GPInterpolatedVerticalEnvelopeCenterPullFactor(
         symbol::X(sync_result.key_index_i),
         symbol::V(sync_result.key_index_i),
@@ -306,14 +238,11 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
         symbol::X(sync_result.key_index_j),
         symbol::V(sync_result.key_index_j),
         symbol::W(sync_result.key_index_j),
-        center_reference.reference_up_m,
+        sample.enu_position_m.z(),
         half_width_m,
         params_.center_deadband_m,
         interpolator,
         MakeEnvelopeCenterNoiseModel(center_sigma_m)));
-      if (context.run_summary != nullptr && center_reference.reference_type == "rtk_lowpass") {
-        ++context.run_summary->rtk_vertical_lowpass_center_pull_factor_count;
-      }
     }
     context.envelope_diagnostics->push_back(
       MakeEnvelopeDiagnosticRow(
@@ -324,11 +253,7 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
         sigma_m,
         half_width_m,
         center_sigma_m,
-        params_.center_deadband_m,
-        center_reference.reference_up_m,
-        center_reference.reference_type,
-        center_reference.skip_reason,
-        center_reference.factor_used));
+        params_));
   }
 
  private:

@@ -167,21 +167,6 @@ struct VerticalEnvelopeDiagnosticRow {
   double center_pull_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double center_pull_deadband_m = std::numeric_limits<double>::quiet_NaN();
   double center_pull_residual_m = std::numeric_limits<double>::quiet_NaN();
-  double center_pull_reference_up_m = std::numeric_limits<double>::quiet_NaN();
-  std::string center_pull_reference_type = "raw_rtk";
-  double center_pull_reference_residual_m = std::numeric_limits<double>::quiet_NaN();
-  std::string center_pull_skip_reason = "NONE";
-};
-
-struct RtkVerticalLowpassReferenceRow {
-  std::size_t sample_index = 0;
-  double time_s = std::numeric_limits<double>::quiet_NaN();
-  double raw_up_m = std::numeric_limits<double>::quiet_NaN();
-  double lowpass_up_m = std::numeric_limits<double>::quiet_NaN();
-  double raw_minus_lowpass_m = std::numeric_limits<double>::quiet_NaN();
-  int window_sample_count = 0;
-  bool lowpass_valid = false;
-  std::string skip_reason = "UNSET";
 };
 
 struct StaticAlignmentValidationRow {

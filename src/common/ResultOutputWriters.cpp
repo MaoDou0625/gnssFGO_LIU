@@ -347,29 +347,6 @@ void WriteGnssConsistencyCsv(
   }
 }
 
-void WriteRtkVerticalLowpassReferenceDiagnosticsCsv(
-  const std::filesystem::path &path,
-  const std::vector<RtkVerticalLowpassReferenceRow> &rows) {
-  std::ofstream stream(path);
-  if (!stream.is_open()) {
-    throw std::runtime_error("failed to write " + path.filename().string());
-  }
-  stream << std::setprecision(17);
-  stream
-    << "sample_index,time_s,raw_up_m,lowpass_up_m,raw_minus_lowpass_m,"
-       "window_sample_count,lowpass_valid,skip_reason\n";
-  for (const auto &row : rows) {
-    stream << row.sample_index << ','
-           << row.time_s << ','
-           << row.raw_up_m << ','
-           << row.lowpass_up_m << ','
-           << row.raw_minus_lowpass_m << ','
-           << row.window_sample_count << ','
-           << (row.lowpass_valid ? 1 : 0) << ','
-           << row.skip_reason << '\n';
-  }
-}
-
 void WriteVerticalEnvelopeDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalEnvelopeDiagnosticRow> &rows) {
@@ -383,8 +360,7 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
        "synchronized_state_index,state_time_i_s,state_time_j_s,duration_from_state_i_s,"
        "factor_used,rtk_up_m,sigma_u_m,half_width_m,predicted_up_m,raw_residual_m,"
        "violation_m,inside_envelope,center_pull_factor_used,center_pull_sigma_m,"
-       "center_pull_deadband_m,center_pull_residual_m,center_pull_reference_up_m,"
-       "center_pull_reference_type,center_pull_reference_residual_m,center_pull_skip_reason\n";
+       "center_pull_deadband_m,center_pull_residual_m\n";
   for (const auto &row : rows) {
     stream << row.sample_index << ','
            << row.raw_time_s << ','
@@ -407,11 +383,7 @@ void WriteVerticalEnvelopeDiagnosticsCsv(
            << (row.center_pull_factor_used ? 1 : 0) << ','
            << row.center_pull_sigma_m << ','
            << row.center_pull_deadband_m << ','
-           << row.center_pull_residual_m << ','
-           << row.center_pull_reference_up_m << ','
-           << row.center_pull_reference_type << ','
-           << row.center_pull_reference_residual_m << ','
-           << row.center_pull_skip_reason << '\n';
+           << row.center_pull_residual_m << '\n';
   }
 }
 

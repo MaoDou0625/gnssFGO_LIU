@@ -897,14 +897,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.gnss_nis_median = std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.gnss_nis_p95 = std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.axis_2sigma_pass_rate = std::numeric_limits<double>::quiet_NaN();
-  run_result.run_summary.rtk_vertical_lowpass_reference_enabled =
-    config_.enable_rtk_vertical_lowpass_reference;
-  run_result.run_summary.rtk_vertical_lowpass_valid_count = 0;
-  run_result.run_summary.rtk_vertical_lowpass_raw_minus_lowpass_std_m =
-    std::numeric_limits<double>::quiet_NaN();
-  run_result.run_summary.rtk_vertical_lowpass_raw_minus_lowpass_max_abs_m =
-    std::numeric_limits<double>::quiet_NaN();
-  run_result.run_summary.rtk_vertical_lowpass_center_pull_factor_count = 0;
   run_result.run_summary.vertical_velocity_delta_factor_count = 0;
   run_result.run_summary.vertical_velocity_delta_static_factor_count = 0;
   run_result.run_summary.vertical_velocity_delta_skipped_disabled_count = 0;
@@ -962,7 +954,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.trajectory = base_dynamic_trajectory;
   run_result.gnss_factor_records.clear();
   run_result.gnss_consistency_records.clear();
-  run_result.rtk_vertical_lowpass_reference_diagnostics.clear();
   run_result.vertical_envelope_diagnostics.clear();
   run_result.vertical_velocity_delta_diagnostics.clear();
   run_result.vertical_motion_adaptive_reweighting_diagnostics.clear();
@@ -1030,8 +1021,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   gnss_request.run_summary = &run_result.run_summary;
   gnss_request.factor_records = &run_result.gnss_factor_records;
   gnss_request.consistency_records = &run_result.gnss_consistency_records;
-  gnss_request.rtk_vertical_lowpass_reference_diagnostics =
-    &run_result.rtk_vertical_lowpass_reference_diagnostics;
   gnss_request.vertical_envelope_diagnostics = &run_result.vertical_envelope_diagnostics;
   gnss_request.collect_consistency_records = collect_gnss_consistency;
   gnss_request.dynamic_start_time_s = dynamic_start_time_s;

@@ -292,16 +292,6 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (config.vertical_envelope_center_deadband_m >= config.vertical_envelope_min_half_width_m) {
     throw std::runtime_error("vertical envelope center deadband must be smaller than the minimum half-width");
   }
-  if (!std::isfinite(config.rtk_vertical_lowpass_window_s) ||
-      config.rtk_vertical_lowpass_window_s <= 0.0 ||
-      config.rtk_vertical_lowpass_min_sample_count <= 0 ||
-      !std::isfinite(config.rtk_vertical_lowpass_huber_sigma_m) ||
-      config.rtk_vertical_lowpass_huber_sigma_m <= 0.0) {
-    throw std::runtime_error("RTK vertical low-pass reference settings are invalid");
-  }
-  if (config.enable_rtk_vertical_lowpass_reference && !config.enable_gnss) {
-    throw std::runtime_error("enable_rtk_vertical_lowpass_reference requires enable_gnss");
-  }
   if (config.enable_vertical_velocity_delta_constraint && !config.enable_body_z_jump_detection) {
     throw std::runtime_error("enable_vertical_velocity_delta_constraint requires enable_body_z_jump_detection");
   }
@@ -746,16 +736,6 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_envelope_center_sigma_mode = ParseVerticalEnvelopeCenterSigmaMode(normalized_value);
   } else if (normalized_key == "vertical_envelope_center_deadband_m") {
     config.vertical_envelope_center_deadband_m = ParseDouble(normalized_value);
-  } else if (normalized_key == "enable_rtk_vertical_lowpass_reference") {
-    config.enable_rtk_vertical_lowpass_reference = ParseBool(normalized_value);
-  } else if (normalized_key == "rtk_vertical_lowpass_window_s") {
-    config.rtk_vertical_lowpass_window_s = ParseDouble(normalized_value);
-  } else if (normalized_key == "rtk_vertical_lowpass_min_sample_count") {
-    config.rtk_vertical_lowpass_min_sample_count = ParseInt(normalized_value);
-  } else if (normalized_key == "rtk_vertical_lowpass_huber_sigma_m") {
-    config.rtk_vertical_lowpass_huber_sigma_m = ParseDouble(normalized_value);
-  } else if (normalized_key == "rtk_vertical_lowpass_use_for_center_pull") {
-    config.rtk_vertical_lowpass_use_for_center_pull = ParseBool(normalized_value);
   } else if (normalized_key == "enable_vertical_velocity_delta_constraint") {
     config.enable_vertical_velocity_delta_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_acc_sigma_mps2") {
@@ -1152,13 +1132,6 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "vertical_envelope_center_sigma_m=" << config.vertical_envelope_center_sigma_m << '\n'
     << "vertical_envelope_center_sigma_mode=" << ToString(config.vertical_envelope_center_sigma_mode) << '\n'
     << "vertical_envelope_center_deadband_m=" << config.vertical_envelope_center_deadband_m << '\n'
-    << "enable_rtk_vertical_lowpass_reference="
-    << (config.enable_rtk_vertical_lowpass_reference ? "true" : "false") << '\n'
-    << "rtk_vertical_lowpass_window_s=" << config.rtk_vertical_lowpass_window_s << '\n'
-    << "rtk_vertical_lowpass_min_sample_count=" << config.rtk_vertical_lowpass_min_sample_count << '\n'
-    << "rtk_vertical_lowpass_huber_sigma_m=" << config.rtk_vertical_lowpass_huber_sigma_m << '\n'
-    << "rtk_vertical_lowpass_use_for_center_pull="
-    << (config.rtk_vertical_lowpass_use_for_center_pull ? "true" : "false") << '\n'
     << "enable_vertical_velocity_delta_constraint="
     << (config.enable_vertical_velocity_delta_constraint ? "true" : "false") << '\n'
     << "vertical_velocity_delta_acc_sigma_mps2=" << config.vertical_velocity_delta_acc_sigma_mps2 << '\n'
