@@ -4,8 +4,11 @@
 #include <string>
 
 #include <gtsam/geometry/Pose3.h>
+#include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
+#include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/nonlinear/Values.h>
+#include <gtsam/slam/PriorFactor.h>
 
 #include "offline_lc_minimal/factor/VerticalRtkFactors.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
@@ -25,6 +28,12 @@ void ExpectNear(const double actual, const double expected, const double toleran
   if (std::abs(actual - expected) > tolerance) {
     throw std::runtime_error(
       message + ": actual=" + std::to_string(actual) + ", expected=" + std::to_string(expected));
+  }
+}
+
+void ExpectTrue(const bool condition, const std::string &message) {
+  if (!condition) {
+    throw std::runtime_error(message);
   }
 }
 
@@ -121,6 +130,45 @@ void TestVerticalEnvelopeLatentFactorsUseReferenceVariable() {
   ExpectNear(gate_factor.evaluateError(pose, 3.00)(0), 0.15, 1e-12, "latent gate outside envelope is wrong");
   ExpectNear(center_factor.evaluateError(pose, 3.20)(0), 0.05, 1e-12, "latent center pull should use reference variable");
   ExpectNear(center_factor.evaluateError(pose, 3.00)(0), 0.10, 1e-12, "latent center pull should clamp at gate");
+}
+
+void TestLatentEnvelopeFactorOptimizesPoseAgainstReference() {
+  const gtsam::Key pose_key = gtsam::Symbol('x', 0);
+  const gtsam::Key reference_key = gtsam::Symbol('r', 0);
+  const gtsam::Pose3 initial_pose(
+    gtsam::Rot3::RzRyRx(0.0, 0.0, 0.0),
+    gtsam::Point3(0.0, 0.0, -1.0));
+
+  gtsam::NonlinearFactorGraph graph;
+  const auto prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
+    (gtsam::Vector(6) << 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 10.0).finished());
+  graph.add(gtsam::PriorFactor<gtsam::Pose3>(pose_key, initial_pose, prior_noise));
+  graph.add(offline_lc_minimal::factor::RtkVerticalReferenceMeasurementFactor(
+    reference_key,
+    0.0,
+    gtsam::noiseModel::Isotropic::Sigma(1, 0.015)));
+  graph.add(offline_lc_minimal::factor::VerticalEnvelopeLatentReferenceFactor(
+    pose_key,
+    reference_key,
+    0.03,
+    gtsam::noiseModel::Isotropic::Sigma(1, 0.20)));
+
+  gtsam::Values initial_values;
+  initial_values.insert(pose_key, initial_pose);
+  initial_values.insert(reference_key, 0.0);
+  const double initial_error = graph.error(initial_values);
+
+  gtsam::LevenbergMarquardtParams params;
+  params.maxIterations = 20;
+  const gtsam::Values optimized_values =
+    gtsam::LevenbergMarquardtOptimizer(graph, initial_values, params).optimize();
+  const double final_error = graph.error(optimized_values);
+  const double optimized_up =
+    optimized_values.at<gtsam::Pose3>(pose_key).translation().z();
+
+  ExpectTrue(final_error < initial_error, "latent envelope factor should reduce graph error");
+  ExpectTrue(optimized_up > -0.2, "latent envelope factor should pull pose height toward reference");
+  ExpectNear(optimized_values.at<double>(reference_key), 0.0, 1e-3, "RTK measurement should anchor latent reference");
 }
 
 void TestGpInterpolatedVerticalFactorMatchesInterpolator() {
@@ -262,6 +310,9 @@ int main() {
     RunTest(
       "TestVerticalEnvelopeLatentFactorsUseReferenceVariable",
       TestVerticalEnvelopeLatentFactorsUseReferenceVariable);
+    RunTest(
+      "TestLatentEnvelopeFactorOptimizesPoseAgainstReference",
+      TestLatentEnvelopeFactorOptimizesPoseAgainstReference);
     RunTest("TestGpInterpolatedVerticalFactorMatchesInterpolator", TestGpInterpolatedVerticalFactorMatchesInterpolator);
     RunTest(
       "TestGpInterpolatedVerticalEnvelopeFactorMatchesInterpolator",

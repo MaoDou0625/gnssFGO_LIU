@@ -682,20 +682,25 @@ void TestEnvelopeUsesLatentReferenceForGateAndCenterPull() {
              0.0,
              "adjacent latent bins should be smoothed");
   ExpectNear(static_cast<double>(summary.rtk_vertical_latent_reference_envelope_factor_count),
-             4.0,
+             3.0,
              0.0,
-             "all vertical envelope factors should use latent references");
+             "main GNSS envelope factors should use latent references after navigation start");
   ExpectNear(static_cast<double>(summary.rtk_vertical_latent_reference_center_pull_factor_count),
-             4.0,
+             3.0,
              0.0,
-             "all center-pull factors should use latent references");
-  ExpectNear(static_cast<double>(envelope_diagnostics.size()), 4.0, 0.0, "diagnostics should cover used samples");
+             "main GNSS center-pull factors should use latent references after navigation start");
+  ExpectNear(static_cast<double>(envelope_diagnostics.size()), 3.0, 0.0, "diagnostics should cover used GNSS factors");
+  ExpectNear(static_cast<double>(envelope_diagnostics[0].sample_index), 1.0, 0.0, "pre-navigation sample should not create a main GNSS factor");
   ExpectTrue(envelope_diagnostics[0].gate_reference_type == "rtk_latent", "gate should use latent reference");
   ExpectTrue(envelope_diagnostics[0].center_pull_reference_type == "rtk_latent", "center should use latent reference");
   ExpectTrue(envelope_diagnostics[0].latent_reference_used, "diagnostic should mark latent reference use");
   bool has_latent_gate = false;
   bool has_latent_center = false;
+  int horizontal_factor_count = 0;
   for (const auto &factor : graph) {
+    if (boost::dynamic_pointer_cast<offline_lc_minimal::factor::HorizontalPositionFactor>(factor)) {
+      ++horizontal_factor_count;
+    }
     has_latent_gate =
       has_latent_gate ||
       static_cast<bool>(
@@ -711,6 +716,7 @@ void TestEnvelopeUsesLatentReferenceForGateAndCenterPull() {
   ExpectTrue(
     has_latent_center,
     "synchronized center factor should connect pose and latent reference");
+  ExpectNear(static_cast<double>(horizontal_factor_count), 3.0, 0.0, "pre-navigation sample should not create a horizontal factor");
 
   gtsam::Values optimized_values;
   optimized_values.insert(
@@ -725,9 +731,9 @@ void TestEnvelopeUsesLatentReferenceForGateAndCenterPull() {
     optimized_values,
     interpolator,
     envelope_diagnostics);
-  ExpectNear(envelope_diagnostics[1].raw_residual_m, 0.25, 1e-12, "raw RTK residual should remain diagnostic-only");
-  ExpectNear(envelope_diagnostics[1].gate_reference_residual_m, -0.25, 1e-12, "gate residual should use optimized latent reference");
-  ExpectNear(envelope_diagnostics[1].center_pull_reference_residual_m, -0.25, 1e-12, "center residual should use optimized latent reference");
+  ExpectNear(envelope_diagnostics[0].raw_residual_m, 0.25, 1e-12, "raw RTK residual should remain diagnostic-only");
+  ExpectNear(envelope_diagnostics[0].gate_reference_residual_m, -0.25, 1e-12, "gate residual should use optimized latent reference");
+  ExpectNear(envelope_diagnostics[0].center_pull_reference_residual_m, -0.25, 1e-12, "center residual should use optimized latent reference");
 }
 
 void TestEnvelopeModeAddsInterpolatedCenterPullFactorWhenEnabled() {

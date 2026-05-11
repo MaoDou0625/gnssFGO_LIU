@@ -177,20 +177,20 @@ void GnssFactorBuilder::Build() const {
   const std::unique_ptr<VerticalConstraintPolicy> vertical_policy =
     CreateVerticalConstraintPolicy(*request_.config);
 
-  const std::size_t first_sample =
-    request_.config->enable_rtk_vertical_latent_reference
-      ? 0U
-      : std::min(request_.navigation_start_index + 1U, request_.gnss_samples->size());
+  const std::size_t first_factor_sample =
+    std::min(request_.navigation_start_index + 1U, request_.gnss_samples->size());
+  const std::size_t first_reference_sample =
+    request_.config->enable_rtk_vertical_latent_reference ? 0U : first_factor_sample;
   std::optional<RtkVerticalLatentReferenceBuildResult> latent_result;
   if (request_.config->enable_rtk_vertical_latent_reference) {
     RtkVerticalLatentReferenceBuildRequest latent_request;
     latent_request.config = request_.config;
     latent_request.gnss_samples = request_.gnss_samples;
-    latent_request.first_sample_index = first_sample;
+    latent_request.first_sample_index = first_reference_sample;
     latent_request.dynamic_start_time_s = request_.dynamic_start_time_s;
-    if (first_sample < request_.gnss_samples->size()) {
+    if (first_reference_sample < request_.gnss_samples->size()) {
       latent_request.reference_epoch_s =
-        request_.corrected_time_s((*request_.gnss_samples)[first_sample]);
+        request_.corrected_time_s((*request_.gnss_samples)[first_reference_sample]);
     }
     latent_request.graph = request_.graph;
     latent_request.initial_values = request_.initial_values;
@@ -206,7 +206,7 @@ void GnssFactorBuilder::Build() const {
     RtkVerticalLowpassReferenceBuildRequest lowpass_request;
     lowpass_request.config = request_.config;
     lowpass_request.gnss_samples = request_.gnss_samples;
-    lowpass_request.first_sample_index = first_sample;
+    lowpass_request.first_sample_index = first_factor_sample;
     lowpass_request.is_within_imu_coverage = request_.is_within_imu_coverage;
     lowpass_request.corrected_time_s = request_.corrected_time_s;
     lowpass_request.clamped_sigma_m = request_.clamped_sigma_m;
@@ -220,7 +220,7 @@ void GnssFactorBuilder::Build() const {
       lowpass_result.raw_minus_lowpass_max_abs_m;
     *request_.rtk_vertical_lowpass_reference_diagnostics = std::move(lowpass_result.rows);
   }
-  for (std::size_t sample_index = first_sample; sample_index < request_.gnss_samples->size();
+  for (std::size_t sample_index = first_factor_sample; sample_index < request_.gnss_samples->size();
        ++sample_index) {
     const GnssSolutionSample &sample = (*request_.gnss_samples)[sample_index];
     const double corrected_time_s = request_.corrected_time_s(sample);
