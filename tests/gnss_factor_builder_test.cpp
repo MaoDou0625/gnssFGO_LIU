@@ -132,6 +132,89 @@ void TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors() {
   ExpectTrue(envelope_diagnostics.empty(), "direct_z should not emit envelope diagnostics");
 }
 
+void TestRejectedNonFixedSampleAddsNoGnssFactors() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.drop_non_rtkfix = true;
+  config.early_gnss_relaxation_duration_s = 0.0;
+
+  std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeGnssSample(0.0),
+    MakeGnssSample(1.0),
+  };
+  samples[1].gnssfgo_type_code = 2;
+
+  gtsam::NonlinearFactorGraph graph;
+  std::vector<offline_lc_minimal::TrajectoryRow> trajectory(2);
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::GnssFactorRecord> factor_records;
+  std::vector<offline_lc_minimal::GnssConsistencyRecord> consistency_records;
+  std::vector<offline_lc_minimal::VerticalEnvelopeDiagnosticRow> envelope_diagnostics;
+  bool find_state_called = false;
+
+  offline_lc_minimal::GnssFactorBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.navigation_start_index = 0;
+  request.graph = &graph;
+  request.trajectory = &trajectory;
+  request.run_summary = &summary;
+  request.factor_records = &factor_records;
+  request.consistency_records = &consistency_records;
+  request.vertical_envelope_diagnostics = &envelope_diagnostics;
+  request.collect_consistency_records = true;
+  request.dynamic_start_time_s = 1.0;
+  request.should_use_sample = [](const auto &sample) {
+    return sample.fix_type() == offline_lc_minimal::GnssFixType::kRtkFix;
+  };
+  request.is_within_imu_coverage = [](double) { return true; };
+  request.corrected_time_s = [](const auto &sample) { return sample.time_s; };
+  request.clamped_sigma_m = [](const auto &) { return Eigen::Vector3d(0.1, 0.2, 0.3); };
+  request.find_state_for_time_s = [&find_state_called](double) {
+    find_state_called = true;
+    offline_lc_minimal::StateMeasSyncResult result;
+    result.status = offline_lc_minimal::StateMeasSyncStatus::kSynchronizedI;
+    result.key_index_i = 1;
+    result.key_index_j = 1;
+    result.timestamp_i_s = 1.0;
+    result.timestamp_j_s = 1.0;
+    return result;
+  };
+  request.trajectory_row_index_for_state = [](std::size_t state_index) {
+    return static_cast<long long>(state_index);
+  };
+
+  offline_lc_minimal::GnssFactorBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 0.0, 0.0, "non-RTKFIX samples should add no GNSS factors");
+  ExpectNear(static_cast<double>(summary.gnss_factor_count), 0.0, 0.0, "non-RTKFIX samples should not count as used");
+  ExpectNear(
+    static_cast<double>(summary.gnss_synced_factor_count),
+    0.0,
+    0.0,
+    "non-RTKFIX samples should not be synchronized");
+  ExpectNear(
+    static_cast<double>(summary.gnss_interpolated_factor_count),
+    0.0,
+    0.0,
+    "non-RTKFIX samples should not be interpolated");
+  ExpectNear(static_cast<double>(factor_records.size()), 1.0, 0.0, "dropped sample should still be recorded");
+  ExpectNear(
+    static_cast<double>(consistency_records.size()),
+    1.0,
+    0.0,
+    "dropped sample should still keep a consistency record");
+  ExpectTrue(!find_state_called, "non-RTKFIX samples should be rejected before state synchronization");
+  ExpectTrue(
+    factor_records.front().sync_status == offline_lc_minimal::StateMeasSyncStatus::kDropped,
+    "dropped sample should have dropped sync status");
+  ExpectTrue(!factor_records.front().factor_used, "dropped sample should not mark factor_used");
+  ExpectTrue(
+    consistency_records.front().sync_status == offline_lc_minimal::StateMeasSyncStatus::kDropped,
+    "dropped consistency record should have dropped sync status");
+  ExpectTrue(!consistency_records.front().factor_used, "dropped consistency record should not mark factor_used");
+  ExpectTrue(!trajectory[1].gnss_factor_used, "dropped sample should not mark trajectory GNSS usage");
+}
+
 void TestEnvelopeModeAddsHorizontalAndEnvelopeFactors() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
@@ -740,6 +823,9 @@ int main() {
     RunTest(
       "TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors",
       TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors);
+    RunTest(
+      "TestRejectedNonFixedSampleAddsNoGnssFactors",
+      TestRejectedNonFixedSampleAddsNoGnssFactors);
     RunTest(
       "TestEnvelopeModeAddsHorizontalAndEnvelopeFactors",
       TestEnvelopeModeAddsHorizontalAndEnvelopeFactors);
