@@ -482,6 +482,9 @@ void TestPhase18AttitudeRefBiasAwareDvzConfigLoads() {
   ExpectTrue(
     std::abs(config.attitude_reference_sigma_rad - 0.01) < 1e-15,
     "phase18 attitude reference sigma should load");
+  ExpectTrue(
+    std::abs(config.attitude_reference_relative_yaw_sigma_rad - 0.01) < 1e-15,
+    "phase18 relative yaw reference sigma should use default");
   ExpectTrue(config.enable_body_z_nhc_constraint, "phase18 should keep fixed-axis body-z NHC enabled");
 }
 
@@ -825,6 +828,9 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
   ExpectTrue(
     config.enable_body_z_nhc_strict_effective_weighting,
     "phase32 should keep strict Body-Z NHC weighting");
+  ExpectTrue(
+    std::abs(config.attitude_reference_relative_yaw_sigma_rad - 0.01) < 1e-15,
+    "phase32 relative yaw reference sigma should load");
 }
 
 void TestDefaultOfflineConfigUsesPhase31StrictNHC() {
@@ -859,7 +865,11 @@ void TestOldCompatibilityKeysAreRejected() {
 void TestBodyZJumpDetectionFlagLoads() {
   auto config = offline_lc_minimal::DefaultConfig();
   offline_lc_minimal::OverrideConfigField(config, "enable_body_z_jump_detection", "true");
+  offline_lc_minimal::OverrideConfigField(config, "attitude_reference_relative_yaw_sigma_rad", "0.02");
   ExpectTrue(config.enable_body_z_jump_detection, "new body-z detection flag should load");
+  ExpectTrue(
+    std::abs(config.attitude_reference_relative_yaw_sigma_rad - 0.02) < 1e-15,
+    "relative yaw reference sigma should parse");
 }
 
 void TestBodyZRequiresGnssAfterOverrides() {
@@ -1016,6 +1026,17 @@ void TestVerticalVelocityDeltaConfigValidation() {
     threw = std::string(exception.what()).find("attitude reference settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive attitude reference sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.attitude_reference_relative_yaw_sigma_rad = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("attitude reference settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive relative yaw reference sigma should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_attitude_reference_constraint = true;

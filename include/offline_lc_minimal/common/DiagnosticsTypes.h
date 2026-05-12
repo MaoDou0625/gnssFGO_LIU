@@ -349,6 +349,20 @@ struct AttitudeReferenceDiagnosticRow {
   double residual_norm_rad = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct RelativeYawReferenceDiagnosticRow {
+  std::size_t edge_index = 0;
+  std::size_t state_index_i = 0;
+  std::size_t state_index_j = 0;
+  double time_i_s = std::numeric_limits<double>::quiet_NaN();
+  double time_j_s = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+  double sigma_rad = std::numeric_limits<double>::quiet_NaN();
+  double reference_delta_yaw_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_delta_yaw_rad = std::numeric_limits<double>::quiet_NaN();
+  double residual_yaw_rad = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct BodyZHorizontalLeakageDiagnosticRow {
   bool enabled = false;
   bool estimate_valid = false;

@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include <boost/pointer_cast.hpp>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
@@ -37,19 +38,49 @@ void ExpectNear(const double actual, const double expected, const double toleran
   }
 }
 
-void TestAttitudeReferenceFactorIgnoresTranslation() {
-  const auto noise = gtsam::noiseModel::Isotropic::Sigma(3, 1.0);
+void TestRollPitchReferenceFactorIgnoresTranslationAndYaw() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(2, 1.0);
   const gtsam::Rot3 reference_rotation = gtsam::Rot3::Ypr(0.2, -0.1, 0.05);
-  const offline_lc_minimal::factor::AttitudeReferenceFactor factor(1, reference_rotation, noise);
+  const offline_lc_minimal::factor::RollPitchReferenceFactor factor(1, reference_rotation, noise);
 
-  const gtsam::Vector same_rotation_residual = factor.evaluateError(
-    gtsam::Pose3(reference_rotation, gtsam::Point3(100.0, -50.0, 3.0)));
-  ExpectNear(same_rotation_residual.norm(), 0.0, 1e-12, "translation should not affect attitude reference");
+  const gtsam::Vector same_roll_pitch_residual = factor.evaluateError(
+    gtsam::Pose3(gtsam::Rot3::Ypr(1.2, -0.1, 0.05), gtsam::Point3(100.0, -50.0, 3.0)));
+  ExpectNear(
+    same_roll_pitch_residual.norm(),
+    0.0,
+    1e-12,
+    "translation and yaw should not affect roll/pitch reference");
 
-  const gtsam::Vector changed_rotation_residual = factor.evaluateError(
-    gtsam::Pose3(reference_rotation.compose(gtsam::Rot3::Expmap(gtsam::Vector3(0.01, 0.0, 0.0))),
-                 gtsam::Point3::Zero()));
-  ExpectTrue(changed_rotation_residual.norm() > 0.005, "rotation change should create attitude residual");
+  const gtsam::Vector changed_pitch_residual = factor.evaluateError(
+    gtsam::Pose3(gtsam::Rot3::Ypr(1.2, -0.08, 0.05), gtsam::Point3::Zero()));
+  ExpectTrue(changed_pitch_residual.norm() > 0.005, "pitch change should create roll/pitch residual");
+
+  const gtsam::Vector changed_roll_residual = factor.evaluateError(
+    gtsam::Pose3(gtsam::Rot3::Ypr(1.2, -0.1, 0.07), gtsam::Point3::Zero()));
+  ExpectTrue(changed_roll_residual.norm() > 0.005, "roll change should create roll/pitch residual");
+}
+
+void TestRelativeYawReferenceFactorIgnoresCommonYawOffset() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
+  const gtsam::Rot3 reference_i = gtsam::Rot3::Ypr(0.2, 0.0, 0.0);
+  const gtsam::Rot3 reference_j = gtsam::Rot3::Ypr(0.5, 0.0, 0.0);
+  const offline_lc_minimal::factor::RelativeYawReferenceFactor factor(
+    1,
+    2,
+    reference_i,
+    reference_j,
+    noise);
+
+  const gtsam::Rot3 common_yaw = gtsam::Rot3::Ypr(1.0, 0.0, 0.0);
+  const gtsam::Vector common_offset_residual = factor.evaluateError(
+    gtsam::Pose3(common_yaw.compose(reference_i), gtsam::Point3(1.0, 2.0, 3.0)),
+    gtsam::Pose3(common_yaw.compose(reference_j), gtsam::Point3(-1.0, -2.0, -3.0)));
+  ExpectNear(common_offset_residual.norm(), 0.0, 1e-12, "common yaw offset should not affect relative yaw");
+
+  const gtsam::Vector changed_delta_residual = factor.evaluateError(
+    gtsam::Pose3(common_yaw.compose(reference_i), gtsam::Point3::Zero()),
+    gtsam::Pose3(gtsam::Rot3::Ypr(1.55, 0.0, 0.0), gtsam::Point3::Zero()));
+  ExpectTrue(changed_delta_residual.norm() > 0.04, "relative yaw delta error should create residual");
 }
 
 std::vector<offline_lc_minimal::ReferenceNodeState> MakeReferenceStates(const std::size_t count = 4U) {
@@ -72,6 +103,7 @@ void TestBuilderAddsOnlyDynamicAttitudeReferences() {
   gtsam::NonlinearFactorGraph graph;
   offline_lc_minimal::RunSummary summary;
   std::vector<offline_lc_minimal::AttitudeReferenceDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::RelativeYawReferenceDiagnosticRow> relative_yaw_diagnostics;
 
   offline_lc_minimal::AttitudeReferenceConstraintBuildRequest request;
   request.config = &config;
@@ -81,18 +113,80 @@ void TestBuilderAddsOnlyDynamicAttitudeReferences() {
   request.graph = &graph;
   request.run_summary = &summary;
   request.diagnostics = &diagnostics;
+  request.relative_yaw_diagnostics = &relative_yaw_diagnostics;
   offline_lc_minimal::AttitudeReferenceConstraintBuilder(std::move(request)).Build();
 
-  ExpectNear(static_cast<double>(graph.size()), 2.0, 0.0, "only dynamic states should receive attitude factors");
-  const auto &keys = graph.at(0)->keys();
-  ExpectNear(static_cast<double>(keys.size()), 1.0, 0.0, "attitude factor should only connect pose");
-  ExpectTrue(keys.front() == gtsam::symbol_shorthand::X(2), "attitude factor should connect the first dynamic pose");
+  ExpectNear(
+    static_cast<double>(graph.size()),
+    3.0,
+    0.0,
+    "dynamic states should receive roll/pitch factors plus dynamic relative yaw edges");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::RollPitchReferenceFactor>(graph.at(0)).get() !=
+      nullptr,
+    "first factor should be roll/pitch reference");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::RollPitchReferenceFactor>(graph.at(1)).get() !=
+      nullptr,
+    "second factor should be roll/pitch reference");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::RelativeYawReferenceFactor>(graph.at(2)).get() !=
+      nullptr,
+    "third factor should be relative yaw reference");
+  const auto &roll_pitch_keys = graph.at(0)->keys();
+  ExpectNear(static_cast<double>(roll_pitch_keys.size()), 1.0, 0.0, "roll/pitch factor should only connect pose");
+  ExpectTrue(
+    roll_pitch_keys.front() == gtsam::symbol_shorthand::X(2),
+    "roll/pitch factor should connect the first dynamic pose");
+  const auto &relative_yaw_keys = graph.at(2)->keys();
+  ExpectNear(static_cast<double>(relative_yaw_keys.size()), 2.0, 0.0, "relative yaw factor should connect two poses");
+  ExpectTrue(
+    relative_yaw_keys[0] == gtsam::symbol_shorthand::X(2) &&
+      relative_yaw_keys[1] == gtsam::symbol_shorthand::X(3),
+    "relative yaw should only connect adjacent dynamic poses");
   ExpectNear(
     static_cast<double>(summary.attitude_reference_factor_count),
-    2.0,
+    3.0,
     0.0,
     "attitude factor count is wrong");
+  ExpectNear(static_cast<double>(diagnostics.size()), 2.0, 0.0, "roll/pitch diagnostic count is wrong");
+  ExpectNear(
+    static_cast<double>(relative_yaw_diagnostics.size()),
+    1.0,
+    0.0,
+    "relative yaw diagnostic count is wrong");
   ExpectNear(static_cast<double>(diagnostics.front().state_index), 2.0, 0.0, "first diagnostic state is wrong");
+}
+
+void TestBuilderDisabledAddsNoAttitudeReferences() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_attitude_reference_constraint = false;
+  const std::vector<double> timestamps{0.0, 1.0, 2.0};
+  const auto reference_states = MakeReferenceStates(timestamps.size());
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::AttitudeReferenceDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::RelativeYawReferenceDiagnosticRow> relative_yaw_diagnostics;
+
+  offline_lc_minimal::AttitudeReferenceConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.reference_states = &reference_states;
+  request.dynamic_start_index = 1;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  request.relative_yaw_diagnostics = &relative_yaw_diagnostics;
+  offline_lc_minimal::AttitudeReferenceConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 0.0, 0.0, "disabled builder should add no factors");
+  ExpectNear(
+    static_cast<double>(summary.attitude_reference_factor_count),
+    0.0,
+    0.0,
+    "disabled builder should not count attitude factors");
+  ExpectTrue(diagnostics.empty(), "disabled builder should add no roll/pitch diagnostics");
+  ExpectTrue(relative_yaw_diagnostics.empty(), "disabled builder should add no relative yaw diagnostics");
 }
 
 void TestBuilderRejectsMissingSeedReferences() {
@@ -103,6 +197,7 @@ void TestBuilderRejectsMissingSeedReferences() {
   gtsam::NonlinearFactorGraph graph;
   offline_lc_minimal::RunSummary summary;
   std::vector<offline_lc_minimal::AttitudeReferenceDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::RelativeYawReferenceDiagnosticRow> relative_yaw_diagnostics;
 
   offline_lc_minimal::AttitudeReferenceConstraintBuildRequest request;
   request.config = &config;
@@ -112,6 +207,7 @@ void TestBuilderRejectsMissingSeedReferences() {
   request.graph = &graph;
   request.run_summary = &summary;
   request.diagnostics = &diagnostics;
+  request.relative_yaw_diagnostics = &relative_yaw_diagnostics;
 
   bool threw = false;
   try {
@@ -131,6 +227,7 @@ void TestPopulateAttitudeReferenceDiagnostics() {
   gtsam::NonlinearFactorGraph graph;
   offline_lc_minimal::RunSummary summary;
   std::vector<offline_lc_minimal::AttitudeReferenceDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::RelativeYawReferenceDiagnosticRow> relative_yaw_diagnostics;
 
   offline_lc_minimal::AttitudeReferenceConstraintBuildRequest request;
   request.config = &config;
@@ -140,27 +237,54 @@ void TestPopulateAttitudeReferenceDiagnostics() {
   request.graph = &graph;
   request.run_summary = &summary;
   request.diagnostics = &diagnostics;
+  request.relative_yaw_diagnostics = &relative_yaw_diagnostics;
   offline_lc_minimal::AttitudeReferenceConstraintBuilder(std::move(request)).Build();
 
+  const double common_yaw_offset_rad = 0.5;
   gtsam::Values values;
-  values.insert(gtsam::symbol_shorthand::X(1), reference_states[1].pose);
+  values.insert(
+    gtsam::symbol_shorthand::X(1),
+    gtsam::Pose3(
+      gtsam::Rot3::Ypr(
+        reference_states[1].pose.rotation().ypr().x() + common_yaw_offset_rad,
+        reference_states[1].pose.rotation().ypr().y(),
+        reference_states[1].pose.rotation().ypr().z()),
+      gtsam::Point3::Zero()));
   values.insert(
     gtsam::symbol_shorthand::X(2),
     gtsam::Pose3(
-      reference_states[2].pose.rotation().compose(gtsam::Rot3::Expmap(gtsam::Vector3(0.02, 0.0, 0.0))),
+      gtsam::Rot3::Ypr(
+        reference_states[2].pose.rotation().ypr().x() + common_yaw_offset_rad + 0.02,
+        reference_states[2].pose.rotation().ypr().y(),
+        reference_states[2].pose.rotation().ypr().z() + 0.01),
       gtsam::Point3::Zero()));
   offline_lc_minimal::PopulateAttitudeReferenceDiagnostics(values, diagnostics);
+  offline_lc_minimal::PopulateRelativeYawReferenceDiagnostics(values, relative_yaw_diagnostics);
 
-  ExpectNear(diagnostics.front().residual_norm_rad, 0.0, 1e-12, "matching attitude residual should be zero");
-  ExpectTrue(diagnostics.back().residual_norm_rad > 0.01, "changed attitude residual should be reported");
+  ExpectNear(
+    diagnostics.front().residual_norm_rad,
+    0.0,
+    1e-12,
+    "matching roll/pitch residual should be zero despite yaw offset");
+  ExpectTrue(std::isnan(diagnostics.front().residual_x_rad), "absolute yaw residual should not be reported");
+  ExpectTrue(diagnostics.back().residual_norm_rad > 0.005, "changed roll/pitch residual should be reported");
+  ExpectTrue(
+    relative_yaw_diagnostics.front().residual_yaw_rad > 0.005,
+    "changed relative yaw residual should be reported");
 }
 
 }  // namespace
 
 int main() {
   try {
-    RunTest("TestAttitudeReferenceFactorIgnoresTranslation", TestAttitudeReferenceFactorIgnoresTranslation);
+    RunTest(
+      "TestRollPitchReferenceFactorIgnoresTranslationAndYaw",
+      TestRollPitchReferenceFactorIgnoresTranslationAndYaw);
+    RunTest(
+      "TestRelativeYawReferenceFactorIgnoresCommonYawOffset",
+      TestRelativeYawReferenceFactorIgnoresCommonYawOffset);
     RunTest("TestBuilderAddsOnlyDynamicAttitudeReferences", TestBuilderAddsOnlyDynamicAttitudeReferences);
+    RunTest("TestBuilderDisabledAddsNoAttitudeReferences", TestBuilderDisabledAddsNoAttitudeReferences);
     RunTest("TestBuilderRejectsMissingSeedReferences", TestBuilderRejectsMissingSeedReferences);
     RunTest("TestPopulateAttitudeReferenceDiagnostics", TestPopulateAttitudeReferenceDiagnostics);
   } catch (const std::exception &exception) {

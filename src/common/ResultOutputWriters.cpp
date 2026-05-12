@@ -696,6 +696,33 @@ void WriteAttitudeReferenceDiagnosticsCsv(
   }
 }
 
+void WriteRelativeYawReferenceDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RelativeYawReferenceDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "edge_index,state_index_i,state_index_j,time_i_s,time_j_s,"
+       "factor_added,skip_reason,sigma_rad,"
+       "reference_delta_yaw_rad,optimized_delta_yaw_rad,residual_yaw_rad\n";
+  for (const auto &row : rows) {
+    stream << row.edge_index << ','
+           << row.state_index_i << ','
+           << row.state_index_j << ','
+           << row.time_i_s << ','
+           << row.time_j_s << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << row.sigma_rad << ','
+           << row.reference_delta_yaw_rad << ','
+           << row.optimized_delta_yaw_rad << ','
+           << row.residual_yaw_rad << '\n';
+  }
+}
+
 void WriteBodyZNHCDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<BodyZNHCDiagnosticRow> &rows) {

@@ -181,6 +181,7 @@ struct OfflineRunnerConfig {
   double vertical_position_velocity_window_sigma_m = 0.0005;
   bool enable_attitude_reference_constraint = false;
   double attitude_reference_sigma_rad = 0.01;
+  double attitude_reference_relative_yaw_sigma_rad = 0.01;
   bool enable_body_z_nhc_constraint = false;
   bool enable_body_z_nhc_global_weak_constraint = false;
   bool enable_body_z_nhc_strict_effective_weighting = false;

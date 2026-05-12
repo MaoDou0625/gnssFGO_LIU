@@ -114,6 +114,11 @@ void ResultWriter::WriteOutputs(
       output_path / "attitude_reference_diagnostics.csv",
       result.attitude_reference_diagnostics);
   }
+  if (!result.relative_yaw_reference_diagnostics.empty()) {
+    WriteRelativeYawReferenceDiagnosticsCsv(
+      output_path / "relative_yaw_reference_diagnostics.csv",
+      result.relative_yaw_reference_diagnostics);
+  }
   if (!result.body_z_nhc_horizontal_leakage_diagnostics.empty()) {
     WriteBodyZHorizontalLeakageDiagnosticsCsv(
       output_path / "body_z_nhc_horizontal_leakage_diagnostics.csv",

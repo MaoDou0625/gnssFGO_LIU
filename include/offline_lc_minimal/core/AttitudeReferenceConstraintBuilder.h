@@ -19,6 +19,7 @@ struct AttitudeReferenceConstraintBuildRequest {
   gtsam::NonlinearFactorGraph *graph = nullptr;
   RunSummary *run_summary = nullptr;
   std::vector<AttitudeReferenceDiagnosticRow> *diagnostics = nullptr;
+  std::vector<RelativeYawReferenceDiagnosticRow> *relative_yaw_diagnostics = nullptr;
 };
 
 class AttitudeReferenceConstraintBuilder {
@@ -34,5 +35,9 @@ class AttitudeReferenceConstraintBuilder {
 void PopulateAttitudeReferenceDiagnostics(
   const gtsam::Values &optimized_values,
   std::vector<AttitudeReferenceDiagnosticRow> &diagnostics);
+
+void PopulateRelativeYawReferenceDiagnostics(
+  const gtsam::Values &optimized_values,
+  std::vector<RelativeYawReferenceDiagnosticRow> &diagnostics);
 
 }  // namespace offline_lc_minimal

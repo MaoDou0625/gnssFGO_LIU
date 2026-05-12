@@ -1046,6 +1046,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.vertical_motion_adaptive_reweighting_diagnostics.clear();
   run_result.vertical_position_velocity_consistency_diagnostics.clear();
   run_result.attitude_reference_diagnostics.clear();
+  run_result.relative_yaw_reference_diagnostics.clear();
   run_result.body_z_nhc_horizontal_leakage_diagnostics.clear();
   run_result.body_z_nhc_diagnostics.clear();
   run_result.vertical_jump_masked_imu_diagnostics.clear();
@@ -1229,6 +1230,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   attitude_reference_request.graph = &graph_with_gnss;
   attitude_reference_request.run_summary = &run_result.run_summary;
   attitude_reference_request.diagnostics = &run_result.attitude_reference_diagnostics;
+  attitude_reference_request.relative_yaw_diagnostics =
+    &run_result.relative_yaw_reference_diagnostics;
   AttitudeReferenceConstraintBuilder(std::move(attitude_reference_request)).Build();
 
   if (config_.enable_vertical_jump_velocity_ramp_smoothing ||
@@ -1380,6 +1383,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateAttitudeReferenceDiagnostics(
     optimized_values,
     run_result.attitude_reference_diagnostics);
+  PopulateRelativeYawReferenceDiagnostics(
+    optimized_values,
+    run_result.relative_yaw_reference_diagnostics);
   PopulateVerticalJumpVelocityRampDiagnostics(
     optimized_values,
     run_result.vertical_jump_velocity_ramp_diagnostics);
