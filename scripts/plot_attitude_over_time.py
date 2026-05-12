@@ -35,13 +35,13 @@ def unwrap_angles_deg(angles_deg: list[float]) -> list[float]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Plot navigation attitude versus time using three subplots."
+        description="Plot navigation yaw/pitch and gyro z bias versus time."
     )
     parser.add_argument("--trajectory", required=True, help="Path to trajectory.csv")
     parser.add_argument("--output", required=True, help="Output image path")
     parser.add_argument(
         "--title",
-        default="Navigation attitude vs time",
+        default="Navigation attitude and gyro z bias vs time",
         help="Figure title",
     )
     return parser.parse_args()
@@ -58,6 +58,7 @@ def read_attitude_rows(path: Path) -> list[dict[str, float]]:
                     "yaw_deg": math.degrees(float(raw["yaw_rad"])),
                     "pitch_deg": math.degrees(float(raw["pitch_rad"])),
                     "roll_deg": math.degrees(float(raw["roll_rad"])),
+                    "bgz_radps": float(raw["bgz"]),
                 }
             )
     if not rows:
@@ -72,7 +73,7 @@ def make_plot(rows: list[dict[str, float]], output_path: Path, title: str) -> No
     time_s = [row["time_s"] for row in rows]
     yaw_deg = [row["yaw_unwrapped_deg"] for row in rows]
     pitch_deg = [row["pitch_deg"] for row in rows]
-    roll_deg = [row["roll_deg"] for row in rows]
+    bgz_radps = [row["bgz_radps"] for row in rows]
 
     fig, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True, constrained_layout=True)
     fig.suptitle(title, fontsize=16)
@@ -87,10 +88,10 @@ def make_plot(rows: list[dict[str, float]], output_path: Path, title: str) -> No
     axes[1].set_ylabel("Pitch [deg]")
     axes[1].grid(True, alpha=0.3)
 
-    axes[2].plot(time_s, roll_deg, color="#2ca02c", linewidth=1.2)
-    axes[2].set_title("Roll")
+    axes[2].plot(time_s, bgz_radps, color="#2ca02c", linewidth=1.2)
+    axes[2].set_title("Gyro Z bias")
     axes[2].set_xlabel("Time [s]")
-    axes[2].set_ylabel("Roll [deg]")
+    axes[2].set_ylabel("bgz [rad/s]")
     axes[2].grid(True, alpha=0.3)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

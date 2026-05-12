@@ -43,8 +43,8 @@ class PlotAttitudeOverTimeTests(unittest.TestCase):
                         "gnss_residual_m",
                     ]
                 )
-                writer.writerow([0.0, 0, 0, 0, 0, 0, 0, 3.12413936107, 0.01745329252, -0.03490658504, 0, 0, 0, 0, 0, 0, 0.5, 1.0, 100.0, 1, "RTKFIX", 0.0])
-                writer.writerow([1.0, 0, 0, 0, 0, 0, 0, -3.12413936107, 0.02617993878, -0.01745329252, 0, 0, 0, 0, 0, 0, 0.5, 1.0, 100.1, 1, "RTKFIX", 0.0])
+                writer.writerow([0.0, 0, 0, 0, 0, 0, 0, 3.12413936107, 0.01745329252, -0.03490658504, 0, 0, 0, 0, 0, 1.0e-6, 0.5, 1.0, 100.0, 1, "RTKFIX", 0.0])
+                writer.writerow([1.0, 0, 0, 0, 0, 0, 0, -3.12413936107, 0.02617993878, -0.01745329252, 0, 0, 0, 0, 0, 2.0e-6, 0.5, 1.0, 100.1, 1, "RTKFIX", 0.0])
 
             rows = plot_attitude_over_time.read_attitude_rows(trajectory_path)
 
@@ -53,11 +53,26 @@ class PlotAttitudeOverTimeTests(unittest.TestCase):
         self.assertAlmostEqual(rows[1]["yaw_unwrapped_deg"], 181.0, places=3)
         self.assertAlmostEqual(rows[0]["pitch_deg"], 1.0, places=3)
         self.assertAlmostEqual(rows[1]["roll_deg"], -1.0, places=3)
+        self.assertAlmostEqual(rows[1]["bgz_radps"], 2.0e-6, places=12)
 
     def test_make_plot_writes_three_subplot_png(self) -> None:
         rows = [
-            {"time_s": 0.0, "yaw_deg": 0.0, "yaw_unwrapped_deg": 0.0, "pitch_deg": 1.0, "roll_deg": -1.0},
-            {"time_s": 1.0, "yaw_deg": 5.0, "yaw_unwrapped_deg": 5.0, "pitch_deg": 1.5, "roll_deg": -0.5},
+            {
+                "time_s": 0.0,
+                "yaw_deg": 0.0,
+                "yaw_unwrapped_deg": 0.0,
+                "pitch_deg": 1.0,
+                "roll_deg": -1.0,
+                "bgz_radps": 1.0e-6,
+            },
+            {
+                "time_s": 1.0,
+                "yaw_deg": 5.0,
+                "yaw_unwrapped_deg": 5.0,
+                "pitch_deg": 1.5,
+                "roll_deg": -0.5,
+                "bgz_radps": 2.0e-6,
+            },
         ]
 
         with tempfile.TemporaryDirectory() as temp_dir:
