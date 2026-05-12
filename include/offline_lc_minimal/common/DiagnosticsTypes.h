@@ -216,6 +216,33 @@ struct RtkOutageWindowRow {
   std::string skip_reason = "UNSET";
 };
 
+struct RtkVelocityDiagnosticRow {
+  std::size_t sample_index = 0;
+  std::size_t state_index = 0;
+  double raw_time_s = std::numeric_limits<double>::quiet_NaN();
+  double corrected_time_s = std::numeric_limits<double>::quiet_NaN();
+  double state_time_s = std::numeric_limits<double>::quiet_NaN();
+  double window_dt_s = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+  StateMeasSyncStatus sync_status = StateMeasSyncStatus::kDropped;
+  double sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector3d rtk_velocity_mps =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d optimized_velocity_mps =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d velocity_residual_mps =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double horizontal_residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double rtk_body_x_mps = std::numeric_limits<double>::quiet_NaN();
+  double rtk_body_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double rtk_body_z_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_body_x_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_body_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_body_z_mps = std::numeric_limits<double>::quiet_NaN();
+  double body_y_residual_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct StaticAlignmentValidationRow {
   double time_s = std::numeric_limits<double>::quiet_NaN();
   double relative_time_s = std::numeric_limits<double>::quiet_NaN();

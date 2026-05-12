@@ -61,6 +61,12 @@ std::vector<RtkOutageWindowRow> RtkOutageWindowPlanner::Plan() const {
     if (!std::isfinite(time_s)) {
       continue;
     }
+    if (time_s > request_.state_timestamps->back() + kTimeEpsilonS) {
+      break;
+    }
+    if (time_s < request_.state_timestamps->front() - kTimeEpsilonS) {
+      continue;
+    }
     if (previous_sample_index != request_.gnss_samples->size()) {
       const double gap_s = time_s - previous_time_s;
       if (std::isfinite(gap_s) && gap_s >= request_.config->rtk_outage_min_gap_s) {

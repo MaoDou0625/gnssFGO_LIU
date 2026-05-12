@@ -86,6 +86,17 @@ struct RunSummary {
   std::size_t rtk_outage_position_ramp_factor_count = 0;
   std::size_t rtk_outage_velocity_delta_factor_count = 0;
   std::size_t rtk_outage_velocity_delta_skipped_body_z_jump_count = 0;
+  bool rtk_velocity_constraint_enabled = false;
+  std::size_t rtk_velocity_candidate_count = 0;
+  std::size_t rtk_velocity_factor_count = 0;
+  std::size_t rtk_velocity_skipped_invalid_count = 0;
+  std::size_t rtk_velocity_skipped_unsynced_count = 0;
+  double rtk_velocity_horizontal_residual_rms_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  double rtk_velocity_horizontal_residual_max_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  double rtk_velocity_body_y_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double rtk_velocity_body_y_max_abs_mps = std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_position_velocity_consistency_factor_count = 0;
   std::size_t vertical_position_velocity_window_consistency_factor_count = 0;
   std::size_t vertical_position_velocity_consistency_skipped_invalid_count = 0;
@@ -210,6 +221,7 @@ struct RunSummary {
   double alignment_start_time_s = 0.0;
   double navigation_start_time_s = 0.0;
   double dynamic_start_time_s = 0.0;
+  double processing_end_time_s = 0.0;
   double static_alignment_duration_s = 0.0;
   std::string yaw_source = "fallback";
 
@@ -315,6 +327,18 @@ struct RunSummary {
         << rtk_outage_velocity_delta_factor_count << '\n'
         << "rtk_outage_velocity_delta_skipped_body_z_jump_count="
         << rtk_outage_velocity_delta_skipped_body_z_jump_count << '\n'
+        << "rtk_velocity_constraint_enabled="
+        << (rtk_velocity_constraint_enabled ? "true" : "false") << '\n'
+        << "rtk_velocity_candidate_count=" << rtk_velocity_candidate_count << '\n'
+        << "rtk_velocity_factor_count=" << rtk_velocity_factor_count << '\n'
+        << "rtk_velocity_skipped_invalid_count=" << rtk_velocity_skipped_invalid_count << '\n'
+        << "rtk_velocity_skipped_unsynced_count=" << rtk_velocity_skipped_unsynced_count << '\n'
+        << "rtk_velocity_horizontal_residual_rms_mps="
+        << rtk_velocity_horizontal_residual_rms_mps << '\n'
+        << "rtk_velocity_horizontal_residual_max_mps="
+        << rtk_velocity_horizontal_residual_max_mps << '\n'
+        << "rtk_velocity_body_y_rms_mps=" << rtk_velocity_body_y_rms_mps << '\n'
+        << "rtk_velocity_body_y_max_abs_mps=" << rtk_velocity_body_y_max_abs_mps << '\n'
         << "vertical_position_velocity_consistency_factor_count="
         << vertical_position_velocity_consistency_factor_count << '\n'
         << "vertical_position_velocity_window_consistency_factor_count="
@@ -474,6 +498,7 @@ struct RunSummary {
         << "alignment_start_time_s=" << alignment_start_time_s << '\n'
         << "navigation_start_time_s=" << navigation_start_time_s << '\n'
         << "dynamic_start_time_s=" << dynamic_start_time_s << '\n'
+        << "processing_end_time_s=" << processing_end_time_s << '\n'
         << "static_alignment_duration_s=" << static_alignment_duration_s << '\n'
         << "yaw_source=" << yaw_source << '\n';
     return oss.str();
@@ -499,6 +524,7 @@ struct OfflineRunResult {
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
   std::vector<RtkVerticalDriftReferenceDiagnosticRow> rtk_vertical_drift_reference_diagnostics;
   std::vector<RtkOutageWindowRow> rtk_outage_windows;
+  std::vector<RtkVelocityDiagnosticRow> rtk_velocity_diagnostics;
   std::vector<StaticAlignmentValidationRow> static_alignment_validation;
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;
   std::vector<VerticalMotionAdaptiveReweightingDiagnosticRow>

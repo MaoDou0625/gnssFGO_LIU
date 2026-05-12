@@ -35,6 +35,7 @@
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
 #include "offline_lc_minimal/core/RtkOutageSmoothingConstraintBuilder.h"
+#include "offline_lc_minimal/core/RtkVelocityConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
 #include "offline_lc_minimal/core/RtkVerticalDriftReferenceEstimator.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
@@ -385,6 +386,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   if (!std::isfinite(end_time_s) || end_time_s <= dynamic_start_time_s) {
     throw std::runtime_error("failed to find a valid offline processing time range");
   }
+  if (config_.processing_end_time_s > 0.0) {
+    if (config_.processing_end_time_s <= dynamic_start_time_s) {
+      throw std::runtime_error("processing_end_time_s must be after the dynamic navigation start time");
+    }
+    end_time_s = std::min(end_time_s, config_.processing_end_time_s);
+  }
+  run_result.run_summary.processing_end_time_s = end_time_s;
 
   const GraphTimeline graph_timeline = BuildGraphTimeline(
     alignment_start_time_s,
@@ -1033,6 +1041,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     active_rtk_vertical_drift_profile_ptr != nullptr
       ? *active_rtk_vertical_drift_profile_ptr
       : std::vector<RtkVerticalDriftReferenceDiagnosticRow>{};
+  run_result.rtk_velocity_diagnostics.clear();
   run_result.vertical_velocity_delta_diagnostics.clear();
   run_result.vertical_motion_adaptive_reweighting_diagnostics.clear();
   run_result.vertical_position_velocity_consistency_diagnostics.clear();
@@ -1129,6 +1138,25 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   };
   gnss_request.trajectory_row_index_for_state = graph_state_to_trajectory_row;
   GnssFactorBuilder(std::move(gnss_request)).Build();
+
+  RtkVelocityConstraintBuildRequest rtk_velocity_request;
+  rtk_velocity_request.config = &config_;
+  rtk_velocity_request.gnss_samples = &dataset.gnss_samples;
+  rtk_velocity_request.state_timestamps = &state_timestamps;
+  rtk_velocity_request.graph = &graph_with_gnss;
+  rtk_velocity_request.run_summary = &run_result.run_summary;
+  rtk_velocity_request.diagnostics = &run_result.rtk_velocity_diagnostics;
+  rtk_velocity_request.dynamic_start_index = graph_timeline.dynamic_start_index;
+  rtk_velocity_request.should_use_sample = [&](const GnssSolutionSample &sample) {
+    return sample.has_enu_position && PassesGnssQualityFilters(sample);
+  };
+  rtk_velocity_request.corrected_time_s = [&](const GnssSolutionSample &sample) {
+    return CorrectedGnssTime(sample);
+  };
+  rtk_velocity_request.find_state_for_time_s = [&](const double corrected_time_s) {
+    return FindStateForMeasurement(state_timestamp_map, corrected_time_s, config_);
+  };
+  RtkVelocityConstraintBuilder(std::move(rtk_velocity_request)).Build();
 
   std::optional<double> vertical_velocity_delta_support_end_time_s;
   for (const auto &record : run_result.gnss_factor_records) {
@@ -1228,6 +1256,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.initial_error = optimizer.error();
   const gtsam::Values optimized_values = optimizer.optimize();
   run_result.run_summary.final_error = graph_with_gnss.error(optimized_values);
+  RtkVelocityConstraintBuilder::PopulateDiagnostics(
+    optimized_values,
+    run_result.rtk_velocity_diagnostics,
+    run_result.run_summary);
   completed_adaptive_pass_count = adaptive_pass + 1;
 
   bool finalize_adaptive_pass = adaptive_pass + 1 >= adaptive_pass_limit;

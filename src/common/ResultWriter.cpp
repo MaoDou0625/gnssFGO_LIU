@@ -84,6 +84,11 @@ void ResultWriter::WriteOutputs(
       output_path / "rtk_outage_windows.csv",
       result.rtk_outage_windows);
   }
+  if (!result.rtk_velocity_diagnostics.empty()) {
+    WriteRtkVelocityDiagnosticsCsv(
+      output_path / "rtk_velocity_diagnostics.csv",
+      result.rtk_velocity_diagnostics);
+  }
   if (!result.static_alignment_validation.empty()) {
     WriteStaticAlignmentValidationCsv(
       output_path / "static_alignment_validation.csv",

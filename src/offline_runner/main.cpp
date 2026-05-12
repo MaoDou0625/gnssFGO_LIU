@@ -18,7 +18,8 @@ namespace {
 
 void PrintUsage() {
   std::cout
-    << "offline_lc_runner --config <file> [--imu <path>] [--gnss <path>] [--output-dir <dir>] [--imu-only] [--verbose]\n";
+    << "offline_lc_runner --config <file> [--imu <path>] [--gnss <path>] "
+       "[--output-dir <dir>] [--set key=value] [--imu-only] [--verbose]\n";
 }
 
 }  // namespace
@@ -34,6 +35,7 @@ int main(int argc, char **argv) {
     std::string imu_override;
     std::string gnss_override;
     std::string output_dir_override;
+    std::vector<std::string> config_overrides;
     bool imu_only = false;
     bool verbose = false;
 
@@ -51,6 +53,8 @@ int main(int argc, char **argv) {
         gnss_override = argv[++index];
       } else if (arg == "--output-dir" && index + 1 < argc) {
         output_dir_override = argv[++index];
+      } else if (arg == "--set" && index + 1 < argc) {
+        config_overrides.push_back(argv[++index]);
       } else if (arg == "--imu-only") {
         imu_only = true;
       } else if (arg == "--verbose") {
@@ -71,6 +75,16 @@ int main(int argc, char **argv) {
     }
     if (!output_dir_override.empty()) {
       config.output_dir = output_dir_override;
+    }
+    for (const auto &override_entry : config_overrides) {
+      const std::size_t delimiter_pos = override_entry.find('=');
+      if (delimiter_pos == std::string::npos) {
+        throw std::runtime_error("--set expects key=value, got: " + override_entry);
+      }
+      OverrideConfigField(
+        config,
+        override_entry.substr(0, delimiter_pos),
+        override_entry.substr(delimiter_pos + 1U));
     }
     if (imu_only) {
       config.enable_gnss = false;

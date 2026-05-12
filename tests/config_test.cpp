@@ -1774,6 +1774,43 @@ void TestBodyZNHCConfigValidation() {
   ExpectTrue(threw, "strict body-z NHC should reject overlapping global windows");
 }
 
+void TestRtkVelocityConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "processing_end_time_s", "6006.988");
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_velocity_constraint", "true");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_velocity_window_s", "1.5");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_velocity_horizontal_sigma_mps", "0.25");
+  ExpectTrue(
+    std::abs(config.processing_end_time_s - 6006.988) < 1e-12,
+    "processing end override should parse");
+  ExpectTrue(config.enable_rtk_velocity_constraint, "RTK velocity constraint flag should parse");
+  ExpectTrue(std::abs(config.rtk_velocity_window_s - 1.5) < 1e-12, "RTK velocity window should parse");
+  ExpectTrue(
+    std::abs(config.rtk_velocity_horizontal_sigma_mps - 0.25) < 1e-12,
+    "RTK velocity sigma should parse");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.processing_end_time_s = -1.0;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("processing_end_time_s") != std::string::npos;
+  }
+  ExpectTrue(threw, "negative processing end time should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_velocity_constraint = true;
+  config.rtk_velocity_window_s = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK velocity constraint settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive RTK velocity window should be rejected");
+}
+
 }  // namespace
 
 int main() {
@@ -1843,6 +1880,7 @@ int main() {
     RunTest("TestVerticalVelocityDeltaConfigValidation", TestVerticalVelocityDeltaConfigValidation);
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);
     RunTest("TestBodyZNHCConfigValidation", TestBodyZNHCConfigValidation);
+    RunTest("TestRtkVelocityConfigValidation", TestRtkVelocityConfigValidation);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

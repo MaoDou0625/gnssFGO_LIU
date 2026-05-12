@@ -137,6 +137,9 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (config.state_frequency_hz <= 0.0 || config.error_state_frequency_hz <= 0.0) {
     throw std::runtime_error("state and error-state frequencies must be positive");
   }
+  if (!std::isfinite(config.processing_end_time_s) || config.processing_end_time_s < 0.0) {
+    throw std::runtime_error("processing_end_time_s must be finite and non-negative");
+  }
   if (config.gravity_mps2 <= 0.0 || config.imu_sigma_acc <= 0.0 ||
       config.imu_sigma_gyro <= 0.0 || config.integration_sigma <= 0.0) {
     throw std::runtime_error("IMU noise and gravity settings must be positive");
@@ -338,6 +341,15 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.rtk_outage_velocity_delta_target_acc_limit_mps2 <= 0.0 ||
       config.rtk_outage_position_ramp_stride <= 0) {
     throw std::runtime_error("RTK outage smoothing settings must be positive");
+  }
+  if (config.enable_rtk_velocity_constraint && !config.enable_gnss) {
+    throw std::runtime_error("RTK velocity constraints require GNSS input");
+  }
+  if (!std::isfinite(config.rtk_velocity_window_s) ||
+      !std::isfinite(config.rtk_velocity_horizontal_sigma_mps) ||
+      config.rtk_velocity_window_s <= 0.0 ||
+      config.rtk_velocity_horizontal_sigma_mps <= 0.0) {
+    throw std::runtime_error("RTK velocity constraint settings must be positive");
   }
   if (config.enable_vertical_velocity_delta_constraint && !config.enable_body_z_jump_detection) {
     throw std::runtime_error("enable_vertical_velocity_delta_constraint requires enable_body_z_jump_detection");
@@ -573,6 +585,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.state_frequency_hz = ParseDouble(normalized_value);
   } else if (normalized_key == "error_state_frequency_hz") {
     config.error_state_frequency_hz = ParseDouble(normalized_value);
+  } else if (normalized_key == "processing_end_time_s") {
+    config.processing_end_time_s = ParseDouble(normalized_value);
   } else if (normalized_key == "gnss_time_offset_s") {
     config.gnss_time_offset_s = ParseDouble(normalized_value);
   } else if (normalized_key == "state_meas_sync_lower_bound_s") {
@@ -821,6 +835,12 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.rtk_outage_velocity_delta_target_acc_limit_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "rtk_outage_position_ramp_stride") {
     config.rtk_outage_position_ramp_stride = ParseInt(normalized_value);
+  } else if (normalized_key == "enable_rtk_velocity_constraint") {
+    config.enable_rtk_velocity_constraint = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_velocity_window_s") {
+    config.rtk_velocity_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_velocity_horizontal_sigma_mps") {
+    config.rtk_velocity_horizontal_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_velocity_delta_constraint") {
     config.enable_vertical_velocity_delta_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_acc_sigma_mps2") {
@@ -1106,6 +1126,7 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "write_imu_rate_avp=" << (config.write_imu_rate_avp ? "true" : "false") << '\n'
     << "state_frequency_hz=" << config.state_frequency_hz << '\n'
     << "error_state_frequency_hz=" << config.error_state_frequency_hz << '\n'
+    << "processing_end_time_s=" << config.processing_end_time_s << '\n'
     << "gnss_time_offset_s=" << config.gnss_time_offset_s << '\n'
     << "state_meas_sync_lower_bound_s=" << config.state_meas_sync_lower_bound_s << '\n'
     << "state_meas_sync_upper_bound_s=" << config.state_meas_sync_upper_bound_s << '\n'
@@ -1245,6 +1266,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "rtk_outage_velocity_delta_target_acc_limit_mps2="
     << config.rtk_outage_velocity_delta_target_acc_limit_mps2 << '\n'
     << "rtk_outage_position_ramp_stride=" << config.rtk_outage_position_ramp_stride << '\n'
+    << "enable_rtk_velocity_constraint="
+    << (config.enable_rtk_velocity_constraint ? "true" : "false") << '\n'
+    << "rtk_velocity_window_s=" << config.rtk_velocity_window_s << '\n'
+    << "rtk_velocity_horizontal_sigma_mps=" << config.rtk_velocity_horizontal_sigma_mps << '\n'
     << "enable_vertical_velocity_delta_constraint="
     << (config.enable_vertical_velocity_delta_constraint ? "true" : "false") << '\n'
     << "vertical_velocity_delta_acc_sigma_mps2=" << config.vertical_velocity_delta_acc_sigma_mps2 << '\n'

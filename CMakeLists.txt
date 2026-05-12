@@ -73,6 +73,7 @@ add_library(offline_lc_minimal_lib
   src/core/RunDiagnosticsBuilder.cpp
   src/core/RtkOutageInitialValueSmoother.cpp
   src/core/RtkOutageSmoothingConstraintBuilder.cpp
+  src/core/RtkVelocityConstraintBuilder.cpp
   src/core/RtkOutageWindowPlanner.cpp
   src/core/RtkVerticalDriftReferenceEstimator.cpp
   src/core/StaticImuAlignment.cpp
@@ -185,6 +186,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     tests/rtk_vertical_drift_reference_test.cpp
   )
 
+  add_executable(rtk_velocity_constraint_test
+    tests/rtk_velocity_constraint_test.cpp
+  )
+
   add_executable(rtk_outage_window_planner_test
     tests/rtk_outage_window_planner_test.cpp
   )
@@ -245,6 +250,11 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(rtk_vertical_drift_reference_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(rtk_velocity_constraint_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -317,6 +327,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       rtk_vertical_drift_reference_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      rtk_velocity_constraint_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -408,6 +424,13 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         $<TARGET_FILE:rtk_vertical_drift_reference_test>
     )
     add_test(
+      NAME rtk_velocity_constraint_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:rtk_velocity_constraint_test>
+    )
+    add_test(
       NAME rtk_outage_window_planner_test
       COMMAND
         ${CMAKE_COMMAND} -E env
@@ -458,6 +481,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     add_test(
       NAME rtk_vertical_drift_reference_test
       COMMAND $<TARGET_FILE:rtk_vertical_drift_reference_test>
+    )
+    add_test(
+      NAME rtk_velocity_constraint_test
+      COMMAND $<TARGET_FILE:rtk_velocity_constraint_test>
     )
     add_test(
       NAME rtk_outage_window_planner_test

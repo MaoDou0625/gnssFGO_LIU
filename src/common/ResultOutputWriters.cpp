@@ -466,6 +466,52 @@ void WriteRtkOutageWindowsCsv(
   }
 }
 
+void WriteRtkVelocityDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkVelocityDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "sample_index,state_index,raw_time_s,corrected_time_s,state_time_s,window_dt_s,"
+       "factor_added,skip_reason,sync_status,sigma_mps,"
+       "rtk_vx_mps,rtk_vy_mps,rtk_vz_mps,opt_vx_mps,opt_vy_mps,opt_vz_mps,"
+       "residual_vx_mps,residual_vy_mps,residual_vz_mps,horizontal_residual_mps,"
+       "rtk_body_x_mps,rtk_body_y_mps,rtk_body_z_mps,"
+       "opt_body_x_mps,opt_body_y_mps,opt_body_z_mps,body_y_residual_mps\n";
+  for (const auto &row : rows) {
+    stream << row.sample_index << ','
+           << row.state_index << ','
+           << row.raw_time_s << ','
+           << row.corrected_time_s << ','
+           << row.state_time_s << ','
+           << row.window_dt_s << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << ToString(row.sync_status) << ','
+           << row.sigma_mps << ','
+           << row.rtk_velocity_mps.x() << ','
+           << row.rtk_velocity_mps.y() << ','
+           << row.rtk_velocity_mps.z() << ','
+           << row.optimized_velocity_mps.x() << ','
+           << row.optimized_velocity_mps.y() << ','
+           << row.optimized_velocity_mps.z() << ','
+           << row.velocity_residual_mps.x() << ','
+           << row.velocity_residual_mps.y() << ','
+           << row.velocity_residual_mps.z() << ','
+           << row.horizontal_residual_mps << ','
+           << row.rtk_body_x_mps << ','
+           << row.rtk_body_y_mps << ','
+           << row.rtk_body_z_mps << ','
+           << row.optimized_body_x_mps << ','
+           << row.optimized_body_y_mps << ','
+           << row.optimized_body_z_mps << ','
+           << row.body_y_residual_mps << '\n';
+  }
+}
+
 void WriteStaticAlignmentValidationCsv(
   const std::filesystem::path &path,
   const std::vector<StaticAlignmentValidationRow> &rows) {
