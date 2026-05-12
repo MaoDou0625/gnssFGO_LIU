@@ -80,6 +80,12 @@ struct RunSummary {
   double rtk_vertical_drift_max_abs_correction_m = std::numeric_limits<double>::quiet_NaN();
   double rtk_vertical_drift_first20_mean_correction_m = std::numeric_limits<double>::quiet_NaN();
   double rtk_vertical_drift_first20_max_abs_correction_m = std::numeric_limits<double>::quiet_NaN();
+  bool rtk_outage_smoothing_enabled = false;
+  std::size_t rtk_outage_window_count = 0;
+  std::size_t rtk_outage_window_with_body_z_jump_count = 0;
+  std::size_t rtk_outage_position_ramp_factor_count = 0;
+  std::size_t rtk_outage_velocity_delta_factor_count = 0;
+  std::size_t rtk_outage_velocity_delta_skipped_body_z_jump_count = 0;
   std::size_t vertical_position_velocity_consistency_factor_count = 0;
   std::size_t vertical_position_velocity_window_consistency_factor_count = 0;
   std::size_t vertical_position_velocity_consistency_skipped_invalid_count = 0;
@@ -298,6 +304,17 @@ struct RunSummary {
         << rtk_vertical_drift_first20_mean_correction_m << '\n'
         << "rtk_vertical_drift_first20_max_abs_correction_m="
         << rtk_vertical_drift_first20_max_abs_correction_m << '\n'
+        << "rtk_outage_smoothing_enabled="
+        << (rtk_outage_smoothing_enabled ? "true" : "false") << '\n'
+        << "rtk_outage_window_count=" << rtk_outage_window_count << '\n'
+        << "rtk_outage_window_with_body_z_jump_count="
+        << rtk_outage_window_with_body_z_jump_count << '\n'
+        << "rtk_outage_position_ramp_factor_count="
+        << rtk_outage_position_ramp_factor_count << '\n'
+        << "rtk_outage_velocity_delta_factor_count="
+        << rtk_outage_velocity_delta_factor_count << '\n'
+        << "rtk_outage_velocity_delta_skipped_body_z_jump_count="
+        << rtk_outage_velocity_delta_skipped_body_z_jump_count << '\n'
         << "vertical_position_velocity_consistency_factor_count="
         << vertical_position_velocity_consistency_factor_count << '\n'
         << "vertical_position_velocity_window_consistency_factor_count="
@@ -481,6 +498,7 @@ struct OfflineRunResult {
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
   std::vector<RtkVerticalDriftReferenceDiagnosticRow> rtk_vertical_drift_reference_diagnostics;
+  std::vector<RtkOutageWindowRow> rtk_outage_windows;
   std::vector<StaticAlignmentValidationRow> static_alignment_validation;
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;
   std::vector<VerticalMotionAdaptiveReweightingDiagnosticRow>

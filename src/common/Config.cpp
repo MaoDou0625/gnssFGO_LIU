@@ -325,6 +325,20 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
         "RTK vertical drift reference requires the initial static RTK height reference");
     }
   }
+  if (config.enable_rtk_outage_smoothing && !config.enable_gnss) {
+    throw std::runtime_error("RTK outage smoothing requires GNSS input");
+  }
+  if (!std::isfinite(config.rtk_outage_min_gap_s) ||
+      !std::isfinite(config.rtk_outage_position_ramp_sigma_m) ||
+      !std::isfinite(config.rtk_outage_velocity_delta_sigma_mps) ||
+      !std::isfinite(config.rtk_outage_velocity_delta_target_acc_limit_mps2) ||
+      config.rtk_outage_min_gap_s <= 0.0 ||
+      config.rtk_outage_position_ramp_sigma_m <= 0.0 ||
+      config.rtk_outage_velocity_delta_sigma_mps <= 0.0 ||
+      config.rtk_outage_velocity_delta_target_acc_limit_mps2 <= 0.0 ||
+      config.rtk_outage_position_ramp_stride <= 0) {
+    throw std::runtime_error("RTK outage smoothing settings must be positive");
+  }
   if (config.enable_vertical_velocity_delta_constraint && !config.enable_body_z_jump_detection) {
     throw std::runtime_error("enable_vertical_velocity_delta_constraint requires enable_body_z_jump_detection");
   }
@@ -795,6 +809,18 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.rtk_vertical_drift_use_for_center_pull = ParseBool(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_use_for_envelope_gate") {
     config.rtk_vertical_drift_use_for_envelope_gate = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_rtk_outage_smoothing") {
+    config.enable_rtk_outage_smoothing = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_outage_min_gap_s") {
+    config.rtk_outage_min_gap_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_outage_position_ramp_sigma_m") {
+    config.rtk_outage_position_ramp_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_outage_velocity_delta_sigma_mps") {
+    config.rtk_outage_velocity_delta_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_outage_velocity_delta_target_acc_limit_mps2") {
+    config.rtk_outage_velocity_delta_target_acc_limit_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_outage_position_ramp_stride") {
+    config.rtk_outage_position_ramp_stride = ParseInt(normalized_value);
   } else if (normalized_key == "enable_vertical_velocity_delta_constraint") {
     config.enable_vertical_velocity_delta_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_acc_sigma_mps2") {
@@ -1210,6 +1236,15 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.rtk_vertical_drift_use_for_center_pull ? "true" : "false") << '\n'
     << "rtk_vertical_drift_use_for_envelope_gate="
     << (config.rtk_vertical_drift_use_for_envelope_gate ? "true" : "false") << '\n'
+    << "enable_rtk_outage_smoothing="
+    << (config.enable_rtk_outage_smoothing ? "true" : "false") << '\n'
+    << "rtk_outage_min_gap_s=" << config.rtk_outage_min_gap_s << '\n'
+    << "rtk_outage_position_ramp_sigma_m=" << config.rtk_outage_position_ramp_sigma_m << '\n'
+    << "rtk_outage_velocity_delta_sigma_mps="
+    << config.rtk_outage_velocity_delta_sigma_mps << '\n'
+    << "rtk_outage_velocity_delta_target_acc_limit_mps2="
+    << config.rtk_outage_velocity_delta_target_acc_limit_mps2 << '\n'
+    << "rtk_outage_position_ramp_stride=" << config.rtk_outage_position_ramp_stride << '\n'
     << "enable_vertical_velocity_delta_constraint="
     << (config.enable_vertical_velocity_delta_constraint ? "true" : "false") << '\n'
     << "vertical_velocity_delta_acc_sigma_mps2=" << config.vertical_velocity_delta_acc_sigma_mps2 << '\n'

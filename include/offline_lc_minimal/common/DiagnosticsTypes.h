@@ -190,6 +190,32 @@ struct RtkVerticalDriftReferenceDiagnosticRow {
   std::string skip_reason = "UNSET";
 };
 
+struct RtkOutageWindowRow {
+  std::size_t window_index = 0;
+  std::size_t pre_sample_index = 0;
+  std::size_t post_sample_index = 0;
+  std::size_t pre_anchor_state_index = 0;
+  std::size_t post_anchor_state_index = 0;
+  double pre_anchor_time_s = std::numeric_limits<double>::quiet_NaN();
+  double post_anchor_time_s = std::numeric_limits<double>::quiet_NaN();
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double duration_s = std::numeric_limits<double>::quiet_NaN();
+  std::size_t interior_state_count = 0;
+  std::size_t rejected_sample_count = 0;
+  std::size_t body_z_jump_overlap_count = 0;
+  bool initial_value_smoothing_applied = false;
+  std::size_t initial_value_smoothed_state_count = 0;
+  double pre_anchor_up_m = std::numeric_limits<double>::quiet_NaN();
+  double post_anchor_up_m = std::numeric_limits<double>::quiet_NaN();
+  double post_anchor_up_offset_m = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::size_t position_ramp_factor_count = 0;
+  std::size_t velocity_delta_factor_count = 0;
+  std::size_t velocity_delta_skipped_body_z_jump_count = 0;
+  std::string skip_reason = "UNSET";
+};
+
 struct StaticAlignmentValidationRow {
   double time_s = std::numeric_limits<double>::quiet_NaN();
   double relative_time_s = std::numeric_limits<double>::quiet_NaN();

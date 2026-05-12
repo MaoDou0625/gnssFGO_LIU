@@ -79,6 +79,11 @@ void ResultWriter::WriteOutputs(
       output_path / "rtk_vertical_drift_reference_diagnostics.csv",
       result.rtk_vertical_drift_reference_diagnostics);
   }
+  if (!result.rtk_outage_windows.empty()) {
+    WriteRtkOutageWindowsCsv(
+      output_path / "rtk_outage_windows.csv",
+      result.rtk_outage_windows);
+  }
   if (!result.static_alignment_validation.empty()) {
     WriteStaticAlignmentValidationCsv(
       output_path / "static_alignment_validation.csv",

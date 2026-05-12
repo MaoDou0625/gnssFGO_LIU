@@ -798,6 +798,35 @@ void TestPhase31StrictNHCWeightConfigLoads() {
     "phase31 should keep leakage-corrected NHC");
 }
 
+void TestPhase32RtkOutageSmootherConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase32_rtk_outage_smoother.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase32 config should keep envelope constraints");
+  ExpectTrue(config.drop_non_rtkfix, "phase32 should remove non-fixed GNSS factors");
+  ExpectTrue(
+    config.enable_rtk_outage_smoothing,
+    "phase32 should enable RTK outage smoothing");
+  ExpectTrue(
+    std::abs(config.rtk_outage_min_gap_s - 2.0) < 1e-15,
+    "phase32 RTK outage gap threshold should load");
+  ExpectTrue(
+    std::abs(config.rtk_outage_position_ramp_sigma_m - 0.05) < 1e-15,
+    "phase32 RTK outage position ramp sigma should load");
+  ExpectTrue(
+    std::abs(config.rtk_outage_velocity_delta_sigma_mps - 0.02) < 1e-15,
+    "phase32 RTK outage dvz sigma should load");
+  ExpectTrue(
+    config.enable_rtk_vertical_drift_reference,
+    "phase32 should keep RTK drift reference");
+  ExpectTrue(
+    config.enable_body_z_nhc_strict_effective_weighting,
+    "phase32 should keep strict Body-Z NHC weighting");
+}
+
 void TestDefaultOfflineConfigUsesPhase31StrictNHC() {
   const auto config = offline_lc_minimal::LoadConfigFile(
     std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) + "/config/default_offline.cfg",
@@ -1796,6 +1825,9 @@ int main() {
     RunTest(
       "TestPhase31StrictNHCWeightConfigLoads",
       TestPhase31StrictNHCWeightConfigLoads);
+    RunTest(
+      "TestPhase32RtkOutageSmootherConfigLoads",
+      TestPhase32RtkOutageSmootherConfigLoads);
     RunTest(
       "TestDefaultOfflineConfigUsesPhase31StrictNHC",
       TestDefaultOfflineConfigUsesPhase31StrictNHC);

@@ -50,6 +50,10 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkVerticalDriftReferenceDiagnosticRow> &rows);
 
+void WriteRtkOutageWindowsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageWindowRow> &rows);
+
 void WriteStaticAlignmentValidationCsv(
   const std::filesystem::path &path,
   const std::vector<StaticAlignmentValidationRow> &rows);

@@ -422,6 +422,50 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
   }
 }
 
+void WriteRtkOutageWindowsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageWindowRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,pre_sample_index,post_sample_index,pre_anchor_state_index,"
+       "post_anchor_state_index,pre_anchor_time_s,post_anchor_time_s,start_time_s,"
+       "end_time_s,duration_s,interior_state_count,rejected_sample_count,"
+       "body_z_jump_overlap_count,initial_value_smoothing_applied,"
+       "initial_value_smoothed_state_count,pre_anchor_up_m,post_anchor_up_m,"
+       "post_anchor_up_offset_m,factor_added,position_ramp_factor_count,"
+       "velocity_delta_factor_count,velocity_delta_skipped_body_z_jump_count,"
+       "skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.pre_sample_index << ','
+           << row.post_sample_index << ','
+           << row.pre_anchor_state_index << ','
+           << row.post_anchor_state_index << ','
+           << row.pre_anchor_time_s << ','
+           << row.post_anchor_time_s << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.duration_s << ','
+           << row.interior_state_count << ','
+           << row.rejected_sample_count << ','
+           << row.body_z_jump_overlap_count << ','
+           << (row.initial_value_smoothing_applied ? 1 : 0) << ','
+           << row.initial_value_smoothed_state_count << ','
+           << row.pre_anchor_up_m << ','
+           << row.post_anchor_up_m << ','
+           << row.post_anchor_up_offset_m << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.position_ramp_factor_count << ','
+           << row.velocity_delta_factor_count << ','
+           << row.velocity_delta_skipped_body_z_jump_count << ','
+           << row.skip_reason << '\n';
+  }
+}
+
 void WriteStaticAlignmentValidationCsv(
   const std::filesystem::path &path,
   const std::vector<StaticAlignmentValidationRow> &rows) {

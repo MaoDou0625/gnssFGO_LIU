@@ -33,6 +33,9 @@
 #include "offline_lc_minimal/core/InitialStaticRtkHeightConstraintBuilder.h"
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
+#include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
+#include "offline_lc_minimal/core/RtkOutageSmoothingConstraintBuilder.h"
+#include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
 #include "offline_lc_minimal/core/RtkVerticalDriftReferenceEstimator.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
@@ -871,6 +874,29 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.attitude_reference_states = body_z_result.seed_reference_states;
   }
 
+  std::vector<RtkOutageWindowRow> planned_rtk_outage_windows;
+  std::vector<BodyZSeedJumpWindowRow> nhc_constraint_windows =
+    run_result.body_z_seed_jump_windows;
+  if (config_.enable_rtk_outage_smoothing) {
+    RtkOutageWindowPlanRequest outage_request;
+    outage_request.config = &config_;
+    outage_request.gnss_samples = &dataset.gnss_samples;
+    outage_request.state_timestamps = &state_timestamps;
+    outage_request.body_z_jump_windows = &run_result.body_z_seed_jump_windows;
+    outage_request.navigation_start_index = navigation_start_index;
+    outage_request.passes_gnss_quality_filters = [&](const GnssSolutionSample &sample) {
+      return PassesGnssQualityFilters(sample);
+    };
+    outage_request.corrected_time_s = [&](const GnssSolutionSample &sample) {
+      return CorrectedGnssTime(sample);
+    };
+    planned_rtk_outage_windows =
+      RtkOutageWindowPlanner(std::move(outage_request)).Plan();
+    nhc_constraint_windows = BuildRtkOutageNHCWindows(
+      run_result.body_z_seed_jump_windows,
+      planned_rtk_outage_windows);
+  }
+
   std::vector<VerticalMotionAdaptiveReweightingDiagnosticRow> adaptive_reweighting_diagnostics;
   VerticalMotionStabilityProfile active_stability_profile;
   const VerticalMotionStabilityProfile *active_stability_profile_ptr = nullptr;
@@ -915,6 +941,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.rtk_vertical_drift_first20_max_abs_correction_m =
     std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.rtk_outage_smoothing_enabled =
+    config_.enable_rtk_outage_smoothing;
+  run_result.run_summary.rtk_outage_window_count = 0;
+  run_result.run_summary.rtk_outage_window_with_body_z_jump_count = 0;
+  run_result.run_summary.rtk_outage_position_ramp_factor_count = 0;
+  run_result.run_summary.rtk_outage_velocity_delta_factor_count = 0;
+  run_result.run_summary.rtk_outage_velocity_delta_skipped_body_z_jump_count = 0;
   run_result.run_summary.gnss_factor_count = 0;
   run_result.run_summary.gnss_synced_factor_count = 0;
   run_result.run_summary.gnss_interpolated_factor_count = 0;
@@ -1012,6 +1045,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.vertical_jump_velocity_ramp_diagnostics.clear();
   run_result.vertical_jump_continuity_diagnostics.clear();
   run_result.vertical_state_corrections.clear();
+  run_result.rtk_outage_windows = planned_rtk_outage_windows;
 
   gtsam::NonlinearFactorGraph graph_with_gnss = base_graph;
   add_vertical_acc_bias_gm_constraints(
@@ -1019,6 +1053,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.run_summary,
     active_stability_profile_ptr);
   gtsam::Values optimization_initial_values = adaptive_initial_values;
+  RtkOutageInitialValueSmoothRequest rtk_outage_initial_request;
+  rtk_outage_initial_request.state_timestamps = &state_timestamps;
+  rtk_outage_initial_request.gnss_samples = &dataset.gnss_samples;
+  rtk_outage_initial_request.propagation_records = &vertical_velocity_delta_records;
+  rtk_outage_initial_request.initial_values = &optimization_initial_values;
+  rtk_outage_initial_request.outage_windows = &run_result.rtk_outage_windows;
+  RtkOutageInitialValueSmoother(std::move(rtk_outage_initial_request)).Apply();
+
   if (config_.enable_vertical_jump_impulse) {
     VerticalJumpImpulseConstraintBuildRequest vertical_jump_impulse_request;
     vertical_jump_impulse_request.config = &config_;
@@ -1127,10 +1169,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   VerticalPositionVelocityConsistencyConstraintBuilder(
     std::move(vertical_position_velocity_request)).Build();
 
+  RtkOutageSmoothingConstraintBuildRequest rtk_outage_request;
+  rtk_outage_request.config = &config_;
+  rtk_outage_request.state_timestamps = &state_timestamps;
+  rtk_outage_request.body_z_jump_windows = &run_result.body_z_seed_jump_windows;
+  rtk_outage_request.propagation_records = &vertical_velocity_delta_records;
+  rtk_outage_request.graph = &graph_with_gnss;
+  rtk_outage_request.run_summary = &run_result.run_summary;
+  rtk_outage_request.outage_windows = &run_result.rtk_outage_windows;
+  RtkOutageSmoothingConstraintBuilder(std::move(rtk_outage_request)).Build();
+
   BodyZNHCConstraintBuildRequest body_z_nhc_request;
   body_z_nhc_request.config = &config_;
   body_z_nhc_request.state_timestamps = &state_timestamps;
-  body_z_nhc_request.jump_windows = &run_result.body_z_seed_jump_windows;
+  body_z_nhc_request.jump_windows = &nhc_constraint_windows;
   body_z_nhc_request.initial_values = &optimization_initial_values;
   body_z_nhc_request.reference_states = &run_result.attitude_reference_states;
   body_z_nhc_request.dynamic_start_index = graph_timeline.dynamic_start_index;

@@ -139,6 +139,12 @@ struct OfflineRunnerConfig {
   int rtk_vertical_drift_outer_iterations = 2;
   bool rtk_vertical_drift_use_for_center_pull = true;
   bool rtk_vertical_drift_use_for_envelope_gate = false;
+  bool enable_rtk_outage_smoothing = false;
+  double rtk_outage_min_gap_s = 2.0;
+  double rtk_outage_position_ramp_sigma_m = 0.05;
+  double rtk_outage_velocity_delta_sigma_mps = 0.02;
+  double rtk_outage_velocity_delta_target_acc_limit_mps2 = 0.85;
+  int rtk_outage_position_ramp_stride = 1;
   bool enable_vertical_velocity_delta_constraint = false;
   double vertical_velocity_delta_acc_sigma_mps2 = 0.50;
   double vertical_velocity_delta_min_sigma_mps = 0.02;
