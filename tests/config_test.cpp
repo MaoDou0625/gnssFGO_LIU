@@ -798,6 +798,22 @@ void TestPhase31StrictNHCWeightConfigLoads() {
     "phase31 should keep leakage-corrected NHC");
 }
 
+void TestDefaultOfflineConfigUsesPhase31StrictNHC() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) + "/config/default_offline.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(config.enable_rtk_vertical_drift_reference, "default config should use RTK drift reference");
+  ExpectTrue(
+    config.enable_body_z_nhc_strict_effective_weighting,
+    "default config should use strict Body-Z NHC weighting");
+  ExpectTrue(
+    std::abs(config.body_z_nhc_global_velocity_sigma_mps - 0.005) < 1e-15,
+    "default global NHC velocity sigma should match phase31");
+  ExpectTrue(
+    std::abs(config.body_z_nhc_global_stride_s - config.body_z_nhc_global_window_s) < 1e-15,
+    "default global NHC windows should be non-overlapping");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -1780,6 +1796,9 @@ int main() {
     RunTest(
       "TestPhase31StrictNHCWeightConfigLoads",
       TestPhase31StrictNHCWeightConfigLoads);
+    RunTest(
+      "TestDefaultOfflineConfigUsesPhase31StrictNHC",
+      TestDefaultOfflineConfigUsesPhase31StrictNHC);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
