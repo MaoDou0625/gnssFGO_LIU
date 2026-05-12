@@ -884,7 +884,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       ? std::max(0, config_.vertical_motion_adaptive_outer_iterations)
       : 0;
   const int rtk_drift_extra_iterations =
-    config_.enable_rtk_vertical_drift_reference ? 2 : 0;
+    config_.enable_rtk_vertical_drift_reference
+      ? std::max(0, config_.rtk_vertical_drift_outer_iterations)
+      : 0;
   const int adaptive_pass_limit =
     1 + std::max(adaptive_extra_iterations, rtk_drift_extra_iterations);
   int completed_adaptive_pass_count = 0;

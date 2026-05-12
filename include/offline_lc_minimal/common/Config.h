@@ -136,6 +136,7 @@ struct OfflineRunnerConfig {
   double rtk_vertical_drift_huber_sigma_m = 0.030;
   double rtk_vertical_drift_max_abs_correction_m = 0.050;
   double rtk_vertical_drift_convergence_threshold_m = 0.001;
+  int rtk_vertical_drift_outer_iterations = 2;
   bool rtk_vertical_drift_use_for_center_pull = true;
   bool rtk_vertical_drift_use_for_envelope_gate = false;
   bool enable_vertical_velocity_delta_constraint = false;

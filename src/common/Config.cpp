@@ -303,7 +303,8 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.rtk_vertical_white_noise_sigma_m <= 0.0 ||
       config.rtk_vertical_drift_huber_sigma_m <= 0.0 ||
       config.rtk_vertical_drift_max_abs_correction_m <= 0.0 ||
-      config.rtk_vertical_drift_convergence_threshold_m <= 0.0) {
+      config.rtk_vertical_drift_convergence_threshold_m <= 0.0 ||
+      config.rtk_vertical_drift_outer_iterations < 0) {
     throw std::runtime_error("RTK vertical drift reference settings must be positive");
   }
   if (config.enable_rtk_vertical_drift_reference) {
@@ -782,6 +783,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.rtk_vertical_drift_max_abs_correction_m = ParseDouble(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_convergence_threshold_m") {
     config.rtk_vertical_drift_convergence_threshold_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_vertical_drift_outer_iterations") {
+    config.rtk_vertical_drift_outer_iterations = ParseInt(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_use_for_center_pull") {
     config.rtk_vertical_drift_use_for_center_pull = ParseBool(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_use_for_envelope_gate") {
@@ -1193,6 +1196,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.rtk_vertical_drift_max_abs_correction_m << '\n'
     << "rtk_vertical_drift_convergence_threshold_m="
     << config.rtk_vertical_drift_convergence_threshold_m << '\n'
+    << "rtk_vertical_drift_outer_iterations="
+    << config.rtk_vertical_drift_outer_iterations << '\n'
     << "rtk_vertical_drift_use_for_center_pull="
     << (config.rtk_vertical_drift_use_for_center_pull ? "true" : "false") << '\n'
     << "rtk_vertical_drift_use_for_envelope_gate="
