@@ -422,6 +422,12 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (config.body_z_nhc_global_window_s < config.body_z_nhc_min_window_s) {
     throw std::runtime_error("body-z NHC global window must be at least the minimum window duration");
   }
+  if (config.enable_body_z_nhc_strict_effective_weighting &&
+      config.enable_body_z_nhc_global_weak_constraint &&
+      config.body_z_nhc_global_stride_s + 1.0e-12 < config.body_z_nhc_global_window_s) {
+    throw std::runtime_error(
+      "strict body-z NHC effective weighting requires global stride to be at least global window");
+  }
   if ((config.enable_vertical_jump_masked_imu ||
        config.enable_vertical_jump_impulse ||
        config.enable_vertical_jump_bias ||
@@ -865,6 +871,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_body_z_nhc_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "enable_body_z_nhc_global_weak_constraint") {
     config.enable_body_z_nhc_global_weak_constraint = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_body_z_nhc_strict_effective_weighting") {
+    config.enable_body_z_nhc_strict_effective_weighting = ParseBool(normalized_value);
   } else if (normalized_key == "body_z_nhc_jump_padding_s") {
     config.body_z_nhc_jump_padding_s = ParseDouble(normalized_value);
   } else if (normalized_key == "body_z_nhc_merge_gap_s") {
@@ -1265,6 +1273,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "enable_body_z_nhc_constraint=" << (config.enable_body_z_nhc_constraint ? "true" : "false") << '\n'
     << "enable_body_z_nhc_global_weak_constraint="
     << (config.enable_body_z_nhc_global_weak_constraint ? "true" : "false") << '\n'
+    << "enable_body_z_nhc_strict_effective_weighting="
+    << (config.enable_body_z_nhc_strict_effective_weighting ? "true" : "false") << '\n'
     << "body_z_nhc_jump_padding_s=" << config.body_z_nhc_jump_padding_s << '\n'
     << "body_z_nhc_merge_gap_s=" << config.body_z_nhc_merge_gap_s << '\n'
     << "body_z_nhc_min_window_s=" << config.body_z_nhc_min_window_s << '\n'

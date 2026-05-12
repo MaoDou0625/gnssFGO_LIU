@@ -772,6 +772,32 @@ void TestPhase30RtkDriftReferenceConfigLoads() {
     "phase30 should preserve the raw RTK envelope gate");
 }
 
+void TestPhase31StrictNHCWeightConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1cut1_vertical_envelope_phase31_strict_nhc_weight.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.vertical_constraint_mode == offline_lc_minimal::VerticalConstraintMode::kEnvelope,
+    "phase31 config should use envelope constraints");
+  ExpectTrue(
+    config.enable_body_z_nhc_strict_effective_weighting,
+    "phase31 should enable strict Body-Z NHC effective weighting");
+  ExpectTrue(
+    std::abs(config.body_z_nhc_global_stride_s - config.body_z_nhc_global_window_s) < 1e-15,
+    "phase31 global NHC stride should match window length");
+  ExpectTrue(
+    std::abs(config.body_z_nhc_global_velocity_sigma_mps - 0.005) < 1e-15,
+    "phase31 global NHC velocity sigma should match jump strength");
+  ExpectTrue(
+    std::abs(config.body_z_nhc_global_displacement_sigma_m - 0.005) < 1e-15,
+    "phase31 global NHC displacement sigma should match jump strength");
+  ExpectTrue(config.enable_rtk_vertical_drift_reference, "phase31 should keep RTK drift reference");
+  ExpectTrue(
+    config.enable_body_z_nhc_horizontal_leakage_correction,
+    "phase31 should keep leakage-corrected NHC");
+}
+
 void TestOldCompatibilityKeysAreRejected() {
   ExpectUnknownKey("enable_vertical_rtk_preintegration_feedback");
   ExpectUnknownKey("vertical_local_recovery_enabled");
@@ -1687,6 +1713,20 @@ void TestBodyZNHCConfigValidation() {
     threw = std::string(exception.what()).find("body-z NHC settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive body-z NHC velocity sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_nhc_constraint = true;
+  config.enable_body_z_nhc_global_weak_constraint = true;
+  config.enable_body_z_nhc_strict_effective_weighting = true;
+  config.body_z_nhc_global_window_s = 3.0;
+  config.body_z_nhc_global_stride_s = 1.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("strict body-z NHC effective weighting") != std::string::npos;
+  }
+  ExpectTrue(threw, "strict body-z NHC should reject overlapping global windows");
 }
 
 }  // namespace
@@ -1737,6 +1777,9 @@ int main() {
     RunTest(
       "TestPhase30RtkDriftReferenceConfigLoads",
       TestPhase30RtkDriftReferenceConfigLoads);
+    RunTest(
+      "TestPhase31StrictNHCWeightConfigLoads",
+      TestPhase31StrictNHCWeightConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

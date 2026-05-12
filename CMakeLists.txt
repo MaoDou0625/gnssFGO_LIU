@@ -61,6 +61,7 @@ add_library(offline_lc_minimal_lib
   src/core/BodyZHorizontalLeakageEstimator.cpp
   src/core/BodyZJumpConstraintWindowPlanner.cpp
   src/core/BodyZNHCConstraintBuilder.cpp
+  src/core/BodyZNHCWeightPlanner.cpp
   src/core/BodyZWindowPipeline.cpp
   src/core/GnssFactorBuilder.cpp
   src/core/GraphTimelineBuilder.cpp

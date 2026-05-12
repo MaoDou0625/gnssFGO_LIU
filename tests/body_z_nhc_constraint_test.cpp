@@ -507,6 +507,64 @@ void TestBuilderAddsGlobalWeakWindowsWhenEnabled() {
     "global weak NHC should use global velocity sigma");
 }
 
+void TestBuilderStrictWeightingUsesUniqueVelocityFactors() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_body_z_nhc_constraint = true;
+  config.enable_body_z_nhc_global_weak_constraint = true;
+  config.enable_body_z_nhc_strict_effective_weighting = true;
+  config.body_z_nhc_jump_padding_s = 0.0;
+  config.body_z_nhc_min_window_s = 0.5;
+  config.body_z_nhc_global_window_s = 2.0;
+  config.body_z_nhc_global_stride_s = 2.0;
+  config.body_z_nhc_jump_velocity_sigma_mps = 0.005;
+  config.body_z_nhc_jump_displacement_sigma_m = 0.005;
+  config.body_z_nhc_global_velocity_sigma_mps = 0.005;
+  config.body_z_nhc_global_displacement_sigma_m = 0.005;
+  const std::vector<double> timestamps{
+    0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0,
+    3.5, 4.0, 4.5, 5.0, 5.5, 6.0};
+  const gtsam::Values values = MakeValues(timestamps, gtsam::Rot3(), gtsam::Vector3::Zero());
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows{
+    MakeJumpWindow(2.0, 2.5),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::BodyZNHCDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::BodyZNHCConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.jump_windows = &jump_windows;
+  request.initial_values = &values;
+  request.dynamic_start_index = 0U;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::BodyZNHCConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(summary.body_z_nhc_strict_effective_weighting_enabled, "strict NHC weighting should be reported");
+  ExpectNear(static_cast<double>(summary.body_z_nhc_window_count), 4.0, 0.0, "strict NHC should add jump plus non-overlapping global windows");
+  ExpectNear(static_cast<double>(summary.body_z_nhc_velocity_factor_count), 13.0, 0.0, "strict NHC should add one velocity factor per dynamic state");
+  ExpectNear(static_cast<double>(summary.body_z_nhc_unique_velocity_factor_count), 13.0, 0.0, "strict NHC unique velocity count is wrong");
+  ExpectNear(static_cast<double>(summary.body_z_nhc_velocity_duplicate_state_count), 0.0, 0.0, "strict NHC should avoid duplicate velocity states");
+  ExpectNear(static_cast<double>(summary.body_z_nhc_interval_overlap_count), 0.0, 0.0, "strict NHC global windows should not overlap jump windows");
+  ExpectNear(static_cast<double>(summary.body_z_nhc_jump_velocity_factor_count), 2.0, 0.0, "jump velocity factor count is wrong");
+  ExpectNear(static_cast<double>(summary.body_z_nhc_global_velocity_factor_count), 11.0, 0.0, "global velocity factor count is wrong");
+  ExpectTrue(
+    std::all_of(
+      diagnostics.begin(),
+      diagnostics.end(),
+      [](const offline_lc_minimal::BodyZNHCDiagnosticRow &row) {
+        return row.strict_weighting_enabled &&
+               std::abs(row.applied_velocity_sigma_mps - 0.005) < 1e-12 &&
+               std::abs(row.applied_displacement_sigma_m - 0.005) < 1e-12 &&
+               row.velocity_state_duplicate_count == 0U &&
+               row.interval_overlap_count == 0U;
+      }),
+    "strict NHC diagnostics should expose applied sigma without duplicates");
+}
+
 void TestBuilderAddsLeakageCorrectedFactorsAcrossJumpAndGlobalWindows() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -615,6 +673,7 @@ int main() {
     RunTest("TestBuilderSkipsShortWindow", TestBuilderSkipsShortWindow);
     RunTest("TestBuilderDoesNotAddGlobalWeakWindowsWhenDisabled", TestBuilderDoesNotAddGlobalWeakWindowsWhenDisabled);
     RunTest("TestBuilderAddsGlobalWeakWindowsWhenEnabled", TestBuilderAddsGlobalWeakWindowsWhenEnabled);
+    RunTest("TestBuilderStrictWeightingUsesUniqueVelocityFactors", TestBuilderStrictWeightingUsesUniqueVelocityFactors);
     RunTest("TestBuilderAddsLeakageCorrectedFactorsAcrossJumpAndGlobalWindows", TestBuilderAddsLeakageCorrectedFactorsAcrossJumpAndGlobalWindows);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';

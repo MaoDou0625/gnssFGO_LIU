@@ -12,6 +12,7 @@
 #include <gtsam/linear/NoiseModel.h>
 
 #include "offline_lc_minimal/core/BodyZHorizontalLeakageEstimator.h"
+#include "offline_lc_minimal/core/BodyZNHCWeightPlanner.h"
 #include "offline_lc_minimal/factor/BodyZLeakageCorrectedVelocityFactor.h"
 #include "offline_lc_minimal/factor/BodyZLeakageCorrectedWindowDisplacementFactor.h"
 #include "offline_lc_minimal/factor/BodyZVelocityZeroFactor.h"
@@ -23,6 +24,7 @@ namespace {
 namespace symbol = gtsam::symbol_shorthand;
 
 constexpr double kTimeEpsilonS = 1.0e-9;
+constexpr double kStrictWindowBoundaryPaddingS = 1.0e-6;
 
 bool IntervalsOverlap(
   const double left_start_s,
@@ -271,6 +273,8 @@ void BodyZNHCConstraintBuilder::Build() const {
   if (!request_.config->enable_body_z_nhc_constraint) {
     return;
   }
+  request_.run_summary->body_z_nhc_strict_effective_weighting_enabled =
+    request_.config->enable_body_z_nhc_strict_effective_weighting;
 
   std::vector<BodyZJumpConstraintWindow> windows = BuildJumpWindows();
   BodyZHorizontalLeakageEstimate leakage_estimate;
@@ -307,6 +311,7 @@ void BodyZNHCConstraintBuilder::Build() const {
   request_.diagnostics->reserve(request_.diagnostics->size() + windows.size());
 
   const std::size_t window_index_offset = request_.diagnostics->size();
+  BodyZNHCWeightPlanner weight_planner;
   for (std::size_t window_index = 0U; window_index < windows.size(); ++window_index) {
     const BodyZJumpConstraintWindow &window = windows[window_index];
     const double velocity_sigma_mps = window.source_window_count > 0U
@@ -401,6 +406,22 @@ void BodyZNHCConstraintBuilder::Build() const {
         initial_corrected_metrics->body_z_displacement_m;
     }
 
+    BodyZNHCWeightPlannerWindowRequest weight_request;
+    weight_request.strict_effective_weighting =
+      request_.config->enable_body_z_nhc_strict_effective_weighting;
+    weight_request.state_indices = state_indices;
+    weight_request.start_time_s = window.start_time_s;
+    weight_request.end_time_s = window.end_time_s;
+    weight_request.target_velocity_sigma_mps = velocity_sigma_mps;
+    weight_request.target_displacement_sigma_m = displacement_sigma_m;
+    const BodyZNHCWindowWeightPlan weight_plan =
+      weight_planner.PlanWindow(weight_request);
+    row.velocity_state_duplicate_count =
+      weight_plan.velocity_state_duplicate_count;
+    row.interval_overlap_count = weight_plan.interval_overlap_count;
+    row.applied_velocity_sigma_mps = weight_plan.applied_velocity_sigma_mps;
+    row.applied_displacement_sigma_m = weight_plan.applied_displacement_sigma_m;
+
     std::vector<gtsam::Key> velocity_keys;
     std::vector<double> state_times_s;
     velocity_keys.reserve(state_indices.size());
@@ -409,19 +430,23 @@ void BodyZNHCConstraintBuilder::Build() const {
       const std::size_t state_index = state_indices[offset];
       velocity_keys.push_back(symbol::V(state_index));
       state_times_s.push_back((*request_.state_timestamps)[state_index]);
+      if (!weight_plan.velocity_factor_used[offset]) {
+        continue;
+      }
       if (use_leakage_correction) {
         request_.graph->add(factor::BodyZLeakageCorrectedVelocityZeroFactor(
           symbol::V(state_index),
           (*body_axes_nav)[offset],
           leakage_estimate.model,
-          gtsam::noiseModel::Isotropic::Sigma(1, velocity_sigma_mps)));
+          gtsam::noiseModel::Isotropic::Sigma(1, weight_plan.applied_velocity_sigma_mps)));
         ++request_.run_summary->body_z_nhc_leakage_corrected_velocity_factor_count;
       } else {
         request_.graph->add(factor::BodyZVelocityZeroFactor(
           symbol::V(state_index),
           effective_body_z_axes_nav[offset],
-          gtsam::noiseModel::Isotropic::Sigma(1, velocity_sigma_mps)));
+          gtsam::noiseModel::Isotropic::Sigma(1, weight_plan.applied_velocity_sigma_mps)));
       }
+      row.velocity_factor_state_indices.push_back(state_index);
       ++row.velocity_factor_count;
     }
 
@@ -431,14 +456,14 @@ void BodyZNHCConstraintBuilder::Build() const {
         *body_axes_nav,
         leakage_estimate.model,
         state_times_s,
-        gtsam::noiseModel::Isotropic::Sigma(1, displacement_sigma_m)));
+        gtsam::noiseModel::Isotropic::Sigma(1, weight_plan.applied_displacement_sigma_m)));
       ++request_.run_summary->body_z_nhc_leakage_corrected_displacement_factor_count;
     } else {
       request_.graph->add(factor::BodyZWindowDisplacementZeroFactor(
         velocity_keys,
         effective_body_z_axes_nav,
         state_times_s,
-        gtsam::noiseModel::Isotropic::Sigma(1, displacement_sigma_m)));
+        gtsam::noiseModel::Isotropic::Sigma(1, weight_plan.applied_displacement_sigma_m)));
     }
     row.displacement_factor_count = 1U;
     row.factor_added = true;
@@ -447,8 +472,21 @@ void BodyZNHCConstraintBuilder::Build() const {
     ++request_.run_summary->body_z_nhc_window_count;
     request_.run_summary->body_z_nhc_velocity_factor_count += row.velocity_factor_count;
     request_.run_summary->body_z_nhc_displacement_factor_count += row.displacement_factor_count;
+    if (row.from_jump_window) {
+      request_.run_summary->body_z_nhc_jump_velocity_factor_count += row.velocity_factor_count;
+      request_.run_summary->body_z_nhc_jump_displacement_factor_count += row.displacement_factor_count;
+    } else {
+      request_.run_summary->body_z_nhc_global_velocity_factor_count += row.velocity_factor_count;
+      request_.run_summary->body_z_nhc_global_displacement_factor_count += row.displacement_factor_count;
+    }
     request_.diagnostics->push_back(row);
   }
+  request_.run_summary->body_z_nhc_unique_velocity_factor_count =
+    weight_planner.uniqueVelocityFactorStateCount();
+  request_.run_summary->body_z_nhc_velocity_duplicate_state_count =
+    weight_planner.duplicateVelocityStateCount();
+  request_.run_summary->body_z_nhc_interval_overlap_count =
+    weight_planner.intervalOverlapCount();
 }
 
 std::vector<BodyZJumpConstraintWindow> BodyZNHCConstraintBuilder::BuildJumpWindows() const {
@@ -488,10 +526,16 @@ std::vector<BodyZJumpConstraintWindow> BodyZNHCConstraintBuilder::BuildGlobalWin
 
   const double dynamic_start_time_s = (*request_.state_timestamps)[request_.dynamic_start_index];
   const double final_time_s = request_.state_timestamps->back();
+  const bool strict_weighting =
+    request_.config->enable_body_z_nhc_strict_effective_weighting;
+  const double boundary_padding_s =
+    strict_weighting ? kStrictWindowBoundaryPaddingS : 0.0;
   double segment_start_s = dynamic_start_time_s;
   for (const auto &jump_window : jump_windows) {
-    const double segment_end_s =
-      std::clamp(jump_window.start_time_s, dynamic_start_time_s, final_time_s);
+    const double segment_end_s = std::clamp(
+      jump_window.start_time_s - boundary_padding_s,
+      dynamic_start_time_s,
+      final_time_s);
     double start_time_s = segment_start_s;
     while (start_time_s + request_.config->body_z_nhc_min_window_s <= segment_end_s + kTimeEpsilonS) {
       const double end_time_s =
@@ -503,8 +547,13 @@ std::vector<BodyZJumpConstraintWindow> BodyZNHCConstraintBuilder::BuildGlobalWin
       window.end_time_s = end_time_s;
       windows.push_back(window);
       start_time_s += request_.config->body_z_nhc_global_stride_s;
+      if (strict_weighting) {
+        start_time_s += kStrictWindowBoundaryPaddingS;
+      }
     }
-    segment_start_s = std::max(segment_start_s, jump_window.end_time_s);
+    segment_start_s = std::max(
+      segment_start_s,
+      jump_window.end_time_s + boundary_padding_s);
   }
   double start_time_s = segment_start_s;
   while (start_time_s + request_.config->body_z_nhc_min_window_s <= final_time_s + kTimeEpsilonS) {
@@ -517,6 +566,9 @@ std::vector<BodyZJumpConstraintWindow> BodyZNHCConstraintBuilder::BuildGlobalWin
     window.end_time_s = end_time_s;
     windows.push_back(window);
     start_time_s += request_.config->body_z_nhc_global_stride_s;
+    if (strict_weighting) {
+      start_time_s += kStrictWindowBoundaryPaddingS;
+    }
   }
   return windows;
 }
@@ -580,6 +632,11 @@ BodyZNHCDiagnosticRow BodyZNHCConstraintBuilder::MakeDiagnosticRow(
   }
   row.velocity_sigma_mps = velocity_sigma_mps;
   row.displacement_sigma_m = displacement_sigma_m;
+  row.strict_weighting_enabled = request_.config->enable_body_z_nhc_strict_effective_weighting;
+  row.target_velocity_sigma_mps = velocity_sigma_mps;
+  row.applied_velocity_sigma_mps = velocity_sigma_mps;
+  row.target_displacement_sigma_m = displacement_sigma_m;
+  row.applied_displacement_sigma_m = displacement_sigma_m;
   return row;
 }
 
@@ -638,6 +695,15 @@ void PopulateBodyZNHCDiagnostics(
         state_row.window_index = row.window_index;
         state_row.state_index = state_index;
         state_row.time_s = state_timestamps[state_index];
+        state_row.nhc_region_type = row.window_type;
+        state_row.velocity_factor_used =
+          std::find(
+            row.velocity_factor_state_indices.begin(),
+            row.velocity_factor_state_indices.end(),
+            state_index) != row.velocity_factor_state_indices.end();
+        state_row.effective_velocity_sigma_mps =
+          state_row.velocity_factor_used ? row.applied_velocity_sigma_mps :
+                                           std::numeric_limits<double>::quiet_NaN();
         state_row.fixed_axis_x = fixed_axis.x();
         state_row.fixed_axis_y = fixed_axis.y();
         state_row.fixed_axis_z = fixed_axis.z();

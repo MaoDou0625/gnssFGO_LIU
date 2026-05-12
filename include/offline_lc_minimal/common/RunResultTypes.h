@@ -98,6 +98,14 @@ struct RunSummary {
   std::size_t body_z_nhc_window_count = 0;
   std::size_t body_z_nhc_skipped_short_window_count = 0;
   std::size_t body_z_nhc_skipped_invalid_count = 0;
+  bool body_z_nhc_strict_effective_weighting_enabled = false;
+  std::size_t body_z_nhc_unique_velocity_factor_count = 0;
+  std::size_t body_z_nhc_velocity_duplicate_state_count = 0;
+  std::size_t body_z_nhc_interval_overlap_count = 0;
+  std::size_t body_z_nhc_jump_velocity_factor_count = 0;
+  std::size_t body_z_nhc_global_velocity_factor_count = 0;
+  std::size_t body_z_nhc_jump_displacement_factor_count = 0;
+  std::size_t body_z_nhc_global_displacement_factor_count = 0;
   bool body_z_nhc_horizontal_leakage_correction_enabled = false;
   bool body_z_nhc_horizontal_leakage_estimate_valid = false;
   std::size_t body_z_nhc_horizontal_leakage_sample_count = 0;
@@ -312,6 +320,19 @@ struct RunSummary {
         << "body_z_nhc_window_count=" << body_z_nhc_window_count << '\n'
         << "body_z_nhc_skipped_short_window_count=" << body_z_nhc_skipped_short_window_count << '\n'
         << "body_z_nhc_skipped_invalid_count=" << body_z_nhc_skipped_invalid_count << '\n'
+        << "body_z_nhc_strict_effective_weighting_enabled="
+        << (body_z_nhc_strict_effective_weighting_enabled ? "true" : "false") << '\n'
+        << "body_z_nhc_unique_velocity_factor_count="
+        << body_z_nhc_unique_velocity_factor_count << '\n'
+        << "body_z_nhc_velocity_duplicate_state_count="
+        << body_z_nhc_velocity_duplicate_state_count << '\n'
+        << "body_z_nhc_interval_overlap_count=" << body_z_nhc_interval_overlap_count << '\n'
+        << "body_z_nhc_jump_velocity_factor_count=" << body_z_nhc_jump_velocity_factor_count << '\n'
+        << "body_z_nhc_global_velocity_factor_count=" << body_z_nhc_global_velocity_factor_count << '\n'
+        << "body_z_nhc_jump_displacement_factor_count="
+        << body_z_nhc_jump_displacement_factor_count << '\n'
+        << "body_z_nhc_global_displacement_factor_count="
+        << body_z_nhc_global_displacement_factor_count << '\n'
         << "body_z_nhc_horizontal_leakage_correction_enabled="
         << (body_z_nhc_horizontal_leakage_correction_enabled ? "true" : "false") << '\n'
         << "body_z_nhc_horizontal_leakage_estimate_valid="

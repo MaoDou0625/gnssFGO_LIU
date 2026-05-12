@@ -336,6 +336,14 @@ struct BodyZNHCDiagnosticRow {
   std::size_t displacement_factor_count = 0;
   double velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
   double displacement_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  bool strict_weighting_enabled = false;
+  double target_velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double applied_velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double target_displacement_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double applied_displacement_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  std::size_t velocity_state_duplicate_count = 0;
+  std::size_t interval_overlap_count = 0;
+  std::vector<std::size_t> velocity_factor_state_indices;
   bool horizontal_leakage_correction_enabled = false;
   double horizontal_leakage_x_rad = std::numeric_limits<double>::quiet_NaN();
   double horizontal_leakage_y_rad = std::numeric_limits<double>::quiet_NaN();
@@ -364,6 +372,9 @@ struct BodyZNHCStateDiagnosticRow {
   std::size_t window_index = 0;
   std::size_t state_index = 0;
   double time_s = std::numeric_limits<double>::quiet_NaN();
+  std::string nhc_region_type = "UNSET";
+  bool velocity_factor_used = false;
+  double effective_velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
   double fixed_axis_x = std::numeric_limits<double>::quiet_NaN();
   double fixed_axis_y = std::numeric_limits<double>::quiet_NaN();
   double fixed_axis_z = std::numeric_limits<double>::quiet_NaN();

@@ -618,7 +618,10 @@ void WriteBodyZNHCDiagnosticsCsv(
     << "window_index,window_type,from_jump_window,source_window_index,source_window_count,"
        "start_state_index,end_state_index,state_count,start_time_s,end_time_s,duration_s,"
        "actual_state_span_s,factor_added,skip_reason,velocity_factor_count,displacement_factor_count,"
-        "velocity_sigma_mps,displacement_sigma_m,horizontal_leakage_correction_enabled,"
+        "velocity_sigma_mps,displacement_sigma_m,strict_weighting_enabled,"
+        "target_velocity_sigma_mps,applied_velocity_sigma_mps,target_displacement_sigma_m,"
+        "applied_displacement_sigma_m,velocity_state_duplicate_count,interval_overlap_count,"
+        "horizontal_leakage_correction_enabled,"
         "horizontal_leakage_x_rad,horizontal_leakage_y_rad,initial_mean_abs_body_z_velocity_mps,"
         "initial_max_abs_body_z_velocity_mps,initial_body_z_displacement_m,"
         "initial_mean_abs_corrected_body_z_velocity_mps,"
@@ -649,6 +652,13 @@ void WriteBodyZNHCDiagnosticsCsv(
            << row.displacement_factor_count << ','
            << row.velocity_sigma_mps << ','
            << row.displacement_sigma_m << ','
+           << (row.strict_weighting_enabled ? 1 : 0) << ','
+           << row.target_velocity_sigma_mps << ','
+           << row.applied_velocity_sigma_mps << ','
+           << row.target_displacement_sigma_m << ','
+           << row.applied_displacement_sigma_m << ','
+           << row.velocity_state_duplicate_count << ','
+           << row.interval_overlap_count << ','
            << (row.horizontal_leakage_correction_enabled ? 1 : 0) << ','
            << row.horizontal_leakage_x_rad << ','
            << row.horizontal_leakage_y_rad << ','
@@ -719,7 +729,8 @@ void WriteBodyZNHCStateDiagnosticsCsv(
   }
   stream << std::setprecision(17);
   stream
-    << "window_index,state_index,time_s,fixed_axis_x,fixed_axis_y,fixed_axis_z,"
+    << "window_index,state_index,time_s,nhc_region_type,velocity_factor_used,"
+       "effective_velocity_sigma_mps,fixed_axis_x,fixed_axis_y,fixed_axis_z,"
        "vx_mps,vy_mps,vz_mps,horizontal_speed_mps,v_body_x_mps,v_body_y_mps,"
        "raw_v_body_z_mps,horizontal_leakage_x_rad,horizontal_leakage_y_rad,"
        "leakage_correction_mps,corrected_v_body_z_mps,fixed_horizontal_projection_mps,"
@@ -730,6 +741,9 @@ void WriteBodyZNHCStateDiagnosticsCsv(
     stream << row.window_index << ','
            << row.state_index << ','
            << row.time_s << ','
+           << row.nhc_region_type << ','
+           << (row.velocity_factor_used ? 1 : 0) << ','
+           << row.effective_velocity_sigma_mps << ','
            << row.fixed_axis_x << ','
            << row.fixed_axis_y << ','
            << row.fixed_axis_z << ','
