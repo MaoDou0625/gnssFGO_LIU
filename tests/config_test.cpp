@@ -765,7 +765,7 @@ void TestPhase30RtkDriftReferenceConfigLoads() {
   ExpectTrue(
     std::abs(config.rtk_vertical_white_noise_sigma_m - 0.002) < 1e-15,
     "phase30 white noise sigma should load");
-  ExpectTrue(config.rtk_vertical_drift_outer_iterations == 10, "phase30 drift iterations should load");
+  ExpectTrue(config.rtk_vertical_drift_outer_iterations == 20, "phase30 drift iterations should load");
   ExpectTrue(config.rtk_vertical_drift_use_for_center_pull, "phase30 should use drift for center pull");
   ExpectTrue(
     !config.rtk_vertical_drift_use_for_envelope_gate,

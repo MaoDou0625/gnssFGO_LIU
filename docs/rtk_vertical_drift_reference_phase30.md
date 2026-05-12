@@ -37,7 +37,7 @@ rtk_vertical_white_noise_sigma_m = 0.002
 rtk_vertical_drift_huber_sigma_m = 0.030
 rtk_vertical_drift_max_abs_correction_m = 0.050
 rtk_vertical_drift_convergence_threshold_m = 0.001
-rtk_vertical_drift_outer_iterations = 10
+rtk_vertical_drift_outer_iterations = 20
 rtk_vertical_drift_use_for_center_pull = true
 rtk_vertical_drift_use_for_envelope_gate = false
 ```
@@ -125,7 +125,7 @@ corrected_center_up_m = raw_rtk_up_m - drift_estimate_m
 
 ## 外循环流程
 
-phase30 与 phase27 的 adaptive motion reweighting 共用外循环。RTK drift reference 的额外迭代次数由 `rtk_vertical_drift_outer_iterations` 控制；phase30 当前设置为 `10`，默认配置仍保留 `2` 以兼容早期实验。当前逻辑为：
+phase30 与 phase27 的 adaptive motion reweighting 共用外循环。RTK drift reference 的额外迭代次数由 `rtk_vertical_drift_outer_iterations` 控制；phase30 当前设置为 `20`，默认配置仍保留 `2` 以兼容早期实验。当前逻辑为：
 
 1. `pass0`
    - 不存在 drift profile。
