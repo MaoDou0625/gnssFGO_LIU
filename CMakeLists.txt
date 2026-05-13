@@ -158,6 +158,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     tests/config_test.cpp
   )
 
+  add_executable(trajectory_initializer_test
+    tests/trajectory_initializer_test.cpp
+  )
+
   add_executable(attitude_reference_constraint_test
     tests/attitude_reference_constraint_test.cpp
   )
@@ -215,6 +219,11 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(config_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(trajectory_initializer_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -285,6 +294,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       config_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      trajectory_initializer_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -375,6 +390,13 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         $<TARGET_FILE:config_test>
     )
     add_test(
+      NAME trajectory_initializer_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:trajectory_initializer_test>
+    )
+    add_test(
       NAME attitude_reference_constraint_test
       COMMAND
         ${CMAKE_COMMAND} -E env
@@ -453,6 +475,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     add_test(
       NAME config_test
       COMMAND $<TARGET_FILE:config_test>
+    )
+    add_test(
+      NAME trajectory_initializer_test
+      COMMAND $<TARGET_FILE:trajectory_initializer_test>
     )
     add_test(
       NAME attitude_reference_constraint_test

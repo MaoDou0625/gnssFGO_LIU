@@ -228,6 +228,9 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.imu_dual_vector_min_cross_norm <= 0.0) {
     throw std::runtime_error("IMU dual-vector alignment settings must be positive");
   }
+  if (config.enable_initial_yaw_override && !std::isfinite(config.initial_yaw_override_rad)) {
+    throw std::runtime_error("initial yaw override must be finite when enabled");
+  }
   if (config.initial_static_zupt_velocity_sigma_mps <= 0.0 ||
       config.initial_static_zaru_sigma_radps <= 0.0 ||
       config.initial_static_specific_force_sigma_mps2 <= 0.0 ||
@@ -708,6 +711,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.stationary_gyro_threshold_radps = ParseDouble(normalized_value);
   } else if (normalized_key == "prefer_imu_initial_yaw") {
     config.prefer_imu_initial_yaw = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_initial_yaw_override") {
+    config.enable_initial_yaw_override = ParseBool(normalized_value);
+  } else if (normalized_key == "initial_yaw_override_rad") {
+    config.initial_yaw_override_rad = ParseDouble(normalized_value);
   } else if (normalized_key == "static_alignment_duration_s") {
     config.static_alignment_duration_s = ParseDouble(normalized_value);
   } else if (normalized_key == "imu_dual_vector_window_s") {
@@ -1188,6 +1195,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "stationary_acc_tolerance_mps2=" << config.stationary_acc_tolerance_mps2 << '\n'
     << "stationary_gyro_threshold_radps=" << config.stationary_gyro_threshold_radps << '\n'
     << "prefer_imu_initial_yaw=" << (config.prefer_imu_initial_yaw ? "true" : "false") << '\n'
+    << "enable_initial_yaw_override=" << (config.enable_initial_yaw_override ? "true" : "false") << '\n'
+    << "initial_yaw_override_rad=" << config.initial_yaw_override_rad << '\n'
     << "static_alignment_duration_s=" << config.static_alignment_duration_s << '\n'
     << "imu_dual_vector_window_s=" << config.imu_dual_vector_window_s << '\n'
     << "imu_dual_vector_min_sample_count=" << config.imu_dual_vector_min_sample_count << '\n'

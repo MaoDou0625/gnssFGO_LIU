@@ -1832,6 +1832,25 @@ void TestRtkVelocityConfigValidation() {
   ExpectTrue(threw, "non-positive RTK velocity window should be rejected");
 }
 
+void TestInitialYawOverrideConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "enable_initial_yaw_override", "true");
+  offline_lc_minimal::OverrideConfigField(config, "initial_yaw_override_rad", "1.25");
+  ExpectTrue(config.enable_initial_yaw_override, "initial yaw override flag should parse");
+  ExpectTrue(
+    std::abs(config.initial_yaw_override_rad - 1.25) < 1e-12,
+    "initial yaw override angle should parse");
+
+  config.initial_yaw_override_rad = std::numeric_limits<double>::quiet_NaN();
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("initial yaw override") != std::string::npos;
+  }
+  ExpectTrue(threw, "enabled initial yaw override should reject non-finite yaw");
+}
+
 }  // namespace
 
 int main() {
@@ -1902,6 +1921,7 @@ int main() {
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);
     RunTest("TestBodyZNHCConfigValidation", TestBodyZNHCConfigValidation);
     RunTest("TestRtkVelocityConfigValidation", TestRtkVelocityConfigValidation);
+    RunTest("TestInitialYawOverrideConfigValidation", TestInitialYawOverrideConfigValidation);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

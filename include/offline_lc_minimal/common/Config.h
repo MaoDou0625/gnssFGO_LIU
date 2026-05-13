@@ -85,6 +85,8 @@ struct OfflineRunnerConfig {
   double stationary_acc_tolerance_mps2 = 0.8;
   double stationary_gyro_threshold_radps = 0.02;
   bool prefer_imu_initial_yaw = false;
+  bool enable_initial_yaw_override = false;
+  double initial_yaw_override_rad = 0.0;
   double static_alignment_duration_s = 0.0;
   double imu_dual_vector_window_s = 100.0;
   int imu_dual_vector_min_sample_count = 1000;

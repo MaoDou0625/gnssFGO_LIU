@@ -19,6 +19,62 @@ double NormalizeYaw(const double yaw_rad) {
   return normalized - kPi;
 }
 
+void UpdateBiasForOrientation(
+  const StaticImuWindowSummary &window_summary,
+  const Eigen::Vector3d &earth_rate_enu,
+  const OfflineRunnerConfig &config,
+  InitialPoseEstimate &initial_pose) {
+  const Eigen::Vector3d gravity_enu(0.0, 0.0, config.gravity_mps2);
+  const Eigen::Vector3d predicted_acc_body =
+    initial_pose.orientation.matrix().transpose() * gravity_enu;
+  const Eigen::Vector3d predicted_gyro_body =
+    initial_pose.orientation.matrix().transpose() * earth_rate_enu;
+  initial_pose.imu_bias = gtsam::imuBias::ConstantBias(
+    window_summary.mean_acc_mps2 - predicted_acc_body,
+    window_summary.mean_gyro_radps - predicted_gyro_body);
+}
+
+InitialPoseEstimate EstimateGravityPitchRollWithYaw(
+  const StaticImuWindowSummary &window_summary,
+  const double yaw_rad,
+  const std::string &yaw_source,
+  const Eigen::Vector3d &earth_rate_enu,
+  const OfflineRunnerConfig &config) {
+  Eigen::Vector3d gravity_alignment = window_summary.mean_acc_mps2;
+  if (gravity_alignment.z() < 0.0) {
+    gravity_alignment *= -1.0;
+  }
+
+  InitialPoseEstimate initial_pose;
+  initial_pose.roll_rad = std::atan2(gravity_alignment.y(), gravity_alignment.z());
+  initial_pose.pitch_rad =
+    std::atan2(-gravity_alignment.x(),
+               std::sqrt(gravity_alignment.y() * gravity_alignment.y() +
+                         gravity_alignment.z() * gravity_alignment.z()));
+  initial_pose.yaw_rad = NormalizeYaw(yaw_rad);
+  initial_pose.stationary_sample_count = window_summary.sample_count;
+  initial_pose.yaw_source = yaw_source;
+  initial_pose.orientation =
+    gtsam::Rot3::Ypr(initial_pose.yaw_rad, initial_pose.pitch_rad, initial_pose.roll_rad);
+  UpdateBiasForOrientation(window_summary, earth_rate_enu, config, initial_pose);
+  return initial_pose;
+}
+
+InitialPoseEstimate OverrideYawAndReestimateBias(
+  InitialPoseEstimate initial_pose,
+  const StaticImuWindowSummary &window_summary,
+  const double yaw_rad,
+  const Eigen::Vector3d &earth_rate_enu,
+  const OfflineRunnerConfig &config) {
+  initial_pose.yaw_rad = NormalizeYaw(yaw_rad);
+  initial_pose.yaw_source = "override";
+  initial_pose.stationary_sample_count = window_summary.sample_count;
+  initial_pose.orientation =
+    gtsam::Rot3::Ypr(initial_pose.yaw_rad, initial_pose.pitch_rad, initial_pose.roll_rad);
+  UpdateBiasForOrientation(window_summary, earth_rate_enu, config, initial_pose);
+  return initial_pose;
+}
+
 }  // namespace
 
 InitialPoseEstimate TrajectoryInitializer::Estimate(
@@ -50,6 +106,41 @@ InitialPoseEstimate TrajectoryInitializer::Estimate(
                                           ? alignment_end_time_s - alignment_start_time_s
                                           : config.imu_dual_vector_window_s;
 
+  if (config.enable_initial_yaw_override) {
+    const auto override_window = StaticImuAlignment::CollectWindow(
+      imu_samples,
+      alignment_start_time_s,
+      dual_vector_duration_s,
+      config,
+      true);
+    if (override_window.sample_count == 0U) {
+      throw std::runtime_error("initial yaw override could not collect an initial IMU window");
+    }
+
+    if (config.prefer_imu_initial_yaw) {
+      InitialPoseEstimate dual_vector_pose;
+      if (StaticImuAlignment::TryEstimateDualVectorInitialization(
+            override_window,
+            earth_rate_enu,
+            config,
+            dual_vector_pose)) {
+        return OverrideYawAndReestimateBias(
+          dual_vector_pose,
+          override_window,
+          config.initial_yaw_override_rad,
+          earth_rate_enu,
+          config);
+      }
+    }
+
+    return EstimateGravityPitchRollWithYaw(
+      override_window,
+      config.initial_yaw_override_rad,
+      "override",
+      earth_rate_enu,
+      config);
+  }
+
   if (config.prefer_imu_initial_yaw) {
     const auto dual_vector_window = StaticImuAlignment::CollectWindow(
       imu_samples,
@@ -76,17 +167,6 @@ InitialPoseEstimate TrajectoryInitializer::Estimate(
     throw std::runtime_error("trajectory initialization could not collect an initial IMU window");
   }
 
-  Eigen::Vector3d gravity_alignment = gravity_window.mean_acc_mps2;
-  if (gravity_alignment.z() < 0.0) {
-    gravity_alignment *= -1.0;
-  }
-
-  const double roll_rad = std::atan2(gravity_alignment.y(), gravity_alignment.z());
-  const double pitch_rad =
-    std::atan2(-gravity_alignment.x(),
-               std::sqrt(gravity_alignment.y() * gravity_alignment.y() +
-                         gravity_alignment.z() * gravity_alignment.z()));
-
   double yaw_rad = config.fallback_initial_yaw_rad;
   std::string yaw_source = "fallback";
   const auto &start_sample = gnss_samples[start_gnss_index];
@@ -108,13 +188,12 @@ InitialPoseEstimate TrajectoryInitializer::Estimate(
     }
   }
 
-  initial_pose.roll_rad = roll_rad;
-  initial_pose.pitch_rad = pitch_rad;
-  initial_pose.yaw_rad = NormalizeYaw(yaw_rad);
-  initial_pose.stationary_sample_count = gravity_window.sample_count;
-  initial_pose.yaw_source = yaw_source;
-  initial_pose.orientation = gtsam::Rot3::Ypr(initial_pose.yaw_rad, initial_pose.pitch_rad, initial_pose.roll_rad);
-  return initial_pose;
+  return EstimateGravityPitchRollWithYaw(
+    gravity_window,
+    yaw_rad,
+    yaw_source,
+    earth_rate_enu,
+    config);
 }
 
 }  // namespace offline_lc_minimal
