@@ -414,7 +414,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     collect_error_diagnostics ||
     collect_segment_error_diagnostics ||
     config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone ||
-    config_.enable_body_z_jump_detection;
+    config_.enable_body_z_jump_detection ||
+    config_.enable_attitude_reference_constraint;
   run_result.run_summary.error_state_count = 0;
 
   const auto imu_params = gtsam::PreintegrationCombinedParams::MakeSharedU(config_.gravity_mps2);
@@ -1226,6 +1227,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   attitude_reference_request.config = &config_;
   attitude_reference_request.state_timestamps = &state_timestamps;
   attitude_reference_request.reference_states = &run_result.attitude_reference_states;
+  attitude_reference_request.relative_yaw_reference_states = &reference_node_states;
   attitude_reference_request.dynamic_start_index = graph_timeline.dynamic_start_index;
   attitude_reference_request.graph = &graph_with_gnss;
   attitude_reference_request.run_summary = &run_result.run_summary;

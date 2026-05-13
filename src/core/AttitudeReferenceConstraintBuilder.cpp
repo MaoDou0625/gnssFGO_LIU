@@ -65,7 +65,8 @@ AttitudeReferenceConstraintBuilder::AttitudeReferenceConstraintBuilder(
 
 void AttitudeReferenceConstraintBuilder::Build() const {
   if (request_.config == nullptr || request_.state_timestamps == nullptr ||
-      request_.reference_states == nullptr || request_.graph == nullptr ||
+      request_.reference_states == nullptr || request_.relative_yaw_reference_states == nullptr ||
+      request_.graph == nullptr ||
       request_.run_summary == nullptr || request_.diagnostics == nullptr ||
       request_.relative_yaw_diagnostics == nullptr) {
     throw std::runtime_error("AttitudeReferenceConstraintBuilder received an incomplete request");
@@ -79,6 +80,12 @@ void AttitudeReferenceConstraintBuilder::Build() const {
   }
   if (request_.reference_states->size() != request_.state_timestamps->size()) {
     throw std::runtime_error("attitude reference state count does not match graph state count");
+  }
+  if (request_.relative_yaw_reference_states->empty()) {
+    throw std::runtime_error("relative yaw reference constraint requires base reference states");
+  }
+  if (request_.relative_yaw_reference_states->size() != request_.state_timestamps->size()) {
+    throw std::runtime_error("relative yaw reference state count does not match graph state count");
   }
   if (request_.dynamic_start_index >= request_.state_timestamps->size()) {
     return;
@@ -95,7 +102,7 @@ void AttitudeReferenceConstraintBuilder::Build() const {
   request_.diagnostics->reserve(request_.diagnostics->size() + dynamic_state_count);
   request_.relative_yaw_diagnostics->reserve(
     request_.relative_yaw_diagnostics->size() +
-    (dynamic_state_count > 0U ? dynamic_state_count - 1U : 0U));
+    (request_.state_timestamps->size() > 0U ? request_.state_timestamps->size() - 1U : 0U));
 
   for (std::size_t state_index = request_.dynamic_start_index;
        state_index < request_.state_timestamps->size();
@@ -112,12 +119,12 @@ void AttitudeReferenceConstraintBuilder::Build() const {
       reference_state.pose.rotation()));
   }
 
-  for (std::size_t state_index_j = request_.dynamic_start_index + 1U;
+  for (std::size_t state_index_j = 1U;
        state_index_j < request_.state_timestamps->size();
        ++state_index_j) {
     const std::size_t state_index_i = state_index_j - 1U;
-    const auto &reference_state_i = (*request_.reference_states)[state_index_i];
-    const auto &reference_state_j = (*request_.reference_states)[state_index_j];
+    const auto &reference_state_i = (*request_.relative_yaw_reference_states)[state_index_i];
+    const auto &reference_state_j = (*request_.relative_yaw_reference_states)[state_index_j];
     request_.graph->add(factor::RelativeYawReferenceFactor(
       symbol::X(state_index_i),
       symbol::X(state_index_j),

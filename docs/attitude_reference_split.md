@@ -7,13 +7,15 @@ This document records the current attitude-reference constraint boundary after t
 `enable_attitude_reference_constraint` now enables two non-overlapping factor types through `AttitudeReferenceConstraintBuilder`:
 
 - `RollPitchReferenceFactor(X_i)` keeps the optimized roll and pitch close to the seed/reference roll and pitch at every dynamic node.
-- `RelativeYawReferenceFactor(X_i, X_j)` keeps only the adjacent dynamic-node yaw increment close to the seed/reference yaw increment.
+- `RelativeYawReferenceFactor(X_i, X_j)` keeps only the adjacent yaw increment close to the base/IMU reference yaw increment.
 
-The builder adds roll/pitch factors for `dynamic_start_index ... end`, and relative-yaw factors for `dynamic_start_index + 1 ... end`. It intentionally does not add a static-to-dynamic relative-yaw edge, so the static/initial absolute yaw cannot be reintroduced through this path.
+The builder adds roll/pitch factors for `dynamic_start_index ... end`, using the RTK seed/reference attitude only for roll and pitch. It adds relative-yaw factors for every adjacent graph state from `X(0)->X(1)` through the final state, including the initial static segment and the static-to-dynamic boundary. Those yaw increments come from the base IMU forward/reference states, not from the RTK seed optimized attitude, so low-motion dynamic intervals are not pulled by RTK-seed yaw drift.
 
 ## Yaw Offset
 
-The attitude reference path no longer locks each node to an absolute reference yaw. A common yaw offset across the dynamic segment is therefore not corrected by these factors. That offset must be estimated by a later yaw-sensitive constraint, such as RTK course or a body-y/NHC relationship against RTK velocity.
+The attitude reference path no longer locks each node to an absolute reference yaw. A common yaw offset across the full static/dynamic chain is therefore not corrected by these factors. If a later yaw-sensitive constraint is added, the relative yaw chain lets the initial/static and dynamic attitudes move together rather than bending only the dynamic segment.
+
+This path does not add RTK course, RTK velocity, body-y velocity, or other yaw observation factors. RTK-derived heading checks are diagnostics or future work only.
 
 ## Configuration
 
@@ -23,4 +25,4 @@ The attitude reference path no longer locks each node to an absolute reference y
 ## Diagnostics
 
 - `attitude_reference_diagnostics.csv` is now a per-state roll/pitch diagnostic. It still records reference and optimized yaw for inspection, but its yaw residual column is `NaN` because no absolute yaw factor is present.
-- `relative_yaw_reference_diagnostics.csv` records each relative-yaw edge, including reference delta yaw, optimized delta yaw, and the yaw residual.
+- `relative_yaw_reference_diagnostics.csv` records each full-chain relative-yaw edge, including reference delta yaw, optimized delta yaw, and the yaw residual.
