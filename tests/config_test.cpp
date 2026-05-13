@@ -829,7 +829,7 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
     config.enable_body_z_nhc_strict_effective_weighting,
     "phase32 should keep strict Body-Z NHC weighting");
   ExpectTrue(
-    std::abs(config.attitude_reference_relative_yaw_sigma_rad - 0.01) < 1e-15,
+    std::abs(config.attitude_reference_relative_yaw_sigma_rad - 0.001) < 1e-15,
     "phase32 relative yaw reference sigma should load");
 }
 
