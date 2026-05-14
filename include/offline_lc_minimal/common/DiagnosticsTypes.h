@@ -363,6 +363,50 @@ struct RelativeYawReferenceDiagnosticRow {
   double residual_yaw_rad = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct RtkOutageAttitudeHoldDiagnosticRow {
+  std::size_t window_index = 0;
+  std::string constraint_type = "UNSET";
+  std::size_t state_index_i = 0;
+  std::size_t state_index_j = 0;
+  double time_i_s = std::numeric_limits<double>::quiet_NaN();
+  double time_j_s = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+  double sigma_rad = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector3d reference_ypr_i_rad =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d reference_ypr_j_rad =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d optimized_ypr_i_rad =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d optimized_ypr_j_rad =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d residual_rad =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double residual_norm_rad = std::numeric_limits<double>::quiet_NaN();
+  double reference_delta_yaw_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_delta_yaw_rad = std::numeric_limits<double>::quiet_NaN();
+  double residual_yaw_rad = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct RtkOutageVelocityDelta3dDiagnosticRow {
+  std::size_t window_index = 0;
+  std::size_t state_index_i = 0;
+  std::size_t state_index_j = 0;
+  double time_i_s = std::numeric_limits<double>::quiet_NaN();
+  double time_j_s = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+  double sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector3d target_delta_v_mps =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d optimized_delta_v_mps =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d residual_mps =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double residual_norm_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct BodyZHorizontalLeakageDiagnosticRow {
   bool enabled = false;
   bool estimate_valid = false;

@@ -34,6 +34,7 @@
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
+#include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageSmoothingConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkVelocityConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
@@ -449,6 +450,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone ||
     config_.enable_body_z_jump_detection ||
     config_.enable_attitude_reference_constraint ||
+    (config_.enable_rtk_outage_smoothing && config_.enable_rtk_outage_attitude_hold) ||
     stage2_reference_ != nullptr;
   run_result.run_summary.error_state_count = 0;
 
@@ -599,6 +601,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   std::vector<std::optional<std::size_t>> trajectory_row_index_by_state(state_timestamps.size(), std::nullopt);
   std::vector<VerticalVelocityDeltaPropagationRecord> vertical_velocity_delta_records;
   vertical_velocity_delta_records.reserve(state_timestamps.size() > 0U ? state_timestamps.size() - 1U : 0U);
+  std::vector<VelocityDeltaPropagationRecord> velocity_delta_records;
+  velocity_delta_records.reserve(state_timestamps.size() > 0U ? state_timestamps.size() - 1U : 0U);
   std::vector<VerticalAccelBiasGmTransitionRecord> vertical_acc_bias_gm_records;
   vertical_acc_bias_gm_records.reserve(state_timestamps.size() > 0U ? state_timestamps.size() - 1U : 0U);
   std::vector<VerticalJumpImuIntervalRecord> vertical_jump_imu_interval_records;
@@ -676,6 +680,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       current_time_s,
       predicted_state.v().z() - previous_nav_state.v().z(),
       previous_bias.accelerometer().z()});
+    velocity_delta_records.push_back(VelocityDeltaPropagationRecord{
+      state_index - 1U,
+      state_index,
+      previous_time_s,
+      current_time_s,
+      predicted_state.v() - previous_nav_state.v()});
     initial_values.insert(X(state_index), predicted_state.pose());
     initial_values.insert(V(state_index), predicted_state.v());
     initial_values.insert(B(state_index), previous_bias);
@@ -1010,6 +1020,15 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.rtk_outage_position_ramp_factor_count = 0;
   run_result.run_summary.rtk_outage_velocity_delta_factor_count = 0;
   run_result.run_summary.rtk_outage_velocity_delta_skipped_body_z_jump_count = 0;
+  run_result.run_summary.rtk_outage_attitude_hold_factor_count = 0;
+  run_result.run_summary.rtk_outage_relative_attitude_factor_count = 0;
+  run_result.run_summary.rtk_outage_velocity_delta_3d_factor_count = 0;
+  run_result.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.rtk_outage_velocity_delta_3d_rms_mps =
+    std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.gnss_factor_count = 0;
   run_result.run_summary.gnss_synced_factor_count = 0;
   run_result.run_summary.gnss_interpolated_factor_count = 0;
@@ -1123,6 +1142,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       ? *active_rtk_vertical_drift_profile_ptr
       : std::vector<RtkVerticalDriftReferenceDiagnosticRow>{};
   run_result.rtk_velocity_diagnostics.clear();
+  run_result.rtk_outage_attitude_hold_diagnostics.clear();
+  run_result.rtk_outage_velocity_delta_3d_diagnostics.clear();
   run_result.vertical_velocity_delta_diagnostics.clear();
   run_result.vertical_motion_adaptive_reweighting_diagnostics.clear();
   run_result.vertical_position_velocity_consistency_diagnostics.clear();
@@ -1281,6 +1302,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   VerticalPositionVelocityConsistencyConstraintBuilder(
     std::move(vertical_position_velocity_request)).Build();
 
+  RtkOutageRecoveryConstraintBuildRequest rtk_outage_recovery_request;
+  rtk_outage_recovery_request.config = &config_;
+  rtk_outage_recovery_request.state_timestamps = &state_timestamps;
+  rtk_outage_recovery_request.outage_windows = &run_result.rtk_outage_windows;
+  rtk_outage_recovery_request.reference_states = &reference_node_states;
+  rtk_outage_recovery_request.velocity_delta_records = &velocity_delta_records;
+  rtk_outage_recovery_request.graph = &graph_with_gnss;
+  rtk_outage_recovery_request.run_summary = &run_result.run_summary;
+  rtk_outage_recovery_request.attitude_diagnostics =
+    &run_result.rtk_outage_attitude_hold_diagnostics;
+  rtk_outage_recovery_request.velocity_diagnostics =
+    &run_result.rtk_outage_velocity_delta_3d_diagnostics;
+  RtkOutageRecoveryConstraintBuilder(std::move(rtk_outage_recovery_request)).Build();
+
   RtkOutageSmoothingConstraintBuildRequest rtk_outage_request;
   rtk_outage_request.config = &config_;
   rtk_outage_request.state_timestamps = &state_timestamps;
@@ -1374,6 +1409,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   RtkVelocityConstraintBuilder::PopulateDiagnostics(
     optimized_values,
     run_result.rtk_velocity_diagnostics,
+    run_result.run_summary);
+  PopulateRtkOutageRecoveryDiagnostics(
+    optimized_values,
+    run_result.rtk_outage_attitude_hold_diagnostics,
+    run_result.rtk_outage_velocity_delta_3d_diagnostics,
     run_result.run_summary);
   completed_adaptive_pass_count = adaptive_pass + 1;
 

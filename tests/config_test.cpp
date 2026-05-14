@@ -822,6 +822,20 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
   ExpectTrue(
     std::abs(config.rtk_outage_velocity_delta_sigma_mps - 0.02) < 1e-15,
     "phase32 RTK outage dvz sigma should load");
+  ExpectTrue(config.enable_rtk_outage_attitude_hold, "phase32 should enable outage attitude hold");
+  ExpectTrue(
+    std::abs(config.rtk_outage_attitude_guard_duration_s - 1.0) < 1e-15,
+    "phase32 outage attitude guard duration should load");
+  ExpectTrue(
+    std::abs(config.rtk_outage_absolute_attitude_sigma_rad - 1.0e-4) < 1e-15,
+    "phase32 outage absolute attitude sigma should load");
+  ExpectTrue(
+    std::abs(config.rtk_outage_relative_attitude_sigma_rad - 1.0e-4) < 1e-15,
+    "phase32 outage relative attitude sigma should load");
+  ExpectTrue(config.enable_rtk_outage_velocity_delta_3d, "phase32 should enable outage 3D velocity delta");
+  ExpectTrue(
+    std::abs(config.rtk_outage_velocity_delta_3d_sigma_mps - 0.20) < 1e-15,
+    "phase32 outage 3D velocity delta sigma should load");
   ExpectTrue(
     config.enable_rtk_vertical_drift_reference,
     "phase32 should keep RTK drift reference");
@@ -1832,6 +1846,60 @@ void TestRtkVelocityConfigValidation() {
   ExpectTrue(threw, "non-positive RTK velocity window should be rejected");
 }
 
+void TestRtkOutageRecoveryConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_attitude_hold", "true");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_attitude_guard_duration_s", "1.5");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_absolute_attitude_sigma_rad", "2e-4");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_relative_attitude_sigma_rad", "3e-4");
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_velocity_delta_3d", "true");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_velocity_delta_3d_sigma_mps", "0.35");
+  offline_lc_minimal::ValidateConfig(config);
+  ExpectTrue(config.enable_rtk_outage_attitude_hold, "outage attitude hold flag should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_attitude_guard_duration_s - 1.5) < 1e-12,
+    "outage attitude guard duration should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_absolute_attitude_sigma_rad - 2e-4) < 1e-12,
+    "outage absolute attitude sigma should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_relative_attitude_sigma_rad - 3e-4) < 1e-12,
+    "outage relative attitude sigma should parse");
+  ExpectTrue(config.enable_rtk_outage_velocity_delta_3d, "outage 3D velocity flag should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_velocity_delta_3d_sigma_mps - 0.35) < 1e-12,
+    "outage 3D velocity sigma should parse");
+
+  config.rtk_outage_absolute_attitude_sigma_rad = 0.0;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK outage smoothing settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive outage attitude sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_attitude_guard_duration_s = -1.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK outage smoothing settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "negative outage attitude guard duration should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_velocity_delta_3d_sigma_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK outage smoothing settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive outage 3D velocity sigma should be rejected");
+}
+
 void TestInitialYawOverrideConfigValidation() {
   auto config = offline_lc_minimal::DefaultConfig();
   offline_lc_minimal::OverrideConfigField(config, "enable_initial_yaw_override", "true");
@@ -1977,6 +2045,7 @@ int main() {
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);
     RunTest("TestBodyZNHCConfigValidation", TestBodyZNHCConfigValidation);
     RunTest("TestRtkVelocityConfigValidation", TestRtkVelocityConfigValidation);
+    RunTest("TestRtkOutageRecoveryConfigValidation", TestRtkOutageRecoveryConfigValidation);
     RunTest("TestInitialYawOverrideConfigValidation", TestInitialYawOverrideConfigValidation);
     RunTest("TestStage1YawRefinementConfigValidation", TestStage1YawRefinementConfigValidation);
   } catch (const std::exception &exception) {

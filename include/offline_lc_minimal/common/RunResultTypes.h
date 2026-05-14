@@ -102,6 +102,15 @@ struct RunSummary {
   std::size_t rtk_outage_position_ramp_factor_count = 0;
   std::size_t rtk_outage_velocity_delta_factor_count = 0;
   std::size_t rtk_outage_velocity_delta_skipped_body_z_jump_count = 0;
+  std::size_t rtk_outage_attitude_hold_factor_count = 0;
+  std::size_t rtk_outage_relative_attitude_factor_count = 0;
+  std::size_t rtk_outage_velocity_delta_3d_factor_count = 0;
+  double rtk_outage_attitude_hold_max_abs_residual_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  double rtk_outage_relative_attitude_max_abs_residual_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  double rtk_outage_velocity_delta_3d_rms_mps =
+    std::numeric_limits<double>::quiet_NaN();
   bool rtk_velocity_constraint_enabled = false;
   std::size_t rtk_velocity_candidate_count = 0;
   std::size_t rtk_velocity_factor_count = 0;
@@ -370,6 +379,18 @@ struct RunSummary {
         << rtk_outage_velocity_delta_factor_count << '\n'
         << "rtk_outage_velocity_delta_skipped_body_z_jump_count="
         << rtk_outage_velocity_delta_skipped_body_z_jump_count << '\n'
+        << "rtk_outage_attitude_hold_factor_count="
+        << rtk_outage_attitude_hold_factor_count << '\n'
+        << "rtk_outage_relative_attitude_factor_count="
+        << rtk_outage_relative_attitude_factor_count << '\n'
+        << "rtk_outage_velocity_delta_3d_factor_count="
+        << rtk_outage_velocity_delta_3d_factor_count << '\n'
+        << "rtk_outage_attitude_hold_max_abs_residual_rad="
+        << rtk_outage_attitude_hold_max_abs_residual_rad << '\n'
+        << "rtk_outage_relative_attitude_max_abs_residual_rad="
+        << rtk_outage_relative_attitude_max_abs_residual_rad << '\n'
+        << "rtk_outage_velocity_delta_3d_rms_mps="
+        << rtk_outage_velocity_delta_3d_rms_mps << '\n'
         << "rtk_velocity_constraint_enabled="
         << (rtk_velocity_constraint_enabled ? "true" : "false") << '\n'
         << "rtk_velocity_candidate_count=" << rtk_velocity_candidate_count << '\n'
@@ -612,6 +633,8 @@ struct OfflineRunResult {
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
   std::vector<RtkVerticalDriftReferenceDiagnosticRow> rtk_vertical_drift_reference_diagnostics;
   std::vector<RtkOutageWindowRow> rtk_outage_windows;
+  std::vector<RtkOutageAttitudeHoldDiagnosticRow> rtk_outage_attitude_hold_diagnostics;
+  std::vector<RtkOutageVelocityDelta3dDiagnosticRow> rtk_outage_velocity_delta_3d_diagnostics;
   std::vector<RtkVelocityDiagnosticRow> rtk_velocity_diagnostics;
   std::vector<StaticAlignmentValidationRow> static_alignment_validation;
   std::vector<VerticalVelocityDeltaDiagnosticRow> vertical_velocity_delta_diagnostics;

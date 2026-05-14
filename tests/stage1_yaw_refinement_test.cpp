@@ -87,6 +87,8 @@ void TestStage1PolicyDisablesSecondStageConstraints() {
   config.enable_body_z_nhc_global_weak_constraint = true;
   config.enable_body_z_nhc_strict_effective_weighting = true;
   config.enable_body_z_nhc_horizontal_leakage_correction = true;
+  config.enable_rtk_outage_attitude_hold = true;
+  config.enable_rtk_outage_velocity_delta_3d = true;
   config.enable_vertical_jump_masked_imu = true;
   config.enable_vertical_jump_impulse = true;
   config.enable_vertical_jump_bias = true;
@@ -104,7 +106,9 @@ void TestStage1PolicyDisablesSecondStageConstraints() {
   ExpectTrue(stage_config.enable_attitude_reference_constraint, "attitude reference should be preserved");
   ExpectTrue(stage_config.enable_body_z_jump_detection, "body-z jump detection should be preserved");
   ExpectTrue(!stage_config.enable_rtk_velocity_constraint, "RTK velocity should be disabled");
-  ExpectTrue(!stage_config.enable_rtk_outage_smoothing, "RTK outage smoothing should be disabled");
+  ExpectTrue(stage_config.enable_rtk_outage_smoothing, "RTK outage smoothing should be preserved");
+  ExpectTrue(stage_config.enable_rtk_outage_attitude_hold, "outage attitude hold should be preserved");
+  ExpectTrue(stage_config.enable_rtk_outage_velocity_delta_3d, "outage 3D velocity delta should be preserved");
   ExpectTrue(!stage_config.enable_vertical_velocity_delta_constraint, "vertical velocity delta should be disabled");
   ExpectTrue(!stage_config.enable_vertical_motion_adaptive_reweighting, "adaptive reweighting should be disabled");
   ExpectTrue(

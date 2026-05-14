@@ -361,10 +361,18 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       !std::isfinite(config.rtk_outage_position_ramp_sigma_m) ||
       !std::isfinite(config.rtk_outage_velocity_delta_sigma_mps) ||
       !std::isfinite(config.rtk_outage_velocity_delta_target_acc_limit_mps2) ||
+      !std::isfinite(config.rtk_outage_attitude_guard_duration_s) ||
+      !std::isfinite(config.rtk_outage_absolute_attitude_sigma_rad) ||
+      !std::isfinite(config.rtk_outage_relative_attitude_sigma_rad) ||
+      !std::isfinite(config.rtk_outage_velocity_delta_3d_sigma_mps) ||
       config.rtk_outage_min_gap_s <= 0.0 ||
       config.rtk_outage_position_ramp_sigma_m <= 0.0 ||
       config.rtk_outage_velocity_delta_sigma_mps <= 0.0 ||
       config.rtk_outage_velocity_delta_target_acc_limit_mps2 <= 0.0 ||
+      config.rtk_outage_attitude_guard_duration_s < 0.0 ||
+      config.rtk_outage_absolute_attitude_sigma_rad <= 0.0 ||
+      config.rtk_outage_relative_attitude_sigma_rad <= 0.0 ||
+      config.rtk_outage_velocity_delta_3d_sigma_mps <= 0.0 ||
       config.rtk_outage_position_ramp_stride <= 0) {
     throw std::runtime_error("RTK outage smoothing settings must be positive");
   }
@@ -894,6 +902,18 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.rtk_outage_velocity_delta_target_acc_limit_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "rtk_outage_position_ramp_stride") {
     config.rtk_outage_position_ramp_stride = ParseInt(normalized_value);
+  } else if (normalized_key == "enable_rtk_outage_attitude_hold") {
+    config.enable_rtk_outage_attitude_hold = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_outage_attitude_guard_duration_s") {
+    config.rtk_outage_attitude_guard_duration_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_outage_absolute_attitude_sigma_rad") {
+    config.rtk_outage_absolute_attitude_sigma_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_outage_relative_attitude_sigma_rad") {
+    config.rtk_outage_relative_attitude_sigma_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_rtk_outage_velocity_delta_3d") {
+    config.enable_rtk_outage_velocity_delta_3d = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_outage_velocity_delta_3d_sigma_mps") {
+    config.rtk_outage_velocity_delta_3d_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_rtk_velocity_constraint") {
     config.enable_rtk_velocity_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "rtk_velocity_window_s") {
@@ -1347,6 +1367,18 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "rtk_outage_velocity_delta_target_acc_limit_mps2="
     << config.rtk_outage_velocity_delta_target_acc_limit_mps2 << '\n'
     << "rtk_outage_position_ramp_stride=" << config.rtk_outage_position_ramp_stride << '\n'
+    << "enable_rtk_outage_attitude_hold="
+    << (config.enable_rtk_outage_attitude_hold ? "true" : "false") << '\n'
+    << "rtk_outage_attitude_guard_duration_s="
+    << config.rtk_outage_attitude_guard_duration_s << '\n'
+    << "rtk_outage_absolute_attitude_sigma_rad="
+    << config.rtk_outage_absolute_attitude_sigma_rad << '\n'
+    << "rtk_outage_relative_attitude_sigma_rad="
+    << config.rtk_outage_relative_attitude_sigma_rad << '\n'
+    << "enable_rtk_outage_velocity_delta_3d="
+    << (config.enable_rtk_outage_velocity_delta_3d ? "true" : "false") << '\n'
+    << "rtk_outage_velocity_delta_3d_sigma_mps="
+    << config.rtk_outage_velocity_delta_3d_sigma_mps << '\n'
     << "enable_rtk_velocity_constraint="
     << (config.enable_rtk_velocity_constraint ? "true" : "false") << '\n'
     << "rtk_velocity_window_s=" << config.rtk_velocity_window_s << '\n'

@@ -84,6 +84,16 @@ void ResultWriter::WriteOutputs(
       output_path / "rtk_outage_windows.csv",
       result.rtk_outage_windows);
   }
+  if (!result.rtk_outage_attitude_hold_diagnostics.empty()) {
+    WriteRtkOutageAttitudeHoldDiagnosticsCsv(
+      output_path / "rtk_outage_attitude_hold_diagnostics.csv",
+      result.rtk_outage_attitude_hold_diagnostics);
+  }
+  if (!result.rtk_outage_velocity_delta_3d_diagnostics.empty()) {
+    WriteRtkOutageVelocityDelta3dDiagnosticsCsv(
+      output_path / "rtk_outage_velocity_delta_3d_diagnostics.csv",
+      result.rtk_outage_velocity_delta_3d_diagnostics);
+  }
   if (!result.rtk_velocity_diagnostics.empty()) {
     WriteRtkVelocityDiagnosticsCsv(
       output_path / "rtk_velocity_diagnostics.csv",

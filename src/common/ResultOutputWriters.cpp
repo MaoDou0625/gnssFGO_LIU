@@ -466,6 +466,91 @@ void WriteRtkOutageWindowsCsv(
   }
 }
 
+void WriteRtkOutageAttitudeHoldDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageAttitudeHoldDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,constraint_type,state_index_i,state_index_j,time_i_s,time_j_s,"
+       "factor_added,skip_reason,sigma_rad,"
+       "reference_yaw_i_rad,reference_pitch_i_rad,reference_roll_i_rad,"
+       "reference_yaw_j_rad,reference_pitch_j_rad,reference_roll_j_rad,"
+       "optimized_yaw_i_rad,optimized_pitch_i_rad,optimized_roll_i_rad,"
+       "optimized_yaw_j_rad,optimized_pitch_j_rad,optimized_roll_j_rad,"
+       "residual_x_rad,residual_y_rad,residual_z_rad,residual_norm_rad,"
+       "reference_delta_yaw_rad,optimized_delta_yaw_rad,residual_yaw_rad\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.constraint_type << ','
+           << row.state_index_i << ','
+           << row.state_index_j << ','
+           << row.time_i_s << ','
+           << row.time_j_s << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << row.sigma_rad << ','
+           << row.reference_ypr_i_rad.x() << ','
+           << row.reference_ypr_i_rad.y() << ','
+           << row.reference_ypr_i_rad.z() << ','
+           << row.reference_ypr_j_rad.x() << ','
+           << row.reference_ypr_j_rad.y() << ','
+           << row.reference_ypr_j_rad.z() << ','
+           << row.optimized_ypr_i_rad.x() << ','
+           << row.optimized_ypr_i_rad.y() << ','
+           << row.optimized_ypr_i_rad.z() << ','
+           << row.optimized_ypr_j_rad.x() << ','
+           << row.optimized_ypr_j_rad.y() << ','
+           << row.optimized_ypr_j_rad.z() << ','
+           << row.residual_rad.x() << ','
+           << row.residual_rad.y() << ','
+           << row.residual_rad.z() << ','
+           << row.residual_norm_rad << ','
+           << row.reference_delta_yaw_rad << ','
+           << row.optimized_delta_yaw_rad << ','
+           << row.residual_yaw_rad << '\n';
+  }
+}
+
+void WriteRtkOutageVelocityDelta3dDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageVelocityDelta3dDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,state_index_i,state_index_j,time_i_s,time_j_s,"
+       "factor_added,skip_reason,sigma_mps,"
+       "target_delta_vx_mps,target_delta_vy_mps,target_delta_vz_mps,"
+       "optimized_delta_vx_mps,optimized_delta_vy_mps,optimized_delta_vz_mps,"
+       "residual_x_mps,residual_y_mps,residual_z_mps,residual_norm_mps\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.state_index_i << ','
+           << row.state_index_j << ','
+           << row.time_i_s << ','
+           << row.time_j_s << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << row.sigma_mps << ','
+           << row.target_delta_v_mps.x() << ','
+           << row.target_delta_v_mps.y() << ','
+           << row.target_delta_v_mps.z() << ','
+           << row.optimized_delta_v_mps.x() << ','
+           << row.optimized_delta_v_mps.y() << ','
+           << row.optimized_delta_v_mps.z() << ','
+           << row.residual_mps.x() << ','
+           << row.residual_mps.y() << ','
+           << row.residual_mps.z() << ','
+           << row.residual_norm_mps << '\n';
+  }
+}
+
 void WriteRtkVelocityDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkVelocityDiagnosticRow> &rows) {

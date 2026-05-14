@@ -8,7 +8,6 @@ OfflineRunnerConfig MakeStage1YawRefinementConfig(const OfflineRunnerConfig &con
   stage_config.enable_stage1_yaw_refinement = false;
 
   stage_config.enable_rtk_velocity_constraint = false;
-  stage_config.enable_rtk_outage_smoothing = false;
   stage_config.enable_vertical_velocity_delta_constraint = false;
   stage_config.enable_vertical_motion_adaptive_reweighting = false;
   stage_config.enable_vertical_position_velocity_consistency_all_states = false;

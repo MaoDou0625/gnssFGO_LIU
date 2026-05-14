@@ -54,6 +54,14 @@ void WriteRtkOutageWindowsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkOutageWindowRow> &rows);
 
+void WriteRtkOutageAttitudeHoldDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageAttitudeHoldDiagnosticRow> &rows);
+
+void WriteRtkOutageVelocityDelta3dDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageVelocityDelta3dDiagnosticRow> &rows);
+
 void WriteRtkVelocityDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkVelocityDiagnosticRow> &rows);
