@@ -13,6 +13,22 @@
 
 namespace offline_lc_minimal {
 
+struct Stage1YawRefinementDiagnosticRow {
+  int iteration = 0;
+  double input_yaw_rad = std::numeric_limits<double>::quiet_NaN();
+  double median_error_rad = std::numeric_limits<double>::quiet_NaN();
+  double heading_noise_rad = std::numeric_limits<double>::quiet_NaN();
+  double yaw_update_rad = 0.0;
+  double next_yaw_rad = std::numeric_limits<double>::quiet_NaN();
+  std::size_t valid_pair_count = 0;
+  double mean_abs_error_rad = std::numeric_limits<double>::quiet_NaN();
+  double rms_error_rad = std::numeric_limits<double>::quiet_NaN();
+  double max_abs_error_rad = std::numeric_limits<double>::quiet_NaN();
+  double final_error = std::numeric_limits<double>::quiet_NaN();
+  double gnss_nis_mean = std::numeric_limits<double>::quiet_NaN();
+  std::string stop_reason;
+};
+
 struct RunSummary {
   bool gnss_enabled = true;
   bool initial_static_constraints_enabled = false;
@@ -224,6 +240,14 @@ struct RunSummary {
   double processing_end_time_s = 0.0;
   double static_alignment_duration_s = 0.0;
   std::string yaw_source = "fallback";
+  bool stage1_yaw_refinement_enabled = false;
+  int stage1_yaw_refinement_iteration_count = 0;
+  bool stage1_yaw_refinement_converged = false;
+  std::string stage1_yaw_refinement_stop_reason;
+  double stage1_yaw_refinement_final_yaw_rad = std::numeric_limits<double>::quiet_NaN();
+  double stage1_yaw_refinement_final_median_error_rad = std::numeric_limits<double>::quiet_NaN();
+  double stage1_yaw_refinement_final_noise_rad = std::numeric_limits<double>::quiet_NaN();
+  double stage1_yaw_refinement_final_update_rad = std::numeric_limits<double>::quiet_NaN();
 
   [[nodiscard]] std::string ToMultilineString() const {
     std::ostringstream oss;
@@ -500,7 +524,23 @@ struct RunSummary {
         << "dynamic_start_time_s=" << dynamic_start_time_s << '\n'
         << "processing_end_time_s=" << processing_end_time_s << '\n'
         << "static_alignment_duration_s=" << static_alignment_duration_s << '\n'
-        << "yaw_source=" << yaw_source << '\n';
+        << "yaw_source=" << yaw_source << '\n'
+        << "stage1_yaw_refinement_enabled="
+        << (stage1_yaw_refinement_enabled ? "true" : "false") << '\n'
+        << "stage1_yaw_refinement_iteration_count="
+        << stage1_yaw_refinement_iteration_count << '\n'
+        << "stage1_yaw_refinement_converged="
+        << (stage1_yaw_refinement_converged ? "true" : "false") << '\n'
+        << "stage1_yaw_refinement_stop_reason="
+        << stage1_yaw_refinement_stop_reason << '\n'
+        << "stage1_yaw_refinement_final_yaw_rad="
+        << stage1_yaw_refinement_final_yaw_rad << '\n'
+        << "stage1_yaw_refinement_final_median_error_rad="
+        << stage1_yaw_refinement_final_median_error_rad << '\n'
+        << "stage1_yaw_refinement_final_noise_rad="
+        << stage1_yaw_refinement_final_noise_rad << '\n'
+        << "stage1_yaw_refinement_final_update_rad="
+        << stage1_yaw_refinement_final_update_rad << '\n';
     return oss.str();
   }
 };
@@ -542,6 +582,7 @@ struct OfflineRunResult {
   std::vector<VerticalJumpVelocityRampDiagnosticRow> vertical_jump_velocity_ramp_diagnostics;
   std::vector<VerticalJumpContinuityDiagnosticRow> vertical_jump_continuity_diagnostics;
   std::vector<VerticalStateCorrectionRow> vertical_state_corrections;
+  std::vector<Stage1YawRefinementDiagnosticRow> stage1_yaw_refinement_diagnostics;
 };
 
 class OfflineRunFailure : public std::runtime_error {

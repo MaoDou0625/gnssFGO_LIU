@@ -58,6 +58,10 @@ void WriteRtkVelocityDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkVelocityDiagnosticRow> &rows);
 
+void WriteStage1YawRefinementDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage1YawRefinementDiagnosticRow> &rows);
+
 void WriteStaticAlignmentValidationCsv(
   const std::filesystem::path &path,
   const std::vector<StaticAlignmentValidationRow> &rows);

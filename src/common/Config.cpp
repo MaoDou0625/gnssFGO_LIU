@@ -231,6 +231,19 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (config.enable_initial_yaw_override && !std::isfinite(config.initial_yaw_override_rad)) {
     throw std::runtime_error("initial yaw override must be finite when enabled");
   }
+  if (config.stage1_yaw_refinement_max_iterations <= 0 ||
+      !std::isfinite(config.stage1_heading_window_s) ||
+      !std::isfinite(config.stage1_heading_time_tolerance_s) ||
+      !std::isfinite(config.stage1_heading_min_displacement_m) ||
+      !std::isfinite(config.stage1_heading_noise_floor_rad) ||
+      !std::isfinite(config.stage1_yaw_update_max_rad) ||
+      config.stage1_heading_window_s <= 0.0 ||
+      config.stage1_heading_time_tolerance_s <= 0.0 ||
+      config.stage1_heading_min_displacement_m <= 0.0 ||
+      config.stage1_heading_noise_floor_rad <= 0.0 ||
+      config.stage1_yaw_update_max_rad <= 0.0) {
+    throw std::runtime_error("stage1 yaw refinement settings must be positive and finite");
+  }
   if (config.initial_static_zupt_velocity_sigma_mps <= 0.0 ||
       config.initial_static_zaru_sigma_radps <= 0.0 ||
       config.initial_static_specific_force_sigma_mps2 <= 0.0 ||
@@ -715,6 +728,20 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_initial_yaw_override = ParseBool(normalized_value);
   } else if (normalized_key == "initial_yaw_override_rad") {
     config.initial_yaw_override_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_stage1_yaw_refinement") {
+    config.enable_stage1_yaw_refinement = ParseBool(normalized_value);
+  } else if (normalized_key == "stage1_yaw_refinement_max_iterations") {
+    config.stage1_yaw_refinement_max_iterations = ParseInt(normalized_value);
+  } else if (normalized_key == "stage1_heading_window_s") {
+    config.stage1_heading_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage1_heading_time_tolerance_s") {
+    config.stage1_heading_time_tolerance_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage1_heading_min_displacement_m") {
+    config.stage1_heading_min_displacement_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage1_heading_noise_floor_rad") {
+    config.stage1_heading_noise_floor_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage1_yaw_update_max_rad") {
+    config.stage1_yaw_update_max_rad = ParseDouble(normalized_value);
   } else if (normalized_key == "static_alignment_duration_s") {
     config.static_alignment_duration_s = ParseDouble(normalized_value);
   } else if (normalized_key == "imu_dual_vector_window_s") {
@@ -1197,6 +1224,13 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "prefer_imu_initial_yaw=" << (config.prefer_imu_initial_yaw ? "true" : "false") << '\n'
     << "enable_initial_yaw_override=" << (config.enable_initial_yaw_override ? "true" : "false") << '\n'
     << "initial_yaw_override_rad=" << config.initial_yaw_override_rad << '\n'
+    << "enable_stage1_yaw_refinement=" << (config.enable_stage1_yaw_refinement ? "true" : "false") << '\n'
+    << "stage1_yaw_refinement_max_iterations=" << config.stage1_yaw_refinement_max_iterations << '\n'
+    << "stage1_heading_window_s=" << config.stage1_heading_window_s << '\n'
+    << "stage1_heading_time_tolerance_s=" << config.stage1_heading_time_tolerance_s << '\n'
+    << "stage1_heading_min_displacement_m=" << config.stage1_heading_min_displacement_m << '\n'
+    << "stage1_heading_noise_floor_rad=" << config.stage1_heading_noise_floor_rad << '\n'
+    << "stage1_yaw_update_max_rad=" << config.stage1_yaw_update_max_rad << '\n'
     << "static_alignment_duration_s=" << config.static_alignment_duration_s << '\n'
     << "imu_dual_vector_window_s=" << config.imu_dual_vector_window_s << '\n'
     << "imu_dual_vector_min_sample_count=" << config.imu_dual_vector_min_sample_count << '\n'

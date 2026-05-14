@@ -38,6 +38,7 @@
 #include "offline_lc_minimal/core/RtkVelocityConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
 #include "offline_lc_minimal/core/RtkVerticalDriftReferenceEstimator.h"
+#include "offline_lc_minimal/core/Stage1YawRefinementRunner.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
 #include "offline_lc_minimal/core/VerticalAdaptiveReweightingLoop.h"
@@ -284,6 +285,16 @@ Eigen::Vector3d OfflineBatchRunner::ClampGnssSigma(const GnssSolutionSample &sam
 }
 
 OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
+  if (config_.enable_stage1_yaw_refinement) {
+    Stage1YawRefinementRequest request;
+    request.config = config_;
+    request.dataset = std::move(dataset);
+    request.run_once = [](const OfflineRunnerConfig &config, DataSet run_dataset) {
+      return OfflineBatchRunner(config).Run(std::move(run_dataset));
+    };
+    return Stage1YawRefinementRunner(std::move(request)).Run();
+  }
+
   if (dataset.imu_samples.empty()) {
     throw std::runtime_error("offline runner received an empty IMU data set");
   }

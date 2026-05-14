@@ -87,6 +87,13 @@ struct OfflineRunnerConfig {
   bool prefer_imu_initial_yaw = false;
   bool enable_initial_yaw_override = false;
   double initial_yaw_override_rad = 0.0;
+  bool enable_stage1_yaw_refinement = false;
+  int stage1_yaw_refinement_max_iterations = 10;
+  double stage1_heading_window_s = 1.0;
+  double stage1_heading_time_tolerance_s = 0.12;
+  double stage1_heading_min_displacement_m = 0.2;
+  double stage1_heading_noise_floor_rad = 0.00872664626;
+  double stage1_yaw_update_max_rad = 1.57079632679;
   double static_alignment_duration_s = 0.0;
   double imu_dual_vector_window_s = 100.0;
   int imu_dual_vector_min_sample_count = 1000;

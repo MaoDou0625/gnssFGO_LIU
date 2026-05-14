@@ -512,6 +512,35 @@ void WriteRtkVelocityDiagnosticsCsv(
   }
 }
 
+void WriteStage1YawRefinementDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage1YawRefinementDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "iteration,input_yaw_rad,median_error_rad,heading_noise_rad,yaw_update_rad,next_yaw_rad,"
+       "valid_pair_count,mean_abs_error_rad,rms_error_rad,max_abs_error_rad,final_error,gnss_nis_mean,"
+       "stop_reason\n";
+  for (const auto &row : rows) {
+    stream << row.iteration << ','
+           << row.input_yaw_rad << ','
+           << row.median_error_rad << ','
+           << row.heading_noise_rad << ','
+           << row.yaw_update_rad << ','
+           << row.next_yaw_rad << ','
+           << row.valid_pair_count << ','
+           << row.mean_abs_error_rad << ','
+           << row.rms_error_rad << ','
+           << row.max_abs_error_rad << ','
+           << row.final_error << ','
+           << row.gnss_nis_mean << ','
+           << row.stop_reason << '\n';
+  }
+}
+
 void WriteStaticAlignmentValidationCsv(
   const std::filesystem::path &path,
   const std::vector<StaticAlignmentValidationRow> &rows) {

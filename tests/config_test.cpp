@@ -1851,6 +1851,62 @@ void TestInitialYawOverrideConfigValidation() {
   ExpectTrue(threw, "enabled initial yaw override should reject non-finite yaw");
 }
 
+void TestStage1YawRefinementConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "enable_stage1_yaw_refinement", "true");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_yaw_refinement_max_iterations", "8");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_heading_window_s", "1.5");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_heading_time_tolerance_s", "0.15");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_heading_min_displacement_m", "0.30");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_heading_noise_floor_rad", "0.01");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_yaw_update_max_rad", "1.0");
+  ExpectTrue(config.enable_stage1_yaw_refinement, "stage1 yaw refinement flag should parse");
+  ExpectTrue(config.stage1_yaw_refinement_max_iterations == 8, "stage1 max iterations should parse");
+  ExpectTrue(std::abs(config.stage1_heading_window_s - 1.5) < 1e-12, "stage1 heading window should parse");
+  ExpectTrue(
+    std::abs(config.stage1_heading_time_tolerance_s - 0.15) < 1e-12,
+    "stage1 heading time tolerance should parse");
+  ExpectTrue(
+    std::abs(config.stage1_heading_min_displacement_m - 0.30) < 1e-12,
+    "stage1 heading displacement threshold should parse");
+  ExpectTrue(
+    std::abs(config.stage1_heading_noise_floor_rad - 0.01) < 1e-12,
+    "stage1 heading noise floor should parse");
+  ExpectTrue(
+    std::abs(config.stage1_yaw_update_max_rad - 1.0) < 1e-12,
+    "stage1 yaw update cap should parse");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage1_yaw_refinement_max_iterations = 0;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("stage1 yaw refinement settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive stage1 iteration count should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage1_heading_window_s = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("stage1 yaw refinement settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive stage1 heading window should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage1_heading_noise_floor_rad = std::numeric_limits<double>::infinity();
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("stage1 yaw refinement settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-finite stage1 noise floor should be rejected");
+}
+
 }  // namespace
 
 int main() {
@@ -1922,6 +1978,7 @@ int main() {
     RunTest("TestBodyZNHCConfigValidation", TestBodyZNHCConfigValidation);
     RunTest("TestRtkVelocityConfigValidation", TestRtkVelocityConfigValidation);
     RunTest("TestInitialYawOverrideConfigValidation", TestInitialYawOverrideConfigValidation);
+    RunTest("TestStage1YawRefinementConfigValidation", TestStage1YawRefinementConfigValidation);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

@@ -89,6 +89,11 @@ void ResultWriter::WriteOutputs(
       output_path / "rtk_velocity_diagnostics.csv",
       result.rtk_velocity_diagnostics);
   }
+  if (!result.stage1_yaw_refinement_diagnostics.empty()) {
+    WriteStage1YawRefinementDiagnosticsCsv(
+      output_path / "stage1_yaw_refinement_diagnostics.csv",
+      result.stage1_yaw_refinement_diagnostics);
+  }
   if (!result.static_alignment_validation.empty()) {
     WriteStaticAlignmentValidationCsv(
       output_path / "static_alignment_validation.csv",
