@@ -152,6 +152,25 @@ struct RunSummary {
   double body_z_nhc_corrected_max_velocity_residual_mps = std::numeric_limits<double>::quiet_NaN();
   double body_z_nhc_corrected_max_abs_displacement_residual_m =
     std::numeric_limits<double>::quiet_NaN();
+  bool stage2_velocity_optimization_enabled = false;
+  std::size_t stage2_attitude_hold_factor_count = 0;
+  std::size_t stage2_vehicle_y_nhc_velocity_factor_count = 0;
+  std::size_t stage2_vehicle_y_nhc_displacement_factor_count = 0;
+  std::size_t stage2_vehicle_z_nhc_velocity_factor_count = 0;
+  std::size_t stage2_vehicle_z_nhc_displacement_factor_count = 0;
+  std::size_t stage2_vehicle_nhc_window_count = 0;
+  std::size_t stage2_vehicle_nhc_skipped_short_window_count = 0;
+  std::size_t stage2_vehicle_nhc_skipped_invalid_count = 0;
+  std::size_t stage2_vehicle_nhc_unique_velocity_factor_count = 0;
+  std::size_t stage2_vehicle_nhc_velocity_duplicate_state_count = 0;
+  std::size_t stage2_vehicle_nhc_interval_overlap_count = 0;
+  double stage2_mount_initial_k_zx_rad = std::numeric_limits<double>::quiet_NaN();
+  double stage2_mount_initial_k_zy_rad = std::numeric_limits<double>::quiet_NaN();
+  double stage2_mount_initial_k_yx_rad = std::numeric_limits<double>::quiet_NaN();
+  double stage2_mount_k_zx_rad = std::numeric_limits<double>::quiet_NaN();
+  double stage2_mount_k_zy_rad = std::numeric_limits<double>::quiet_NaN();
+  double stage2_mount_k_yx_rad = std::numeric_limits<double>::quiet_NaN();
+  double stage2_max_abs_yaw_delta_rad = std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_jump_combined_imu_factor_count = 0;
   std::size_t vertical_jump_masked_imu_factor_count = 0;
   std::size_t vertical_jump_impulse_factor_count = 0;
@@ -420,6 +439,35 @@ struct RunSummary {
         << body_z_nhc_corrected_max_velocity_residual_mps << '\n'
         << "body_z_nhc_corrected_max_abs_displacement_residual_m="
         << body_z_nhc_corrected_max_abs_displacement_residual_m << '\n'
+        << "stage2_velocity_optimization_enabled="
+        << (stage2_velocity_optimization_enabled ? "true" : "false") << '\n'
+        << "stage2_attitude_hold_factor_count=" << stage2_attitude_hold_factor_count << '\n'
+        << "stage2_vehicle_y_nhc_velocity_factor_count="
+        << stage2_vehicle_y_nhc_velocity_factor_count << '\n'
+        << "stage2_vehicle_y_nhc_displacement_factor_count="
+        << stage2_vehicle_y_nhc_displacement_factor_count << '\n'
+        << "stage2_vehicle_z_nhc_velocity_factor_count="
+        << stage2_vehicle_z_nhc_velocity_factor_count << '\n'
+        << "stage2_vehicle_z_nhc_displacement_factor_count="
+        << stage2_vehicle_z_nhc_displacement_factor_count << '\n'
+        << "stage2_vehicle_nhc_window_count=" << stage2_vehicle_nhc_window_count << '\n'
+        << "stage2_vehicle_nhc_skipped_short_window_count="
+        << stage2_vehicle_nhc_skipped_short_window_count << '\n'
+        << "stage2_vehicle_nhc_skipped_invalid_count="
+        << stage2_vehicle_nhc_skipped_invalid_count << '\n'
+        << "stage2_vehicle_nhc_unique_velocity_factor_count="
+        << stage2_vehicle_nhc_unique_velocity_factor_count << '\n'
+        << "stage2_vehicle_nhc_velocity_duplicate_state_count="
+        << stage2_vehicle_nhc_velocity_duplicate_state_count << '\n'
+        << "stage2_vehicle_nhc_interval_overlap_count="
+        << stage2_vehicle_nhc_interval_overlap_count << '\n'
+        << "stage2_mount_initial_k_zx_rad=" << stage2_mount_initial_k_zx_rad << '\n'
+        << "stage2_mount_initial_k_zy_rad=" << stage2_mount_initial_k_zy_rad << '\n'
+        << "stage2_mount_initial_k_yx_rad=" << stage2_mount_initial_k_yx_rad << '\n'
+        << "stage2_mount_k_zx_rad=" << stage2_mount_k_zx_rad << '\n'
+        << "stage2_mount_k_zy_rad=" << stage2_mount_k_zy_rad << '\n'
+        << "stage2_mount_k_yx_rad=" << stage2_mount_k_yx_rad << '\n'
+        << "stage2_max_abs_yaw_delta_rad=" << stage2_max_abs_yaw_delta_rad << '\n'
         << "vertical_jump_combined_imu_factor_count=" << vertical_jump_combined_imu_factor_count << '\n'
         << "vertical_jump_masked_imu_factor_count=" << vertical_jump_masked_imu_factor_count << '\n'
         << "vertical_jump_impulse_factor_count=" << vertical_jump_impulse_factor_count << '\n'
@@ -576,6 +624,8 @@ struct OfflineRunResult {
   std::vector<BodyZHorizontalLeakageDiagnosticRow> body_z_nhc_horizontal_leakage_diagnostics;
   std::vector<BodyZNHCDiagnosticRow> body_z_nhc_diagnostics;
   std::vector<BodyZNHCStateDiagnosticRow> body_z_nhc_state_diagnostics;
+  std::vector<Stage2MountLeakageDiagnosticRow> stage2_mount_leakage_diagnostics;
+  std::vector<Stage2VehicleNHCStateDiagnosticRow> stage2_vehicle_nhc_state_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;
   std::vector<VerticalJumpImpulseDiagnosticRow> vertical_jump_impulse_diagnostics;
   std::vector<VerticalJumpBiasDiagnosticRow> vertical_jump_bias_diagnostics;

@@ -244,6 +244,16 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.stage1_yaw_update_max_rad <= 0.0) {
     throw std::runtime_error("stage1 yaw refinement settings must be positive and finite");
   }
+  if (!std::isfinite(config.stage2_attitude_hold_sigma_rad) ||
+      !std::isfinite(config.stage2_mount_leakage_prior_sigma_rad) ||
+      !std::isfinite(config.stage2_vehicle_y_nhc_velocity_sigma_mps) ||
+      !std::isfinite(config.stage2_vehicle_y_nhc_displacement_sigma_m) ||
+      config.stage2_attitude_hold_sigma_rad <= 0.0 ||
+      config.stage2_mount_leakage_prior_sigma_rad <= 0.0 ||
+      config.stage2_vehicle_y_nhc_velocity_sigma_mps <= 0.0 ||
+      config.stage2_vehicle_y_nhc_displacement_sigma_m <= 0.0) {
+    throw std::runtime_error("stage2 velocity optimization settings must be positive and finite");
+  }
   if (config.initial_static_zupt_velocity_sigma_mps <= 0.0 ||
       config.initial_static_zaru_sigma_radps <= 0.0 ||
       config.initial_static_specific_force_sigma_mps2 <= 0.0 ||
@@ -742,6 +752,18 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.stage1_heading_noise_floor_rad = ParseDouble(normalized_value);
   } else if (normalized_key == "stage1_yaw_update_max_rad") {
     config.stage1_yaw_update_max_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_stage2_velocity_optimization") {
+    config.enable_stage2_velocity_optimization = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_stage2_vehicle_nhc_constraint") {
+    config.enable_stage2_vehicle_nhc_constraint = ParseBool(normalized_value);
+  } else if (normalized_key == "stage2_attitude_hold_sigma_rad") {
+    config.stage2_attitude_hold_sigma_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage2_mount_leakage_prior_sigma_rad") {
+    config.stage2_mount_leakage_prior_sigma_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage2_vehicle_y_nhc_velocity_sigma_mps") {
+    config.stage2_vehicle_y_nhc_velocity_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage2_vehicle_y_nhc_displacement_sigma_m") {
+    config.stage2_vehicle_y_nhc_displacement_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "static_alignment_duration_s") {
     config.static_alignment_duration_s = ParseDouble(normalized_value);
   } else if (normalized_key == "imu_dual_vector_window_s") {
@@ -1231,6 +1253,17 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "stage1_heading_min_displacement_m=" << config.stage1_heading_min_displacement_m << '\n'
     << "stage1_heading_noise_floor_rad=" << config.stage1_heading_noise_floor_rad << '\n'
     << "stage1_yaw_update_max_rad=" << config.stage1_yaw_update_max_rad << '\n'
+    << "enable_stage2_velocity_optimization="
+    << (config.enable_stage2_velocity_optimization ? "true" : "false") << '\n'
+    << "enable_stage2_vehicle_nhc_constraint="
+    << (config.enable_stage2_vehicle_nhc_constraint ? "true" : "false") << '\n'
+    << "stage2_attitude_hold_sigma_rad=" << config.stage2_attitude_hold_sigma_rad << '\n'
+    << "stage2_mount_leakage_prior_sigma_rad="
+    << config.stage2_mount_leakage_prior_sigma_rad << '\n'
+    << "stage2_vehicle_y_nhc_velocity_sigma_mps="
+    << config.stage2_vehicle_y_nhc_velocity_sigma_mps << '\n'
+    << "stage2_vehicle_y_nhc_displacement_sigma_m="
+    << config.stage2_vehicle_y_nhc_displacement_sigma_m << '\n'
     << "static_alignment_duration_s=" << config.static_alignment_duration_s << '\n'
     << "imu_dual_vector_window_s=" << config.imu_dual_vector_window_s << '\n'
     << "imu_dual_vector_min_sample_count=" << config.imu_dual_vector_min_sample_count << '\n'

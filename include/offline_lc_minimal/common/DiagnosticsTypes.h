@@ -467,6 +467,61 @@ struct BodyZNHCStateDiagnosticRow {
   double optimized_pose_body_z_velocity_mps = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct Stage2MountLeakageDiagnosticRow {
+  bool enabled = false;
+  bool estimate_valid = false;
+  std::string skip_reason = "UNSET";
+  std::size_t used_sample_count = 0;
+  double prior_sigma_rad = std::numeric_limits<double>::quiet_NaN();
+  double initial_k_zx_rad = std::numeric_limits<double>::quiet_NaN();
+  double initial_k_zy_rad = std::numeric_limits<double>::quiet_NaN();
+  double initial_k_yx_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_k_zx_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_k_zy_rad = std::numeric_limits<double>::quiet_NaN();
+  double optimized_k_yx_rad = std::numeric_limits<double>::quiet_NaN();
+  double prior_residual_norm = std::numeric_limits<double>::quiet_NaN();
+  double initial_raw_y_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double initial_raw_y_max_abs_mps = std::numeric_limits<double>::quiet_NaN();
+  double initial_vehicle_y_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double initial_vehicle_y_max_abs_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_raw_y_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_raw_y_max_abs_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_vehicle_y_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_vehicle_y_max_abs_mps = std::numeric_limits<double>::quiet_NaN();
+  double initial_raw_z_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double initial_raw_z_max_abs_mps = std::numeric_limits<double>::quiet_NaN();
+  double initial_vehicle_z_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double initial_vehicle_z_max_abs_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_raw_z_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_raw_z_max_abs_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_vehicle_z_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_vehicle_z_max_abs_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct Stage2VehicleNHCStateDiagnosticRow {
+  std::size_t window_index = 0;
+  std::size_t state_index = 0;
+  double time_s = std::numeric_limits<double>::quiet_NaN();
+  std::string nhc_region_type = "UNSET";
+  bool velocity_factor_used = false;
+  double effective_vehicle_y_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double effective_vehicle_z_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double vx_mps = std::numeric_limits<double>::quiet_NaN();
+  double vy_mps = std::numeric_limits<double>::quiet_NaN();
+  double vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double v_body_x_mps = std::numeric_limits<double>::quiet_NaN();
+  double v_body_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double v_body_z_mps = std::numeric_limits<double>::quiet_NaN();
+  double k_zx_rad = std::numeric_limits<double>::quiet_NaN();
+  double k_zy_rad = std::numeric_limits<double>::quiet_NaN();
+  double k_yx_rad = std::numeric_limits<double>::quiet_NaN();
+  double vehicle_y_correction_mps = std::numeric_limits<double>::quiet_NaN();
+  double vehicle_z_correction_from_x_mps = std::numeric_limits<double>::quiet_NaN();
+  double vehicle_z_correction_from_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double v_vehicle_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double v_vehicle_z_mps = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct VerticalJumpMaskedImuDiagnosticRow {
   std::size_t state_index_i = 0;
   std::size_t state_index_j = 0;

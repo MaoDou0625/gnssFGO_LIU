@@ -34,4 +34,20 @@ OfflineRunnerConfig MakeStage1YawRefinementConfig(const OfflineRunnerConfig &con
   return stage_config;
 }
 
+OfflineRunnerConfig MakeStage2VelocityOptimizationConfig(const OfflineRunnerConfig &config) {
+  OfflineRunnerConfig stage_config = config;
+
+  stage_config.enable_stage1_yaw_refinement = false;
+  stage_config.enable_stage2_velocity_optimization = true;
+
+  stage_config.enable_attitude_reference_constraint = false;
+  stage_config.enable_rtk_velocity_constraint = true;
+
+  stage_config.enable_body_z_nhc_constraint = false;
+  stage_config.enable_body_z_nhc_horizontal_leakage_correction = false;
+  stage_config.enable_stage2_vehicle_nhc_constraint = true;
+
+  return stage_config;
+}
+
 }  // namespace offline_lc_minimal

@@ -916,6 +916,98 @@ void WriteBodyZNHCStateDiagnosticsCsv(
   }
 }
 
+void WriteStage2MountLeakageDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage2MountLeakageDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "enabled,estimate_valid,skip_reason,used_sample_count,prior_sigma_rad,"
+       "initial_k_zx_rad,initial_k_zy_rad,initial_k_yx_rad,"
+       "optimized_k_zx_rad,optimized_k_zy_rad,optimized_k_yx_rad,"
+       "prior_residual_norm,initial_raw_y_rms_mps,initial_raw_y_max_abs_mps,"
+       "initial_vehicle_y_rms_mps,initial_vehicle_y_max_abs_mps,"
+       "optimized_raw_y_rms_mps,optimized_raw_y_max_abs_mps,"
+       "optimized_vehicle_y_rms_mps,optimized_vehicle_y_max_abs_mps,"
+       "initial_raw_z_rms_mps,initial_raw_z_max_abs_mps,"
+       "initial_vehicle_z_rms_mps,initial_vehicle_z_max_abs_mps,"
+       "optimized_raw_z_rms_mps,optimized_raw_z_max_abs_mps,"
+       "optimized_vehicle_z_rms_mps,optimized_vehicle_z_max_abs_mps\n";
+  for (const auto &row : rows) {
+    stream << (row.enabled ? 1 : 0) << ','
+           << (row.estimate_valid ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << row.used_sample_count << ','
+           << row.prior_sigma_rad << ','
+           << row.initial_k_zx_rad << ','
+           << row.initial_k_zy_rad << ','
+           << row.initial_k_yx_rad << ','
+           << row.optimized_k_zx_rad << ','
+           << row.optimized_k_zy_rad << ','
+           << row.optimized_k_yx_rad << ','
+           << row.prior_residual_norm << ','
+           << row.initial_raw_y_rms_mps << ','
+           << row.initial_raw_y_max_abs_mps << ','
+           << row.initial_vehicle_y_rms_mps << ','
+           << row.initial_vehicle_y_max_abs_mps << ','
+           << row.optimized_raw_y_rms_mps << ','
+           << row.optimized_raw_y_max_abs_mps << ','
+           << row.optimized_vehicle_y_rms_mps << ','
+           << row.optimized_vehicle_y_max_abs_mps << ','
+           << row.initial_raw_z_rms_mps << ','
+           << row.initial_raw_z_max_abs_mps << ','
+           << row.initial_vehicle_z_rms_mps << ','
+           << row.initial_vehicle_z_max_abs_mps << ','
+           << row.optimized_raw_z_rms_mps << ','
+           << row.optimized_raw_z_max_abs_mps << ','
+           << row.optimized_vehicle_z_rms_mps << ','
+           << row.optimized_vehicle_z_max_abs_mps << '\n';
+  }
+}
+
+void WriteStage2VehicleNHCStateDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage2VehicleNHCStateDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,state_index,time_s,nhc_region_type,velocity_factor_used,"
+       "effective_vehicle_y_sigma_mps,effective_vehicle_z_sigma_mps,"
+       "vx_mps,vy_mps,vz_mps,v_body_x_mps,v_body_y_mps,v_body_z_mps,"
+       "k_zx_rad,k_zy_rad,k_yx_rad,vehicle_y_correction_mps,"
+       "vehicle_z_correction_from_x_mps,vehicle_z_correction_from_y_mps,"
+       "v_vehicle_y_mps,v_vehicle_z_mps\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.state_index << ','
+           << row.time_s << ','
+           << row.nhc_region_type << ','
+           << (row.velocity_factor_used ? 1 : 0) << ','
+           << row.effective_vehicle_y_sigma_mps << ','
+           << row.effective_vehicle_z_sigma_mps << ','
+           << row.vx_mps << ','
+           << row.vy_mps << ','
+           << row.vz_mps << ','
+           << row.v_body_x_mps << ','
+           << row.v_body_y_mps << ','
+           << row.v_body_z_mps << ','
+           << row.k_zx_rad << ','
+           << row.k_zy_rad << ','
+           << row.k_yx_rad << ','
+           << row.vehicle_y_correction_mps << ','
+           << row.vehicle_z_correction_from_x_mps << ','
+           << row.vehicle_z_correction_from_y_mps << ','
+           << row.v_vehicle_y_mps << ','
+           << row.v_vehicle_z_mps << '\n';
+  }
+}
+
 void WriteVerticalJumpMaskedImuDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpMaskedImuDiagnosticRow> &rows) {

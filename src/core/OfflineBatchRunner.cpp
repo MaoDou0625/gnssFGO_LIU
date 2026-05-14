@@ -38,6 +38,10 @@
 #include "offline_lc_minimal/core/RtkVelocityConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
 #include "offline_lc_minimal/core/RtkVerticalDriftReferenceEstimator.h"
+#include "offline_lc_minimal/core/Stage2AttitudeHoldBuilder.h"
+#include "offline_lc_minimal/core/Stage2VehicleNHCConstraintBuilder.h"
+#include "offline_lc_minimal/core/Stage2VelocityOptimizationRunner.h"
+#include "offline_lc_minimal/core/Stage2VelocityReference.h"
 #include "offline_lc_minimal/core/Stage1YawRefinementRunner.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
@@ -106,6 +110,12 @@ gtsam::Matrix66 ComputeBiasProcessCovariance(const double dt_s, const OfflineRun
 
 OfflineBatchRunner::OfflineBatchRunner(OfflineRunnerConfig config)
     : config_(std::move(config)) {}
+
+OfflineBatchRunner::OfflineBatchRunner(
+  OfflineRunnerConfig config,
+  std::shared_ptr<const Stage2VelocityReference> stage2_reference)
+    : config_(std::move(config)),
+      stage2_reference_(std::move(stage2_reference)) {}
 
 double OfflineBatchRunner::CorrectedGnssTime(const GnssSolutionSample &sample) const {
   return sample.time_s - config_.gnss_time_offset_s;
@@ -285,6 +295,18 @@ Eigen::Vector3d OfflineBatchRunner::ClampGnssSigma(const GnssSolutionSample &sam
 }
 
 OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
+  if (config_.enable_stage2_velocity_optimization && stage2_reference_ == nullptr) {
+    Stage2VelocityOptimizationRequest request;
+    request.config = config_;
+    request.dataset = std::move(dataset);
+    request.run_once = [](
+                         const OfflineRunnerConfig &config,
+                         std::shared_ptr<const Stage2VelocityReference> stage2_reference,
+                         DataSet run_dataset) {
+      return OfflineBatchRunner(config, std::move(stage2_reference)).Run(std::move(run_dataset));
+    };
+    return Stage2VelocityOptimizationRunner(std::move(request)).Run();
+  }
   if (config_.enable_stage1_yaw_refinement) {
     Stage1YawRefinementRequest request;
     request.config = config_;
@@ -426,7 +448,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     collect_segment_error_diagnostics ||
     config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone ||
     config_.enable_body_z_jump_detection ||
-    config_.enable_attitude_reference_constraint;
+    config_.enable_attitude_reference_constraint ||
+    stage2_reference_ != nullptr;
   run_result.run_summary.error_state_count = 0;
 
   const auto imu_params = gtsam::PreintegrationCombinedParams::MakeSharedU(config_.gravity_mps2);
@@ -462,6 +485,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     initial_bias.correctGyroscope(dataset.imu_samples[initial_imu_index].gyro_radps);
   const gtsam::Key global_acc_bias_key = gtsam::Symbol('a', 0);
   const gtsam::Key global_gyro_bias_key = gtsam::Symbol('g', 0);
+  const gtsam::Key stage2_mount_leakage_key = gtsam::Symbol('m', 0);
 
   const gtsam::Vector6 pose_sigmas =
     (gtsam::Vector6() << config_.initial_roll_pitch_sigma_rad,
@@ -821,6 +845,21 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     previous_time_s = current_time_s;
   }
 
+  std::vector<ReferenceNodeState> stage2_fixed_reference_states;
+  if (stage2_reference_ != nullptr) {
+    ApplyStage2ReferenceTrajectoryToInitialValues(
+      *stage2_reference_,
+      state_timestamps,
+      initial_values);
+    run_result.trajectory = stage2_reference_->trajectory;
+    stage2_fixed_reference_states =
+      BuildStage2ReferenceStatesFromTrajectory(stage2_reference_->trajectory);
+    run_result.attitude_reference_states = stage2_fixed_reference_states;
+    if (collect_reference_states) {
+      reference_node_states = stage2_fixed_reference_states;
+    }
+  }
+
   run_result.run_summary.state_count = run_result.trajectory.size();
   if (collect_reference_states) {
     run_result.reference_node_trajectory.reserve(reference_node_states.size());
@@ -892,6 +931,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.seed_body_z_acc_diagnostics = body_z_result.imu_diagnostics;
     run_result.body_z_seed_jump_windows = body_z_result.jump_windows;
     run_result.attitude_reference_states = body_z_result.seed_reference_states;
+  }
+  if (stage2_reference_ != nullptr) {
+    run_result.attitude_reference_states = stage2_fixed_reference_states;
   }
 
   std::vector<RtkOutageWindowRow> planned_rtk_outage_windows;
@@ -1027,6 +1069,33 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.body_z_nhc_corrected_max_abs_displacement_residual_m =
     std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage2_velocity_optimization_enabled =
+    stage2_reference_ != nullptr && config_.enable_stage2_velocity_optimization;
+  run_result.run_summary.stage2_attitude_hold_factor_count = 0;
+  run_result.run_summary.stage2_vehicle_y_nhc_velocity_factor_count = 0;
+  run_result.run_summary.stage2_vehicle_y_nhc_displacement_factor_count = 0;
+  run_result.run_summary.stage2_vehicle_z_nhc_velocity_factor_count = 0;
+  run_result.run_summary.stage2_vehicle_z_nhc_displacement_factor_count = 0;
+  run_result.run_summary.stage2_vehicle_nhc_window_count = 0;
+  run_result.run_summary.stage2_vehicle_nhc_skipped_short_window_count = 0;
+  run_result.run_summary.stage2_vehicle_nhc_skipped_invalid_count = 0;
+  run_result.run_summary.stage2_vehicle_nhc_unique_velocity_factor_count = 0;
+  run_result.run_summary.stage2_vehicle_nhc_velocity_duplicate_state_count = 0;
+  run_result.run_summary.stage2_vehicle_nhc_interval_overlap_count = 0;
+  run_result.run_summary.stage2_mount_initial_k_zx_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage2_mount_initial_k_zy_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage2_mount_initial_k_yx_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage2_mount_k_zx_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage2_mount_k_zy_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage2_mount_k_yx_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage2_max_abs_yaw_delta_rad =
+    std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.vertical_jump_combined_imu_factor_count = 0;
   run_result.run_summary.vertical_jump_masked_imu_factor_count = 0;
   run_result.run_summary.vertical_jump_impulse_factor_count = 0;
@@ -1061,6 +1130,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.relative_yaw_reference_diagnostics.clear();
   run_result.body_z_nhc_horizontal_leakage_diagnostics.clear();
   run_result.body_z_nhc_diagnostics.clear();
+  run_result.stage2_mount_leakage_diagnostics.clear();
+  run_result.stage2_vehicle_nhc_state_diagnostics.clear();
   run_result.vertical_jump_masked_imu_diagnostics.clear();
   run_result.vertical_jump_impulse_diagnostics.clear();
   run_result.vertical_jump_bias_diagnostics.clear();
@@ -1234,6 +1305,24 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     &run_result.body_z_nhc_horizontal_leakage_diagnostics;
   BodyZNHCConstraintBuilder(std::move(body_z_nhc_request)).Build();
 
+  if (stage2_reference_ != nullptr) {
+    Stage2VehicleNHCConstraintBuildRequest stage2_vehicle_request;
+    stage2_vehicle_request.config = &config_;
+    stage2_vehicle_request.state_timestamps = &state_timestamps;
+    stage2_vehicle_request.jump_windows = &nhc_constraint_windows;
+    stage2_vehicle_request.initial_values = &optimization_initial_values;
+    stage2_vehicle_request.reference_states = &stage2_fixed_reference_states;
+    stage2_vehicle_request.dynamic_start_index = graph_timeline.dynamic_start_index;
+    stage2_vehicle_request.mount_leakage_key = stage2_mount_leakage_key;
+    stage2_vehicle_request.graph = &graph_with_gnss;
+    stage2_vehicle_request.run_summary = &run_result.run_summary;
+    stage2_vehicle_request.mount_diagnostics =
+      &run_result.stage2_mount_leakage_diagnostics;
+    stage2_vehicle_request.state_diagnostics =
+      &run_result.stage2_vehicle_nhc_state_diagnostics;
+    Stage2VehicleNHCConstraintBuilder(std::move(stage2_vehicle_request)).Build();
+  }
+
   AttitudeReferenceConstraintBuildRequest attitude_reference_request;
   attitude_reference_request.config = &config_;
   attitude_reference_request.state_timestamps = &state_timestamps;
@@ -1246,6 +1335,16 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   attitude_reference_request.relative_yaw_diagnostics =
     &run_result.relative_yaw_reference_diagnostics;
   AttitudeReferenceConstraintBuilder(std::move(attitude_reference_request)).Build();
+
+  if (stage2_reference_ != nullptr) {
+    Stage2AttitudeHoldBuildRequest attitude_hold_request;
+    attitude_hold_request.config = &config_;
+    attitude_hold_request.state_timestamps = &state_timestamps;
+    attitude_hold_request.reference_states = &stage2_fixed_reference_states;
+    attitude_hold_request.graph = &graph_with_gnss;
+    attitude_hold_request.run_summary = &run_result.run_summary;
+    Stage2AttitudeHoldBuilder(std::move(attitude_hold_request)).Build();
+  }
 
   if (config_.enable_vertical_jump_velocity_ramp_smoothing ||
       config_.enable_vertical_jump_position_ramp_smoothing ||
@@ -1393,6 +1492,19 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     &run_result.body_z_nhc_state_diagnostics,
     &run_result.attitude_reference_states,
     &run_result.run_summary);
+  if (stage2_reference_ != nullptr) {
+    PopulateStage2VehicleNHCDiagnostics(
+      optimization_initial_values,
+      optimized_values,
+      state_timestamps,
+      stage2_fixed_reference_states,
+      stage2_mount_leakage_key,
+      run_result.stage2_mount_leakage_diagnostics,
+      run_result.stage2_vehicle_nhc_state_diagnostics,
+      run_result.run_summary);
+    run_result.run_summary.stage2_max_abs_yaw_delta_rad =
+      ComputeMaxAbsYawDeltaRad(stage2_fixed_reference_states, optimized_values);
+  }
   PopulateAttitudeReferenceDiagnostics(
     optimized_values,
     run_result.attitude_reference_diagnostics);

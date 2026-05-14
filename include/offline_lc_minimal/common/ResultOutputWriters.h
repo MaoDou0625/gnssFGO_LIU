@@ -98,6 +98,14 @@ void WriteBodyZNHCStateDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<BodyZNHCStateDiagnosticRow> &rows);
 
+void WriteStage2MountLeakageDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage2MountLeakageDiagnosticRow> &rows);
+
+void WriteStage2VehicleNHCStateDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage2VehicleNHCStateDiagnosticRow> &rows);
+
 void WriteVerticalJumpMaskedImuDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpMaskedImuDiagnosticRow> &rows);

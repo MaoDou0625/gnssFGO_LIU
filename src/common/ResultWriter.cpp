@@ -139,6 +139,16 @@ void ResultWriter::WriteOutputs(
       output_path / "body_z_nhc_state_diagnostics.csv",
       result.body_z_nhc_state_diagnostics);
   }
+  if (!result.stage2_mount_leakage_diagnostics.empty()) {
+    WriteStage2MountLeakageDiagnosticsCsv(
+      output_path / "stage2_mount_leakage_diagnostics.csv",
+      result.stage2_mount_leakage_diagnostics);
+  }
+  if (!result.stage2_vehicle_nhc_state_diagnostics.empty()) {
+    WriteStage2VehicleNHCStateDiagnosticsCsv(
+      output_path / "stage2_vehicle_nhc_state_diagnostics.csv",
+      result.stage2_vehicle_nhc_state_diagnostics);
+  }
   if (!result.vertical_jump_masked_imu_diagnostics.empty()) {
     WriteVerticalJumpMaskedImuDiagnosticsCsv(
       output_path / "vertical_jump_masked_imu_diagnostics.csv",
