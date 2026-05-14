@@ -170,8 +170,10 @@ MountLeakageInitialEstimate EstimateMountLeakage(
       state_timestamps,
       dynamic_start_index,
       excluded_windows);
-  Eigen::Matrix3d normal = Eigen::Matrix3d::Zero();
-  Eigen::Vector3d rhs = Eigen::Vector3d::Zero();
+  double zx_normal = 0.0;
+  double zx_rhs = 0.0;
+  double yx_normal = 0.0;
+  double yx_rhs = 0.0;
   const double min_speed_mps =
     std::max(0.0, config.body_z_nhc_horizontal_leakage_min_speed_mps);
   for (const std::size_t state_index : state_indices) {
@@ -186,13 +188,11 @@ MountLeakageInitialEstimate EstimateMountLeakage(
     if (std::hypot(body_x, body_y) < min_speed_mps) {
       continue;
     }
-    Eigen::Vector3d row_z(body_x, body_y, 0.0);
-    normal += row_z * row_z.transpose();
-    rhs += row_z * body_z;
+    zx_normal += body_x * body_x;
+    zx_rhs += body_x * body_z;
     if (std::abs(body_x) >= min_speed_mps) {
-      Eigen::Vector3d row_y(0.0, 0.0, body_x);
-      normal += row_y * row_y.transpose();
-      rhs += row_y * body_y;
+      yx_normal += body_x * body_x;
+      yx_rhs += body_x * body_y;
     }
     ++estimate.used_sample_count;
   }
@@ -202,21 +202,16 @@ MountLeakageInitialEstimate EstimateMountLeakage(
     estimate.skip_reason = "INSUFFICIENT_SAMPLES";
     return estimate;
   }
-  Eigen::CompleteOrthogonalDecomposition<Eigen::Matrix3d> solver(normal);
-  if (solver.rank() < 3) {
+  if (zx_normal <= 1.0e-12 || yx_normal <= 1.0e-12) {
     estimate.skip_reason = "RANK_DEFICIENT";
     return estimate;
   }
-  Eigen::Vector3d solution = solver.solve(rhs);
   const double max_abs_coeff =
     std::max(0.0, config.body_z_nhc_horizontal_leakage_max_abs_coeff_rad);
-  for (int index = 0; index < 3; ++index) {
-    solution[index] = std::clamp(solution[index], -max_abs_coeff, max_abs_coeff);
-  }
   estimate.model = factor::VehicleMountLeakageModel{
-    solution.x(),
-    solution.y(),
-    solution.z()};
+    std::clamp(zx_rhs / zx_normal, -max_abs_coeff, max_abs_coeff),
+    0.0,
+    std::clamp(yx_rhs / yx_normal, -max_abs_coeff, max_abs_coeff)};
   estimate.valid = true;
   estimate.skip_reason = "ESTIMATED";
   return estimate;

@@ -55,8 +55,7 @@ struct VehicleMountLeakageModel {
   const VehicleMountLeakageModel &mount,
   const gtsam::Vector3 &nav_velocity) {
   return BodyZRawVelocityMps(axes, nav_velocity) -
-         mount.k_zx_rad * BodyXVelocityMps(axes, nav_velocity) -
-         mount.k_zy_rad * BodyYVelocityMps(axes, nav_velocity);
+         mount.k_zx_rad * BodyXVelocityMps(axes, nav_velocity);
 }
 
 [[nodiscard]] inline gtsam::Matrix VehicleYVelocityJacobianWrtVelocity(
@@ -75,8 +74,7 @@ struct VehicleMountLeakageModel {
   gtsam::Matrix jacobian(1, 3);
   jacobian.row(0) =
     axes.body_z_axis_nav.transpose() -
-    mount.k_zx_rad * axes.body_x_axis_nav.transpose() -
-    mount.k_zy_rad * axes.body_y_axis_nav.transpose();
+    mount.k_zx_rad * axes.body_x_axis_nav.transpose();
   return jacobian;
 }
 
@@ -93,7 +91,6 @@ struct VehicleMountLeakageModel {
   const gtsam::Vector3 &nav_velocity) {
   gtsam::Matrix jacobian = gtsam::Matrix::Zero(1, 3);
   jacobian(0, 0) = -BodyXVelocityMps(axes, nav_velocity);
-  jacobian(0, 1) = -BodyYVelocityMps(axes, nav_velocity);
   return jacobian;
 }
 

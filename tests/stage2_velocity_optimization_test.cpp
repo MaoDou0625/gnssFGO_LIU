@@ -104,12 +104,12 @@ void TestVehicleVelocityFactorsUseVelocityAndMountOnly() {
     mount,
     h_z_velocity,
     h_z_mount);
-  ExpectNear(z_error[0], 1.4, 1e-12, "vehicle-z residual is wrong");
+  ExpectNear(z_error[0], 0.8, 1e-12, "vehicle-z residual is wrong");
   ExpectNear(h_z_velocity(0, 0), -0.1, 1e-12, "vehicle-z dres/dvx is wrong");
-  ExpectNear(h_z_velocity(0, 1), 0.2, 1e-12, "vehicle-z dres/dvy is wrong");
+  ExpectNear(h_z_velocity(0, 1), 0.0, 1e-12, "vehicle-z dres/dvy is wrong");
   ExpectNear(h_z_velocity(0, 2), 1.0, 1e-12, "vehicle-z dres/dvz is wrong");
   ExpectNear(h_z_mount(0, 0), -2.0, 1e-12, "vehicle-z dres/dk_zx is wrong");
-  ExpectNear(h_z_mount(0, 1), -3.0, 1e-12, "vehicle-z dres/dk_zy is wrong");
+  ExpectNear(h_z_mount(0, 1), 0.0, 1e-12, "vehicle-z should ignore fixed k_zy");
   ExpectNear(h_z_mount(0, 2), 0.0, 1e-12, "vehicle-z dres/dk_yx is wrong");
 
   ExpectTrue(y_factor.keys().size() == 2U, "vehicle-y factor should have two keys");
