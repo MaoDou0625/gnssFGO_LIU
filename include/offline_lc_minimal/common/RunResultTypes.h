@@ -163,6 +163,8 @@ struct RunSummary {
     std::numeric_limits<double>::quiet_NaN();
   bool stage2_velocity_optimization_enabled = false;
   std::size_t stage2_attitude_hold_factor_count = 0;
+  std::size_t stage2_horizontal_position_hold_factor_count = 0;
+  std::size_t stage2_horizontal_velocity_hold_factor_count = 0;
   std::size_t stage2_vehicle_y_nhc_velocity_factor_count = 0;
   std::size_t stage2_vehicle_y_nhc_displacement_factor_count = 0;
   std::size_t stage2_vehicle_z_nhc_velocity_factor_count = 0;
@@ -463,6 +465,10 @@ struct RunSummary {
         << "stage2_velocity_optimization_enabled="
         << (stage2_velocity_optimization_enabled ? "true" : "false") << '\n'
         << "stage2_attitude_hold_factor_count=" << stage2_attitude_hold_factor_count << '\n'
+        << "stage2_horizontal_position_hold_factor_count="
+        << stage2_horizontal_position_hold_factor_count << '\n'
+        << "stage2_horizontal_velocity_hold_factor_count="
+        << stage2_horizontal_velocity_hold_factor_count << '\n'
         << "stage2_vehicle_y_nhc_velocity_factor_count="
         << stage2_vehicle_y_nhc_velocity_factor_count << '\n'
         << "stage2_vehicle_y_nhc_displacement_factor_count="

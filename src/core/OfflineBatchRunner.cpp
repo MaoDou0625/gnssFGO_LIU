@@ -40,6 +40,7 @@
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
 #include "offline_lc_minimal/core/RtkVerticalDriftReferenceEstimator.h"
 #include "offline_lc_minimal/core/Stage2AttitudeHoldBuilder.h"
+#include "offline_lc_minimal/core/Stage2HorizontalHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage2VehicleNHCConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage2VelocityOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage2VelocityReference.h"
@@ -1091,6 +1092,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.stage2_velocity_optimization_enabled =
     stage2_reference_ != nullptr && config_.enable_stage2_velocity_optimization;
   run_result.run_summary.stage2_attitude_hold_factor_count = 0;
+  run_result.run_summary.stage2_horizontal_position_hold_factor_count = 0;
+  run_result.run_summary.stage2_horizontal_velocity_hold_factor_count = 0;
   run_result.run_summary.stage2_vehicle_y_nhc_velocity_factor_count = 0;
   run_result.run_summary.stage2_vehicle_y_nhc_displacement_factor_count = 0;
   run_result.run_summary.stage2_vehicle_z_nhc_velocity_factor_count = 0;
@@ -1379,6 +1382,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     attitude_hold_request.graph = &graph_with_gnss;
     attitude_hold_request.run_summary = &run_result.run_summary;
     Stage2AttitudeHoldBuilder(std::move(attitude_hold_request)).Build();
+
+    Stage2HorizontalHoldBuildRequest horizontal_hold_request;
+    horizontal_hold_request.config = &config_;
+    horizontal_hold_request.state_timestamps = &state_timestamps;
+    horizontal_hold_request.reference_states = &stage2_fixed_reference_states;
+    horizontal_hold_request.graph = &graph_with_gnss;
+    horizontal_hold_request.run_summary = &run_result.run_summary;
+    Stage2HorizontalHoldBuilder(std::move(horizontal_hold_request)).Build();
   }
 
   if (config_.enable_vertical_jump_velocity_ramp_smoothing ||

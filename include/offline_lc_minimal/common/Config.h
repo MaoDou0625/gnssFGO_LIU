@@ -97,6 +97,8 @@ struct OfflineRunnerConfig {
   bool enable_stage2_velocity_optimization = false;
   bool enable_stage2_vehicle_nhc_constraint = true;
   double stage2_attitude_hold_sigma_rad = 1e-5;
+  double stage2_horizontal_position_hold_sigma_m = 1e-4;
+  double stage2_horizontal_velocity_hold_sigma_mps = 1e-4;
   double stage2_mount_leakage_prior_sigma_rad = 0.02;
   double stage2_vehicle_y_nhc_velocity_sigma_mps = 0.05;
   double stage2_vehicle_y_nhc_displacement_sigma_m = 0.05;

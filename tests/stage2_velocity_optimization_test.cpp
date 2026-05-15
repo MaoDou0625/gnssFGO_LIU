@@ -8,12 +8,16 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/core/OptimizationStagePolicy.h"
 #include "offline_lc_minimal/core/Stage2AttitudeHoldBuilder.h"
+#include "offline_lc_minimal/core/Stage2HorizontalHoldBuilder.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
+#include "offline_lc_minimal/factor/HorizontalHoldFactor.h"
 #include "offline_lc_minimal/factor/VehicleVelocityNHCFactor.h"
+#include "offline_lc_minimal/factor/VehicleZFixedForwardNHCFactor.h"
 
 namespace {
 
@@ -59,7 +63,14 @@ std::vector<offline_lc_minimal::ReferenceNodeState> MakeReferenceStates(
     states[index].time_s = static_cast<double>(index);
     states[index].pose = gtsam::Pose3(
       gtsam::Rot3::Ypr(0.1 * static_cast<double>(index), 0.01, -0.02),
-      gtsam::Point3::Zero());
+      gtsam::Point3(
+        10.0 + static_cast<double>(index),
+        -3.0 - 0.5 * static_cast<double>(index),
+        2.0));
+    states[index].velocity = gtsam::Vector3(
+      1.0 + static_cast<double>(index),
+      -0.1 * static_cast<double>(index),
+      0.2);
   }
   return states;
 }
@@ -120,6 +131,78 @@ void TestVehicleVelocityFactorsUseVelocityAndMountOnly() {
              "vehicle-z factor should not connect pose");
 }
 
+void TestVehicleZFixedForwardDoesNotPullForwardVelocity() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
+  const auto axes = IdentityAxes();
+  const gtsam::Key velocity_key = gtsam::symbol_shorthand::V(3);
+  const gtsam::Key mount_key = gtsam::Symbol('m', 0);
+  const gtsam::Vector3 velocity(2.0, 3.0, 1.0);
+  const gtsam::Vector3 mount(0.1, 0.0, 0.0);
+
+  offline_lc_minimal::factor::VehicleZVelocityZeroFixedForwardFactor factor(
+    velocity_key,
+    mount_key,
+    axes,
+    5.0,
+    gtsam::Vector3(20.0, -30.0, -0.5),
+    noise);
+  gtsam::Matrix h_velocity;
+  gtsam::Matrix h_mount;
+  const auto error = factor.evaluateError(
+    velocity,
+    mount,
+    h_velocity,
+    h_mount);
+  ExpectNear(error[0], 0.5, 1e-12, "fixed-forward vehicle-z residual is wrong");
+  ExpectNear(h_velocity(0, 0), 0.0, 1e-12,
+             "fixed-forward vehicle-z should not pull body-x velocity");
+  ExpectNear(h_velocity(0, 1), 0.0, 1e-12,
+             "fixed-forward vehicle-z should not pull body-y velocity");
+  ExpectNear(h_velocity(0, 2), 1.0, 1e-12,
+             "fixed-forward vehicle-z should constrain body-z velocity");
+  ExpectNear(h_mount(0, 0), -5.0, 1e-12,
+             "fixed-forward vehicle-z dres/dk_zx is wrong");
+  ExpectNear(h_mount(0, 1), 0.0, 1e-12,
+             "fixed-forward vehicle-z should ignore k_zy");
+  ExpectNear(h_mount(0, 2), 0.0, 1e-12,
+             "fixed-forward vehicle-z should ignore k_yx");
+
+  gtsam::Values values;
+  values.insert(gtsam::symbol_shorthand::V(0), gtsam::Vector3(2.0, 0.0, 1.0));
+  values.insert(gtsam::symbol_shorthand::V(1), gtsam::Vector3(9.0, 0.0, 2.0));
+  values.insert(mount_key, mount);
+  const std::vector<gtsam::Key> velocity_keys{
+    gtsam::symbol_shorthand::V(0),
+    gtsam::symbol_shorthand::V(1)};
+  const std::vector<offline_lc_minimal::factor::BodyFrameAxesNav> axes_by_state{
+    axes,
+    axes};
+  offline_lc_minimal::factor::VehicleZWindowDisplacementZeroFixedForwardFactor window_factor(
+    velocity_keys,
+    mount_key,
+    axes_by_state,
+    std::vector<double>{5.0, 7.0},
+    std::vector<gtsam::Vector3>{
+      gtsam::Vector3(20.0, -30.0, 0.0),
+      gtsam::Vector3(-10.0, 40.0, 0.0)},
+    std::vector<double>{0.0, 2.0},
+    noise);
+  std::vector<gtsam::Matrix> jacobians;
+  const auto displacement_error = window_factor.unwhitenedError(values, jacobians);
+  ExpectNear(displacement_error[0], 1.8, 1e-12,
+             "fixed-forward vehicle-z displacement residual is wrong");
+  ExpectNear(jacobians[0](0, 0), 0.0, 1e-12,
+             "fixed-forward displacement should not pull first body-x velocity");
+  ExpectNear(jacobians[1](0, 0), 0.0, 1e-12,
+             "fixed-forward displacement should not pull second body-x velocity");
+  ExpectNear(jacobians[0](0, 2), 1.0, 1e-12,
+             "fixed-forward displacement first dres/dvz is wrong");
+  ExpectNear(jacobians[1](0, 2), 1.0, 1e-12,
+             "fixed-forward displacement second dres/dvz is wrong");
+  ExpectNear(jacobians[2](0, 0), -12.0, 1e-12,
+             "fixed-forward displacement dres/dk_zx is wrong");
+}
+
 void TestStage2AttitudeHoldBuilderAddsOneFactorPerState() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_stage2_velocity_optimization = true;
@@ -147,12 +230,69 @@ void TestStage2AttitudeHoldBuilderAddsOneFactorPerState() {
              "attitude hold should connect the first pose key");
 }
 
+void TestStage2HorizontalHoldFactorsIgnoreVerticalAndAttitude() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(2, 1.0);
+  offline_lc_minimal::factor::HorizontalPositionHoldFactor position_factor(
+    gtsam::symbol_shorthand::X(0),
+    (gtsam::Vector2() << 1.0, 2.0).finished(),
+    noise);
+  const gtsam::Pose3 pose(
+    gtsam::Rot3::Ypr(0.5, -0.4, 0.3),
+    gtsam::Point3(1.2, 1.7, 99.0));
+  gtsam::Matrix h_pose;
+  const auto position_error = position_factor.evaluateError(pose, h_pose);
+  ExpectNear(position_error[0], 0.2, 1e-12, "horizontal position east residual is wrong");
+  ExpectNear(position_error[1], -0.3, 1e-12, "horizontal position north residual is wrong");
+
+  offline_lc_minimal::factor::HorizontalVelocityHoldFactor velocity_factor(
+    gtsam::symbol_shorthand::V(0),
+    (gtsam::Vector2() << 3.0, 4.0).finished(),
+    noise);
+  gtsam::Matrix h_velocity;
+  const auto velocity_error = velocity_factor.evaluateError(
+    gtsam::Vector3(2.5, 4.25, 10.0),
+    h_velocity);
+  ExpectNear(velocity_error[0], -0.5, 1e-12, "horizontal velocity east residual is wrong");
+  ExpectNear(velocity_error[1], 0.25, 1e-12, "horizontal velocity north residual is wrong");
+  ExpectNear(h_velocity(0, 0), 1.0, 1e-12, "horizontal velocity dres/dvx is wrong");
+  ExpectNear(h_velocity(1, 1), 1.0, 1e-12, "horizontal velocity dres/dvy is wrong");
+  ExpectNear(h_velocity(0, 2), 0.0, 1e-12, "horizontal velocity should ignore vz");
+  ExpectNear(h_velocity(1, 2), 0.0, 1e-12, "horizontal velocity should ignore vz");
+}
+
+void TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_velocity_optimization = true;
+  config.stage2_horizontal_position_hold_sigma_m = 1e-4;
+  config.stage2_horizontal_velocity_hold_sigma_mps = 1e-4;
+  const std::vector<double> timestamps{0.0, 1.0, 2.0};
+  const auto reference_states = MakeReferenceStates(timestamps.size());
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+
+  offline_lc_minimal::Stage2HorizontalHoldBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.reference_states = &reference_states;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  offline_lc_minimal::Stage2HorizontalHoldBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == timestamps.size() * 2U,
+             "horizontal hold should add one position and one velocity factor per state");
+  ExpectTrue(summary.stage2_horizontal_position_hold_factor_count == timestamps.size(),
+             "summary horizontal position hold count is wrong");
+  ExpectTrue(summary.stage2_horizontal_velocity_hold_factor_count == timestamps.size(),
+             "summary horizontal velocity hold count is wrong");
+}
+
 void TestStage2PolicyDisablesRtkVelocityAndAttitudeReference() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_stage1_yaw_refinement = true;
   config.enable_stage2_velocity_optimization = true;
   config.enable_attitude_reference_constraint = true;
   config.enable_rtk_velocity_constraint = false;
+  config.enable_rtk_outage_velocity_delta_3d = true;
   config.enable_body_z_nhc_constraint = true;
   config.enable_body_z_nhc_horizontal_leakage_correction = true;
   config.enable_stage2_vehicle_nhc_constraint = false;
@@ -167,6 +307,8 @@ void TestStage2PolicyDisablesRtkVelocityAndAttitudeReference() {
              "stage2 should disable attitude reference");
   ExpectTrue(!stage2_config.enable_rtk_velocity_constraint,
              "stage2 should not enable RTK horizontal velocity");
+  ExpectTrue(!stage2_config.enable_rtk_outage_velocity_delta_3d,
+             "stage2 should disable outage 3D velocity delta");
   ExpectTrue(!stage2_config.enable_body_z_nhc_constraint,
              "stage2 should disable old body-z NHC");
   ExpectTrue(!stage2_config.enable_body_z_nhc_horizontal_leakage_correction,
@@ -180,6 +322,8 @@ void TestStage2ConfigParsingAndValidation() {
   offline_lc_minimal::OverrideConfigField(config, "enable_stage2_velocity_optimization", "true");
   offline_lc_minimal::OverrideConfigField(config, "enable_stage2_vehicle_nhc_constraint", "true");
   offline_lc_minimal::OverrideConfigField(config, "stage2_attitude_hold_sigma_rad", "2e-5");
+  offline_lc_minimal::OverrideConfigField(config, "stage2_horizontal_position_hold_sigma_m", "3e-4");
+  offline_lc_minimal::OverrideConfigField(config, "stage2_horizontal_velocity_hold_sigma_mps", "4e-4");
   offline_lc_minimal::OverrideConfigField(config, "stage2_mount_leakage_prior_sigma_rad", "0.03");
   offline_lc_minimal::OverrideConfigField(config, "stage2_vehicle_y_nhc_velocity_sigma_mps", "0.07");
   offline_lc_minimal::OverrideConfigField(config, "stage2_vehicle_y_nhc_displacement_sigma_m", "0.09");
@@ -187,6 +331,10 @@ void TestStage2ConfigParsingAndValidation() {
   ExpectTrue(config.enable_stage2_velocity_optimization, "stage2 enable flag should parse");
   ExpectNear(config.stage2_attitude_hold_sigma_rad, 2e-5, 1e-12,
              "stage2 attitude hold sigma should parse");
+  ExpectNear(config.stage2_horizontal_position_hold_sigma_m, 3e-4, 1e-12,
+             "stage2 horizontal position hold sigma should parse");
+  ExpectNear(config.stage2_horizontal_velocity_hold_sigma_mps, 4e-4, 1e-12,
+             "stage2 horizontal velocity hold sigma should parse");
   ExpectNear(config.stage2_mount_leakage_prior_sigma_rad, 0.03, 1e-12,
              "stage2 mount prior sigma should parse");
   ExpectNear(config.stage2_vehicle_y_nhc_velocity_sigma_mps, 0.07, 1e-12,
@@ -209,7 +357,10 @@ void TestStage2ConfigParsingAndValidation() {
 int main() {
   try {
     RunTest("TestVehicleVelocityFactorsUseVelocityAndMountOnly", TestVehicleVelocityFactorsUseVelocityAndMountOnly);
+    RunTest("TestVehicleZFixedForwardDoesNotPullForwardVelocity", TestVehicleZFixedForwardDoesNotPullForwardVelocity);
     RunTest("TestStage2AttitudeHoldBuilderAddsOneFactorPerState", TestStage2AttitudeHoldBuilderAddsOneFactorPerState);
+    RunTest("TestStage2HorizontalHoldFactorsIgnoreVerticalAndAttitude", TestStage2HorizontalHoldFactorsIgnoreVerticalAndAttitude);
+    RunTest("TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors", TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors);
     RunTest("TestStage2PolicyDisablesRtkVelocityAndAttitudeReference", TestStage2PolicyDisablesRtkVelocityAndAttitudeReference);
     RunTest("TestStage2ConfigParsingAndValidation", TestStage2ConfigParsingAndValidation);
   } catch (const std::exception &exception) {

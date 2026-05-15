@@ -16,6 +16,7 @@
 
 #include "offline_lc_minimal/core/BodyZNHCWeightPlanner.h"
 #include "offline_lc_minimal/factor/VehicleVelocityNHCFactor.h"
+#include "offline_lc_minimal/factor/VehicleZFixedForwardNHCFactor.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -56,6 +57,19 @@ factor::BodyFrameAxesNav BodyAxesFromReference(
   const std::vector<ReferenceNodeState> &reference_states,
   const std::size_t state_index) {
   return factor::BodyFrameAxesNavFromPose(reference_states[state_index].pose);
+}
+
+double ReferenceBodyXMps(
+  const std::vector<ReferenceNodeState> &reference_states,
+  const std::size_t state_index) {
+  const auto axes = BodyAxesFromReference(reference_states, state_index);
+  return factor::BodyXVelocityMps(axes, reference_states[state_index].velocity);
+}
+
+gtsam::Vector3 ReferenceNavVelocity(
+  const std::vector<ReferenceNodeState> &reference_states,
+  const std::size_t state_index) {
+  return reference_states[state_index].velocity;
 }
 
 struct VelocityStats {
@@ -114,8 +128,15 @@ VehicleVelocityStats ComputeVehicleVelocityStats(
     const auto axes = BodyAxesFromReference(reference_states, state_index);
     const double body_y = factor::BodyYVelocityMps(axes, velocity);
     const double body_z = factor::BodyZRawVelocityMps(axes, velocity);
-    const double vehicle_y = factor::VehicleYVelocityMps(axes, mount, velocity);
-    const double vehicle_z = factor::VehicleZVelocityMps(axes, mount, velocity);
+    const double reference_body_x = ReferenceBodyXMps(reference_states, state_index);
+    const double vehicle_y = body_y;
+    const double vehicle_z =
+      factor::VehicleZVelocityMpsWithFixedForward(
+        axes,
+        mount,
+        velocity,
+        reference_body_x,
+        ReferenceNavVelocity(reference_states, state_index));
     if (!std::isfinite(body_y) || !std::isfinite(body_z) ||
         !std::isfinite(vehicle_y) || !std::isfinite(vehicle_z)) {
       continue;
@@ -172,28 +193,21 @@ MountLeakageInitialEstimate EstimateMountLeakage(
       excluded_windows);
   double zx_normal = 0.0;
   double zx_rhs = 0.0;
-  double yx_normal = 0.0;
-  double yx_rhs = 0.0;
   const double min_speed_mps =
     std::max(0.0, config.body_z_nhc_horizontal_leakage_min_speed_mps);
   for (const std::size_t state_index : state_indices) {
     const auto velocity = values.at<gtsam::Vector3>(symbol::V(state_index));
     const auto axes = BodyAxesFromReference(reference_states, state_index);
-    const double body_x = factor::BodyXVelocityMps(axes, velocity);
-    const double body_y = factor::BodyYVelocityMps(axes, velocity);
+    const double reference_body_x = ReferenceBodyXMps(reference_states, state_index);
     const double body_z = factor::BodyZRawVelocityMps(axes, velocity);
-    if (!std::isfinite(body_x) || !std::isfinite(body_y) || !std::isfinite(body_z)) {
+    if (!std::isfinite(reference_body_x) || !std::isfinite(body_z)) {
       continue;
     }
-    if (std::hypot(body_x, body_y) < min_speed_mps) {
+    if (std::abs(reference_body_x) < min_speed_mps) {
       continue;
     }
-    zx_normal += body_x * body_x;
-    zx_rhs += body_x * body_z;
-    if (std::abs(body_x) >= min_speed_mps) {
-      yx_normal += body_x * body_x;
-      yx_rhs += body_x * body_y;
-    }
+    zx_normal += reference_body_x * reference_body_x;
+    zx_rhs += reference_body_x * body_z;
     ++estimate.used_sample_count;
   }
 
@@ -202,7 +216,7 @@ MountLeakageInitialEstimate EstimateMountLeakage(
     estimate.skip_reason = "INSUFFICIENT_SAMPLES";
     return estimate;
   }
-  if (zx_normal <= 1.0e-12 || yx_normal <= 1.0e-12) {
+  if (zx_normal <= 1.0e-12) {
     estimate.skip_reason = "RANK_DEFICIENT";
     return estimate;
   }
@@ -211,7 +225,7 @@ MountLeakageInitialEstimate EstimateMountLeakage(
   estimate.model = factor::VehicleMountLeakageModel{
     std::clamp(zx_rhs / zx_normal, -max_abs_coeff, max_abs_coeff),
     0.0,
-    std::clamp(yx_rhs / yx_normal, -max_abs_coeff, max_abs_coeff)};
+    0.0};
   estimate.valid = true;
   estimate.skip_reason = "ESTIMATED";
   return estimate;
@@ -238,6 +252,28 @@ std::vector<factor::BodyFrameAxesNav> BodyAxesForStates(
     axes.push_back(BodyAxesFromReference(reference_states, state_index));
   }
   return axes;
+}
+
+std::vector<double> ReferenceBodyXForStates(
+  const std::vector<ReferenceNodeState> &reference_states,
+  const std::vector<std::size_t> &state_indices) {
+  std::vector<double> reference_body_x_mps;
+  reference_body_x_mps.reserve(state_indices.size());
+  for (const std::size_t state_index : state_indices) {
+    reference_body_x_mps.push_back(ReferenceBodyXMps(reference_states, state_index));
+  }
+  return reference_body_x_mps;
+}
+
+std::vector<gtsam::Vector3> ReferenceNavVelocitiesForStates(
+  const std::vector<ReferenceNodeState> &reference_states,
+  const std::vector<std::size_t> &state_indices) {
+  std::vector<gtsam::Vector3> reference_nav_velocities;
+  reference_nav_velocities.reserve(state_indices.size());
+  for (const std::size_t state_index : state_indices) {
+    reference_nav_velocities.push_back(ReferenceNavVelocity(reference_states, state_index));
+  }
+  return reference_nav_velocities;
 }
 
 std::vector<std::size_t> UniqueStateIndices(
@@ -398,18 +434,14 @@ void Stage2VehicleNHCConstraintBuilder::Build() const {
     weight_request.target_displacement_sigma_m = z_displacement_sigma_m;
     const BodyZNHCWindowWeightPlan weight_plan =
       weight_planner.PlanWindow(weight_request);
-    const double velocity_sigma_scale =
-      weight_plan.applied_velocity_sigma_mps / z_velocity_sigma_mps;
-    const double displacement_sigma_scale =
-      weight_plan.applied_displacement_sigma_m / z_displacement_sigma_m;
-    const double applied_y_velocity_sigma_mps =
-      request_.config->stage2_vehicle_y_nhc_velocity_sigma_mps * velocity_sigma_scale;
-    const double applied_y_displacement_sigma_m =
-      request_.config->stage2_vehicle_y_nhc_displacement_sigma_m * displacement_sigma_scale;
 
     std::vector<gtsam::Key> velocity_keys;
     std::vector<double> state_times_s;
     const auto body_axes_nav = BodyAxesForStates(*request_.reference_states, state_indices);
+    const auto reference_body_x_mps =
+      ReferenceBodyXForStates(*request_.reference_states, state_indices);
+    const auto reference_nav_velocities =
+      ReferenceNavVelocitiesForStates(*request_.reference_states, state_indices);
     velocity_keys.reserve(state_indices.size());
     state_times_s.reserve(state_indices.size());
     for (std::size_t offset = 0U; offset < state_indices.size(); ++offset) {
@@ -417,17 +449,13 @@ void Stage2VehicleNHCConstraintBuilder::Build() const {
       velocity_keys.push_back(symbol::V(state_index));
       state_times_s.push_back((*request_.state_timestamps)[state_index]);
       if (weight_plan.velocity_factor_used[offset]) {
-        request_.graph->add(factor::VehicleYVelocityZeroFactor(
+        request_.graph->add(factor::VehicleZVelocityZeroFixedForwardFactor(
           symbol::V(state_index),
           request_.mount_leakage_key,
           body_axes_nav[offset],
-          gtsam::noiseModel::Isotropic::Sigma(1, applied_y_velocity_sigma_mps)));
-        request_.graph->add(factor::VehicleZVelocityZeroFactor(
-          symbol::V(state_index),
-          request_.mount_leakage_key,
-          body_axes_nav[offset],
+          reference_body_x_mps[offset],
+          reference_nav_velocities[offset],
           gtsam::noiseModel::Isotropic::Sigma(1, weight_plan.applied_velocity_sigma_mps)));
-        ++request_.run_summary->stage2_vehicle_y_nhc_velocity_factor_count;
         ++request_.run_summary->stage2_vehicle_z_nhc_velocity_factor_count;
       }
 
@@ -437,30 +465,20 @@ void Stage2VehicleNHCConstraintBuilder::Build() const {
       state_row.time_s = (*request_.state_timestamps)[state_index];
       state_row.nhc_region_type = window.source_window_count > 0U ? "JUMP" : "GLOBAL";
       state_row.velocity_factor_used = weight_plan.velocity_factor_used[offset];
-      state_row.effective_vehicle_y_sigma_mps =
-        state_row.velocity_factor_used ? applied_y_velocity_sigma_mps :
-                                         std::numeric_limits<double>::quiet_NaN();
       state_row.effective_vehicle_z_sigma_mps =
         state_row.velocity_factor_used ? weight_plan.applied_velocity_sigma_mps :
                                          std::numeric_limits<double>::quiet_NaN();
       request_.state_diagnostics->push_back(state_row);
     }
 
-    request_.graph->add(factor::VehicleWindowDisplacementZeroFactor(
+    request_.graph->add(factor::VehicleZWindowDisplacementZeroFixedForwardFactor(
       velocity_keys,
       request_.mount_leakage_key,
       body_axes_nav,
+      reference_body_x_mps,
+      reference_nav_velocities,
       state_times_s,
-      factor::VehicleNHCComponent::kY,
-      gtsam::noiseModel::Isotropic::Sigma(1, applied_y_displacement_sigma_m)));
-    request_.graph->add(factor::VehicleWindowDisplacementZeroFactor(
-      velocity_keys,
-      request_.mount_leakage_key,
-      body_axes_nav,
-      state_times_s,
-      factor::VehicleNHCComponent::kZ,
       gtsam::noiseModel::Isotropic::Sigma(1, weight_plan.applied_displacement_sigma_m)));
-    ++request_.run_summary->stage2_vehicle_y_nhc_displacement_factor_count;
     ++request_.run_summary->stage2_vehicle_z_nhc_displacement_factor_count;
     ++request_.run_summary->stage2_vehicle_nhc_window_count;
     request_.run_summary->stage2_vehicle_nhc_velocity_duplicate_state_count +=
@@ -587,6 +605,7 @@ void PopulateStage2VehicleNHCDiagnostics(
     const double body_x = factor::BodyXVelocityMps(axes, velocity);
     const double body_y = factor::BodyYVelocityMps(axes, velocity);
     const double body_z = factor::BodyZRawVelocityMps(axes, velocity);
+    const double reference_body_x = ReferenceBodyXMps(reference_states, row.state_index);
     row.vx_mps = velocity.x();
     row.vy_mps = velocity.y();
     row.vz_mps = velocity.z();
@@ -596,11 +615,17 @@ void PopulateStage2VehicleNHCDiagnostics(
     row.k_zx_rad = optimized_mount.k_zx_rad;
     row.k_zy_rad = optimized_mount.k_zy_rad;
     row.k_yx_rad = optimized_mount.k_yx_rad;
-    row.vehicle_y_correction_mps = optimized_mount.k_yx_rad * body_x;
-    row.vehicle_z_correction_from_x_mps = optimized_mount.k_zx_rad * body_x;
+    row.vehicle_y_correction_mps = 0.0;
+    row.vehicle_z_correction_from_x_mps = optimized_mount.k_zx_rad * reference_body_x;
     row.vehicle_z_correction_from_y_mps = optimized_mount.k_zy_rad * body_y;
-    row.v_vehicle_y_mps = factor::VehicleYVelocityMps(axes, optimized_mount, velocity);
-    row.v_vehicle_z_mps = factor::VehicleZVelocityMps(axes, optimized_mount, velocity);
+    row.v_vehicle_y_mps = body_y;
+    row.v_vehicle_z_mps =
+      factor::VehicleZVelocityMpsWithFixedForward(
+        axes,
+        optimized_mount,
+        velocity,
+        reference_body_x,
+        ReferenceNavVelocity(reference_states, row.state_index));
   }
 
   if (!mount_diagnostics.empty()) {

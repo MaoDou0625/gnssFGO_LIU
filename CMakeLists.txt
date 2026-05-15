@@ -81,6 +81,7 @@ add_library(offline_lc_minimal_lib
   src/core/RtkVerticalDriftReferenceEstimator.cpp
   src/core/Stage1YawRefinementRunner.cpp
   src/core/Stage2AttitudeHoldBuilder.cpp
+  src/core/Stage2HorizontalHoldBuilder.cpp
   src/core/Stage2VehicleNHCConstraintBuilder.cpp
   src/core/Stage2VelocityOptimizationRunner.cpp
   src/core/Stage2VelocityReference.cpp

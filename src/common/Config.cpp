@@ -245,10 +245,14 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
     throw std::runtime_error("stage1 yaw refinement settings must be positive and finite");
   }
   if (!std::isfinite(config.stage2_attitude_hold_sigma_rad) ||
+      !std::isfinite(config.stage2_horizontal_position_hold_sigma_m) ||
+      !std::isfinite(config.stage2_horizontal_velocity_hold_sigma_mps) ||
       !std::isfinite(config.stage2_mount_leakage_prior_sigma_rad) ||
       !std::isfinite(config.stage2_vehicle_y_nhc_velocity_sigma_mps) ||
       !std::isfinite(config.stage2_vehicle_y_nhc_displacement_sigma_m) ||
       config.stage2_attitude_hold_sigma_rad <= 0.0 ||
+      config.stage2_horizontal_position_hold_sigma_m <= 0.0 ||
+      config.stage2_horizontal_velocity_hold_sigma_mps <= 0.0 ||
       config.stage2_mount_leakage_prior_sigma_rad <= 0.0 ||
       config.stage2_vehicle_y_nhc_velocity_sigma_mps <= 0.0 ||
       config.stage2_vehicle_y_nhc_displacement_sigma_m <= 0.0) {
@@ -766,6 +770,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_stage2_vehicle_nhc_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "stage2_attitude_hold_sigma_rad") {
     config.stage2_attitude_hold_sigma_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage2_horizontal_position_hold_sigma_m") {
+    config.stage2_horizontal_position_hold_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage2_horizontal_velocity_hold_sigma_mps") {
+    config.stage2_horizontal_velocity_hold_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "stage2_mount_leakage_prior_sigma_rad") {
     config.stage2_mount_leakage_prior_sigma_rad = ParseDouble(normalized_value);
   } else if (normalized_key == "stage2_vehicle_y_nhc_velocity_sigma_mps") {
@@ -1278,6 +1286,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "enable_stage2_vehicle_nhc_constraint="
     << (config.enable_stage2_vehicle_nhc_constraint ? "true" : "false") << '\n'
     << "stage2_attitude_hold_sigma_rad=" << config.stage2_attitude_hold_sigma_rad << '\n'
+    << "stage2_horizontal_position_hold_sigma_m="
+    << config.stage2_horizontal_position_hold_sigma_m << '\n'
+    << "stage2_horizontal_velocity_hold_sigma_mps="
+    << config.stage2_horizontal_velocity_hold_sigma_mps << '\n'
     << "stage2_mount_leakage_prior_sigma_rad="
     << config.stage2_mount_leakage_prior_sigma_rad << '\n'
     << "stage2_vehicle_y_nhc_velocity_sigma_mps="
