@@ -528,6 +528,7 @@ std::vector<BodyZJumpConstraintWindow> Stage2VehicleNHCConstraintBuilder::BuildG
     while (start_time_s + request_.config->body_z_nhc_min_window_s <=
            segment_end_s + kTimeEpsilonS) {
       BodyZJumpConstraintWindow window;
+      window.source_window_count = 0U;
       window.start_time_s = start_time_s;
       window.end_time_s =
         std::min(start_time_s + request_.config->body_z_nhc_global_window_s, segment_end_s);
@@ -544,6 +545,7 @@ std::vector<BodyZJumpConstraintWindow> Stage2VehicleNHCConstraintBuilder::BuildG
   double start_time_s = segment_start_s;
   while (start_time_s + request_.config->body_z_nhc_min_window_s <= final_time_s + kTimeEpsilonS) {
     BodyZJumpConstraintWindow window;
+    window.source_window_count = 0U;
     window.start_time_s = start_time_s;
     window.end_time_s =
       std::min(start_time_s + request_.config->body_z_nhc_global_window_s, final_time_s);

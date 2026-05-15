@@ -10,7 +10,7 @@ namespace offline_lc_minimal {
 
 struct BodyZJumpConstraintWindow {
   std::size_t source_window_index = 0;
-  std::size_t source_window_count = 1;
+  std::size_t source_window_count = 0;
   double start_time_s = 0.0;
   double end_time_s = 0.0;
 };

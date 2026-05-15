@@ -14,6 +14,7 @@
 #include "offline_lc_minimal/core/OptimizationStagePolicy.h"
 #include "offline_lc_minimal/core/Stage2AttitudeHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage2HorizontalHoldBuilder.h"
+#include "offline_lc_minimal/core/Stage2VehicleNHCConstraintBuilder.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
 #include "offline_lc_minimal/factor/HorizontalHoldFactor.h"
 #include "offline_lc_minimal/factor/VehicleVelocityNHCFactor.h"
@@ -286,6 +287,67 @@ void TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors() {
              "summary horizontal velocity hold count is wrong");
 }
 
+void TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_stage2_vehicle_nhc_constraint = true;
+  config.enable_body_z_nhc_global_weak_constraint = true;
+  config.enable_body_z_nhc_strict_effective_weighting = false;
+  config.body_z_nhc_min_window_s = 0.5;
+  config.body_z_nhc_global_window_s = 2.0;
+  config.body_z_nhc_global_stride_s = 2.0;
+  config.body_z_nhc_jump_velocity_sigma_mps = 0.005;
+  config.body_z_nhc_jump_displacement_sigma_m = 0.005;
+  config.body_z_nhc_global_velocity_sigma_mps = 0.123;
+  config.body_z_nhc_global_displacement_sigma_m = 0.234;
+  config.body_z_nhc_horizontal_leakage_min_speed_mps = 0.0;
+  config.body_z_nhc_horizontal_leakage_min_sample_count = 1;
+  const std::vector<double> timestamps{0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0};
+  const auto reference_states = MakeReferenceStates(timestamps.size());
+  std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  gtsam::Values initial_values;
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    initial_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(1.0 + static_cast<double>(index), 0.0, 0.1));
+  }
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::Stage2MountLeakageDiagnosticRow> mount_diagnostics;
+  std::vector<offline_lc_minimal::Stage2VehicleNHCStateDiagnosticRow> state_diagnostics;
+
+  offline_lc_minimal::Stage2VehicleNHCConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.jump_windows = &jump_windows;
+  request.initial_values = &initial_values;
+  request.reference_states = &reference_states;
+  request.dynamic_start_index = 0U;
+  request.mount_leakage_key = gtsam::Symbol('m', 0);
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.mount_diagnostics = &mount_diagnostics;
+  request.state_diagnostics = &state_diagnostics;
+  offline_lc_minimal::Stage2VehicleNHCConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(!state_diagnostics.empty(), "stage2 global NHC diagnostics should not be empty");
+  for (const auto &row : state_diagnostics) {
+    ExpectTrue(row.nhc_region_type == "GLOBAL",
+               "stage2 global windows should be labeled GLOBAL");
+    if (row.velocity_factor_used) {
+      ExpectNear(
+        row.effective_vehicle_z_sigma_mps,
+        config.body_z_nhc_global_velocity_sigma_mps,
+        1e-12,
+        "stage2 global window should use global velocity sigma");
+    }
+  }
+  ExpectTrue(summary.stage2_vehicle_nhc_window_count > 0U,
+             "stage2 global NHC windows should be added");
+  ExpectTrue(summary.stage2_vehicle_z_nhc_velocity_factor_count > 0U,
+             "stage2 global velocity factors should be added");
+}
+
 void TestStage2PolicyDisablesRtkVelocityAndAttitudeReference() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_stage1_yaw_refinement = true;
@@ -361,6 +423,7 @@ int main() {
     RunTest("TestStage2AttitudeHoldBuilderAddsOneFactorPerState", TestStage2AttitudeHoldBuilderAddsOneFactorPerState);
     RunTest("TestStage2HorizontalHoldFactorsIgnoreVerticalAndAttitude", TestStage2HorizontalHoldFactorsIgnoreVerticalAndAttitude);
     RunTest("TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors", TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors);
+    RunTest("TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma", TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma);
     RunTest("TestStage2PolicyDisablesRtkVelocityAndAttitudeReference", TestStage2PolicyDisablesRtkVelocityAndAttitudeReference);
     RunTest("TestStage2ConfigParsingAndValidation", TestStage2ConfigParsingAndValidation);
   } catch (const std::exception &exception) {
