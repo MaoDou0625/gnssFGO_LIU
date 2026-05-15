@@ -847,7 +847,7 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
     "phase32 relative yaw reference sigma should load");
 }
 
-void TestDefaultOfflineConfigUsesPhase31StrictNHC() {
+void TestDefaultOfflineConfigUsesPhase32RtkOutageSmoother() {
   const auto config = offline_lc_minimal::LoadConfigFile(
     std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) + "/config/default_offline.cfg",
     offline_lc_minimal::DefaultConfig());
@@ -861,6 +861,19 @@ void TestDefaultOfflineConfigUsesPhase31StrictNHC() {
   ExpectTrue(
     std::abs(config.body_z_nhc_global_stride_s - config.body_z_nhc_global_window_s) < 1e-15,
     "default global NHC windows should be non-overlapping");
+  ExpectTrue(config.drop_non_rtkfix, "default config should remove non-fixed GNSS factors");
+  ExpectTrue(config.enable_rtk_outage_smoothing, "default config should enable RTK outage smoothing");
+  ExpectTrue(config.enable_rtk_outage_attitude_hold, "default config should enable outage attitude hold");
+  ExpectTrue(
+    std::abs(config.rtk_outage_attitude_guard_duration_s - 1.0) < 1e-15,
+    "default outage attitude guard duration should match phase32");
+  ExpectTrue(
+    std::abs(config.rtk_outage_absolute_attitude_sigma_rad - 1.0e-4) < 1e-15,
+    "default outage absolute attitude sigma should match phase32");
+  ExpectTrue(config.enable_rtk_outage_velocity_delta_3d, "default config should enable outage 3D velocity delta");
+  ExpectTrue(
+    std::abs(config.rtk_outage_velocity_delta_3d_sigma_mps - 0.20) < 1e-15,
+    "default outage 3D velocity sigma should match phase32");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
@@ -2030,8 +2043,8 @@ int main() {
       "TestPhase32RtkOutageSmootherConfigLoads",
       TestPhase32RtkOutageSmootherConfigLoads);
     RunTest(
-      "TestDefaultOfflineConfigUsesPhase31StrictNHC",
-      TestDefaultOfflineConfigUsesPhase31StrictNHC);
+      "TestDefaultOfflineConfigUsesPhase32RtkOutageSmoother",
+      TestDefaultOfflineConfigUsesPhase32RtkOutageSmoother);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
