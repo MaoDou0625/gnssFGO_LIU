@@ -558,6 +558,9 @@ std::vector<BodyZJumpWindowCandidate> MergeNearbySameDirectionWindows(
   std::vector<BodyZJumpWindowCandidate> merged_windows;
   const double merge_gap_s =
     std::max(config.body_z_jump_redundant_padding_s, config.body_z_jump_merge_gap_s);
+  const double merge_max_duration_s = config.body_z_jump_merge_max_duration_s;
+  const bool has_merge_duration_limit =
+    std::isfinite(merge_max_duration_s) && merge_max_duration_s > 0.0;
   std::size_t group_begin = 0U;
   while (group_begin < windows.size()) {
     std::size_t group_end = group_begin;
@@ -565,8 +568,14 @@ std::vector<BodyZJumpWindowCandidate> MergeNearbySameDirectionWindows(
     while (group_end + 1U < windows.size() &&
            windows[group_end + 1U].direction == windows[group_begin].direction &&
            windows[group_end + 1U].start_time_s <= group_end_time_s + merge_gap_s) {
+      const double candidate_end_time_s =
+        std::max(group_end_time_s, windows[group_end + 1U].end_time_s);
+      if (has_merge_duration_limit &&
+          candidate_end_time_s - windows[group_begin].start_time_s > merge_max_duration_s) {
+        break;
+      }
       ++group_end;
-      group_end_time_s = std::max(group_end_time_s, windows[group_end].end_time_s);
+      group_end_time_s = candidate_end_time_s;
     }
     merged_windows.push_back(
       RebuildMergedWindow(windows, group_begin, group_end, signal, state_timestamps));

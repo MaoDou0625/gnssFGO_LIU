@@ -137,6 +137,47 @@ void TestBodyZSeedJumpDetectorMergesNearbyDownwardWindows() {
     "nearby DOWN body-z windows should merge into one correction window");
 }
 
+void TestBodyZSeedJumpDetectorRespectsMergeMaxDuration() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  ConfigureSensitiveDetector(&config);
+  config.body_z_jump_merge_gap_s = 2.0;
+  config.body_z_jump_merge_max_duration_s = 2.0;
+
+  std::vector<offline_lc_minimal::ImuSample> imu_samples;
+  for (int sample_index = 0; sample_index <= 1000; ++sample_index) {
+    const double time_s = 0.005 * static_cast<double>(sample_index);
+    offline_lc_minimal::ImuSample sample;
+    sample.time_s = time_s;
+    sample.accel_mps2 = Eigen::Vector3d(0.0, 0.0, 9.81);
+    if ((time_s >= 1.0 && time_s <= 1.10) ||
+        (time_s >= 2.0 && time_s <= 2.10) ||
+        (time_s >= 3.0 && time_s <= 3.10)) {
+      sample.accel_mps2.z() -= 1.0;
+    }
+    imu_samples.push_back(sample);
+  }
+
+  std::vector<double> state_timestamps;
+  const auto seed_states = MakeFlatSeedStates(&state_timestamps, 100);
+  offline_lc_minimal::BodyZBidirectionalJumpDetector detector(config);
+  const auto detection = detector.Detect(imu_samples, seed_states, state_timestamps, 0.0, 5.0);
+  const auto down_window_count = std::count_if(
+    detection.windows.begin(),
+    detection.windows.end(),
+    [](const auto &window) { return window.direction == "DOWN"; });
+  ExpectTrue(
+    down_window_count >= 2U,
+    "merge max duration should split nearby DOWN windows instead of chaining them into one long window");
+  for (const auto &window : detection.windows) {
+    if (window.direction != "DOWN") {
+      continue;
+    }
+    ExpectTrue(
+      window.duration_s <= config.body_z_jump_merge_max_duration_s + 1e-9,
+      "merged DOWN body-z window should respect body_z_jump_merge_max_duration_s");
+  }
+}
+
 void TestBodyZSeedJumpDetectorDoesNotMergeAcrossOppositeDirectionWindow() {
   auto config = offline_lc_minimal::DefaultConfig();
   ConfigureSensitiveDetector(&config);
@@ -210,6 +251,9 @@ int main() {
   try {
     RunTest("TestBodyZSeedJumpDetectorFindsDownwardWindow", TestBodyZSeedJumpDetectorFindsDownwardWindow);
     RunTest("TestBodyZSeedJumpDetectorMergesNearbyDownwardWindows", TestBodyZSeedJumpDetectorMergesNearbyDownwardWindows);
+    RunTest(
+      "TestBodyZSeedJumpDetectorRespectsMergeMaxDuration",
+      TestBodyZSeedJumpDetectorRespectsMergeMaxDuration);
     RunTest(
       "TestBodyZSeedJumpDetectorDoesNotMergeAcrossOppositeDirectionWindow",
       TestBodyZSeedJumpDetectorDoesNotMergeAcrossOppositeDirectionWindow);

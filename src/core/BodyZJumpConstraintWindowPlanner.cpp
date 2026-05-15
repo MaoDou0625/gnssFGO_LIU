@@ -33,14 +33,23 @@ std::vector<BodyZJumpConstraintWindow> BuildBodyZJumpConstraintWindows(
     });
 
   std::vector<BodyZJumpConstraintWindow> merged_windows;
+  const bool has_merge_duration_limit =
+    std::isfinite(options.merge_max_duration_s) && options.merge_max_duration_s > 0.0;
   for (const auto &window : windows) {
     if (merged_windows.empty() ||
         window.start_time_s > merged_windows.back().end_time_s + options.merge_gap_s) {
       merged_windows.push_back(window);
       continue;
     }
-    merged_windows.back().end_time_s =
+    const double candidate_end_time_s =
       std::max(merged_windows.back().end_time_s, window.end_time_s);
+    if (has_merge_duration_limit &&
+        candidate_end_time_s - merged_windows.back().start_time_s > options.merge_max_duration_s) {
+      merged_windows.push_back(window);
+      continue;
+    }
+    merged_windows.back().end_time_s =
+      candidate_end_time_s;
     merged_windows.back().source_window_count += window.source_window_count;
   }
   return merged_windows;
@@ -51,6 +60,7 @@ BodyZJumpConstraintWindowOptions BodyZNHCJumpConstraintWindowOptions(
   BodyZJumpConstraintWindowOptions options;
   options.padding_s = config.body_z_nhc_jump_padding_s;
   options.merge_gap_s = config.body_z_nhc_merge_gap_s;
+  options.merge_max_duration_s = config.body_z_jump_merge_max_duration_s;
   return options;
 }
 

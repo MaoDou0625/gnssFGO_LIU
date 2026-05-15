@@ -13,6 +13,7 @@
 
 #include "offline_lc_minimal/core/BodyZNHCConstraintBuilder.h"
 #include "offline_lc_minimal/core/BodyZHorizontalLeakageEstimator.h"
+#include "offline_lc_minimal/core/BodyZJumpConstraintWindowPlanner.h"
 #include "offline_lc_minimal/factor/BodyZLeakageCorrectedVelocityFactor.h"
 #include "offline_lc_minimal/factor/BodyZLeakageCorrectedWindowDisplacementFactor.h"
 #include "offline_lc_minimal/factor/BodyZVelocityZeroFactor.h"
@@ -412,6 +413,31 @@ void TestBuilderMergesOverlappingJumpWindows() {
   ExpectNear(static_cast<double>(diagnostics.front().source_window_count), 2.0, 0.0, "merged source count is wrong");
 }
 
+void TestJumpConstraintWindowPlannerRespectsMergeMaxDuration() {
+  offline_lc_minimal::BodyZJumpConstraintWindowOptions options;
+  options.padding_s = 0.0;
+  options.merge_gap_s = 1.0;
+  options.merge_max_duration_s = 3.0;
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows{
+    MakeJumpWindow(0.0, 1.0),
+    MakeJumpWindow(1.5, 2.5),
+    MakeJumpWindow(3.0, 4.0),
+  };
+
+  const std::vector<offline_lc_minimal::BodyZJumpConstraintWindow> windows =
+    offline_lc_minimal::BuildBodyZJumpConstraintWindows(jump_windows, options);
+  ExpectNear(static_cast<double>(windows.size()), 2.0, 0.0, "merge max duration should split long chains");
+  ExpectNear(windows.front().start_time_s, 0.0, 1e-12, "first capped window start is wrong");
+  ExpectNear(windows.front().end_time_s, 2.5, 1e-12, "first capped window end is wrong");
+  ExpectNear(
+    static_cast<double>(windows.front().source_window_count),
+    2.0,
+    0.0,
+    "first capped window should retain merged source count");
+  ExpectNear(windows.back().start_time_s, 3.0, 1e-12, "second capped window start is wrong");
+  ExpectNear(windows.back().end_time_s, 4.0, 1e-12, "second capped window end is wrong");
+}
+
 void TestBuilderSkipsShortWindow() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -670,6 +696,9 @@ int main() {
     RunTest("TestPopulateBodyZNHCDiagnosticsUsesFixedInitialAxis", TestPopulateBodyZNHCDiagnosticsUsesFixedInitialAxis);
     RunTest("TestBuilderAddsJumpWindowNHC", TestBuilderAddsJumpWindowNHC);
     RunTest("TestBuilderMergesOverlappingJumpWindows", TestBuilderMergesOverlappingJumpWindows);
+    RunTest(
+      "TestJumpConstraintWindowPlannerRespectsMergeMaxDuration",
+      TestJumpConstraintWindowPlannerRespectsMergeMaxDuration);
     RunTest("TestBuilderSkipsShortWindow", TestBuilderSkipsShortWindow);
     RunTest("TestBuilderDoesNotAddGlobalWeakWindowsWhenDisabled", TestBuilderDoesNotAddGlobalWeakWindowsWhenDisabled);
     RunTest("TestBuilderAddsGlobalWeakWindowsWhenEnabled", TestBuilderAddsGlobalWeakWindowsWhenEnabled);

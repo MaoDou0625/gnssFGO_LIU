@@ -18,6 +18,7 @@ struct BodyZJumpConstraintWindow {
 struct BodyZJumpConstraintWindowOptions {
   double padding_s = 0.0;
   double merge_gap_s = 0.0;
+  double merge_max_duration_s = 0.0;
 };
 
 [[nodiscard]] std::vector<BodyZJumpConstraintWindow> BuildBodyZJumpConstraintWindows(
