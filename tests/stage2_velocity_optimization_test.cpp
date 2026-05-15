@@ -147,7 +147,7 @@ void TestStage2AttitudeHoldBuilderAddsOneFactorPerState() {
              "attitude hold should connect the first pose key");
 }
 
-void TestStage2PolicyEnablesVelocityAndDisablesAttitudeReference() {
+void TestStage2PolicyDisablesRtkVelocityAndAttitudeReference() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_stage1_yaw_refinement = true;
   config.enable_stage2_velocity_optimization = true;
@@ -165,8 +165,8 @@ void TestStage2PolicyEnablesVelocityAndDisablesAttitudeReference() {
              "stage2 flag should remain enabled for inner run");
   ExpectTrue(!stage2_config.enable_attitude_reference_constraint,
              "stage2 should disable attitude reference");
-  ExpectTrue(stage2_config.enable_rtk_velocity_constraint,
-             "stage2 should enable RTK horizontal velocity");
+  ExpectTrue(!stage2_config.enable_rtk_velocity_constraint,
+             "stage2 should not enable RTK horizontal velocity");
   ExpectTrue(!stage2_config.enable_body_z_nhc_constraint,
              "stage2 should disable old body-z NHC");
   ExpectTrue(!stage2_config.enable_body_z_nhc_horizontal_leakage_correction,
@@ -210,7 +210,7 @@ int main() {
   try {
     RunTest("TestVehicleVelocityFactorsUseVelocityAndMountOnly", TestVehicleVelocityFactorsUseVelocityAndMountOnly);
     RunTest("TestStage2AttitudeHoldBuilderAddsOneFactorPerState", TestStage2AttitudeHoldBuilderAddsOneFactorPerState);
-    RunTest("TestStage2PolicyEnablesVelocityAndDisablesAttitudeReference", TestStage2PolicyEnablesVelocityAndDisablesAttitudeReference);
+    RunTest("TestStage2PolicyDisablesRtkVelocityAndAttitudeReference", TestStage2PolicyDisablesRtkVelocityAndAttitudeReference);
     RunTest("TestStage2ConfigParsingAndValidation", TestStage2ConfigParsingAndValidation);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
