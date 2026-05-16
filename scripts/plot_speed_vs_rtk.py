@@ -159,9 +159,9 @@ def read_rtkfix_rows(
     origin_h_m: float,
 ) -> list[dict[str, float]]:
     rows: list[dict[str, float]] = []
-    with gnss_path.open("r", encoding="utf-8", newline="") as file:
-        reader = csv.reader(file, delimiter="\t")
-        for raw in reader:
+    with gnss_path.open("r", encoding="utf-8") as file:
+        for line in file:
+            raw = line.split()
             if not raw:
                 continue
             try:

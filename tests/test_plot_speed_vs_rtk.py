@@ -1,5 +1,6 @@
 import importlib.util
 import pathlib
+import tempfile
 import unittest
 
 
@@ -10,6 +11,24 @@ SCRIPT_SPEC.loader.exec_module(plot_speed_vs_rtk)
 
 
 class PlotSpeedVsRtkTests(unittest.TestCase):
+    def test_read_rtkfix_rows_accepts_whitespace_delimited_gnss(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            gnss_path = pathlib.Path(temp_dir) / "gnss.txt"
+            gnss_path.write_text(
+                "0.0 0.0 0.0 10.0 0 0 0.02 0 0 0 1 7 1 0 0 0 0 0\n"
+                "0.2 0.0 0.0 10.1 0 0 0.02 0 0 0 1 7 4 0 0 0 0 0\n"
+                "0.4 0.0 0.0 10.2 0 0 0.02 0 0 0 1 7 1 0 0 0 0 0\n",
+                encoding="utf-8",
+            )
+
+            rows = plot_speed_vs_rtk.read_rtkfix_rows(gnss_path, 0.0, 0.0, 10.0)
+
+        self.assertEqual(len(rows), 2)
+        self.assertAlmostEqual(rows[0]["time_s"], 0.0)
+        self.assertAlmostEqual(rows[1]["time_s"], 0.4)
+        self.assertAlmostEqual(rows[0]["up_m"], 0.0, places=6)
+        self.assertAlmostEqual(rows[1]["up_m"], 0.2, places=6)
+
     def test_centered_difference_recovers_constant_velocity(self) -> None:
         rtk_rows = [
             {"time_s": 0.0, "east_m": 0.0, "north_m": 0.0, "up_m": 0.0},
