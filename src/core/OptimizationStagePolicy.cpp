@@ -22,6 +22,7 @@ OfflineRunnerConfig MakeStage1YawRefinementConfig(const OfflineRunnerConfig &con
   stage_config.enable_vertical_jump_impulse = false;
   stage_config.enable_vertical_jump_bias = false;
   stage_config.enable_vertical_jump_segmented_bias = false;
+  stage_config.enable_vertical_jump_spectral_bias_relaxation = false;
   stage_config.enable_vertical_jump_velocity_ramp_smoothing = false;
   stage_config.enable_vertical_jump_position_ramp_smoothing = false;
   stage_config.enable_vertical_jump_velocity_continuity = false;

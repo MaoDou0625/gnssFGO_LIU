@@ -14,6 +14,7 @@
 #include "offline_lc_minimal/factor/VerticalJumpBiasVelocityFactor.h"
 #include "offline_lc_minimal/factor/VerticalMaskedCombinedImuFactor.h"
 #include "offline_lc_minimal/factor/VerticalPositionVelocityConsistencyFactor.h"
+#include "offline_lc_minimal/core/VerticalJumpSpectralResponseEstimator.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -65,6 +66,47 @@ double VelocitySigmaMps(
   return std::sqrt(base_sigma_mps * base_sigma_mps + inflation_mps * inflation_mps);
 }
 
+void FillSpectralDiagnostics(
+  const VerticalJumpSpectralResponseEstimate &estimate,
+  VerticalJumpBiasDiagnosticRow &row) {
+  row.spectral_skip_reason = estimate.skip_reason;
+  row.spectral_target_window_count = estimate.target_window_count;
+  row.spectral_reference_window_count = estimate.reference_window_count;
+  row.spectral_total_rms_ratio = estimate.total_rms_ratio;
+  row.spectral_band_30_60_rms_ratio = estimate.band_30_60_rms_ratio;
+  row.spectral_band_60_120_rms_ratio = estimate.band_60_120_rms_ratio;
+  row.spectral_band_120_250_rms_ratio = estimate.band_120_250_rms_ratio;
+  row.spectral_response_ratio = estimate.response_ratio;
+  row.spectral_score = estimate.score;
+}
+
+void UpdateSpectralSummary(
+  const VerticalJumpSpectralResponseEstimate &estimate,
+  const double effective_prior_sigma_mps2,
+  const double base_prior_sigma_mps2,
+  RunSummary &run_summary) {
+  if (!estimate.valid) {
+    return;
+  }
+  if (std::isfinite(estimate.response_ratio)) {
+    if (!std::isfinite(run_summary.vertical_jump_spectral_max_response_ratio) ||
+        estimate.response_ratio > run_summary.vertical_jump_spectral_max_response_ratio) {
+      run_summary.vertical_jump_spectral_max_response_ratio = estimate.response_ratio;
+    }
+  }
+  if (std::isfinite(effective_prior_sigma_mps2)) {
+    if (!std::isfinite(run_summary.vertical_jump_spectral_max_effective_prior_sigma_mps2) ||
+        effective_prior_sigma_mps2 >
+          run_summary.vertical_jump_spectral_max_effective_prior_sigma_mps2) {
+      run_summary.vertical_jump_spectral_max_effective_prior_sigma_mps2 =
+        effective_prior_sigma_mps2;
+    }
+  }
+  if (effective_prior_sigma_mps2 > base_prior_sigma_mps2 + kTimeEpsilonS) {
+    ++run_summary.vertical_jump_spectral_relaxed_segment_count;
+  }
+}
+
 }  // namespace
 
 VerticalJumpBiasConstraintBuilder::VerticalJumpBiasConstraintBuilder(
@@ -91,6 +133,8 @@ void VerticalJumpBiasConstraintBuilder::Build() const {
       request_.jump_windows,
       request_.body_z_diagnostics,
       &segmenter_inputs});
+  request_.run_summary->vertical_jump_spectral_bias_relaxation_enabled =
+    request_.config->enable_vertical_jump_spectral_bias_relaxation;
   request_.diagnostics->reserve(request_.diagnostics->size() + segments.size());
   const bool add_position_velocity_consistency =
     !request_.config->enable_vertical_position_velocity_consistency_all_states;
@@ -115,6 +159,7 @@ void VerticalJumpBiasConstraintBuilder::Build() const {
     row.highfreq_rms_mps2 = segment.highfreq_rms_mps2;
     row.highfreq_p95_abs_mps2 = segment.highfreq_p95_abs_mps2;
     row.prior_sigma_mps2 = request_.config->vertical_jump_bias_prior_sigma_mps2;
+    row.effective_prior_sigma_mps2 = row.prior_sigma_mps2;
     row.base_velocity_sigma_mps = request_.config->vertical_jump_bias_velocity_sigma_mps;
     row.velocity_sigma_mps = row.base_velocity_sigma_mps;
     row.position_velocity_sigma_m = request_.config->vertical_jump_bias_position_velocity_sigma_m;
@@ -176,10 +221,29 @@ void VerticalJumpBiasConstraintBuilder::Build() const {
       continue;
     }
 
+    const auto spectral_estimate = EstimateVerticalJumpSpectralResponse(
+      VerticalJumpSpectralResponseRequest{
+        request_.config,
+        request_.body_z_diagnostics,
+        &segmenter_inputs,
+        row.start_time_s,
+        row.end_time_s});
+    FillSpectralDiagnostics(spectral_estimate, row);
+    row.effective_prior_sigma_mps2 = ComputeVerticalJumpSpectralEffectivePriorSigma(
+      *request_.config,
+      request_.config->vertical_jump_bias_prior_sigma_mps2,
+      spectral_estimate);
+    row.prior_sigma_mps2 = row.effective_prior_sigma_mps2;
+    UpdateSpectralSummary(
+      spectral_estimate,
+      row.effective_prior_sigma_mps2,
+      request_.config->vertical_jump_bias_prior_sigma_mps2,
+      *request_.run_summary);
+
     const gtsam::Key jump_bias_key = JumpBiasKey(segment.bias_key_index);
     const auto prior_noise = gtsam::noiseModel::Isotropic::Sigma(
       1,
-      request_.config->vertical_jump_bias_prior_sigma_mps2);
+      row.effective_prior_sigma_mps2);
     if (!request_.initial_values->exists(jump_bias_key)) {
       request_.initial_values->insert(jump_bias_key, row.detected_bias_mps2);
     }

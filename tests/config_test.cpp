@@ -1729,6 +1729,70 @@ void TestVerticalJumpConfigValidation() {
   ExpectTrue(threw, "non-positive boundary position-velocity consistency sigma should be rejected");
 }
 
+void TestVerticalJumpSpectralBiasRelaxationConfig() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "enable_body_z_jump_detection", "true");
+  offline_lc_minimal::OverrideConfigField(config, "enable_vertical_jump_bias", "true");
+  offline_lc_minimal::OverrideConfigField(config, "enable_vertical_jump_spectral_bias_relaxation", "true");
+  offline_lc_minimal::OverrideConfigField(config, "vertical_jump_spectral_window_s", "2.5");
+  offline_lc_minimal::OverrideConfigField(config, "vertical_jump_spectral_stride_s", "0.25");
+  offline_lc_minimal::OverrideConfigField(config, "vertical_jump_spectral_reference_margin_s", "9.0");
+  offline_lc_minimal::OverrideConfigField(config, "vertical_jump_spectral_min_reference_window_count", "4");
+  offline_lc_minimal::OverrideConfigField(config, "vertical_jump_spectral_response_trigger_ratio", "1.3");
+  offline_lc_minimal::OverrideConfigField(config, "vertical_jump_spectral_response_full_ratio", "2.8");
+  offline_lc_minimal::OverrideConfigField(config, "vertical_jump_spectral_bias_prior_max_sigma_mps2", "0.35");
+
+  ExpectTrue(config.enable_vertical_jump_spectral_bias_relaxation, "spectral relaxation flag should parse");
+  ExpectTrue(
+    std::abs(config.vertical_jump_spectral_window_s - 2.5) < 1e-12,
+    "spectral window should parse");
+  ExpectTrue(
+    std::abs(config.vertical_jump_spectral_stride_s - 0.25) < 1e-12,
+    "spectral stride should parse");
+  ExpectTrue(
+    config.vertical_jump_spectral_min_reference_window_count == 4,
+    "spectral minimum reference count should parse");
+  offline_lc_minimal::ValidateConfig(config);
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_spectral_bias_relaxation = true;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("requires enable_vertical_jump_bias") != std::string::npos;
+  }
+  ExpectTrue(threw, "spectral relaxation should require jump-local bias mode");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  config.enable_vertical_jump_spectral_bias_relaxation = true;
+  config.vertical_jump_spectral_response_full_ratio = 1.1;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical jump settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "spectral full-response ratio must exceed trigger ratio");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  config.enable_vertical_jump_spectral_bias_relaxation = true;
+  config.vertical_jump_bias_prior_sigma_mps2 = 0.40;
+  config.vertical_jump_spectral_bias_prior_max_sigma_mps2 = 0.30;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("spectral bias prior max sigma") != std::string::npos;
+  }
+  ExpectTrue(threw, "spectral max prior sigma should not be below the base prior sigma");
+}
+
 void TestBodyZNHCConfigValidation() {
   auto config = offline_lc_minimal::DefaultConfig();
   offline_lc_minimal::OverrideConfigField(config, "enable_body_z_nhc_constraint", "true");
@@ -2056,6 +2120,9 @@ int main() {
     RunTest("TestAccelerometerBiasUgConfigParsing", TestAccelerometerBiasUgConfigParsing);
     RunTest("TestVerticalVelocityDeltaConfigValidation", TestVerticalVelocityDeltaConfigValidation);
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);
+    RunTest(
+      "TestVerticalJumpSpectralBiasRelaxationConfig",
+      TestVerticalJumpSpectralBiasRelaxationConfig);
     RunTest("TestBodyZNHCConfigValidation", TestBodyZNHCConfigValidation);
     RunTest("TestRtkVelocityConfigValidation", TestRtkVelocityConfigValidation);
     RunTest("TestRtkOutageRecoveryConfigValidation", TestRtkOutageRecoveryConfigValidation);

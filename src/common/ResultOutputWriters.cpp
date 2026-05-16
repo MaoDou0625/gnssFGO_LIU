@@ -1171,6 +1171,11 @@ void WriteVerticalJumpBiasDiagnosticsCsv(
        "velocity_factor_count,position_velocity_factor_count,source_window_duration_s,"
        "factor_duration_s,imu_delta_vz_mps,detected_signed_delta_velocity_mps,"
        "detected_bias_mps2,used_segmented_estimate,prior_sigma_mps2,"
+       "effective_prior_sigma_mps2,spectral_skip_reason,"
+       "spectral_target_window_count,spectral_reference_window_count,"
+       "spectral_total_rms_ratio,spectral_band_30_60_rms_ratio,"
+       "spectral_band_60_120_rms_ratio,spectral_band_120_250_rms_ratio,"
+       "spectral_response_ratio,spectral_score,"
        "base_velocity_sigma_mps,highfreq_rms_mps2,highfreq_p95_abs_mps2,"
        "highfreq_sigma_inflation_mps,velocity_sigma_mps,position_velocity_sigma_m,"
        "estimated_bias_mps2,corrected_delta_vz_mps,optimized_delta_vz_mps,residual_mps\n";
@@ -1197,6 +1202,16 @@ void WriteVerticalJumpBiasDiagnosticsCsv(
            << row.detected_bias_mps2 << ','
            << (row.used_segmented_estimate ? 1 : 0) << ','
            << row.prior_sigma_mps2 << ','
+           << row.effective_prior_sigma_mps2 << ','
+           << row.spectral_skip_reason << ','
+           << row.spectral_target_window_count << ','
+           << row.spectral_reference_window_count << ','
+           << row.spectral_total_rms_ratio << ','
+           << row.spectral_band_30_60_rms_ratio << ','
+           << row.spectral_band_60_120_rms_ratio << ','
+           << row.spectral_band_120_250_rms_ratio << ','
+           << row.spectral_response_ratio << ','
+           << row.spectral_score << ','
            << row.base_velocity_sigma_mps << ','
            << row.highfreq_rms_mps2 << ','
            << row.highfreq_p95_abs_mps2 << ','

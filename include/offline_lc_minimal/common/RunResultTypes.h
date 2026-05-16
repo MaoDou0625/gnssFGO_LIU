@@ -195,6 +195,11 @@ struct RunSummary {
   std::size_t vertical_jump_bias_skipped_count = 0;
   std::size_t vertical_jump_bias_segment_count = 0;
   std::size_t vertical_jump_bias_highfreq_inflated_factor_count = 0;
+  bool vertical_jump_spectral_bias_relaxation_enabled = false;
+  std::size_t vertical_jump_spectral_relaxed_segment_count = 0;
+  double vertical_jump_spectral_max_response_ratio = std::numeric_limits<double>::quiet_NaN();
+  double vertical_jump_spectral_max_effective_prior_sigma_mps2 =
+    std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_jump_velocity_ramp_factor_count = 0;
   std::size_t vertical_jump_position_ramp_factor_count = 0;
   std::size_t vertical_jump_velocity_height_slope_factor_count = 0;
@@ -512,6 +517,14 @@ struct RunSummary {
         << "vertical_jump_bias_segment_count=" << vertical_jump_bias_segment_count << '\n'
         << "vertical_jump_bias_highfreq_inflated_factor_count="
         << vertical_jump_bias_highfreq_inflated_factor_count << '\n'
+        << "vertical_jump_spectral_bias_relaxation_enabled="
+        << (vertical_jump_spectral_bias_relaxation_enabled ? "true" : "false") << '\n'
+        << "vertical_jump_spectral_relaxed_segment_count="
+        << vertical_jump_spectral_relaxed_segment_count << '\n'
+        << "vertical_jump_spectral_max_response_ratio="
+        << vertical_jump_spectral_max_response_ratio << '\n'
+        << "vertical_jump_spectral_max_effective_prior_sigma_mps2="
+        << vertical_jump_spectral_max_effective_prior_sigma_mps2 << '\n'
         << "vertical_jump_velocity_ramp_factor_count=" << vertical_jump_velocity_ramp_factor_count << '\n'
         << "vertical_jump_position_ramp_factor_count=" << vertical_jump_position_ramp_factor_count << '\n'
         << "vertical_jump_velocity_height_slope_factor_count="

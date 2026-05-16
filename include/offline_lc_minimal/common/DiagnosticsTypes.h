@@ -626,6 +626,16 @@ struct VerticalJumpBiasDiagnosticRow {
   double detected_bias_mps2 = std::numeric_limits<double>::quiet_NaN();
   bool used_segmented_estimate = false;
   double prior_sigma_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double effective_prior_sigma_mps2 = std::numeric_limits<double>::quiet_NaN();
+  std::string spectral_skip_reason = "DISABLED";
+  std::size_t spectral_target_window_count = 0;
+  std::size_t spectral_reference_window_count = 0;
+  double spectral_total_rms_ratio = std::numeric_limits<double>::quiet_NaN();
+  double spectral_band_30_60_rms_ratio = std::numeric_limits<double>::quiet_NaN();
+  double spectral_band_60_120_rms_ratio = std::numeric_limits<double>::quiet_NaN();
+  double spectral_band_120_250_rms_ratio = std::numeric_limits<double>::quiet_NaN();
+  double spectral_response_ratio = std::numeric_limits<double>::quiet_NaN();
+  double spectral_score = 0.0;
   double base_velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
   double highfreq_rms_mps2 = std::numeric_limits<double>::quiet_NaN();
   double highfreq_p95_abs_mps2 = std::numeric_limits<double>::quiet_NaN();

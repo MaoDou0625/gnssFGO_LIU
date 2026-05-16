@@ -499,6 +499,7 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
        config.enable_vertical_jump_impulse ||
        config.enable_vertical_jump_bias ||
        config.enable_vertical_jump_segmented_bias ||
+       config.enable_vertical_jump_spectral_bias_relaxation ||
        config.enable_vertical_jump_velocity_ramp_smoothing ||
        config.enable_vertical_jump_position_ramp_smoothing ||
        config.enable_vertical_jump_velocity_continuity ||
@@ -552,6 +553,20 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_jump_bias_highfreq_sigma_scale < 0.0 ||
       !std::isfinite(config.vertical_jump_bias_highfreq_sigma_max_mps) ||
       config.vertical_jump_bias_highfreq_sigma_max_mps <= 0.0 ||
+      !std::isfinite(config.vertical_jump_spectral_window_s) ||
+      config.vertical_jump_spectral_window_s <= 0.0 ||
+      !std::isfinite(config.vertical_jump_spectral_stride_s) ||
+      config.vertical_jump_spectral_stride_s <= 0.0 ||
+      !std::isfinite(config.vertical_jump_spectral_reference_margin_s) ||
+      config.vertical_jump_spectral_reference_margin_s < 0.0 ||
+      config.vertical_jump_spectral_min_reference_window_count <= 0 ||
+      !std::isfinite(config.vertical_jump_spectral_response_trigger_ratio) ||
+      config.vertical_jump_spectral_response_trigger_ratio < 1.0 ||
+      !std::isfinite(config.vertical_jump_spectral_response_full_ratio) ||
+      config.vertical_jump_spectral_response_full_ratio <=
+        config.vertical_jump_spectral_response_trigger_ratio ||
+      !std::isfinite(config.vertical_jump_spectral_bias_prior_max_sigma_mps2) ||
+      config.vertical_jump_spectral_bias_prior_max_sigma_mps2 <= 0.0 ||
       config.vertical_jump_velocity_ramp_sigma_mps <= 0.0 ||
       config.vertical_jump_position_ramp_sigma_m <= 0.0 ||
       config.vertical_jump_velocity_continuity_sigma_mps <= 0.0 ||
@@ -565,6 +580,17 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_jump_boundary_position_velocity_consistency_sigma_m <= 0.0 ||
       config.vertical_jump_velocity_height_slope_sigma_mps <= 0.0) {
     throw std::runtime_error("vertical jump settings must be positive");
+  }
+  if (config.enable_vertical_jump_spectral_bias_relaxation) {
+    if (!config.enable_vertical_jump_bias) {
+      throw std::runtime_error(
+        "enable_vertical_jump_spectral_bias_relaxation requires enable_vertical_jump_bias");
+    }
+    if (config.vertical_jump_spectral_bias_prior_max_sigma_mps2 <
+        config.vertical_jump_bias_prior_sigma_mps2) {
+      throw std::runtime_error(
+        "vertical jump spectral bias prior max sigma must be >= vertical_jump_bias_prior_sigma_mps2");
+    }
   }
   if (config.gnss_position_robust_param <= 0.0) {
     throw std::runtime_error("gnss_position_robust_param must be positive");
@@ -1072,6 +1098,22 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_jump_bias_highfreq_sigma_scale = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_bias_highfreq_sigma_max_mps") {
     config.vertical_jump_bias_highfreq_sigma_max_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_jump_spectral_bias_relaxation") {
+    config.enable_vertical_jump_spectral_bias_relaxation = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_jump_spectral_window_s") {
+    config.vertical_jump_spectral_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_spectral_stride_s") {
+    config.vertical_jump_spectral_stride_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_spectral_reference_margin_s") {
+    config.vertical_jump_spectral_reference_margin_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_spectral_min_reference_window_count") {
+    config.vertical_jump_spectral_min_reference_window_count = ParseInt(normalized_value);
+  } else if (normalized_key == "vertical_jump_spectral_response_trigger_ratio") {
+    config.vertical_jump_spectral_response_trigger_ratio = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_spectral_response_full_ratio") {
+    config.vertical_jump_spectral_response_full_ratio = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_spectral_bias_prior_max_sigma_mps2") {
+    config.vertical_jump_spectral_bias_prior_max_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_jump_velocity_ramp_smoothing") {
     config.enable_vertical_jump_velocity_ramp_smoothing = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_jump_velocity_ramp_sigma_mps") {
@@ -1508,6 +1550,20 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.vertical_jump_bias_highfreq_sigma_scale << '\n'
     << "vertical_jump_bias_highfreq_sigma_max_mps="
     << config.vertical_jump_bias_highfreq_sigma_max_mps << '\n'
+    << "enable_vertical_jump_spectral_bias_relaxation="
+    << (config.enable_vertical_jump_spectral_bias_relaxation ? "true" : "false") << '\n'
+    << "vertical_jump_spectral_window_s=" << config.vertical_jump_spectral_window_s << '\n'
+    << "vertical_jump_spectral_stride_s=" << config.vertical_jump_spectral_stride_s << '\n'
+    << "vertical_jump_spectral_reference_margin_s="
+    << config.vertical_jump_spectral_reference_margin_s << '\n'
+    << "vertical_jump_spectral_min_reference_window_count="
+    << config.vertical_jump_spectral_min_reference_window_count << '\n'
+    << "vertical_jump_spectral_response_trigger_ratio="
+    << config.vertical_jump_spectral_response_trigger_ratio << '\n'
+    << "vertical_jump_spectral_response_full_ratio="
+    << config.vertical_jump_spectral_response_full_ratio << '\n'
+    << "vertical_jump_spectral_bias_prior_max_sigma_mps2="
+    << config.vertical_jump_spectral_bias_prior_max_sigma_mps2 << '\n'
     << "enable_vertical_jump_velocity_ramp_smoothing="
     << (config.enable_vertical_jump_velocity_ramp_smoothing ? "true" : "false") << '\n'
     << "vertical_jump_velocity_ramp_sigma_mps=" << config.vertical_jump_velocity_ramp_sigma_mps << '\n'

@@ -16,6 +16,7 @@
 #include "offline_lc_minimal/core/VerticalJumpImpulseConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpImuMasker.h"
 #include "offline_lc_minimal/core/VerticalJumpShapeConstraintBuilder.h"
+#include "offline_lc_minimal/core/VerticalJumpSpectralResponseEstimator.h"
 #include "offline_lc_minimal/factor/VerticalJumpImpulseVelocityFactor.h"
 #include "offline_lc_minimal/factor/VerticalJumpBiasVelocityFactor.h"
 #include "offline_lc_minimal/factor/VerticalMaskedCombinedImuFactor.h"
@@ -30,6 +31,7 @@
 namespace {
 
 namespace symbol = gtsam::symbol_shorthand;
+constexpr double kPi = 3.141592653589793238462643383279502884;
 
 template <typename Function>
 void RunTest(const std::string &name, Function &&function) {
@@ -82,6 +84,25 @@ offline_lc_minimal::BodyZSeedImuDiagnosticRow MakeBodyZDiagnostic(
   row.integrated_body_z_velocity_0p2s_smooth_mps = velocity_mps;
   row.body_z_acc_mps2 = acceleration_mps2;
   return row;
+}
+
+std::vector<offline_lc_minimal::BodyZSeedImuDiagnosticRow> MakeSpectralBodyZDiagnostics(
+  const double start_time_s,
+  const double end_time_s,
+  const double target_start_time_s,
+  const double target_end_time_s) {
+  std::vector<offline_lc_minimal::BodyZSeedImuDiagnosticRow> diagnostics;
+  const double dt_s = 0.002;
+  for (double time_s = start_time_s; time_s <= end_time_s + 1.0e-9; time_s += dt_s) {
+    const bool inside_target =
+      time_s >= target_start_time_s && time_s <= target_end_time_s;
+    const double high_band_amplitude = inside_target ? 1.0 : 0.10;
+    const double acceleration_mps2 =
+      0.10 * std::sin(2.0 * kPi * 10.0 * time_s) +
+      high_band_amplitude * std::sin(2.0 * kPi * 80.0 * time_s);
+    diagnostics.push_back(MakeBodyZDiagnostic(time_s, 0.0, acceleration_mps2));
+  }
+  return diagnostics;
 }
 
 void TestVerticalMaskedCombinedImuDropsZAndVz() {
@@ -729,6 +750,134 @@ void TestVerticalJumpBiasBuilderSegmentedFallsBackWithoutDiagnostics() {
     1.0,
     0.0,
     "fallback should add one prior");
+}
+
+void TestVerticalJumpSpectralResponseEstimatorDetectsBandIncrease() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_vertical_jump_bias = true;
+  config.enable_vertical_jump_spectral_bias_relaxation = true;
+  config.vertical_jump_spectral_reference_margin_s = 3.0;
+  config.vertical_jump_spectral_min_reference_window_count = 2;
+  config.vertical_jump_spectral_response_trigger_ratio = 1.2;
+  config.vertical_jump_spectral_response_full_ratio = 2.5;
+  config.vertical_jump_spectral_bias_prior_max_sigma_mps2 = 0.30;
+
+  const auto diagnostics = MakeSpectralBodyZDiagnostics(0.0, 8.0, 4.0, 6.0);
+  const std::vector<offline_lc_minimal::VerticalJumpBiasSpanInput> spans{
+    {0, 4.0, 6.0, {0}},
+  };
+  const auto estimate = offline_lc_minimal::EstimateVerticalJumpSpectralResponse(
+    offline_lc_minimal::VerticalJumpSpectralResponseRequest{
+      &config,
+      &diagnostics,
+      &spans,
+      4.0,
+      6.0});
+
+  ExpectTrue(estimate.valid, "spectral response estimate should be valid");
+  ExpectTrue(
+    estimate.reference_window_count >= 2U,
+    "spectral response should use local non-jump reference windows");
+  ExpectTrue(
+    estimate.band_60_120_rms_ratio > 2.0,
+    "target 60-120Hz band should be stronger than the reference");
+  ExpectTrue(
+    estimate.response_ratio > config.vertical_jump_spectral_response_trigger_ratio,
+    "spectral response ratio should exceed the trigger threshold");
+  ExpectTrue(estimate.score > 0.0, "spectral response should produce a positive relaxation score");
+
+  const double effective_sigma = offline_lc_minimal::ComputeVerticalJumpSpectralEffectivePriorSigma(
+    config,
+    0.05,
+    estimate);
+  ExpectTrue(effective_sigma > 0.05, "spectral response should relax the local bias prior sigma");
+}
+
+void TestVerticalJumpSpectralResponseEstimatorFallsBackWithoutReference() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_vertical_jump_bias = true;
+  config.enable_vertical_jump_spectral_bias_relaxation = true;
+  config.vertical_jump_spectral_reference_margin_s = 3.0;
+  config.vertical_jump_spectral_min_reference_window_count = 2;
+  const auto diagnostics = MakeSpectralBodyZDiagnostics(4.0, 6.0, 4.0, 6.0);
+  const std::vector<offline_lc_minimal::VerticalJumpBiasSpanInput> spans{
+    {0, 4.0, 6.0, {0}},
+  };
+
+  const auto estimate = offline_lc_minimal::EstimateVerticalJumpSpectralResponse(
+    offline_lc_minimal::VerticalJumpSpectralResponseRequest{
+      &config,
+      &diagnostics,
+      &spans,
+      4.0,
+      6.0});
+
+  ExpectTrue(!estimate.valid, "spectral response should not be valid without reference windows");
+  ExpectTrue(
+    estimate.skip_reason == "MISSING_REFERENCE",
+    "missing local non-jump reference should be reported");
+  const double effective_sigma = offline_lc_minimal::ComputeVerticalJumpSpectralEffectivePriorSigma(
+    config,
+    0.05,
+    estimate);
+  ExpectNear(effective_sigma, 0.05, 1e-12, "missing reference should preserve the base prior sigma");
+}
+
+void TestVerticalJumpBiasBuilderSpectralResponseRelaxesPrior() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_jump_bias = true;
+  config.enable_vertical_jump_spectral_bias_relaxation = true;
+  config.vertical_jump_bias_padding_s = 0.0;
+  config.vertical_jump_bias_prior_sigma_mps2 = 0.05;
+  config.vertical_jump_spectral_reference_margin_s = 3.0;
+  config.vertical_jump_spectral_min_reference_window_count = 2;
+  config.vertical_jump_spectral_bias_prior_max_sigma_mps2 = 0.30;
+  const auto pim = MakePreintegratedMeasurements();
+
+  gtsam::NonlinearFactorGraph graph;
+  graph.add(gtsam::CombinedImuFactor(symbol::X(0), symbol::V(0), symbol::X(1), symbol::V(1), symbol::B(0), symbol::B(1), pim));
+  graph.add(gtsam::CombinedImuFactor(symbol::X(1), symbol::V(1), symbol::X(2), symbol::V(2), symbol::B(1), symbol::B(2), pim));
+
+  const std::vector<double> state_timestamps{2.0, 3.0, 4.0};
+  const std::vector<offline_lc_minimal::VerticalJumpImuIntervalRecord> intervals{
+    {0, 1, 2.0, 3.0, 0, pim},
+    {1, 2, 3.0, 4.0, 1, pim},
+  };
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> propagation_records{
+    {0, 1, 2.0, 3.0, -0.10},
+    {1, 2, 3.0, 4.0, -0.10},
+  };
+  std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> windows{MakeJumpWindow(2.0, 4.0)};
+  windows.front().signed_delta_velocity_mps = -0.20;
+  const auto body_z_diagnostics = MakeSpectralBodyZDiagnostics(0.0, 6.0, 2.0, 4.0);
+  gtsam::Values initial_values;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalJumpBiasDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalJumpBiasConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.jump_windows = &windows;
+  request.body_z_diagnostics = &body_z_diagnostics;
+  request.imu_intervals = &intervals;
+  request.propagation_records = &propagation_records;
+  request.graph = &graph;
+  request.initial_values = &initial_values;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalJumpBiasConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(diagnostics.size()), 1.0, 0.0, "builder should add one diagnostic row");
+  ExpectTrue(
+    diagnostics.front().spectral_skip_reason == "ADDED",
+    "builder should record spectral relaxation diagnostics");
+  ExpectTrue(
+    diagnostics.front().effective_prior_sigma_mps2 > config.vertical_jump_bias_prior_sigma_mps2,
+    "spectral response should increase the effective local bias prior sigma");
+  ExpectTrue(
+    summary.vertical_jump_spectral_relaxed_segment_count == 1U,
+    "spectral relaxation summary should count the relaxed segment");
 }
 
 void TestVerticalJumpImpulseBuilderAddsFactorAndReplacesImu() {
@@ -1780,6 +1929,15 @@ int main() {
     RunTest(
       "TestVerticalJumpBiasBuilderSegmentedFallsBackWithoutDiagnostics",
       TestVerticalJumpBiasBuilderSegmentedFallsBackWithoutDiagnostics);
+    RunTest(
+      "TestVerticalJumpSpectralResponseEstimatorDetectsBandIncrease",
+      TestVerticalJumpSpectralResponseEstimatorDetectsBandIncrease);
+    RunTest(
+      "TestVerticalJumpSpectralResponseEstimatorFallsBackWithoutReference",
+      TestVerticalJumpSpectralResponseEstimatorFallsBackWithoutReference);
+    RunTest(
+      "TestVerticalJumpBiasBuilderSpectralResponseRelaxesPrior",
+      TestVerticalJumpBiasBuilderSpectralResponseRelaxesPrior);
     RunTest(
       "TestVerticalJumpImpulseBuilderAddsFactorAndReplacesImu",
       TestVerticalJumpImpulseBuilderAddsFactorAndReplacesImu);

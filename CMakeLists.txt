@@ -93,6 +93,7 @@ add_library(offline_lc_minimal_lib
   src/core/VerticalAccelBiasGmConstraintBuilder.cpp
   src/core/VerticalJumpBiasConstraintBuilder.cpp
   src/core/VerticalJumpBiasSegmenter.cpp
+  src/core/VerticalJumpSpectralResponseEstimator.cpp
   src/core/VerticalJumpImpulseConstraintBuilder.cpp
   src/core/VerticalJumpImuMasker.cpp
   src/core/VerticalJumpShapeConstraintBuilder.cpp
