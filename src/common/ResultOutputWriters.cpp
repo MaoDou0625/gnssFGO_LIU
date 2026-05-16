@@ -401,8 +401,9 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
   stream << std::setprecision(17);
   stream
     << "sample_index,time_s,raw_rtk_up_m,nav_reference_up_m,residual_m,constant_bias_m,"
-       "drift_estimate_m,corrected_center_up_m,white_residual_m,drift_sigma_m,"
-       "white_sigma_m,tau_s,static_window_flag,valid,skip_reason\n";
+       "drift_estimate_m,corrected_center_up_m,lowpass_center_up_m,lowpass_delta_m,"
+       "lowpass_cutoff_hz,white_residual_m,drift_sigma_m,white_sigma_m,tau_s,"
+       "lowpass_applied,static_window_flag,valid,skip_reason\n";
   for (const auto &row : rows) {
     stream << row.sample_index << ','
            << row.time_s << ','
@@ -412,10 +413,14 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
            << row.constant_bias_m << ','
            << row.drift_estimate_m << ','
            << row.corrected_center_up_m << ','
+           << row.lowpass_center_up_m << ','
+           << row.lowpass_delta_m << ','
+           << row.lowpass_cutoff_hz << ','
            << row.white_residual_m << ','
            << row.drift_sigma_m << ','
            << row.white_sigma_m << ','
            << row.tau_s << ','
+           << (row.lowpass_applied ? 1 : 0) << ','
            << (row.static_window_flag ? 1 : 0) << ','
            << (row.valid ? 1 : 0) << ','
            << row.skip_reason << '\n';

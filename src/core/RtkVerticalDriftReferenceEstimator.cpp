@@ -13,6 +13,7 @@
 #include <gtsam/navigation/NavState.h>
 
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
+#include "offline_lc_minimal/core/RtkVerticalLowpassReferenceFilter.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -269,6 +270,7 @@ RtkVerticalDriftReferenceEstimateResult RtkVerticalDriftReferenceEstimator::Esti
     !static_residuals.empty() ? Median(std::move(static_residuals)) : Median(std::move(residuals));
   if (std::isfinite(constant_bias_m)) {
     EstimateOuDrift(*request_.config, candidates, constant_bias_m, &result.profile);
+    ApplyRtkVerticalLowpassReferenceFilter(*request_.config, &result.profile);
   }
 
   if (previous_profile == nullptr || previous_profile->empty()) {
@@ -294,11 +296,17 @@ void PopulateRtkVerticalDriftReferenceSummary(
   const std::vector<RtkVerticalDriftReferenceDiagnosticRow> &profile,
   RunSummary &run_summary) {
   run_summary.rtk_vertical_drift_reference_enabled = config.enable_rtk_vertical_drift_reference;
+  run_summary.rtk_vertical_lowpass_reference_enabled =
+    config.enable_rtk_vertical_lowpass_reference;
+  run_summary.rtk_vertical_lowpass_reference_cutoff_hz =
+    config.rtk_vertical_lowpass_reference_cutoff_hz;
   std::vector<double> static_drifts;
   std::vector<double> white_residuals;
   std::vector<double> first20_corrections;
   double max_abs_correction_m = 0.0;
+  double max_abs_lowpass_delta_m = 0.0;
   std::size_t valid_count = 0;
+  std::size_t lowpass_valid_count = 0;
   for (const auto &row : profile) {
     if (!row.valid || !std::isfinite(row.drift_estimate_m)) {
       continue;
@@ -311,6 +319,11 @@ void PopulateRtkVerticalDriftReferenceSummary(
     if (std::isfinite(row.white_residual_m)) {
       white_residuals.push_back(row.white_residual_m);
     }
+    if (row.lowpass_applied && std::isfinite(row.lowpass_delta_m)) {
+      ++lowpass_valid_count;
+      max_abs_lowpass_delta_m =
+        std::max(max_abs_lowpass_delta_m, std::abs(row.lowpass_delta_m));
+    }
     const double rel_dynamic_time_s = row.time_s - run_summary.dynamic_start_time_s;
     if (rel_dynamic_time_s >= 0.0 && rel_dynamic_time_s <= 20.0) {
       first20_corrections.push_back(row.drift_estimate_m);
@@ -319,6 +332,9 @@ void PopulateRtkVerticalDriftReferenceSummary(
   run_summary.rtk_vertical_drift_reference_valid_count = valid_count;
   run_summary.rtk_vertical_drift_max_abs_correction_m =
     valid_count > 0U ? max_abs_correction_m : std::numeric_limits<double>::quiet_NaN();
+  run_summary.rtk_vertical_lowpass_reference_valid_count = lowpass_valid_count;
+  run_summary.rtk_vertical_lowpass_reference_max_abs_delta_m =
+    lowpass_valid_count > 0U ? max_abs_lowpass_delta_m : std::numeric_limits<double>::quiet_NaN();
   if (!static_drifts.empty()) {
     const auto [min_it, max_it] = std::minmax_element(static_drifts.begin(), static_drifts.end());
     run_summary.rtk_vertical_drift_static_range_m = *max_it - *min_it;

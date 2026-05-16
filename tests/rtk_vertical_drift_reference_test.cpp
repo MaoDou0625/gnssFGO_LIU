@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "offline_lc_minimal/core/RtkVerticalDriftReferenceEstimator.h"
+#include "offline_lc_minimal/core/RtkVerticalLowpassReferenceFilter.h"
 
 namespace {
 
@@ -128,6 +129,42 @@ void TestCorrectionIsClipped() {
   ExpectTrue(max_abs_correction <= 0.050 + 1.0e-12, "drift correction should respect max clip");
 }
 
+void TestLowpassReferenceReducesHighFrequencyCenterMotion() {
+  offline_lc_minimal::OfflineRunnerConfig config;
+  config.enable_rtk_vertical_lowpass_reference = true;
+  config.rtk_vertical_lowpass_reference_cutoff_hz = 0.10;
+
+  std::vector<offline_lc_minimal::RtkVerticalDriftReferenceDiagnosticRow> profile(200U);
+  for (std::size_t index = 0; index < profile.size(); ++index) {
+    const double time_s = 0.2 * static_cast<double>(index);
+    auto &row = profile[index];
+    row.sample_index = index;
+    row.time_s = time_s;
+    row.corrected_center_up_m =
+      10.0 + 0.020 * std::sin(2.0 * 3.14159265358979323846 * 0.5 * time_s);
+    row.valid = true;
+  }
+
+  const auto summary =
+    offline_lc_minimal::ApplyRtkVerticalLowpassReferenceFilter(config, &profile);
+  std::vector<double> raw;
+  std::vector<double> filtered;
+  raw.reserve(profile.size());
+  filtered.reserve(profile.size());
+  for (const auto &row : profile) {
+    ExpectTrue(row.lowpass_applied, "valid rows should receive lowpass center references");
+    raw.push_back(row.corrected_center_up_m);
+    filtered.push_back(row.lowpass_center_up_m);
+  }
+  const auto raw_minmax = std::minmax_element(raw.begin(), raw.end());
+  const auto filtered_minmax = std::minmax_element(filtered.begin(), filtered.end());
+  const double raw_range = *raw_minmax.second - *raw_minmax.first;
+  const double filtered_range = *filtered_minmax.second - *filtered_minmax.first;
+  ExpectTrue(summary.valid_count == profile.size(), "all valid rows should be counted");
+  ExpectTrue(summary.max_abs_delta_m > 0.0, "lowpass should report a finite delta");
+  ExpectTrue(filtered_range < 0.6 * raw_range, "0.1 Hz lowpass should suppress 0.5 Hz height motion");
+}
+
 }  // namespace
 
 int main() {
@@ -135,6 +172,9 @@ int main() {
     RunTest("TestNoDriftKeepsCorrectionNearZero", TestNoDriftKeepsCorrectionNearZero);
     RunTest("TestSlowDriftReducesCorrectedCenterRange", TestSlowDriftReducesCorrectedCenterRange);
     RunTest("TestCorrectionIsClipped", TestCorrectionIsClipped);
+    RunTest(
+      "TestLowpassReferenceReducesHighFrequencyCenterMotion",
+      TestLowpassReferenceReducesHighFrequencyCenterMotion);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

@@ -26,6 +26,7 @@ struct EnvelopePolicyParams {
   double center_deadband_m = 0.01;
   bool enable_rtk_vertical_drift_reference = false;
   bool rtk_vertical_drift_use_for_center_pull = true;
+  bool enable_rtk_vertical_lowpass_reference = false;
 };
 
 struct CenterPullReference {
@@ -78,8 +79,15 @@ CenterPullReference SelectCenterPullReference(
   if (!row.valid || !std::isfinite(row.corrected_center_up_m)) {
     return reference;
   }
-  reference.up_m = row.corrected_center_up_m;
-  reference.type = "rtk_drift_corrected";
+  if (params.enable_rtk_vertical_lowpass_reference &&
+      row.lowpass_applied &&
+      std::isfinite(row.lowpass_center_up_m)) {
+    reference.up_m = row.lowpass_center_up_m;
+    reference.type = "rtk_drift_lowpass";
+  } else {
+    reference.up_m = row.corrected_center_up_m;
+    reference.type = "rtk_drift_corrected";
+  }
   reference.rtk_drift_estimate_m = row.drift_estimate_m;
   return reference;
 }
@@ -194,7 +202,8 @@ class EnvelopeVerticalConstraintPolicy final : public VerticalConstraintPolicy {
           config.vertical_envelope_center_sigma_mode,
           config.vertical_envelope_center_deadband_m,
           config.enable_rtk_vertical_drift_reference,
-          config.rtk_vertical_drift_use_for_center_pull} {}
+          config.rtk_vertical_drift_use_for_center_pull,
+          config.enable_rtk_vertical_lowpass_reference} {}
 
   [[nodiscard]] bool UsesDirectPositionFactor() const override { return false; }
 

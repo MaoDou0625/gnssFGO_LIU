@@ -331,12 +331,14 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       !std::isfinite(config.rtk_vertical_drift_huber_sigma_m) ||
       !std::isfinite(config.rtk_vertical_drift_max_abs_correction_m) ||
       !std::isfinite(config.rtk_vertical_drift_convergence_threshold_m) ||
+      !std::isfinite(config.rtk_vertical_lowpass_reference_cutoff_hz) ||
       config.rtk_vertical_drift_correlation_time_s <= 0.0 ||
       config.rtk_vertical_drift_sigma_m <= 0.0 ||
       config.rtk_vertical_white_noise_sigma_m <= 0.0 ||
       config.rtk_vertical_drift_huber_sigma_m <= 0.0 ||
       config.rtk_vertical_drift_max_abs_correction_m <= 0.0 ||
       config.rtk_vertical_drift_convergence_threshold_m <= 0.0 ||
+      config.rtk_vertical_lowpass_reference_cutoff_hz <= 0.0 ||
       config.rtk_vertical_drift_outer_iterations < 0) {
     throw std::runtime_error("RTK vertical drift reference settings must be positive");
   }
@@ -357,6 +359,12 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       throw std::runtime_error(
         "RTK vertical drift reference requires the initial static RTK height reference");
     }
+  }
+  if (config.enable_rtk_vertical_lowpass_reference &&
+      (!config.enable_rtk_vertical_drift_reference ||
+       !config.rtk_vertical_drift_use_for_center_pull)) {
+    throw std::runtime_error(
+      "RTK vertical lowpass reference requires RTK vertical drift center-pull reference");
   }
   if (config.enable_rtk_outage_smoothing && !config.enable_gnss) {
     throw std::runtime_error("RTK outage smoothing requires GNSS input");
@@ -924,6 +932,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.rtk_vertical_drift_use_for_center_pull = ParseBool(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_use_for_envelope_gate") {
     config.rtk_vertical_drift_use_for_envelope_gate = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_rtk_vertical_lowpass_reference") {
+    config.enable_rtk_vertical_lowpass_reference = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_vertical_lowpass_reference_cutoff_hz") {
+    config.rtk_vertical_lowpass_reference_cutoff_hz = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_rtk_outage_smoothing") {
     config.enable_rtk_outage_smoothing = ParseBool(normalized_value);
   } else if (normalized_key == "rtk_outage_min_gap_s") {
@@ -1412,6 +1424,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.rtk_vertical_drift_use_for_center_pull ? "true" : "false") << '\n'
     << "rtk_vertical_drift_use_for_envelope_gate="
     << (config.rtk_vertical_drift_use_for_envelope_gate ? "true" : "false") << '\n'
+    << "enable_rtk_vertical_lowpass_reference="
+    << (config.enable_rtk_vertical_lowpass_reference ? "true" : "false") << '\n'
+    << "rtk_vertical_lowpass_reference_cutoff_hz="
+    << config.rtk_vertical_lowpass_reference_cutoff_hz << '\n'
     << "enable_rtk_outage_smoothing="
     << (config.enable_rtk_outage_smoothing ? "true" : "false") << '\n'
     << "rtk_outage_min_gap_s=" << config.rtk_outage_min_gap_s << '\n'

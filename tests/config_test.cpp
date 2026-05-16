@@ -1249,6 +1249,44 @@ void TestInitialStaticRtkHeightReferenceConfigValidation() {
   ExpectTrue(threw, "non-positive static RTK height reference sigma should be rejected");
 }
 
+void TestRtkVerticalLowpassReferenceConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.static_alignment_duration_s = 100.0;
+  config.enable_gnss = true;
+  config.enable_initial_static_subgraph = true;
+  config.enable_initial_static_rtk_height_reference = true;
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
+  config.enable_vertical_envelope_center_pull = true;
+  config.enable_rtk_vertical_drift_reference = true;
+  config.rtk_vertical_drift_use_for_center_pull = true;
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_vertical_lowpass_reference", "true");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_vertical_lowpass_reference_cutoff_hz", "0.1");
+  ExpectTrue(config.enable_rtk_vertical_lowpass_reference, "RTK vertical lowpass flag should parse");
+  ExpectTrue(
+    std::abs(config.rtk_vertical_lowpass_reference_cutoff_hz - 0.1) < 1e-15,
+    "RTK vertical lowpass cutoff should parse");
+  offline_lc_minimal::ValidateConfig(config);
+
+  config.rtk_vertical_lowpass_reference_cutoff_hz = 0.0;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK vertical drift reference settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive RTK vertical lowpass cutoff should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_vertical_lowpass_reference = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("lowpass reference") != std::string::npos;
+  }
+  ExpectTrue(threw, "lowpass reference should require drift center-pull reference");
+}
+
 void TestAccelerometerBiasUgConfigParsing() {
   auto config = offline_lc_minimal::DefaultConfig();
   offline_lc_minimal::OverrideConfigField(config, "vertical_acc_bias_sigma_ug", "10.0");
@@ -2117,6 +2155,9 @@ int main() {
     RunTest(
       "TestInitialStaticRtkHeightReferenceConfigValidation",
       TestInitialStaticRtkHeightReferenceConfigValidation);
+    RunTest(
+      "TestRtkVerticalLowpassReferenceConfigValidation",
+      TestRtkVerticalLowpassReferenceConfigValidation);
     RunTest("TestAccelerometerBiasUgConfigParsing", TestAccelerometerBiasUgConfigParsing);
     RunTest("TestVerticalVelocityDeltaConfigValidation", TestVerticalVelocityDeltaConfigValidation);
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);

@@ -181,10 +181,14 @@ struct RtkVerticalDriftReferenceDiagnosticRow {
   double constant_bias_m = std::numeric_limits<double>::quiet_NaN();
   double drift_estimate_m = std::numeric_limits<double>::quiet_NaN();
   double corrected_center_up_m = std::numeric_limits<double>::quiet_NaN();
+  double lowpass_center_up_m = std::numeric_limits<double>::quiet_NaN();
+  double lowpass_delta_m = std::numeric_limits<double>::quiet_NaN();
+  double lowpass_cutoff_hz = std::numeric_limits<double>::quiet_NaN();
   double white_residual_m = std::numeric_limits<double>::quiet_NaN();
   double drift_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double white_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double tau_s = std::numeric_limits<double>::quiet_NaN();
+  bool lowpass_applied = false;
   bool static_window_flag = false;
   bool valid = false;
   std::string skip_reason = "UNSET";

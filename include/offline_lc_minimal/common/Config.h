@@ -157,6 +157,8 @@ struct OfflineRunnerConfig {
   int rtk_vertical_drift_outer_iterations = 2;
   bool rtk_vertical_drift_use_for_center_pull = true;
   bool rtk_vertical_drift_use_for_envelope_gate = false;
+  bool enable_rtk_vertical_lowpass_reference = false;
+  double rtk_vertical_lowpass_reference_cutoff_hz = 0.10;
   bool enable_rtk_outage_smoothing = false;
   double rtk_outage_min_gap_s = 2.0;
   double rtk_outage_position_ramp_sigma_m = 0.05;

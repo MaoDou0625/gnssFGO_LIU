@@ -96,6 +96,11 @@ struct RunSummary {
   double rtk_vertical_drift_max_abs_correction_m = std::numeric_limits<double>::quiet_NaN();
   double rtk_vertical_drift_first20_mean_correction_m = std::numeric_limits<double>::quiet_NaN();
   double rtk_vertical_drift_first20_max_abs_correction_m = std::numeric_limits<double>::quiet_NaN();
+  bool rtk_vertical_lowpass_reference_enabled = false;
+  double rtk_vertical_lowpass_reference_cutoff_hz = std::numeric_limits<double>::quiet_NaN();
+  std::size_t rtk_vertical_lowpass_reference_valid_count = 0;
+  double rtk_vertical_lowpass_reference_max_abs_delta_m =
+    std::numeric_limits<double>::quiet_NaN();
   bool rtk_outage_smoothing_enabled = false;
   std::size_t rtk_outage_window_count = 0;
   std::size_t rtk_outage_window_with_body_z_jump_count = 0;
@@ -375,6 +380,14 @@ struct RunSummary {
         << rtk_vertical_drift_first20_mean_correction_m << '\n'
         << "rtk_vertical_drift_first20_max_abs_correction_m="
         << rtk_vertical_drift_first20_max_abs_correction_m << '\n'
+        << "rtk_vertical_lowpass_reference_enabled="
+        << (rtk_vertical_lowpass_reference_enabled ? "true" : "false") << '\n'
+        << "rtk_vertical_lowpass_reference_cutoff_hz="
+        << rtk_vertical_lowpass_reference_cutoff_hz << '\n'
+        << "rtk_vertical_lowpass_reference_valid_count="
+        << rtk_vertical_lowpass_reference_valid_count << '\n'
+        << "rtk_vertical_lowpass_reference_max_abs_delta_m="
+        << rtk_vertical_lowpass_reference_max_abs_delta_m << '\n'
         << "rtk_outage_smoothing_enabled="
         << (rtk_outage_smoothing_enabled ? "true" : "false") << '\n'
         << "rtk_outage_window_count=" << rtk_outage_window_count << '\n'
