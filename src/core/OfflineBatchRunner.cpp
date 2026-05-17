@@ -941,6 +941,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     const BodyZWindowPipelineResult body_z_result = BodyZWindowPipeline(std::move(body_z_request)).Run();
     run_result.seed_body_z_acc_diagnostics = body_z_result.imu_diagnostics;
     run_result.body_z_seed_jump_windows = body_z_result.jump_windows;
+    run_result.body_z_seed_bias_windows = body_z_result.bias_windows;
     run_result.attitude_reference_states = body_z_result.seed_reference_states;
   }
   if (stage2_reference_ != nullptr) {
@@ -1195,7 +1196,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     VerticalJumpBiasConstraintBuildRequest vertical_jump_bias_request;
     vertical_jump_bias_request.config = &config_;
     vertical_jump_bias_request.state_timestamps = &state_timestamps;
-    vertical_jump_bias_request.jump_windows = &run_result.body_z_seed_jump_windows;
+    vertical_jump_bias_request.jump_windows = &run_result.body_z_seed_bias_windows;
     vertical_jump_bias_request.body_z_diagnostics = &run_result.seed_body_z_acc_diagnostics;
     vertical_jump_bias_request.imu_intervals = &vertical_jump_imu_interval_records;
     vertical_jump_bias_request.propagation_records = &vertical_velocity_delta_records;

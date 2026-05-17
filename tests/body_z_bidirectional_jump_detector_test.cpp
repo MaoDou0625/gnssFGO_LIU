@@ -9,6 +9,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/core/BodyZBidirectionalJumpDetector.h"
+#include "offline_lc_minimal/core/BodyZJumpWindowClassifier.h"
 
 namespace {
 
@@ -137,7 +138,7 @@ void TestBodyZSeedJumpDetectorMergesNearbyDownwardWindows() {
     "nearby DOWN body-z windows should merge into one correction window");
 }
 
-void TestBodyZSeedJumpDetectorRespectsMergeMaxDuration() {
+void TestBodyZSeedJumpDetectorAllowsLongMergedBiasWindow() {
   auto config = offline_lc_minimal::DefaultConfig();
   ConfigureSensitiveDetector(&config);
   config.body_z_jump_merge_gap_s = 2.0;
@@ -161,21 +162,121 @@ void TestBodyZSeedJumpDetectorRespectsMergeMaxDuration() {
   const auto seed_states = MakeFlatSeedStates(&state_timestamps, 100);
   offline_lc_minimal::BodyZBidirectionalJumpDetector detector(config);
   const auto detection = detector.Detect(imu_samples, seed_states, state_timestamps, 0.0, 5.0);
+  const auto selected_down_window_count = std::count_if(
+    detection.selected_windows.begin(),
+    detection.selected_windows.end(),
+    [](const auto &window) { return window.direction == "DOWN"; });
+  ExpectTrue(
+    selected_down_window_count >= 3U,
+    "detector should keep the short transition candidates before same-direction merge");
   const auto down_window_count = std::count_if(
     detection.windows.begin(),
     detection.windows.end(),
     [](const auto &window) { return window.direction == "DOWN"; });
   ExpectTrue(
-    down_window_count >= 2U,
-    "merge max duration should split nearby DOWN windows instead of chaining them into one long window");
+    down_window_count == 1U,
+    "same-direction windows should merge into one long bias-estimation window");
   for (const auto &window : detection.windows) {
     if (window.direction != "DOWN") {
       continue;
     }
     ExpectTrue(
-      window.duration_s <= config.body_z_jump_merge_max_duration_s + 1e-9,
-      "merged DOWN body-z window should respect body_z_jump_merge_max_duration_s");
+      window.duration_s > config.body_z_jump_merge_max_duration_s,
+      "body_z_jump_merge_max_duration_s should no longer cap merged body-z windows");
   }
+}
+
+offline_lc_minimal::BodyZJumpWindowCandidate MakeWindowCandidate(
+  const double start_time_s,
+  const double center_time_s,
+  const double end_time_s,
+  const std::string &direction = "DOWN") {
+  offline_lc_minimal::BodyZJumpWindowCandidate window;
+  window.direction = direction;
+  window.start_time_s = start_time_s;
+  window.center_time_s = center_time_s;
+  window.end_time_s = end_time_s;
+  window.duration_s = end_time_s - start_time_s;
+  return window;
+}
+
+void TestLongBodyZWindowRoutesBiasSeparatelyFromJumpTransitions() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.body_z_long_bias_min_duration_s = 3.0;
+  const std::vector<offline_lc_minimal::BodyZJumpWindowCandidate> merged_windows{
+    MakeWindowCandidate(0.0, 5.0, 10.0),
+  };
+  const std::vector<offline_lc_minimal::BodyZJumpWindowCandidate> transition_candidates{
+    MakeWindowCandidate(0.5, 1.0, 1.5),
+    MakeWindowCandidate(4.5, 5.0, 5.5),
+    MakeWindowCandidate(8.5, 9.0, 9.5),
+  };
+
+  const auto classification = offline_lc_minimal::ClassifyBodyZJumpWindowsForBias(
+    merged_windows,
+    transition_candidates,
+    config);
+  ExpectNear(
+    static_cast<double>(classification.bias_windows.size()),
+    1.0,
+    0.0,
+    "long window should remain available for bias estimation");
+  ExpectNear(
+    classification.bias_windows.front().duration_s,
+    10.0,
+    1e-12,
+    "bias-estimation window should keep the full long span");
+  ExpectNear(
+    static_cast<double>(classification.jump_windows.size()),
+    2.0,
+    0.0,
+    "long bias windows should only retain boundary transition candidates");
+  ExpectNear(
+    classification.jump_windows.front().center_time_s,
+    1.0,
+    1e-12,
+    "long bias window should keep the entry transition");
+  ExpectNear(
+    classification.jump_windows.back().center_time_s,
+    9.0,
+    1e-12,
+    "long bias window should keep the exit transition");
+  for (const auto &window : classification.jump_windows) {
+    ExpectTrue(
+      window.duration_s < config.body_z_long_bias_min_duration_s,
+      "transition jump window should not inherit the full long bias span");
+  }
+}
+
+void TestShortBodyZWindowRemainsJumpAndBiasWindow() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.body_z_long_bias_min_duration_s = 3.0;
+  const std::vector<offline_lc_minimal::BodyZJumpWindowCandidate> merged_windows{
+    MakeWindowCandidate(1.0, 1.5, 2.0),
+  };
+  const std::vector<offline_lc_minimal::BodyZJumpWindowCandidate> transition_candidates{
+    MakeWindowCandidate(1.0, 1.5, 2.0),
+  };
+
+  const auto classification = offline_lc_minimal::ClassifyBodyZJumpWindowsForBias(
+    merged_windows,
+    transition_candidates,
+    config);
+  ExpectNear(
+    static_cast<double>(classification.bias_windows.size()),
+    1.0,
+    0.0,
+    "short window should still feed bias estimation");
+  ExpectNear(
+    static_cast<double>(classification.jump_windows.size()),
+    1.0,
+    0.0,
+    "short window should remain a jump window");
+  ExpectNear(
+    classification.jump_windows.front().duration_s,
+    1.0,
+    1e-12,
+    "short jump window duration should be preserved");
 }
 
 void TestBodyZSeedJumpDetectorDoesNotMergeAcrossOppositeDirectionWindow() {
@@ -252,8 +353,14 @@ int main() {
     RunTest("TestBodyZSeedJumpDetectorFindsDownwardWindow", TestBodyZSeedJumpDetectorFindsDownwardWindow);
     RunTest("TestBodyZSeedJumpDetectorMergesNearbyDownwardWindows", TestBodyZSeedJumpDetectorMergesNearbyDownwardWindows);
     RunTest(
-      "TestBodyZSeedJumpDetectorRespectsMergeMaxDuration",
-      TestBodyZSeedJumpDetectorRespectsMergeMaxDuration);
+      "TestBodyZSeedJumpDetectorAllowsLongMergedBiasWindow",
+      TestBodyZSeedJumpDetectorAllowsLongMergedBiasWindow);
+    RunTest(
+      "TestLongBodyZWindowRoutesBiasSeparatelyFromJumpTransitions",
+      TestLongBodyZWindowRoutesBiasSeparatelyFromJumpTransitions);
+    RunTest(
+      "TestShortBodyZWindowRemainsJumpAndBiasWindow",
+      TestShortBodyZWindowRemainsJumpAndBiasWindow);
     RunTest(
       "TestBodyZSeedJumpDetectorDoesNotMergeAcrossOppositeDirectionWindow",
       TestBodyZSeedJumpDetectorDoesNotMergeAcrossOppositeDirectionWindow);

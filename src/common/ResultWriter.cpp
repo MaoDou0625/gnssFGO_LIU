@@ -57,6 +57,11 @@ void ResultWriter::WriteOutputs(
       output_path / "body_z_seed_jump_windows.csv",
       result.body_z_seed_jump_windows);
   }
+  if (!result.body_z_seed_bias_windows.empty()) {
+    WriteBodyZSeedJumpWindowCsv(
+      output_path / "body_z_seed_bias_windows.csv",
+      result.body_z_seed_bias_windows);
+  }
   if (!result.error_state_trajectory.empty()) {
     WriteErrorStateCsv(output_path / "error_state_trajectory.csv", result.error_state_trajectory);
   }

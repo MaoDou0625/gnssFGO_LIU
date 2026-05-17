@@ -11,6 +11,7 @@
 
 #include "offline_lc_minimal/factor/GPInterpolatedGPSFactor.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
+#include "offline_lc_minimal/core/BodyZJumpWindowClassifier.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -208,9 +209,18 @@ BodyZWindowPipelineResult BodyZWindowPipeline::Run() const {
     result.imu_diagnostics.push_back(MakeImuDiagnosticRow(sample));
   }
 
-  result.jump_windows.reserve(result.detection.windows.size());
-  for (const auto &window : result.detection.windows) {
+  const BodyZJumpWindowClassification classification = ClassifyBodyZJumpWindowsForBias(
+    result.detection.windows,
+    result.detection.selected_windows,
+    *request_.config);
+
+  result.jump_windows.reserve(classification.jump_windows.size());
+  for (const auto &window : classification.jump_windows) {
     result.jump_windows.push_back(MakeJumpWindowRow(window));
+  }
+  result.bias_windows.reserve(classification.bias_windows.size());
+  for (const auto &window : classification.bias_windows) {
+    result.bias_windows.push_back(MakeJumpWindowRow(window));
   }
   return result;
 }

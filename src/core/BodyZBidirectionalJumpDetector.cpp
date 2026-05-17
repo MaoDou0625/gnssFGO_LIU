@@ -558,9 +558,6 @@ std::vector<BodyZJumpWindowCandidate> MergeNearbySameDirectionWindows(
   std::vector<BodyZJumpWindowCandidate> merged_windows;
   const double merge_gap_s =
     std::max(config.body_z_jump_redundant_padding_s, config.body_z_jump_merge_gap_s);
-  const double merge_max_duration_s = config.body_z_jump_merge_max_duration_s;
-  const bool has_merge_duration_limit =
-    std::isfinite(merge_max_duration_s) && merge_max_duration_s > 0.0;
   std::size_t group_begin = 0U;
   while (group_begin < windows.size()) {
     std::size_t group_end = group_begin;
@@ -570,10 +567,6 @@ std::vector<BodyZJumpWindowCandidate> MergeNearbySameDirectionWindows(
            windows[group_end + 1U].start_time_s <= group_end_time_s + merge_gap_s) {
       const double candidate_end_time_s =
         std::max(group_end_time_s, windows[group_end + 1U].end_time_s);
-      if (has_merge_duration_limit &&
-          candidate_end_time_s - windows[group_begin].start_time_s > merge_max_duration_s) {
-        break;
-      }
       ++group_end;
       group_end_time_s = candidate_end_time_s;
     }
@@ -697,19 +690,19 @@ BodyZJumpDetectionResult BodyZBidirectionalJumpDetector::Detect(
     SelectDirection("DOWN", -1.0, signed_step, downward_score, result.signal, state_timestamps, config_);
   std::vector<BodyZJumpWindowCandidate> up_windows =
     SelectDirection("UP", 1.0, signed_step, upward_score, result.signal, state_timestamps, config_);
-  result.windows = std::move(down_windows);
-  result.windows.insert(
-    result.windows.end(),
+  result.selected_windows = std::move(down_windows);
+  result.selected_windows.insert(
+    result.selected_windows.end(),
     std::make_move_iterator(up_windows.begin()),
     std::make_move_iterator(up_windows.end()));
   std::sort(
-    result.windows.begin(),
-    result.windows.end(),
+    result.selected_windows.begin(),
+    result.selected_windows.end(),
     [](const BodyZJumpWindowCandidate &left, const BodyZJumpWindowCandidate &right) {
       return left.center_time_s < right.center_time_s;
     });
   result.windows = MergeNearbySameDirectionWindows(
-    std::move(result.windows),
+    result.selected_windows,
     result.signal,
     state_timestamps,
     config_);

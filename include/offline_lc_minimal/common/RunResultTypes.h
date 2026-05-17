@@ -655,6 +655,7 @@ struct OfflineRunResult {
   std::vector<ReferenceNodeState> attitude_reference_states;
   std::vector<BodyZSeedImuDiagnosticRow> seed_body_z_acc_diagnostics;
   std::vector<BodyZSeedJumpWindowRow> body_z_seed_jump_windows;
+  std::vector<BodyZSeedJumpWindowRow> body_z_seed_bias_windows;
   std::vector<ErrorStateRow> error_state_trajectory;
   std::vector<SegmentErrorDiagnostic> segment_error_diagnostics;
   std::vector<TrajectoryRow> trajectory;

@@ -59,6 +59,7 @@ struct BodyZJumpWindowCandidate {
 
 struct BodyZJumpDetectionResult {
   std::vector<BodyZJumpSignalSample> signal;
+  std::vector<BodyZJumpWindowCandidate> selected_windows;
   std::vector<BodyZJumpWindowCandidate> windows;
 };
 

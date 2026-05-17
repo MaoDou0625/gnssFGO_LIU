@@ -60,6 +60,7 @@ add_library(offline_lc_minimal_lib
   src/core/BodyZBidirectionalJumpDetector.cpp
   src/core/BodyZHorizontalLeakageEstimator.cpp
   src/core/BodyZJumpConstraintWindowPlanner.cpp
+  src/core/BodyZJumpWindowClassifier.cpp
   src/core/BodyZNHCConstraintBuilder.cpp
   src/core/BodyZNHCWeightPlanner.cpp
   src/core/BodyZWindowPipeline.cpp

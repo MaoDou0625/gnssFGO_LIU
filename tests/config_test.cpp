@@ -893,10 +893,14 @@ void TestBodyZJumpDetectionFlagLoads() {
   auto config = offline_lc_minimal::DefaultConfig();
   offline_lc_minimal::OverrideConfigField(config, "enable_body_z_jump_detection", "true");
   offline_lc_minimal::OverrideConfigField(config, "attitude_reference_relative_yaw_sigma_rad", "0.02");
+  offline_lc_minimal::OverrideConfigField(config, "body_z_long_bias_min_duration_s", "12.5");
   ExpectTrue(config.enable_body_z_jump_detection, "new body-z detection flag should load");
   ExpectTrue(
     std::abs(config.attitude_reference_relative_yaw_sigma_rad - 0.02) < 1e-15,
     "relative yaw reference sigma should parse");
+  ExpectTrue(
+    std::abs(config.body_z_long_bias_min_duration_s - 12.5) < 1e-15,
+    "long body-z bias window threshold should parse");
 }
 
 void TestBodyZRequiresGnssAfterOverrides() {

@@ -39,6 +39,7 @@ struct BodyZWindowPipelineResult {
   std::vector<ReferenceNodeState> seed_reference_states;
   std::vector<BodyZSeedImuDiagnosticRow> imu_diagnostics;
   std::vector<BodyZSeedJumpWindowRow> jump_windows;
+  std::vector<BodyZSeedJumpWindowRow> bias_windows;
 };
 
 class BodyZWindowPipeline {
