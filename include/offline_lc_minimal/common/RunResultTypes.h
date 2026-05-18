@@ -96,6 +96,10 @@ struct RunSummary {
   double rtk_vertical_drift_max_abs_correction_m = std::numeric_limits<double>::quiet_NaN();
   double rtk_vertical_drift_first20_mean_correction_m = std::numeric_limits<double>::quiet_NaN();
   double rtk_vertical_drift_first20_max_abs_correction_m = std::numeric_limits<double>::quiet_NaN();
+  bool rtk_vertical_drift_outage_segmentation_enabled = false;
+  std::size_t rtk_vertical_drift_segment_count = 0;
+  std::size_t rtk_vertical_drift_outage_boundary_count = 0;
+  bool rtk_vertical_drift_cross_outage_lowpass_blocked = false;
   bool rtk_vertical_drift_gate_weighting_enabled = true;
   std::size_t rtk_vertical_drift_gate_downweighted_count = 0;
   double rtk_vertical_drift_gate_weight_mean = std::numeric_limits<double>::quiet_NaN();
@@ -394,6 +398,13 @@ struct RunSummary {
         << rtk_vertical_drift_first20_mean_correction_m << '\n'
         << "rtk_vertical_drift_first20_max_abs_correction_m="
         << rtk_vertical_drift_first20_max_abs_correction_m << '\n'
+        << "rtk_vertical_drift_outage_segmentation_enabled="
+        << (rtk_vertical_drift_outage_segmentation_enabled ? "true" : "false") << '\n'
+        << "rtk_vertical_drift_segment_count=" << rtk_vertical_drift_segment_count << '\n'
+        << "rtk_vertical_drift_outage_boundary_count="
+        << rtk_vertical_drift_outage_boundary_count << '\n'
+        << "rtk_vertical_drift_cross_outage_lowpass_blocked="
+        << (rtk_vertical_drift_cross_outage_lowpass_blocked ? "true" : "false") << '\n'
         << "rtk_vertical_drift_gate_weighting_enabled="
         << (rtk_vertical_drift_gate_weighting_enabled ? "true" : "false") << '\n'
         << "rtk_vertical_drift_gate_downweighted_count="

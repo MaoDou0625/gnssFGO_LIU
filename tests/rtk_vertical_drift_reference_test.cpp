@@ -7,12 +7,17 @@
 #include <string>
 #include <vector>
 
+#include <gtsam/geometry/Pose3.h>
+#include <gtsam/inference/Symbol.h>
+
 #include "offline_lc_minimal/common/ResultOutputWriters.h"
 #include "offline_lc_minimal/core/RtkVerticalDriftGateWeighting.h"
 #include "offline_lc_minimal/core/RtkVerticalDriftReferenceEstimator.h"
 #include "offline_lc_minimal/core/RtkVerticalLowpassReferenceFilter.h"
 
 namespace {
+
+namespace symbol = gtsam::symbol_shorthand;
 
 template <typename Function>
 void RunTest(const std::string &name, Function &&function) {
@@ -59,10 +64,12 @@ std::vector<offline_lc_minimal::GnssSolutionSample> MakeStaticSamples(
 
 offline_lc_minimal::RtkVerticalDriftReferenceEstimateRequest MakeRequest(
   const offline_lc_minimal::OfflineRunnerConfig &config,
-  const std::vector<offline_lc_minimal::GnssSolutionSample> &samples) {
+  const std::vector<offline_lc_minimal::GnssSolutionSample> &samples,
+  const std::vector<offline_lc_minimal::RtkOutageWindowRow> *outage_windows = nullptr) {
   offline_lc_minimal::RtkVerticalDriftReferenceEstimateRequest request;
   request.config = &config;
   request.gnss_samples = &samples;
+  request.rtk_outage_windows = outage_windows;
   request.alignment_start_time_s = 0.0;
   request.alignment_end_time_s = 200.0;
   request.static_reference_up_m = 0.0;
@@ -73,6 +80,42 @@ offline_lc_minimal::RtkVerticalDriftReferenceEstimateRequest MakeRequest(
   };
   request.clamped_sigma_m = [](const offline_lc_minimal::GnssSolutionSample &sample) {
     return Eigen::Vector3d(sample.sigma_lat_m, sample.sigma_lon_m, sample.sigma_h_m);
+  };
+  return request;
+}
+
+offline_lc_minimal::RtkOutageWindowRow MakeOutageWindow(
+  const double start_time_s,
+  const double end_time_s) {
+  offline_lc_minimal::RtkOutageWindowRow window;
+  window.start_time_s = start_time_s;
+  window.end_time_s = end_time_s;
+  return window;
+}
+
+gtsam::Values MakeZeroPoseValues(const std::size_t count) {
+  gtsam::Values values;
+  for (std::size_t index = 0; index < count; ++index) {
+    values.insert(symbol::X(index), gtsam::Pose3());
+  }
+  return values;
+}
+
+offline_lc_minimal::RtkVerticalDriftReferenceEstimateRequest MakeDynamicRequest(
+  const offline_lc_minimal::OfflineRunnerConfig &config,
+  const std::vector<offline_lc_minimal::GnssSolutionSample> &samples,
+  const gtsam::Values &values,
+  const std::vector<offline_lc_minimal::RtkOutageWindowRow> *outage_windows = nullptr) {
+  auto request = MakeRequest(config, samples, outage_windows);
+  request.alignment_start_time_s = 1.0;
+  request.alignment_end_time_s = 0.0;
+  request.optimized_values = &values;
+  request.find_state_for_time_s = [](const double corrected_time_s) {
+    offline_lc_minimal::StateMeasSyncResult sync;
+    sync.found_i = true;
+    sync.key_index_i = static_cast<std::size_t>(std::llround(corrected_time_s));
+    sync.status = offline_lc_minimal::StateMeasSyncStatus::kSynchronizedI;
+    return sync;
   };
   return request;
 }
@@ -176,6 +219,158 @@ void TestLowpassReferenceReducesHighFrequencyCenterMotion() {
   ExpectTrue(summary.valid_count == profile.size(), "all valid rows should be counted");
   ExpectTrue(summary.max_abs_delta_m > 0.0, "lowpass should report a finite delta");
   ExpectTrue(filtered_range < 0.6 * raw_range, "0.1 Hz lowpass should suppress 0.5 Hz height motion");
+}
+
+void TestOutageSegmentationBlocksPostOutageBackwardDrift() {
+  offline_lc_minimal::OfflineRunnerConfig config;
+  config.enable_rtk_vertical_drift_outage_segmentation = true;
+  config.enable_rtk_vertical_drift_gate_weighting = false;
+  config.rtk_vertical_drift_sigma_m = 0.050;
+  config.rtk_vertical_white_noise_sigma_m = 0.002;
+  config.rtk_vertical_drift_huber_sigma_m = 1.0;
+  config.rtk_vertical_drift_correlation_time_s = 100.0;
+  config.rtk_vertical_drift_max_abs_correction_m = 1.0;
+
+  std::vector<double> up_values(50U, 0.0);
+  for (std::size_t index = 30U; index < up_values.size(); ++index) {
+    up_values[index] = 0.080;
+  }
+  const auto samples = MakeStaticSamples(up_values);
+  const std::vector<offline_lc_minimal::RtkOutageWindowRow> outage_windows{
+    MakeOutageWindow(29.5, 30.5)};
+
+  const auto segmented =
+    offline_lc_minimal::RtkVerticalDriftReferenceEstimator(
+      MakeRequest(config, samples, &outage_windows)).Estimate(nullptr);
+
+  std::vector<double> pre_only_values(up_values.begin(), up_values.begin() + 30);
+  const auto pre_only_samples = MakeStaticSamples(pre_only_values);
+  const auto pre_only =
+    offline_lc_minimal::RtkVerticalDriftReferenceEstimator(
+      MakeRequest(config, pre_only_samples)).Estimate(nullptr);
+
+  ExpectTrue(segmented.profile[29U].valid, "pre-outage boundary sample should be valid");
+  ExpectTrue(segmented.profile[30U].skip_reason == "inside_rtk_outage",
+             "sample inside outage should not be used for drift reference");
+  ExpectTrue(segmented.profile[31U].valid, "post-outage sample should be valid");
+  ExpectNear(
+    segmented.profile[29U].drift_estimate_m,
+    pre_only.profile[29U].drift_estimate_m,
+    1.0e-12,
+    "post-outage drift should not pull the pre-outage smoother");
+  ExpectTrue(segmented.profile[29U].drift_segment_index == 0,
+             "pre-outage sample should stay in segment 0");
+  ExpectTrue(segmented.profile[31U].drift_segment_index == 1,
+             "post-outage sample should start a new segment");
+  ExpectTrue(segmented.profile[29U].outage_boundary_blocked &&
+               segmented.profile[31U].outage_boundary_blocked,
+             "boundary-adjacent rows should report blocked outage propagation");
+
+  offline_lc_minimal::OfflineRunnerConfig unsegmented_config = config;
+  unsegmented_config.enable_rtk_vertical_drift_outage_segmentation = false;
+  const auto unsegmented =
+    offline_lc_minimal::RtkVerticalDriftReferenceEstimator(
+      MakeRequest(unsegmented_config, samples, &outage_windows)).Estimate(nullptr);
+  ExpectTrue(
+    std::abs(unsegmented.profile[29U].drift_estimate_m) >
+      std::abs(segmented.profile[29U].drift_estimate_m) + 1.0e-4,
+    "unsegmented smoother should show the old backward pull");
+}
+
+void TestOutageSegmentationUsesPerSegmentBiasWhenStaticBiasUnavailable() {
+  offline_lc_minimal::OfflineRunnerConfig config;
+  config.enable_rtk_vertical_drift_outage_segmentation = true;
+  config.enable_rtk_vertical_drift_gate_weighting = false;
+  config.rtk_vertical_drift_sigma_m = 0.050;
+  config.rtk_vertical_white_noise_sigma_m = 0.002;
+  config.rtk_vertical_drift_huber_sigma_m = 1.0;
+  config.rtk_vertical_drift_correlation_time_s = 100.0;
+  config.rtk_vertical_drift_max_abs_correction_m = 1.0;
+
+  std::vector<double> up_values(50U, 0.0);
+  for (std::size_t index = 30U; index < up_values.size(); ++index) {
+    up_values[index] = 0.080;
+  }
+  const auto samples = MakeStaticSamples(up_values);
+  const gtsam::Values values = MakeZeroPoseValues(samples.size());
+  const std::vector<offline_lc_minimal::RtkOutageWindowRow> outage_windows{
+    MakeOutageWindow(29.5, 30.5)};
+
+  const auto segmented =
+    offline_lc_minimal::RtkVerticalDriftReferenceEstimator(
+      MakeDynamicRequest(config, samples, values, &outage_windows)).Estimate(nullptr);
+
+  std::vector<double> pre_only_values(up_values.begin(), up_values.begin() + 30);
+  const auto pre_only_samples = MakeStaticSamples(pre_only_values);
+  const gtsam::Values pre_only_values_graph = MakeZeroPoseValues(pre_only_samples.size());
+  const auto pre_only =
+    offline_lc_minimal::RtkVerticalDriftReferenceEstimator(
+      MakeDynamicRequest(config, pre_only_samples, pre_only_values_graph)).Estimate(nullptr);
+
+  ExpectNear(
+    segmented.profile[29U].constant_bias_m,
+    pre_only.profile[29U].constant_bias_m,
+    1.0e-12,
+    "fallback constant bias should be estimated from the pre-outage segment only");
+  ExpectNear(
+    segmented.profile[29U].drift_estimate_m,
+    pre_only.profile[29U].drift_estimate_m,
+    1.0e-12,
+    "post-outage samples should not influence pre-outage fallback bias or smoothing");
+}
+
+void TestOutageSegmentationCreatesMultipleIndependentSegments() {
+  offline_lc_minimal::OfflineRunnerConfig config;
+  config.enable_rtk_vertical_drift_outage_segmentation = true;
+
+  const auto samples = MakeStaticSamples(std::vector<double>(8U, 0.0));
+  const std::vector<offline_lc_minimal::RtkOutageWindowRow> outage_windows{
+    MakeOutageWindow(2.5, 3.5),
+    MakeOutageWindow(5.5, 6.5)};
+  const auto result =
+    offline_lc_minimal::RtkVerticalDriftReferenceEstimator(
+      MakeRequest(config, samples, &outage_windows)).Estimate(nullptr);
+
+  ExpectTrue(result.profile[0U].drift_segment_role == "PRE_OUTAGE",
+             "first segment should be labeled pre-outage");
+  ExpectTrue(result.profile[4U].drift_segment_index == 1,
+             "middle segment should have index 1");
+  ExpectTrue(result.profile[4U].drift_segment_role == "BETWEEN_OUTAGES",
+             "middle segment should be labeled between outages");
+  ExpectTrue(result.profile[7U].drift_segment_index == 2,
+             "last segment should have index 2");
+  ExpectTrue(result.profile[7U].drift_segment_role == "POST_OUTAGE",
+             "last segment should be labeled post-outage");
+  ExpectTrue(result.profile[3U].skip_reason == "inside_rtk_outage" &&
+               result.profile[6U].skip_reason == "inside_rtk_outage",
+             "samples inside outage windows should be excluded");
+}
+
+void TestLowpassReferenceDoesNotCrossOutageSegments() {
+  offline_lc_minimal::OfflineRunnerConfig config;
+  config.enable_rtk_vertical_lowpass_reference = true;
+  config.rtk_vertical_lowpass_reference_cutoff_hz = 0.10;
+
+  std::vector<offline_lc_minimal::RtkVerticalDriftReferenceDiagnosticRow> profile(40U);
+  for (std::size_t index = 0; index < profile.size(); ++index) {
+    auto &row = profile[index];
+    row.sample_index = index;
+    row.time_s = static_cast<double>(index);
+    row.corrected_center_up_m = index < 20U ? 0.0 : 1.0;
+    row.drift_segment_index = index < 20U ? 0 : 1;
+    row.drift_segment_role = index < 20U ? "PRE_OUTAGE" : "POST_OUTAGE";
+    row.valid = true;
+  }
+
+  const auto summary =
+    offline_lc_minimal::ApplyRtkVerticalLowpassReferenceFilter(config, &profile);
+  ExpectTrue(summary.valid_count == profile.size(), "all valid rows should be filtered");
+  ExpectNear(profile[19U].lowpass_center_up_m, 0.0, 1.0e-12,
+             "pre-outage lowpass should not see post-outage level");
+  ExpectNear(profile[20U].lowpass_center_up_m, 1.0, 1.0e-12,
+             "post-outage lowpass should start from post segment only");
+  ExpectTrue(profile[19U].outage_boundary_blocked && profile[20U].outage_boundary_blocked,
+             "lowpass split should mark the outage boundary rows");
 }
 
 void TestGateWeightFormula() {
@@ -307,6 +502,28 @@ void TestGateDiagnosticsWriterIncludesColumns() {
     "CSV writer should include gate weighting diagnostics");
 }
 
+void TestOutageSegmentDiagnosticsWriterIncludesColumns() {
+  std::vector<offline_lc_minimal::RtkVerticalDriftReferenceDiagnosticRow> rows(1U);
+  rows.front().sample_index = 7U;
+  rows.front().time_s = 1.0;
+  rows.front().drift_segment_index = 1;
+  rows.front().drift_segment_role = "POST_OUTAGE";
+  rows.front().outage_boundary_blocked = true;
+
+  const auto path =
+    std::filesystem::temp_directory_path() / "rtk_vertical_drift_reference_segment_writer_test.csv";
+  offline_lc_minimal::WriteRtkVerticalDriftReferenceDiagnosticsCsv(path, rows);
+  std::ifstream stream(path);
+  std::string header;
+  std::getline(stream, header);
+  stream.close();
+  std::filesystem::remove(path);
+  ExpectTrue(
+    header.find("drift_segment_index,drift_segment_role,outage_boundary_blocked") !=
+      std::string::npos,
+    "CSV writer should include outage segment diagnostics");
+}
+
 }  // namespace
 
 int main() {
@@ -317,6 +534,18 @@ int main() {
     RunTest(
       "TestLowpassReferenceReducesHighFrequencyCenterMotion",
       TestLowpassReferenceReducesHighFrequencyCenterMotion);
+    RunTest(
+      "TestOutageSegmentationBlocksPostOutageBackwardDrift",
+      TestOutageSegmentationBlocksPostOutageBackwardDrift);
+    RunTest(
+      "TestOutageSegmentationUsesPerSegmentBiasWhenStaticBiasUnavailable",
+      TestOutageSegmentationUsesPerSegmentBiasWhenStaticBiasUnavailable);
+    RunTest(
+      "TestOutageSegmentationCreatesMultipleIndependentSegments",
+      TestOutageSegmentationCreatesMultipleIndependentSegments);
+    RunTest(
+      "TestLowpassReferenceDoesNotCrossOutageSegments",
+      TestLowpassReferenceDoesNotCrossOutageSegments);
     RunTest("TestGateWeightFormula", TestGateWeightFormula);
     RunTest("TestGateWeightFloor", TestGateWeightFloor);
     RunTest("TestEstimatorWritesGateDiagnostics", TestEstimatorWritesGateDiagnostics);
@@ -324,6 +553,9 @@ int main() {
       "TestEstimatorGateWeightingReducesLargeDriftEstimate",
       TestEstimatorGateWeightingReducesLargeDriftEstimate);
     RunTest("TestGateDiagnosticsWriterIncludesColumns", TestGateDiagnosticsWriterIncludesColumns);
+    RunTest(
+      "TestOutageSegmentDiagnosticsWriterIncludesColumns",
+      TestOutageSegmentDiagnosticsWriterIncludesColumns);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

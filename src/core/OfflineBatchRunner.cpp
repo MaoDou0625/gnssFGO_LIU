@@ -1037,6 +1037,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.rtk_vertical_drift_first20_max_abs_correction_m =
     std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.rtk_vertical_drift_outage_segmentation_enabled = false;
+  run_result.run_summary.rtk_vertical_drift_segment_count = 0;
+  run_result.run_summary.rtk_vertical_drift_outage_boundary_count = 0;
+  run_result.run_summary.rtk_vertical_drift_cross_outage_lowpass_blocked = false;
   run_result.run_summary.rtk_outage_smoothing_enabled =
     config_.enable_rtk_outage_smoothing;
   run_result.run_summary.rtk_outage_baz_reestimate_enabled =
@@ -1489,6 +1493,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     RtkVerticalDriftReferenceEstimateRequest drift_request;
     drift_request.config = &config_;
     drift_request.gnss_samples = &dataset.gnss_samples;
+    drift_request.rtk_outage_windows = &planned_rtk_outage_windows;
     drift_request.optimized_values = &optimized_values;
     drift_request.alignment_start_time_s = alignment_start_time_s;
     drift_request.alignment_end_time_s = alignment_end_time_s;

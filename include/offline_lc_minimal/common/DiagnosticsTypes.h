@@ -215,6 +215,9 @@ struct RtkVerticalDriftReferenceDiagnosticRow {
   double drift_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double white_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double tau_s = std::numeric_limits<double>::quiet_NaN();
+  int drift_segment_index = -1;
+  std::string drift_segment_role = "UNSEGMENTED";
+  bool outage_boundary_blocked = false;
   bool lowpass_applied = false;
   bool static_window_flag = false;
   bool valid = false;

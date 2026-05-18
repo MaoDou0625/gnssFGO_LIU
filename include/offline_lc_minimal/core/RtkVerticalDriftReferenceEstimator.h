@@ -15,6 +15,7 @@ namespace offline_lc_minimal {
 struct RtkVerticalDriftReferenceEstimateRequest {
   const OfflineRunnerConfig *config = nullptr;
   const std::vector<GnssSolutionSample> *gnss_samples = nullptr;
+  const std::vector<RtkOutageWindowRow> *rtk_outage_windows = nullptr;
   const gtsam::Values *optimized_values = nullptr;
   double alignment_start_time_s = 0.0;
   double alignment_end_time_s = 0.0;

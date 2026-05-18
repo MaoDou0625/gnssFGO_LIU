@@ -66,6 +66,11 @@ struct Candidate {
   bool static_window = false;
 };
 
+struct DriftOutageWindow {
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+};
+
 std::optional<double> NavReferenceUpM(
   const RtkVerticalDriftReferenceEstimateRequest &request,
   const double corrected_time_s,
@@ -131,6 +136,94 @@ std::optional<double> NavReferenceUpM(
   }
   *skip_reason = "unsupported_sync_status";
   return std::nullopt;
+}
+
+std::vector<DriftOutageWindow> NormalizedDriftOutageWindows(
+  const RtkVerticalDriftReferenceEstimateRequest &request) {
+  std::vector<DriftOutageWindow> windows;
+  if (request.config == nullptr ||
+      !request.config->enable_rtk_vertical_drift_outage_segmentation ||
+      request.rtk_outage_windows == nullptr) {
+    return windows;
+  }
+  windows.reserve(request.rtk_outage_windows->size());
+  for (const auto &window : *request.rtk_outage_windows) {
+    if (!std::isfinite(window.start_time_s) ||
+        !std::isfinite(window.end_time_s) ||
+        window.end_time_s <= window.start_time_s) {
+      continue;
+    }
+    windows.push_back(DriftOutageWindow{window.start_time_s, window.end_time_s});
+  }
+  std::sort(windows.begin(), windows.end(), [](const auto &lhs, const auto &rhs) {
+    if (lhs.start_time_s == rhs.start_time_s) {
+      return lhs.end_time_s < rhs.end_time_s;
+    }
+    return lhs.start_time_s < rhs.start_time_s;
+  });
+  std::vector<DriftOutageWindow> merged;
+  for (const auto &window : windows) {
+    if (merged.empty() || window.start_time_s > merged.back().end_time_s) {
+      merged.push_back(window);
+      continue;
+    }
+    merged.back().end_time_s = std::max(merged.back().end_time_s, window.end_time_s);
+  }
+  return merged;
+}
+
+int SegmentIndexForTime(
+  const double time_s,
+  const std::vector<DriftOutageWindow> &outage_windows) {
+  int segment_index = 0;
+  for (const auto &window : outage_windows) {
+    if (time_s > window.start_time_s && time_s < window.end_time_s) {
+      return -1;
+    }
+    if (time_s >= window.end_time_s) {
+      ++segment_index;
+      continue;
+    }
+    break;
+  }
+  return segment_index;
+}
+
+std::string SegmentRole(const int segment_index, const std::size_t possible_segment_count) {
+  if (segment_index < 0) {
+    return "IN_OUTAGE";
+  }
+  if (possible_segment_count <= 1U) {
+    return "UNSEGMENTED";
+  }
+  if (segment_index == 0) {
+    return "PRE_OUTAGE";
+  }
+  if (static_cast<std::size_t>(segment_index + 1) >= possible_segment_count) {
+    return "POST_OUTAGE";
+  }
+  return "BETWEEN_OUTAGES";
+}
+
+void MarkOutageBoundaryRows(
+  const std::vector<std::vector<Candidate>> &candidate_segments,
+  std::vector<RtkVerticalDriftReferenceDiagnosticRow> *profile) {
+  if (profile == nullptr || candidate_segments.size() <= 1U) {
+    return;
+  }
+  bool has_previous_segment = false;
+  std::size_t previous_last_row_index = 0U;
+  for (const auto &segment : candidate_segments) {
+    if (segment.empty()) {
+      continue;
+    }
+    if (has_previous_segment) {
+      (*profile)[previous_last_row_index].outage_boundary_blocked = true;
+      (*profile)[segment.front().row_index].outage_boundary_blocked = true;
+    }
+    previous_last_row_index = segment.back().row_index;
+    has_previous_segment = true;
+  }
 }
 
 void EstimateOuDrift(
@@ -241,8 +334,13 @@ RtkVerticalDriftReferenceEstimateResult RtkVerticalDriftReferenceEstimator::Esti
 
   RtkVerticalDriftReferenceEstimateResult result;
   result.profile.resize(request_.gnss_samples->size());
-  std::vector<Candidate> candidates;
-  std::vector<double> residuals;
+  const std::vector<DriftOutageWindow> outage_windows =
+    NormalizedDriftOutageWindows(request_);
+  const bool outage_segmentation_enabled = !outage_windows.empty();
+  const std::size_t possible_segment_count =
+    outage_segmentation_enabled ? outage_windows.size() + 1U : 1U;
+  std::vector<std::vector<Candidate>> candidate_segments(possible_segment_count);
+  std::vector<std::vector<double>> segment_residuals(possible_segment_count);
   std::vector<double> static_residuals;
 
   for (std::size_t sample_index = 0; sample_index < request_.gnss_samples->size(); ++sample_index) {
@@ -286,19 +384,51 @@ RtkVerticalDriftReferenceEstimateResult RtkVerticalDriftReferenceEstimator::Esti
 
     row.nav_reference_up_m = *nav_up_m;
     row.residual_m = row.raw_rtk_up_m - row.nav_reference_up_m;
-    candidates.push_back(
-      Candidate{sample_index, corrected_time_s, row.residual_m, sigma_u_m, row.static_window_flag});
-    residuals.push_back(row.residual_m);
+    const int segment_index =
+      outage_segmentation_enabled ? SegmentIndexForTime(corrected_time_s, outage_windows) : 0;
+    row.drift_segment_index = segment_index;
+    row.drift_segment_role = SegmentRole(segment_index, possible_segment_count);
+    if (segment_index < 0) {
+      row.skip_reason = "inside_rtk_outage";
+      continue;
+    }
+    candidate_segments[static_cast<std::size_t>(segment_index)].push_back(
+      Candidate{
+        sample_index,
+        corrected_time_s,
+        row.residual_m,
+        sigma_u_m,
+        row.static_window_flag});
+    segment_residuals[static_cast<std::size_t>(segment_index)].push_back(row.residual_m);
     if (row.static_window_flag) {
       static_residuals.push_back(row.residual_m);
     }
   }
 
-  const double constant_bias_m =
-    !static_residuals.empty() ? Median(std::move(static_residuals)) : Median(std::move(residuals));
-  if (std::isfinite(constant_bias_m)) {
-    EstimateOuDrift(*request_.config, candidates, constant_bias_m, &result.profile);
-    ApplyRtkVerticalLowpassReferenceFilter(*request_.config, &result.profile);
+  const std::optional<double> static_constant_bias_m =
+    !static_residuals.empty()
+      ? std::optional<double>(Median(std::move(static_residuals)))
+      : std::nullopt;
+  bool estimated_any_segment = false;
+  for (std::size_t segment_index = 0; segment_index < candidate_segments.size(); ++segment_index) {
+    const double constant_bias_m =
+      static_constant_bias_m.has_value()
+        ? *static_constant_bias_m
+        : Median(segment_residuals[segment_index]);
+    if (std::isfinite(constant_bias_m)) {
+      EstimateOuDrift(
+        *request_.config,
+        candidate_segments[segment_index],
+        constant_bias_m,
+        &result.profile);
+      estimated_any_segment = true;
+    }
+  }
+  if (estimated_any_segment) {
+    MarkOutageBoundaryRows(candidate_segments, &result.profile);
+    const RtkVerticalLowpassReferenceFilterSummary lowpass_summary =
+      ApplyRtkVerticalLowpassReferenceFilter(*request_.config, &result.profile);
+    (void)lowpass_summary;
   }
 
   if (previous_profile == nullptr || previous_profile->empty()) {
@@ -334,17 +464,39 @@ void PopulateRtkVerticalDriftReferenceSummary(
   std::vector<double> white_residuals;
   std::vector<double> first20_corrections;
   std::vector<double> gate_weights;
+  std::vector<int> valid_segment_indices;
   double max_abs_correction_m = 0.0;
   double max_abs_lowpass_delta_m = 0.0;
   double max_gate_violation_m = 0.0;
   std::size_t valid_count = 0;
   std::size_t lowpass_valid_count = 0;
   std::size_t downweighted_count = 0;
+  std::size_t outage_boundary_count = 0;
+  bool outage_segmentation_enabled = false;
+  bool has_previous_segment = false;
+  int previous_segment_index = -1;
   for (const auto &row : profile) {
     if (!row.valid || !std::isfinite(row.drift_estimate_m)) {
       continue;
     }
     ++valid_count;
+    if (row.drift_segment_index >= 0) {
+      if (std::find(valid_segment_indices.begin(),
+                    valid_segment_indices.end(),
+                    row.drift_segment_index) == valid_segment_indices.end()) {
+        valid_segment_indices.push_back(row.drift_segment_index);
+      }
+      if (has_previous_segment &&
+          previous_segment_index >= 0 &&
+          previous_segment_index != row.drift_segment_index) {
+        ++outage_boundary_count;
+      }
+      previous_segment_index = row.drift_segment_index;
+      has_previous_segment = true;
+    }
+    if (row.drift_segment_role != "UNSEGMENTED") {
+      outage_segmentation_enabled = true;
+    }
     max_abs_correction_m = std::max(max_abs_correction_m, std::abs(row.drift_estimate_m));
     if (row.static_window_flag) {
       static_drifts.push_back(row.drift_estimate_m);
@@ -374,6 +526,12 @@ void PopulateRtkVerticalDriftReferenceSummary(
   run_summary.rtk_vertical_drift_reference_valid_count = valid_count;
   run_summary.rtk_vertical_drift_max_abs_correction_m =
     valid_count > 0U ? max_abs_correction_m : std::numeric_limits<double>::quiet_NaN();
+  run_summary.rtk_vertical_drift_outage_segmentation_enabled =
+    config.enable_rtk_vertical_drift_outage_segmentation && outage_segmentation_enabled;
+  run_summary.rtk_vertical_drift_segment_count = valid_segment_indices.size();
+  run_summary.rtk_vertical_drift_outage_boundary_count = outage_boundary_count;
+  run_summary.rtk_vertical_drift_cross_outage_lowpass_blocked =
+    config.enable_rtk_vertical_lowpass_reference && outage_boundary_count > 0U;
   run_summary.rtk_vertical_drift_gate_downweighted_count = downweighted_count;
   run_summary.rtk_vertical_drift_gate_max_violation_m =
     valid_count > 0U ? max_gate_violation_m : std::numeric_limits<double>::quiet_NaN();

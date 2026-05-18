@@ -929,6 +929,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.rtk_vertical_white_noise_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_huber_sigma_m") {
     config.rtk_vertical_drift_huber_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_rtk_vertical_drift_outage_segmentation") {
+    config.enable_rtk_vertical_drift_outage_segmentation = ParseBool(normalized_value);
   } else if (normalized_key == "enable_rtk_vertical_drift_gate_weighting") {
     config.enable_rtk_vertical_drift_gate_weighting = ParseBool(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_gate_weight_floor") {
@@ -1428,6 +1430,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "rtk_vertical_drift_sigma_m=" << config.rtk_vertical_drift_sigma_m << '\n'
     << "rtk_vertical_white_noise_sigma_m=" << config.rtk_vertical_white_noise_sigma_m << '\n'
     << "rtk_vertical_drift_huber_sigma_m=" << config.rtk_vertical_drift_huber_sigma_m << '\n'
+    << "enable_rtk_vertical_drift_outage_segmentation="
+    << (config.enable_rtk_vertical_drift_outage_segmentation ? "true" : "false") << '\n'
     << "enable_rtk_vertical_drift_gate_weighting="
     << (config.enable_rtk_vertical_drift_gate_weighting ? "true" : "false") << '\n'
     << "rtk_vertical_drift_gate_weight_floor="

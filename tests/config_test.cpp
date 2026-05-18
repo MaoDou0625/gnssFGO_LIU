@@ -769,6 +769,9 @@ void TestPhase30RtkDriftReferenceConfigLoads() {
     std::abs(config.rtk_vertical_white_noise_sigma_m - 0.002) < 1e-15,
     "phase30 white noise sigma should load");
   ExpectTrue(config.rtk_vertical_drift_outer_iterations == 20, "phase30 drift iterations should load");
+  ExpectTrue(
+    config.enable_rtk_vertical_drift_outage_segmentation,
+    "phase30 should enable outage-aware drift segmentation");
   ExpectTrue(config.rtk_vertical_drift_use_for_center_pull, "phase30 should use drift for center pull");
   ExpectTrue(
     !config.rtk_vertical_drift_use_for_envelope_gate,
@@ -843,6 +846,9 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
     config.enable_rtk_vertical_drift_reference,
     "phase32 should keep RTK drift reference");
   ExpectTrue(
+    config.enable_rtk_vertical_drift_outage_segmentation,
+    "phase32 should keep outage-aware drift segmentation");
+  ExpectTrue(
     config.enable_body_z_nhc_strict_effective_weighting,
     "phase32 should keep strict Body-Z NHC weighting");
   ExpectTrue(
@@ -855,6 +861,9 @@ void TestDefaultOfflineConfigUsesPhase32RtkOutageSmoother() {
     std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) + "/config/default_offline.cfg",
     offline_lc_minimal::DefaultConfig());
   ExpectTrue(config.enable_rtk_vertical_drift_reference, "default config should use RTK drift reference");
+  ExpectTrue(
+    config.enable_rtk_vertical_drift_outage_segmentation,
+    "default config should use outage-aware RTK drift segmentation");
   ExpectTrue(
     config.enable_body_z_nhc_strict_effective_weighting,
     "default config should use strict Body-Z NHC weighting");
@@ -1299,8 +1308,12 @@ void TestRtkVerticalLowpassReferenceConfigValidation() {
 
 void TestRtkVerticalDriftGateWeightingConfigValidation() {
   auto config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_vertical_drift_outage_segmentation", "false");
   offline_lc_minimal::OverrideConfigField(config, "enable_rtk_vertical_drift_gate_weighting", "false");
   offline_lc_minimal::OverrideConfigField(config, "rtk_vertical_drift_gate_weight_floor", "0.25");
+  ExpectTrue(
+    !config.enable_rtk_vertical_drift_outage_segmentation,
+    "RTK vertical drift outage segmentation flag should parse");
   ExpectTrue(
     !config.enable_rtk_vertical_drift_gate_weighting,
     "RTK vertical drift gate weighting flag should parse");
@@ -1308,6 +1321,9 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
     std::abs(config.rtk_vertical_drift_gate_weight_floor - 0.25) < 1e-15,
     "RTK vertical drift gate weight floor should parse");
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
+  ExpectTrue(
+    serialized.find("enable_rtk_vertical_drift_outage_segmentation=false") != std::string::npos,
+    "RTK vertical drift outage segmentation flag should be serialized");
   ExpectTrue(
     serialized.find("enable_rtk_vertical_drift_gate_weighting=false") != std::string::npos,
     "RTK vertical drift gate weighting flag should be serialized");

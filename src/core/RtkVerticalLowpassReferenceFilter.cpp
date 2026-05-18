@@ -87,7 +87,15 @@ RtkVerticalLowpassReferenceFilterSummary ApplyRtkVerticalLowpassReferenceFilter(
     if (!segment.empty()) {
       const auto &prev_row = (*profile)[segment.back()];
       const auto &row = (*profile)[index];
-      if (row.time_s <= prev_row.time_s) {
+      const bool crosses_drift_segment =
+        row.drift_segment_index >= 0 &&
+        prev_row.drift_segment_index >= 0 &&
+        row.drift_segment_index != prev_row.drift_segment_index;
+      if (row.time_s <= prev_row.time_s || crosses_drift_segment) {
+        if (crosses_drift_segment) {
+          (*profile)[segment.back()].outage_boundary_blocked = true;
+          (*profile)[index].outage_boundary_blocked = true;
+        }
         FilterSegment(config, segment, profile, &summary);
         segment.clear();
       }
