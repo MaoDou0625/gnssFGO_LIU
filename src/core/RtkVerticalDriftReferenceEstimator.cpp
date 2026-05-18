@@ -13,6 +13,7 @@
 #include <gtsam/navigation/NavState.h>
 
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
+#include "offline_lc_minimal/core/RtkVerticalDriftGateWeighting.h"
 #include "offline_lc_minimal/core/RtkVerticalLowpassReferenceFilter.h"
 
 namespace offline_lc_minimal {
@@ -61,6 +62,7 @@ struct Candidate {
   std::size_t row_index = 0;
   double time_s = 0.0;
   double residual_m = 0.0;
+  double sigma_u_m = std::numeric_limits<double>::quiet_NaN();
   bool static_window = false;
 };
 
@@ -170,11 +172,28 @@ void EstimateOuDrift(
     }
 
     const double observation = candidates[i].residual_m - constant_bias_m;
+    const RtkVerticalDriftGateWeightingResult gate_weighting =
+      ComputeRtkVerticalDriftGateWeighting(
+        config,
+        observation,
+        candidates[i].sigma_u_m);
+    auto &row = (*profile)[candidates[i].row_index];
+    row.gate_half_width_m = gate_weighting.gate_half_width_m;
+    row.gate_observation_m = gate_weighting.gate_observation_m;
+    row.gate_violation_m = gate_weighting.gate_violation_m;
+    row.gate_weight = gate_weighting.gate_weight;
+    row.effective_white_sigma_m = gate_weighting.effective_white_sigma_m;
+
     const double innovation =
       Clamp(observation - x_pred[i],
             -config.rtk_vertical_drift_huber_sigma_m,
             config.rtk_vertical_drift_huber_sigma_m);
-    const double innovation_var = p_pred[i] + meas_var;
+    const double effective_meas_var =
+      std::isfinite(gate_weighting.effective_white_sigma_m) &&
+      gate_weighting.effective_white_sigma_m > 0.0
+        ? gate_weighting.effective_white_sigma_m * gate_weighting.effective_white_sigma_m
+        : meas_var;
+    const double innovation_var = p_pred[i] + std::max(effective_meas_var, kTiny);
     const double kalman_gain = p_pred[i] / std::max(innovation_var, kTiny);
     x_filt[i] = x_pred[i] + kalman_gain * innovation;
     p_filt[i] = std::max((1.0 - kalman_gain) * p_pred[i], kTiny);
@@ -235,6 +254,7 @@ RtkVerticalDriftReferenceEstimateResult RtkVerticalDriftReferenceEstimator::Esti
     row.raw_rtk_up_m = sample.enu_position_m.z();
     row.drift_sigma_m = request_.config->rtk_vertical_drift_sigma_m;
     row.white_sigma_m = request_.config->rtk_vertical_white_noise_sigma_m;
+    row.effective_white_sigma_m = request_.config->rtk_vertical_white_noise_sigma_m;
     row.tau_s = request_.config->rtk_vertical_drift_correlation_time_s;
     row.static_window_flag =
       corrected_time_s >= request_.alignment_start_time_s &&
@@ -257,9 +277,17 @@ RtkVerticalDriftReferenceEstimateResult RtkVerticalDriftReferenceEstimator::Esti
       continue;
     }
 
+    double sigma_u_m = std::numeric_limits<double>::quiet_NaN();
+    if (request_.clamped_sigma_m) {
+      sigma_u_m = request_.clamped_sigma_m(sample).z();
+    } else {
+      sigma_u_m = sample.sigma_h_m;
+    }
+
     row.nav_reference_up_m = *nav_up_m;
     row.residual_m = row.raw_rtk_up_m - row.nav_reference_up_m;
-    candidates.push_back(Candidate{sample_index, corrected_time_s, row.residual_m, row.static_window_flag});
+    candidates.push_back(
+      Candidate{sample_index, corrected_time_s, row.residual_m, sigma_u_m, row.static_window_flag});
     residuals.push_back(row.residual_m);
     if (row.static_window_flag) {
       static_residuals.push_back(row.residual_m);
@@ -296,6 +324,8 @@ void PopulateRtkVerticalDriftReferenceSummary(
   const std::vector<RtkVerticalDriftReferenceDiagnosticRow> &profile,
   RunSummary &run_summary) {
   run_summary.rtk_vertical_drift_reference_enabled = config.enable_rtk_vertical_drift_reference;
+  run_summary.rtk_vertical_drift_gate_weighting_enabled =
+    config.enable_rtk_vertical_drift_gate_weighting;
   run_summary.rtk_vertical_lowpass_reference_enabled =
     config.enable_rtk_vertical_lowpass_reference;
   run_summary.rtk_vertical_lowpass_reference_cutoff_hz =
@@ -303,10 +333,13 @@ void PopulateRtkVerticalDriftReferenceSummary(
   std::vector<double> static_drifts;
   std::vector<double> white_residuals;
   std::vector<double> first20_corrections;
+  std::vector<double> gate_weights;
   double max_abs_correction_m = 0.0;
   double max_abs_lowpass_delta_m = 0.0;
+  double max_gate_violation_m = 0.0;
   std::size_t valid_count = 0;
   std::size_t lowpass_valid_count = 0;
+  std::size_t downweighted_count = 0;
   for (const auto &row : profile) {
     if (!row.valid || !std::isfinite(row.drift_estimate_m)) {
       continue;
@@ -318,6 +351,15 @@ void PopulateRtkVerticalDriftReferenceSummary(
     }
     if (std::isfinite(row.white_residual_m)) {
       white_residuals.push_back(row.white_residual_m);
+    }
+    if (std::isfinite(row.gate_weight)) {
+      gate_weights.push_back(row.gate_weight);
+      if (row.gate_weight < 1.0 - 1.0e-12) {
+        ++downweighted_count;
+      }
+    }
+    if (std::isfinite(row.gate_violation_m)) {
+      max_gate_violation_m = std::max(max_gate_violation_m, row.gate_violation_m);
     }
     if (row.lowpass_applied && std::isfinite(row.lowpass_delta_m)) {
       ++lowpass_valid_count;
@@ -332,6 +374,9 @@ void PopulateRtkVerticalDriftReferenceSummary(
   run_summary.rtk_vertical_drift_reference_valid_count = valid_count;
   run_summary.rtk_vertical_drift_max_abs_correction_m =
     valid_count > 0U ? max_abs_correction_m : std::numeric_limits<double>::quiet_NaN();
+  run_summary.rtk_vertical_drift_gate_downweighted_count = downweighted_count;
+  run_summary.rtk_vertical_drift_gate_max_violation_m =
+    valid_count > 0U ? max_gate_violation_m : std::numeric_limits<double>::quiet_NaN();
   run_summary.rtk_vertical_lowpass_reference_valid_count = lowpass_valid_count;
   run_summary.rtk_vertical_lowpass_reference_max_abs_delta_m =
     lowpass_valid_count > 0U ? max_abs_lowpass_delta_m : std::numeric_limits<double>::quiet_NaN();
@@ -341,6 +386,13 @@ void PopulateRtkVerticalDriftReferenceSummary(
     run_summary.rtk_vertical_drift_static_std_m = StdDev(static_drifts);
   }
   run_summary.rtk_vertical_drift_white_residual_std_m = StdDev(white_residuals);
+  if (!gate_weights.empty()) {
+    run_summary.rtk_vertical_drift_gate_weight_mean =
+      std::accumulate(gate_weights.begin(), gate_weights.end(), 0.0) /
+      static_cast<double>(gate_weights.size());
+    run_summary.rtk_vertical_drift_gate_weight_min =
+      *std::min_element(gate_weights.begin(), gate_weights.end());
+  }
   if (!first20_corrections.empty()) {
     const double sum = std::accumulate(first20_corrections.begin(), first20_corrections.end(), 0.0);
     run_summary.rtk_vertical_drift_first20_mean_correction_m =

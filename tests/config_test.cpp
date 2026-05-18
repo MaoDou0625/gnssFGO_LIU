@@ -1291,6 +1291,46 @@ void TestRtkVerticalLowpassReferenceConfigValidation() {
   ExpectTrue(threw, "lowpass reference should require drift center-pull reference");
 }
 
+void TestRtkVerticalDriftGateWeightingConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_vertical_drift_gate_weighting", "false");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_vertical_drift_gate_weight_floor", "0.25");
+  ExpectTrue(
+    !config.enable_rtk_vertical_drift_gate_weighting,
+    "RTK vertical drift gate weighting flag should parse");
+  ExpectTrue(
+    std::abs(config.rtk_vertical_drift_gate_weight_floor - 0.25) < 1e-15,
+    "RTK vertical drift gate weight floor should parse");
+  const std::string serialized = offline_lc_minimal::ConfigToString(config);
+  ExpectTrue(
+    serialized.find("enable_rtk_vertical_drift_gate_weighting=false") != std::string::npos,
+    "RTK vertical drift gate weighting flag should be serialized");
+  ExpectTrue(
+    serialized.find("rtk_vertical_drift_gate_weight_floor=0.25") != std::string::npos,
+    "RTK vertical drift gate weight floor should be serialized");
+  offline_lc_minimal::ValidateConfig(config);
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.rtk_vertical_drift_gate_weight_floor = 0.0;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK vertical drift reference settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "zero RTK vertical drift gate weight floor should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.rtk_vertical_drift_gate_weight_floor = 1.01;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK vertical drift reference settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "RTK vertical drift gate weight floor above one should be rejected");
+}
+
 void TestAccelerometerBiasUgConfigParsing() {
   auto config = offline_lc_minimal::DefaultConfig();
   offline_lc_minimal::OverrideConfigField(config, "vertical_acc_bias_sigma_ug", "10.0");
@@ -2162,6 +2202,9 @@ int main() {
     RunTest(
       "TestRtkVerticalLowpassReferenceConfigValidation",
       TestRtkVerticalLowpassReferenceConfigValidation);
+    RunTest(
+      "TestRtkVerticalDriftGateWeightingConfigValidation",
+      TestRtkVerticalDriftGateWeightingConfigValidation);
     RunTest("TestAccelerometerBiasUgConfigParsing", TestAccelerometerBiasUgConfigParsing);
     RunTest("TestVerticalVelocityDeltaConfigValidation", TestVerticalVelocityDeltaConfigValidation);
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);

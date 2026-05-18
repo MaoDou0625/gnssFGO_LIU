@@ -82,6 +82,7 @@ add_library(offline_lc_minimal_lib
   src/core/RtkHeadingAlignmentEstimator.cpp
   src/core/RtkVelocityConstraintBuilder.cpp
   src/core/RtkOutageWindowPlanner.cpp
+  src/core/RtkVerticalDriftGateWeighting.cpp
   src/core/RtkVerticalDriftReferenceEstimator.cpp
   src/core/RtkVerticalLowpassReferenceFilter.cpp
   src/core/Stage1YawRefinementRunner.cpp

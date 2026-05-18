@@ -330,6 +330,7 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       !std::isfinite(config.rtk_vertical_drift_sigma_m) ||
       !std::isfinite(config.rtk_vertical_white_noise_sigma_m) ||
       !std::isfinite(config.rtk_vertical_drift_huber_sigma_m) ||
+      !std::isfinite(config.rtk_vertical_drift_gate_weight_floor) ||
       !std::isfinite(config.rtk_vertical_drift_max_abs_correction_m) ||
       !std::isfinite(config.rtk_vertical_drift_convergence_threshold_m) ||
       !std::isfinite(config.rtk_vertical_lowpass_reference_cutoff_hz) ||
@@ -337,6 +338,8 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.rtk_vertical_drift_sigma_m <= 0.0 ||
       config.rtk_vertical_white_noise_sigma_m <= 0.0 ||
       config.rtk_vertical_drift_huber_sigma_m <= 0.0 ||
+      config.rtk_vertical_drift_gate_weight_floor <= 0.0 ||
+      config.rtk_vertical_drift_gate_weight_floor > 1.0 ||
       config.rtk_vertical_drift_max_abs_correction_m <= 0.0 ||
       config.rtk_vertical_drift_convergence_threshold_m <= 0.0 ||
       config.rtk_vertical_lowpass_reference_cutoff_hz <= 0.0 ||
@@ -926,6 +929,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.rtk_vertical_white_noise_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_huber_sigma_m") {
     config.rtk_vertical_drift_huber_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_rtk_vertical_drift_gate_weighting") {
+    config.enable_rtk_vertical_drift_gate_weighting = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_vertical_drift_gate_weight_floor") {
+    config.rtk_vertical_drift_gate_weight_floor = ParseDouble(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_max_abs_correction_m") {
     config.rtk_vertical_drift_max_abs_correction_m = ParseDouble(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_convergence_threshold_m") {
@@ -1419,6 +1426,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "rtk_vertical_drift_sigma_m=" << config.rtk_vertical_drift_sigma_m << '\n'
     << "rtk_vertical_white_noise_sigma_m=" << config.rtk_vertical_white_noise_sigma_m << '\n'
     << "rtk_vertical_drift_huber_sigma_m=" << config.rtk_vertical_drift_huber_sigma_m << '\n'
+    << "enable_rtk_vertical_drift_gate_weighting="
+    << (config.enable_rtk_vertical_drift_gate_weighting ? "true" : "false") << '\n'
+    << "rtk_vertical_drift_gate_weight_floor="
+    << config.rtk_vertical_drift_gate_weight_floor << '\n'
     << "rtk_vertical_drift_max_abs_correction_m="
     << config.rtk_vertical_drift_max_abs_correction_m << '\n'
     << "rtk_vertical_drift_convergence_threshold_m="

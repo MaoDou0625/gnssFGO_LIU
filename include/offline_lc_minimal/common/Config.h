@@ -153,6 +153,8 @@ struct OfflineRunnerConfig {
   double rtk_vertical_drift_sigma_m = 0.010;
   double rtk_vertical_white_noise_sigma_m = 0.002;
   double rtk_vertical_drift_huber_sigma_m = 0.030;
+  bool enable_rtk_vertical_drift_gate_weighting = true;
+  double rtk_vertical_drift_gate_weight_floor = 0.05;
   double rtk_vertical_drift_max_abs_correction_m = 0.050;
   double rtk_vertical_drift_convergence_threshold_m = 0.001;
   int rtk_vertical_drift_outer_iterations = 2;

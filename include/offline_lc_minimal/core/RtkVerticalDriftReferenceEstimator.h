@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 
+#include <Eigen/Core>
 #include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/common/Config.h"
@@ -24,6 +25,7 @@ struct RtkVerticalDriftReferenceEstimateRequest {
   std::function<bool(const GnssSolutionSample &sample)> should_use_sample;
   std::function<bool(double corrected_time_s)> is_within_imu_coverage;
   std::function<double(const GnssSolutionSample &sample)> corrected_time_s;
+  std::function<Eigen::Vector3d(const GnssSolutionSample &sample)> clamped_sigma_m;
   std::function<StateMeasSyncResult(double corrected_time_s)> find_state_for_time_s;
 };
 

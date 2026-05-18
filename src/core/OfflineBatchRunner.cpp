@@ -1487,6 +1487,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     drift_request.corrected_time_s = [&](const GnssSolutionSample &sample) {
       return CorrectedGnssTime(sample);
     };
+    drift_request.clamped_sigma_m = [&](const GnssSolutionSample &sample) {
+      return ClampGnssSigma(sample);
+    };
     drift_request.find_state_for_time_s = [&](const double corrected_time_s) {
       return FindStateForMeasurement(state_timestamp_map, corrected_time_s, config_);
     };

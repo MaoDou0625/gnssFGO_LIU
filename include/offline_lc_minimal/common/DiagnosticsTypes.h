@@ -205,6 +205,11 @@ struct RtkVerticalDriftReferenceDiagnosticRow {
   double lowpass_delta_m = std::numeric_limits<double>::quiet_NaN();
   double lowpass_cutoff_hz = std::numeric_limits<double>::quiet_NaN();
   double white_residual_m = std::numeric_limits<double>::quiet_NaN();
+  double gate_half_width_m = std::numeric_limits<double>::quiet_NaN();
+  double gate_observation_m = std::numeric_limits<double>::quiet_NaN();
+  double gate_violation_m = std::numeric_limits<double>::quiet_NaN();
+  double gate_weight = std::numeric_limits<double>::quiet_NaN();
+  double effective_white_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double drift_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double white_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double tau_s = std::numeric_limits<double>::quiet_NaN();

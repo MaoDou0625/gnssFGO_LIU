@@ -441,7 +441,8 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
   stream
     << "sample_index,time_s,raw_rtk_up_m,nav_reference_up_m,residual_m,constant_bias_m,"
        "drift_estimate_m,corrected_center_up_m,lowpass_center_up_m,lowpass_delta_m,"
-       "lowpass_cutoff_hz,white_residual_m,drift_sigma_m,white_sigma_m,tau_s,"
+       "lowpass_cutoff_hz,white_residual_m,gate_half_width_m,gate_observation_m,"
+       "gate_violation_m,gate_weight,effective_white_sigma_m,drift_sigma_m,white_sigma_m,tau_s,"
        "lowpass_applied,static_window_flag,valid,skip_reason\n";
   for (const auto &row : rows) {
     stream << row.sample_index << ','
@@ -456,6 +457,11 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
            << row.lowpass_delta_m << ','
            << row.lowpass_cutoff_hz << ','
            << row.white_residual_m << ','
+           << row.gate_half_width_m << ','
+           << row.gate_observation_m << ','
+           << row.gate_violation_m << ','
+           << row.gate_weight << ','
+           << row.effective_white_sigma_m << ','
            << row.drift_sigma_m << ','
            << row.white_sigma_m << ','
            << row.tau_s << ','
