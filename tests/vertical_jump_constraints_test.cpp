@@ -13,12 +13,17 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/core/VerticalJumpBiasConstraintBuilder.h"
+#include "offline_lc_minimal/core/BodyZBiasReestimateConstraintBuilder.h"
+#include "offline_lc_minimal/core/BodyZBiasReestimatePlanner.h"
+#include "offline_lc_minimal/core/VerticalAccelBiasGmConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpImpulseConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpImuMasker.h"
 #include "offline_lc_minimal/core/VerticalJumpShapeConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpSpectralResponseEstimator.h"
 #include "offline_lc_minimal/factor/VerticalJumpImpulseVelocityFactor.h"
 #include "offline_lc_minimal/factor/VerticalJumpBiasVelocityFactor.h"
+#include "offline_lc_minimal/factor/BazContinuityBreakCombinedImuFactor.h"
+#include "offline_lc_minimal/factor/VerticalAccelBiasPriorFactor.h"
 #include "offline_lc_minimal/factor/VerticalMaskedCombinedImuFactor.h"
 #include "offline_lc_minimal/factor/VerticalPositionRampFactor.h"
 #include "offline_lc_minimal/factor/VerticalPositionVelocityConsistencyFactor.h"
@@ -234,6 +239,123 @@ void TestVerticalMaskedCombinedImuMatchesCombinedKeptRowsForBias() {
   }
 }
 
+void TestBazContinuityBreakCombinedImuDropsOnlyBazContinuity() {
+  constexpr std::array<int, offline_lc_minimal::factor::BazContinuityBreakCombinedImuFactor::kKeptErrorDim> kept_rows{
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14};
+  const auto pim = MakePreintegratedMeasurements();
+  const gtsam::imuBias::ConstantBias bias_i(
+    gtsam::Vector3(0.01, -0.02, 0.03),
+    gtsam::Vector3(0.001, -0.002, 0.003));
+  const gtsam::imuBias::ConstantBias bias_j(
+    gtsam::Vector3(-0.04, 0.05, -5.0),
+    gtsam::Vector3(-0.004, 0.005, -0.006));
+  const gtsam::NavState state_i(
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(0.01, -0.02, 0.03), gtsam::Point3(1.0, 2.0, 3.0)),
+    gtsam::Vector3(0.4, -0.5, 0.6));
+  const gtsam::NavState state_j(
+    gtsam::Pose3(gtsam::Rot3::RzRyRx(-0.03, 0.02, -0.01), gtsam::Point3(1.2, 2.3, 3.4)),
+    gtsam::Vector3(-0.2, 0.1, -0.3));
+
+  const gtsam::CombinedImuFactor combined(
+    symbol::X(0), symbol::V(0), symbol::X(1), symbol::V(1), symbol::B(0), symbol::B(1), pim);
+  const offline_lc_minimal::factor::BazContinuityBreakCombinedImuFactor broken(
+    symbol::X(0), symbol::V(0), symbol::X(1), symbol::V(1), symbol::B(0), symbol::B(1), pim);
+
+  gtsam::Matrix combined_h_bias_j;
+  const gtsam::Vector combined_error = combined.evaluateError(
+    state_i.pose(),
+    state_i.v(),
+    state_j.pose(),
+    state_j.v(),
+    bias_i,
+    bias_j,
+    boost::none,
+    boost::none,
+    boost::none,
+    boost::none,
+    boost::none,
+    combined_h_bias_j);
+
+  gtsam::Matrix broken_h_bias_j;
+  const gtsam::Vector broken_error = broken.evaluateError(
+    state_i.pose(),
+    state_i.v(),
+    state_j.pose(),
+    state_j.v(),
+    bias_i,
+    bias_j,
+    boost::none,
+    boost::none,
+    boost::none,
+    boost::none,
+    boost::none,
+    broken_h_bias_j);
+
+  for (std::size_t row = 0; row < kept_rows.size(); ++row) {
+    ExpectNear(
+      broken_error(static_cast<Eigen::Index>(row)),
+      combined_error(kept_rows[row]),
+      1e-12,
+      "ba_z break factor should keep all non-ba_z-continuity rows");
+    for (Eigen::Index col = 0; col < broken_h_bias_j.cols(); ++col) {
+      ExpectNear(
+        broken_h_bias_j(static_cast<Eigen::Index>(row), col),
+        combined_h_bias_j(kept_rows[row], col),
+        1e-12,
+        "ba_z break bias_j Jacobian row should match kept CombinedImuFactor rows");
+    }
+  }
+
+  const gtsam::imuBias::ConstantBias changed_baz_j(
+    gtsam::Vector3(bias_j.accelerometer().x(), bias_j.accelerometer().y(), 100.0),
+    bias_j.gyroscope());
+  const gtsam::Vector changed_baz_error = broken.evaluateError(
+    state_i.pose(),
+    state_i.v(),
+    state_j.pose(),
+    state_j.v(),
+    bias_i,
+    changed_baz_j);
+  ExpectNear(
+    (changed_baz_error - broken_error).norm(),
+    0.0,
+    1e-12,
+    "ba_z continuity changes should be masked");
+
+  const gtsam::imuBias::ConstantBias changed_bax_j(
+    gtsam::Vector3(100.0, bias_j.accelerometer().y(), bias_j.accelerometer().z()),
+    bias_j.gyroscope());
+  const gtsam::Vector changed_bax_error = broken.evaluateError(
+    state_i.pose(),
+    state_i.v(),
+    state_j.pose(),
+    state_j.v(),
+    bias_i,
+    changed_bax_j);
+  ExpectTrue(
+    (changed_bax_error - broken_error).norm() > 1.0,
+    "ba_x continuity should remain active");
+}
+
+void TestVerticalAccelBiasPriorFactorOnlyTouchesBaz() {
+  const offline_lc_minimal::factor::VerticalAccelBiasPriorFactor factor(
+    symbol::B(0),
+    0.25,
+    gtsam::noiseModel::Isotropic::Sigma(1, 1.0));
+  const gtsam::imuBias::ConstantBias bias(
+    gtsam::Vector3(100.0, -200.0, 0.20),
+    gtsam::Vector3(1.0, 2.0, 3.0));
+  gtsam::Matrix h_bias;
+  const gtsam::Vector error = factor.evaluateError(bias, h_bias);
+  ExpectNear(error(0), -0.05, 1e-12, "ba_z prior residual is wrong");
+  ExpectNear(h_bias(0, 0), 0.0, 1e-12, "ba_x should not be constrained");
+  ExpectNear(h_bias(0, 1), 0.0, 1e-12, "ba_y should not be constrained");
+  ExpectNear(h_bias(0, 2), 1.0, 1e-12, "ba_z Jacobian is wrong");
+  ExpectNear(h_bias(0, 3), 0.0, 1e-12, "gyro x should not be constrained");
+  ExpectNear(h_bias(0, 4), 0.0, 1e-12, "gyro y should not be constrained");
+  ExpectNear(h_bias(0, 5), 0.0, 1e-12, "gyro z should not be constrained");
+}
+
 void TestVerticalJumpImuMaskerReplacesOverlappingIntervals() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -270,6 +392,175 @@ void TestVerticalJumpImuMaskerReplacesOverlappingIntervals() {
   ExpectNear(static_cast<double>(summary.vertical_jump_masked_imu_factor_count), 1.0, 0.0, "masked count is wrong");
   ExpectNear(static_cast<double>(summary.vertical_jump_combined_imu_factor_count), 1.0, 0.0, "combined count is wrong");
   ExpectTrue(diagnostics.front().masked_z_position && diagnostics.front().masked_vz, "mask diagnostics are wrong");
+}
+
+void TestBodyZBiasReestimatePlannerSubtractsJumpWindows() {
+  offline_lc_minimal::BodyZSeedJumpWindowRow bias_window = MakeJumpWindow(0.0, 10.0);
+  bias_window.duration_s = 10.0;
+  bias_window.signed_delta_velocity_mps = -0.50;
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> bias_windows{bias_window};
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows{
+    MakeJumpWindow(2.0, 3.0),
+    MakeJumpWindow(6.0, 7.0),
+  };
+
+  const std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> segments =
+    offline_lc_minimal::PlanBodyZBiasReestimateSegments(
+      bias_windows,
+      jump_windows,
+      offline_lc_minimal::BodyZBiasReestimatePlannerOptions{0.5, 0.4, 5.0});
+
+  ExpectNear(static_cast<double>(segments.size()), 3.0, 0.0, "segment count is wrong");
+  ExpectNear(segments[0].start_time_s, 0.0, 1e-12, "first segment start is wrong");
+  ExpectNear(segments[0].end_time_s, 1.5, 1e-12, "first segment end is wrong");
+  ExpectNear(segments[1].start_time_s, 3.5, 1e-12, "middle segment start is wrong");
+  ExpectNear(segments[1].end_time_s, 5.5, 1e-12, "middle segment end is wrong");
+  ExpectNear(segments[2].start_time_s, 7.5, 1e-12, "last segment start is wrong");
+  ExpectNear(segments[2].end_time_s, 10.0, 1e-12, "last segment end is wrong");
+  ExpectNear(segments[0].detected_bias_delta_mps2, -0.05, 1e-12, "detected bias delta is wrong");
+
+  offline_lc_minimal::BodyZSeedJumpWindowRow short_bias_window = MakeJumpWindow(20.0, 22.0);
+  short_bias_window.duration_s = 2.0;
+  const auto short_segments = offline_lc_minimal::PlanBodyZBiasReestimateSegments(
+    std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow>{short_bias_window},
+    {},
+    offline_lc_minimal::BodyZBiasReestimatePlannerOptions{0.0, 0.0, 5.0});
+  ExpectTrue(short_segments.empty(), "short jump windows should not become ba_z reestimate segments");
+}
+
+void TestBodyZBiasReestimateBuilderBreaksBoundaryAndAddsWeakPrior() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_jump_bias_prior_sigma_mps2 = 0.05;
+  const auto pim = MakePreintegratedMeasurements();
+
+  gtsam::NonlinearFactorGraph graph;
+  for (std::size_t index = 0; index < 4; ++index) {
+    graph.add(gtsam::CombinedImuFactor(
+      symbol::X(index),
+      symbol::V(index),
+      symbol::X(index + 1U),
+      symbol::V(index + 1U),
+      symbol::B(index),
+      symbol::B(index + 1U),
+      pim));
+  }
+
+  const std::vector<double> state_timestamps{0.0, 0.5, 1.0, 1.5, 2.0};
+  const std::vector<offline_lc_minimal::VerticalJumpImuIntervalRecord> intervals{
+    {0, 1, 0.0, 0.5, 0, pim},
+    {1, 2, 0.5, 1.0, 1, pim},
+    {2, 3, 1.0, 1.5, 2, pim},
+    {3, 4, 1.5, 2.0, 3, pim},
+  };
+  std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> segments;
+  offline_lc_minimal::BodyZBiasReestimateSegmentRow segment;
+  segment.segment_index = 0;
+  segment.start_time_s = 0.5;
+  segment.end_time_s = 1.5;
+  segment.duration_s = 1.0;
+  segment.detected_bias_delta_mps2 = -0.20;
+  segments.push_back(segment);
+
+  gtsam::Values initial_values;
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    initial_values.insert(
+      symbol::B(index),
+      gtsam::imuBias::ConstantBias(
+        gtsam::Vector3(0.01, -0.02, 0.10),
+        gtsam::Vector3(0.001, -0.002, 0.003)));
+  }
+  offline_lc_minimal::RunSummary summary;
+
+  offline_lc_minimal::BodyZBiasReestimateConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.segments = &segments;
+  request.imu_intervals = &intervals;
+  request.graph = &graph;
+  request.initial_values = &initial_values;
+  request.run_summary = &summary;
+  offline_lc_minimal::BodyZBiasReestimateConstraintBuilder(std::move(request)).Apply();
+
+  ExpectNear(
+    static_cast<double>(summary.body_z_bias_reestimate_segment_count),
+    1.0,
+    0.0,
+    "reestimate segment count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.body_z_bias_reestimate_boundary_break_count),
+    2.0,
+    0.0,
+    "boundary break count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.body_z_bias_reestimate_prior_factor_count),
+    1.0,
+    0.0,
+    "weak prior count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.body_z_bias_reestimate_initialized_state_count),
+    3.0,
+    0.0,
+    "initialized state count is wrong");
+  ExpectNear(segments.front().prior_target_ba_z_mps2, -0.10, 1e-12, "prior target ba_z is wrong");
+  ExpectTrue(segments.front().prior_factor_added, "segment should mark prior factor added");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::BazContinuityBreakCombinedImuFactor>(graph.at(0)) != nullptr,
+    "entry boundary should use ba_z continuity break factor");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<gtsam::CombinedImuFactor>(graph.at(1)) != nullptr,
+    "interior interval should keep CombinedImuFactor");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<gtsam::CombinedImuFactor>(graph.at(2)) != nullptr,
+    "interior endpoint interval should keep CombinedImuFactor");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::BazContinuityBreakCombinedImuFactor>(graph.at(3)) != nullptr,
+    "exit boundary should use ba_z continuity break factor");
+  for (std::size_t state_index = 1; state_index <= 3; ++state_index) {
+    const auto bias = initial_values.at<gtsam::imuBias::ConstantBias>(symbol::B(state_index));
+    ExpectNear(bias.accelerometer().z(), -0.10, 1e-12, "inside ba_z initial value is wrong");
+    ExpectNear(bias.accelerometer().x(), 0.01, 1e-12, "ba_x initial value should be preserved");
+    ExpectNear(bias.gyroscope().z(), 0.003, 1e-12, "gyro bias initial value should be preserved");
+  }
+  const auto outside_bias = initial_values.at<gtsam::imuBias::ConstantBias>(symbol::B(0));
+  ExpectNear(outside_bias.accelerometer().z(), 0.10, 1e-12, "outside ba_z should be preserved");
+}
+
+void TestVerticalAccelBiasGmSkipsBiasReestimateBoundaries() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_global_acc_bias = true;
+  config.enable_vertical_acc_bias_gm_process = true;
+  config.vertical_acc_bias_sigma_mps2 = 0.01;
+
+  const std::vector<offline_lc_minimal::VerticalAccelBiasGmTransitionRecord> records{
+    {0, 1, 0.0, 0.5, false},
+    {1, 2, 0.5, 1.0, false},
+    {2, 3, 1.0, 1.5, false},
+    {3, 4, 1.5, 2.0, false},
+  };
+  std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> segments;
+  offline_lc_minimal::BodyZBiasReestimateSegmentRow segment;
+  segment.segment_index = 0;
+  segment.start_time_s = 0.5;
+  segment.end_time_s = 1.5;
+  segments.push_back(segment);
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  offline_lc_minimal::VerticalAccelBiasGmConstraintBuildRequest request;
+  request.config = &config;
+  request.records = &records;
+  request.bias_reestimate_segments = &segments;
+  request.global_acc_bias_key = gtsam::Symbol('a', 0);
+  request.graph = &graph;
+  request.run_summary = &summary;
+  offline_lc_minimal::VerticalAccelBiasGmConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 2.0, 0.0, "only interior GM factors should remain");
+  ExpectNear(
+    static_cast<double>(summary.body_z_bias_reestimate_gm_skipped_count),
+    2.0,
+    0.0,
+    "GM boundary skip count is wrong");
 }
 
 void TestVerticalJumpImpulseVelocityFactor() {
@@ -1905,7 +2196,20 @@ int main() {
     RunTest(
       "TestVerticalMaskedCombinedImuMatchesCombinedKeptRowsForBias",
       TestVerticalMaskedCombinedImuMatchesCombinedKeptRowsForBias);
+    RunTest(
+      "TestBazContinuityBreakCombinedImuDropsOnlyBazContinuity",
+      TestBazContinuityBreakCombinedImuDropsOnlyBazContinuity);
+    RunTest("TestVerticalAccelBiasPriorFactorOnlyTouchesBaz", TestVerticalAccelBiasPriorFactorOnlyTouchesBaz);
     RunTest("TestVerticalJumpImuMaskerReplacesOverlappingIntervals", TestVerticalJumpImuMaskerReplacesOverlappingIntervals);
+    RunTest(
+      "TestBodyZBiasReestimatePlannerSubtractsJumpWindows",
+      TestBodyZBiasReestimatePlannerSubtractsJumpWindows);
+    RunTest(
+      "TestBodyZBiasReestimateBuilderBreaksBoundaryAndAddsWeakPrior",
+      TestBodyZBiasReestimateBuilderBreaksBoundaryAndAddsWeakPrior);
+    RunTest(
+      "TestVerticalAccelBiasGmSkipsBiasReestimateBoundaries",
+      TestVerticalAccelBiasGmSkipsBiasReestimateBoundaries);
     RunTest("TestVerticalJumpImpulseVelocityFactor", TestVerticalJumpImpulseVelocityFactor);
     RunTest("TestVerticalJumpBiasVelocityFactor", TestVerticalJumpBiasVelocityFactor);
     RunTest(

@@ -20,6 +20,34 @@ double BiasDecay(const double dt_s, const double tau_s) {
   return std::exp(-std::max(dt_s, 0.0) / std::max(tau_s, 1.0e-9));
 }
 
+bool ContainsTime(
+  const BodyZBiasReestimateSegmentRow &segment,
+  const double time_s) {
+  constexpr double kTimeEpsilonS = 1.0e-9;
+  return std::isfinite(time_s) &&
+         time_s + kTimeEpsilonS >= segment.start_time_s &&
+         time_s <= segment.end_time_s + kTimeEpsilonS;
+}
+
+long long SegmentIndexForTime(
+  const std::vector<BodyZBiasReestimateSegmentRow> &segments,
+  const double time_s) {
+  for (const auto &segment : segments) {
+    if (ContainsTime(segment, time_s)) {
+      return static_cast<long long>(segment.segment_index);
+    }
+  }
+  return -1;
+}
+
+double PositiveOverlapDurationS(
+  const double left_start_s,
+  const double left_end_s,
+  const double right_start_s,
+  const double right_end_s) {
+  return std::max(0.0, std::min(left_end_s, right_end_s) - std::max(left_start_s, right_start_s));
+}
+
 double BaseGmSigmaMps2(
   const OfflineRunnerConfig &config,
   const bool is_initial_static_interval) {
@@ -78,6 +106,10 @@ void VerticalAccelBiasGmConstraintBuilder::Build() const {
     return;
   }
   for (const auto &record : *request_.records) {
+    if (CrossesBiasReestimateBoundary(record)) {
+      ++request_.run_summary->body_z_bias_reestimate_gm_skipped_count;
+      continue;
+    }
     const double dt_s = record.end_time_s - record.start_time_s;
     const double phi = BiasDecay(dt_s, request_.config->vertical_acc_bias_tau_s);
     const auto *stability_entry = FindStabilityProfileEntry(
@@ -100,6 +132,36 @@ void VerticalAccelBiasGmConstraintBuilder::Build() const {
       ++request_.run_summary->initial_static_vertical_bias_gm_tightened_factor_count;
     }
   }
+}
+
+bool VerticalAccelBiasGmConstraintBuilder::CrossesBiasReestimateBoundary(
+  const VerticalAccelBiasGmTransitionRecord &record) const {
+  if (request_.bias_reestimate_segments == nullptr ||
+      request_.bias_reestimate_segments->empty()) {
+    return false;
+  }
+
+  const auto &segments = *request_.bias_reestimate_segments;
+  const long long start_segment_index = SegmentIndexForTime(segments, record.start_time_s);
+  const long long end_segment_index = SegmentIndexForTime(segments, record.end_time_s);
+  if (start_segment_index != end_segment_index &&
+      (start_segment_index >= 0 || end_segment_index >= 0)) {
+    return true;
+  }
+  if (start_segment_index >= 0 && start_segment_index == end_segment_index) {
+    return false;
+  }
+
+  for (const auto &segment : segments) {
+    if (PositiveOverlapDurationS(
+          record.start_time_s,
+          record.end_time_s,
+          segment.start_time_s,
+          segment.end_time_s) > 1.0e-9) {
+      return true;
+    }
+  }
+  return false;
 }
 
 double VerticalAccelBiasGmConstraintBuilder::TransitionSigmaMps2(

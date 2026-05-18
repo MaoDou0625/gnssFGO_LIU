@@ -62,6 +62,11 @@ void ResultWriter::WriteOutputs(
       output_path / "body_z_seed_bias_windows.csv",
       result.body_z_seed_bias_windows);
   }
+  if (!result.body_z_bias_reestimate_segments.empty()) {
+    WriteBodyZBiasReestimateSegmentsCsv(
+      output_path / "body_z_bias_reestimate_segments.csv",
+      result.body_z_bias_reestimate_segments);
+  }
   if (!result.error_state_trajectory.empty()) {
     WriteErrorStateCsv(output_path / "error_state_trajectory.csv", result.error_state_trajectory);
   }

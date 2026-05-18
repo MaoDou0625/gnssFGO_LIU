@@ -22,6 +22,7 @@ struct VerticalAccelBiasGmTransitionRecord {
 struct VerticalAccelBiasGmConstraintBuildRequest {
   const OfflineRunnerConfig *config = nullptr;
   const std::vector<VerticalAccelBiasGmTransitionRecord> *records = nullptr;
+  const std::vector<BodyZBiasReestimateSegmentRow> *bias_reestimate_segments = nullptr;
   const VerticalMotionStabilityProfile *stability_profile = nullptr;
   gtsam::Key global_acc_bias_key = 0;
   gtsam::NonlinearFactorGraph *graph = nullptr;
@@ -46,6 +47,9 @@ class VerticalAccelBiasGmConstraintBuilder {
     const VerticalMotionAdaptiveReweightingDiagnosticRow *stability_entry);
 
  private:
+  [[nodiscard]] bool CrossesBiasReestimateBoundary(
+    const VerticalAccelBiasGmTransitionRecord &record) const;
+
   VerticalAccelBiasGmConstraintBuildRequest request_;
 };
 

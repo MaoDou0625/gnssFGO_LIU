@@ -218,6 +218,45 @@ void WriteBodyZSeedJumpWindowCsv(
   }
 }
 
+void WriteBodyZBiasReestimateSegmentsCsv(
+  const std::filesystem::path &path,
+  const std::vector<BodyZBiasReestimateSegmentRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "segment_index,source_bias_window_index,start_state_index,end_state_index,anchor_state_index,"
+       "bias_window_start_time_s,bias_window_end_time_s,start_time_s,end_time_s,duration_s,"
+       "detected_bias_delta_mps2,detected_bias_delta_ug,reference_ba_z_mps2,reference_ba_z_ug,"
+       "prior_target_ba_z_mps2,prior_target_ba_z_ug,prior_sigma_mps2,prior_sigma_ug,"
+       "initialized_state_count,prior_factor_added,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.segment_index << ','
+           << row.source_bias_window_index << ','
+           << row.start_state_index << ','
+           << row.end_state_index << ','
+           << row.anchor_state_index << ','
+           << row.bias_window_start_time_s << ','
+           << row.bias_window_end_time_s << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.duration_s << ','
+           << row.detected_bias_delta_mps2 << ','
+           << Mps2ToMicroG(row.detected_bias_delta_mps2) << ','
+           << row.reference_ba_z_mps2 << ','
+           << Mps2ToMicroG(row.reference_ba_z_mps2) << ','
+           << row.prior_target_ba_z_mps2 << ','
+           << Mps2ToMicroG(row.prior_target_ba_z_mps2) << ','
+           << row.prior_sigma_mps2 << ','
+           << Mps2ToMicroG(row.prior_sigma_mps2) << ','
+           << row.initialized_state_count << ','
+           << (row.prior_factor_added ? 1 : 0) << ','
+           << row.skip_reason << '\n';
+  }
+}
+
 void WriteErrorStateCsv(const std::filesystem::path &path, const std::vector<ErrorStateRow> &rows) {
   std::ofstream stream(path);
   if (!stream.is_open()) {

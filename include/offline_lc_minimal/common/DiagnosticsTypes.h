@@ -108,6 +108,26 @@ struct BodyZSeedJumpWindowRow {
   double delta_vz_init_mps = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct BodyZBiasReestimateSegmentRow {
+  std::size_t segment_index = 0;
+  std::size_t source_bias_window_index = 0;
+  long long start_state_index = -1;
+  long long end_state_index = -1;
+  long long anchor_state_index = -1;
+  double bias_window_start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double bias_window_end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double duration_s = std::numeric_limits<double>::quiet_NaN();
+  double detected_bias_delta_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double reference_ba_z_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double prior_target_ba_z_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double prior_sigma_mps2 = std::numeric_limits<double>::quiet_NaN();
+  std::size_t initialized_state_count = 0;
+  bool prior_factor_added = false;
+  std::string skip_reason = "UNSET";
+};
+
 struct ErrorStateRow {
   double time_s = 0.0;
   ErrorStateVector state = ErrorStateVector::Zero();

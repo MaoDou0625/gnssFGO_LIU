@@ -52,11 +52,14 @@ add_library(offline_lc_minimal_lib
   src/common/GeoUtils.cpp
   src/common/ResultOutputWriters.cpp
   src/common/ResultWriter.cpp
+  src/factor/BazContinuityBreakCombinedImuFactor.cpp
   src/factor/VerticalMaskedCombinedImuFactor.cpp
   src/gp/Pose3Utils.cpp
   src/io/TextDatasetLoader.cpp
   src/core/AttitudeReferenceConstraintBuilder.cpp
   src/core/InitialStaticConstraintBuilder.cpp
+  src/core/BodyZBiasReestimateConstraintBuilder.cpp
+  src/core/BodyZBiasReestimatePlanner.cpp
   src/core/BodyZBidirectionalJumpDetector.cpp
   src/core/BodyZHorizontalLeakageEstimator.cpp
   src/core/BodyZJumpConstraintWindowPlanner.cpp

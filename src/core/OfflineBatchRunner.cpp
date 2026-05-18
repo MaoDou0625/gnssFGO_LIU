@@ -22,6 +22,8 @@
 #include <gtsam/slam/PriorFactor.h>
 
 #include "offline_lc_minimal/core/AttitudeReferenceConstraintBuilder.h"
+#include "offline_lc_minimal/core/BodyZBiasReestimateConstraintBuilder.h"
+#include "offline_lc_minimal/core/BodyZBiasReestimatePlanner.h"
 #include "offline_lc_minimal/core/BodyZWindowPipeline.h"
 #include "offline_lc_minimal/core/BodyZNHCConstraintBuilder.h"
 #include "offline_lc_minimal/core/GnssFactorBuilder.h"
@@ -897,10 +899,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   const auto add_vertical_acc_bias_gm_constraints =
     [&](gtsam::NonlinearFactorGraph &target_graph,
         RunSummary &target_summary,
+        const std::vector<BodyZBiasReestimateSegmentRow> *bias_reestimate_segments,
         const VerticalMotionStabilityProfile *stability_profile) {
       VerticalAccelBiasGmConstraintBuildRequest request;
       request.config = &config_;
       request.records = &vertical_acc_bias_gm_records;
+      request.bias_reestimate_segments = bias_reestimate_segments;
       request.stability_profile = stability_profile;
       request.global_acc_bias_key = global_acc_bias_key;
       request.graph = &target_graph;
@@ -911,7 +915,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   if (config_.enable_body_z_jump_detection) {
     gtsam::NonlinearFactorGraph body_z_base_graph = base_graph;
     RunSummary body_z_seed_summary = base_run_summary;
-    add_vertical_acc_bias_gm_constraints(body_z_base_graph, body_z_seed_summary, nullptr);
+    add_vertical_acc_bias_gm_constraints(body_z_base_graph, body_z_seed_summary, nullptr, nullptr);
     BodyZWindowPipelineRequest body_z_request;
     body_z_request.config = &config_;
     body_z_request.imu_samples = &dataset.imu_samples;
@@ -947,6 +951,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   if (stage2_reference_ != nullptr) {
     run_result.attitude_reference_states = stage2_fixed_reference_states;
   }
+  run_result.body_z_bias_reestimate_segments = PlanBodyZBiasReestimateSegments(
+    run_result.body_z_seed_bias_windows,
+    run_result.body_z_seed_jump_windows,
+    BodyZBiasReestimatePlannerOptions{
+      config_.vertical_velocity_delta_jump_padding_s,
+      config_.vertical_jump_segmented_bias_min_segment_s,
+      config_.body_z_long_bias_min_duration_s});
 
   std::vector<RtkOutageWindowRow> planned_rtk_outage_windows;
   std::vector<BodyZSeedJumpWindowRow> nhc_constraint_windows =
@@ -1130,6 +1141,19 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.vertical_jump_bias_replaced_imu_factor_count = 0;
   run_result.run_summary.vertical_jump_bias_position_velocity_factor_count = 0;
   run_result.run_summary.vertical_jump_bias_skipped_count = 0;
+  run_result.run_summary.vertical_jump_bias_segment_count = 0;
+  run_result.run_summary.vertical_jump_bias_highfreq_inflated_factor_count = 0;
+  run_result.run_summary.body_z_bias_reestimate_segment_count = 0;
+  run_result.run_summary.body_z_bias_reestimate_boundary_break_count = 0;
+  run_result.run_summary.body_z_bias_reestimate_prior_factor_count = 0;
+  run_result.run_summary.body_z_bias_reestimate_initialized_state_count = 0;
+  run_result.run_summary.body_z_bias_reestimate_gm_skipped_count = 0;
+  run_result.run_summary.vertical_jump_spectral_bias_relaxation_enabled = false;
+  run_result.run_summary.vertical_jump_spectral_relaxed_segment_count = 0;
+  run_result.run_summary.vertical_jump_spectral_max_response_ratio =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.vertical_jump_spectral_max_effective_prior_sigma_mps2 =
+    std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.vertical_jump_velocity_ramp_factor_count = 0;
   run_result.run_summary.vertical_jump_position_ramp_factor_count = 0;
   run_result.run_summary.vertical_jump_velocity_height_slope_factor_count = 0;
@@ -1169,6 +1193,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   add_vertical_acc_bias_gm_constraints(
     graph_with_gnss,
     run_result.run_summary,
+    &run_result.body_z_bias_reestimate_segments,
     active_stability_profile_ptr);
   gtsam::Values optimization_initial_values = adaptive_initial_values;
   RtkOutageInitialValueSmoothRequest rtk_outage_initial_request;
@@ -1178,6 +1203,18 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   rtk_outage_initial_request.initial_values = &optimization_initial_values;
   rtk_outage_initial_request.outage_windows = &run_result.rtk_outage_windows;
   RtkOutageInitialValueSmoother(std::move(rtk_outage_initial_request)).Apply();
+
+  if (!run_result.body_z_bias_reestimate_segments.empty()) {
+    BodyZBiasReestimateConstraintBuildRequest bias_reestimate_request;
+    bias_reestimate_request.config = &config_;
+    bias_reestimate_request.state_timestamps = &state_timestamps;
+    bias_reestimate_request.segments = &run_result.body_z_bias_reestimate_segments;
+    bias_reestimate_request.imu_intervals = &vertical_jump_imu_interval_records;
+    bias_reestimate_request.graph = &graph_with_gnss;
+    bias_reestimate_request.initial_values = &optimization_initial_values;
+    bias_reestimate_request.run_summary = &run_result.run_summary;
+    BodyZBiasReestimateConstraintBuilder(std::move(bias_reestimate_request)).Apply();
+  }
 
   if (config_.enable_vertical_jump_impulse) {
     VerticalJumpImpulseConstraintBuildRequest vertical_jump_impulse_request;
@@ -1196,7 +1233,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     VerticalJumpBiasConstraintBuildRequest vertical_jump_bias_request;
     vertical_jump_bias_request.config = &config_;
     vertical_jump_bias_request.state_timestamps = &state_timestamps;
-    vertical_jump_bias_request.jump_windows = &run_result.body_z_seed_bias_windows;
+    vertical_jump_bias_request.jump_windows = &run_result.body_z_seed_jump_windows;
     vertical_jump_bias_request.body_z_diagnostics = &run_result.seed_body_z_acc_diagnostics;
     vertical_jump_bias_request.imu_intervals = &vertical_jump_imu_interval_records;
     vertical_jump_bias_request.propagation_records = &vertical_velocity_delta_records;

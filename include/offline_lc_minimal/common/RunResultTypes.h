@@ -200,6 +200,11 @@ struct RunSummary {
   std::size_t vertical_jump_bias_skipped_count = 0;
   std::size_t vertical_jump_bias_segment_count = 0;
   std::size_t vertical_jump_bias_highfreq_inflated_factor_count = 0;
+  std::size_t body_z_bias_reestimate_segment_count = 0;
+  std::size_t body_z_bias_reestimate_boundary_break_count = 0;
+  std::size_t body_z_bias_reestimate_prior_factor_count = 0;
+  std::size_t body_z_bias_reestimate_initialized_state_count = 0;
+  std::size_t body_z_bias_reestimate_gm_skipped_count = 0;
   bool vertical_jump_spectral_bias_relaxation_enabled = false;
   std::size_t vertical_jump_spectral_relaxed_segment_count = 0;
   double vertical_jump_spectral_max_response_ratio = std::numeric_limits<double>::quiet_NaN();
@@ -530,6 +535,15 @@ struct RunSummary {
         << "vertical_jump_bias_segment_count=" << vertical_jump_bias_segment_count << '\n'
         << "vertical_jump_bias_highfreq_inflated_factor_count="
         << vertical_jump_bias_highfreq_inflated_factor_count << '\n'
+        << "body_z_bias_reestimate_segment_count=" << body_z_bias_reestimate_segment_count << '\n'
+        << "body_z_bias_reestimate_boundary_break_count="
+        << body_z_bias_reestimate_boundary_break_count << '\n'
+        << "body_z_bias_reestimate_prior_factor_count="
+        << body_z_bias_reestimate_prior_factor_count << '\n'
+        << "body_z_bias_reestimate_initialized_state_count="
+        << body_z_bias_reestimate_initialized_state_count << '\n'
+        << "body_z_bias_reestimate_gm_skipped_count="
+        << body_z_bias_reestimate_gm_skipped_count << '\n'
         << "vertical_jump_spectral_bias_relaxation_enabled="
         << (vertical_jump_spectral_bias_relaxation_enabled ? "true" : "false") << '\n'
         << "vertical_jump_spectral_relaxed_segment_count="
@@ -656,6 +670,7 @@ struct OfflineRunResult {
   std::vector<BodyZSeedImuDiagnosticRow> seed_body_z_acc_diagnostics;
   std::vector<BodyZSeedJumpWindowRow> body_z_seed_jump_windows;
   std::vector<BodyZSeedJumpWindowRow> body_z_seed_bias_windows;
+  std::vector<BodyZBiasReestimateSegmentRow> body_z_bias_reestimate_segments;
   std::vector<ErrorStateRow> error_state_trajectory;
   std::vector<SegmentErrorDiagnostic> segment_error_diagnostics;
   std::vector<TrajectoryRow> trajectory;
