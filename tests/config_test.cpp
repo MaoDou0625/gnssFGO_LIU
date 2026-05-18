@@ -814,6 +814,9 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
     config.enable_rtk_outage_smoothing,
     "phase32 should enable RTK outage smoothing");
   ExpectTrue(
+    config.enable_rtk_outage_baz_reestimate,
+    "phase32 should enable RTK outage ba_z reestimate");
+  ExpectTrue(
     std::abs(config.rtk_outage_min_gap_s - 2.0) < 1e-15,
     "phase32 RTK outage gap threshold should load");
   ExpectTrue(
@@ -863,6 +866,9 @@ void TestDefaultOfflineConfigUsesPhase32RtkOutageSmoother() {
     "default global NHC windows should be non-overlapping");
   ExpectTrue(config.drop_non_rtkfix, "default config should remove non-fixed GNSS factors");
   ExpectTrue(config.enable_rtk_outage_smoothing, "default config should enable RTK outage smoothing");
+  ExpectTrue(
+    config.enable_rtk_outage_baz_reestimate,
+    "default config should enable RTK outage ba_z reestimate");
   ExpectTrue(config.enable_rtk_outage_attitude_hold, "default config should enable outage attitude hold");
   ExpectTrue(
     std::abs(config.rtk_outage_attitude_guard_duration_s - 1.0) < 1e-15,
@@ -2008,6 +2014,7 @@ void TestRtkVelocityConfigValidation() {
 void TestRtkOutageRecoveryConfigValidation() {
   auto config = offline_lc_minimal::DefaultConfig();
   offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_attitude_hold", "true");
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_baz_reestimate", "true");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_attitude_guard_duration_s", "1.5");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_absolute_attitude_sigma_rad", "2e-4");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_relative_attitude_sigma_rad", "3e-4");
@@ -2015,6 +2022,7 @@ void TestRtkOutageRecoveryConfigValidation() {
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_velocity_delta_3d_sigma_mps", "0.35");
   offline_lc_minimal::ValidateConfig(config);
   ExpectTrue(config.enable_rtk_outage_attitude_hold, "outage attitude hold flag should parse");
+  ExpectTrue(config.enable_rtk_outage_baz_reestimate, "outage ba_z reestimate flag should parse");
   ExpectTrue(
     std::abs(config.rtk_outage_attitude_guard_duration_s - 1.5) < 1e-12,
     "outage attitude guard duration should parse");

@@ -110,7 +110,9 @@ struct BodyZSeedJumpWindowRow {
 
 struct BodyZBiasReestimateSegmentRow {
   std::size_t segment_index = 0;
+  std::string source_type = "BODY_Z_BIAS";
   std::size_t source_bias_window_index = 0;
+  long long source_outage_window_index = -1;
   long long start_state_index = -1;
   long long end_state_index = -1;
   long long anchor_state_index = -1;

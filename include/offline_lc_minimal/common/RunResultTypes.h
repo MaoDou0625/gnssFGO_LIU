@@ -107,8 +107,12 @@ struct RunSummary {
   double rtk_vertical_lowpass_reference_max_abs_delta_m =
     std::numeric_limits<double>::quiet_NaN();
   bool rtk_outage_smoothing_enabled = false;
+  bool rtk_outage_baz_reestimate_enabled = true;
   std::size_t rtk_outage_window_count = 0;
   std::size_t rtk_outage_window_with_body_z_jump_count = 0;
+  std::size_t rtk_outage_baz_reestimate_segment_count = 0;
+  std::size_t rtk_outage_baz_reestimate_boundary_break_count = 0;
+  std::size_t rtk_outage_baz_reestimate_prior_factor_count = 0;
   std::size_t rtk_outage_position_ramp_factor_count = 0;
   std::size_t rtk_outage_velocity_delta_factor_count = 0;
   std::size_t rtk_outage_velocity_delta_skipped_body_z_jump_count = 0;
@@ -408,9 +412,17 @@ struct RunSummary {
         << rtk_vertical_lowpass_reference_max_abs_delta_m << '\n'
         << "rtk_outage_smoothing_enabled="
         << (rtk_outage_smoothing_enabled ? "true" : "false") << '\n'
+        << "rtk_outage_baz_reestimate_enabled="
+        << (rtk_outage_baz_reestimate_enabled ? "true" : "false") << '\n'
         << "rtk_outage_window_count=" << rtk_outage_window_count << '\n'
         << "rtk_outage_window_with_body_z_jump_count="
         << rtk_outage_window_with_body_z_jump_count << '\n'
+        << "rtk_outage_baz_reestimate_segment_count="
+        << rtk_outage_baz_reestimate_segment_count << '\n'
+        << "rtk_outage_baz_reestimate_boundary_break_count="
+        << rtk_outage_baz_reestimate_boundary_break_count << '\n'
+        << "rtk_outage_baz_reestimate_prior_factor_count="
+        << rtk_outage_baz_reestimate_prior_factor_count << '\n'
         << "rtk_outage_position_ramp_factor_count="
         << rtk_outage_position_ramp_factor_count << '\n'
         << "rtk_outage_velocity_delta_factor_count="

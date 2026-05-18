@@ -37,6 +37,11 @@ gtsam::imuBias::ConstantBias WithUpdatedBaz(
   return gtsam::imuBias::ConstantBias(accelerometer, bias.gyroscope());
 }
 
+bool IsRtkOutageLinked(const BodyZBiasReestimateSegmentRow &segment) {
+  return segment.source_outage_window_index >= 0 ||
+         segment.source_type == "RTK_OUTAGE";
+}
+
 }  // namespace
 
 BodyZBiasReestimateConstraintBuilder::BodyZBiasReestimateConstraintBuilder(
@@ -55,6 +60,16 @@ void BodyZBiasReestimateConstraintBuilder::Apply() const {
   }
 
   request_.run_summary->body_z_bias_reestimate_segment_count = request_.segments->size();
+  request_.run_summary->rtk_outage_baz_reestimate_enabled =
+    request_.config->enable_rtk_outage_smoothing &&
+    request_.config->enable_rtk_outage_baz_reestimate;
+  request_.run_summary->rtk_outage_baz_reestimate_segment_count =
+    static_cast<std::size_t>(std::count_if(
+      request_.segments->begin(),
+      request_.segments->end(),
+      [](const BodyZBiasReestimateSegmentRow &segment) {
+        return IsRtkOutageLinked(segment);
+      }));
   const auto prior_noise = gtsam::noiseModel::Isotropic::Sigma(
     1,
     request_.config->vertical_jump_bias_prior_sigma_mps2);
@@ -108,6 +123,9 @@ void BodyZBiasReestimateConstraintBuilder::Apply() const {
     segment.prior_factor_added = true;
     segment.skip_reason = "ADDED";
     ++request_.run_summary->body_z_bias_reestimate_prior_factor_count;
+    if (IsRtkOutageLinked(segment)) {
+      ++request_.run_summary->rtk_outage_baz_reestimate_prior_factor_count;
+    }
   }
 
   std::set<std::size_t> replaced_factor_indices;
@@ -128,6 +146,9 @@ void BodyZBiasReestimateConstraintBuilder::Apply() const {
         symbol::B(interval.state_index_j),
         interval.preintegrated_measurements));
     ++request_.run_summary->body_z_bias_reestimate_boundary_break_count;
+    if (BoundaryTouchesRtkOutageSegment(interval)) {
+      ++request_.run_summary->rtk_outage_baz_reestimate_boundary_break_count;
+    }
   }
 }
 
@@ -144,16 +165,25 @@ std::vector<std::size_t> BodyZBiasReestimateConstraintBuilder::StateIndicesInSeg
 
 long long BodyZBiasReestimateConstraintBuilder::SegmentIndexForState(
   const std::size_t state_index) const {
-  if (state_index >= request_.state_timestamps->size()) {
+  const BodyZBiasReestimateSegmentRow *segment = SegmentForState(state_index);
+  if (segment == nullptr) {
     return -1;
+  }
+  return static_cast<long long>(segment->segment_index);
+}
+
+const BodyZBiasReestimateSegmentRow *BodyZBiasReestimateConstraintBuilder::SegmentForState(
+  const std::size_t state_index) const {
+  if (state_index >= request_.state_timestamps->size()) {
+    return nullptr;
   }
   const double time_s = (*request_.state_timestamps)[state_index];
   for (const auto &segment : *request_.segments) {
     if (ContainsTime(segment, time_s)) {
-      return static_cast<long long>(segment.segment_index);
+      return &segment;
     }
   }
-  return -1;
+  return nullptr;
 }
 
 bool BodyZBiasReestimateConstraintBuilder::CrossesReestimateBoundary(
@@ -162,6 +192,17 @@ bool BodyZBiasReestimateConstraintBuilder::CrossesReestimateBoundary(
   const long long right_segment_index = SegmentIndexForState(interval.state_index_j);
   return left_segment_index != right_segment_index &&
          (left_segment_index >= 0 || right_segment_index >= 0);
+}
+
+bool BodyZBiasReestimateConstraintBuilder::BoundaryTouchesRtkOutageSegment(
+  const VerticalJumpImuIntervalRecord &interval) const {
+  const BodyZBiasReestimateSegmentRow *left_segment = SegmentForState(interval.state_index_i);
+  const BodyZBiasReestimateSegmentRow *right_segment = SegmentForState(interval.state_index_j);
+  if (left_segment == right_segment) {
+    return false;
+  }
+  return (left_segment != nullptr && IsRtkOutageLinked(*left_segment)) ||
+         (right_segment != nullptr && IsRtkOutageLinked(*right_segment));
 }
 
 }  // namespace offline_lc_minimal

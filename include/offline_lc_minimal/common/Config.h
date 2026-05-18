@@ -163,6 +163,7 @@ struct OfflineRunnerConfig {
   bool enable_rtk_vertical_lowpass_reference = false;
   double rtk_vertical_lowpass_reference_cutoff_hz = 0.10;
   bool enable_rtk_outage_smoothing = false;
+  bool enable_rtk_outage_baz_reestimate = true;
   double rtk_outage_min_gap_s = 2.0;
   double rtk_outage_position_ramp_sigma_m = 0.05;
   double rtk_outage_velocity_delta_sigma_mps = 0.02;

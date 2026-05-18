@@ -227,14 +227,17 @@ void WriteBodyZBiasReestimateSegmentsCsv(
   }
   stream << std::setprecision(17);
   stream
-    << "segment_index,source_bias_window_index,start_state_index,end_state_index,anchor_state_index,"
+    << "segment_index,source_type,source_bias_window_index,source_outage_window_index,"
+       "start_state_index,end_state_index,anchor_state_index,"
        "bias_window_start_time_s,bias_window_end_time_s,start_time_s,end_time_s,duration_s,"
        "detected_bias_delta_mps2,detected_bias_delta_ug,reference_ba_z_mps2,reference_ba_z_ug,"
        "prior_target_ba_z_mps2,prior_target_ba_z_ug,prior_sigma_mps2,prior_sigma_ug,"
        "initialized_state_count,prior_factor_added,skip_reason\n";
   for (const auto &row : rows) {
     stream << row.segment_index << ','
+           << row.source_type << ','
            << row.source_bias_window_index << ','
+           << row.source_outage_window_index << ','
            << row.start_state_index << ','
            << row.end_state_index << ','
            << row.anchor_state_index << ','

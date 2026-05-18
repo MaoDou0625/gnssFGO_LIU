@@ -949,6 +949,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.rtk_vertical_lowpass_reference_cutoff_hz = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_rtk_outage_smoothing") {
     config.enable_rtk_outage_smoothing = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_rtk_outage_baz_reestimate") {
+    config.enable_rtk_outage_baz_reestimate = ParseBool(normalized_value);
   } else if (normalized_key == "rtk_outage_min_gap_s") {
     config.rtk_outage_min_gap_s = ParseDouble(normalized_value);
   } else if (normalized_key == "rtk_outage_position_ramp_sigma_m") {
@@ -1446,6 +1448,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.rtk_vertical_lowpass_reference_cutoff_hz << '\n'
     << "enable_rtk_outage_smoothing="
     << (config.enable_rtk_outage_smoothing ? "true" : "false") << '\n'
+    << "enable_rtk_outage_baz_reestimate="
+    << (config.enable_rtk_outage_baz_reestimate ? "true" : "false") << '\n'
     << "rtk_outage_min_gap_s=" << config.rtk_outage_min_gap_s << '\n'
     << "rtk_outage_position_ramp_sigma_m=" << config.rtk_outage_position_ramp_sigma_m << '\n'
     << "rtk_outage_velocity_delta_sigma_mps="

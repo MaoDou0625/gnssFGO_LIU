@@ -81,6 +81,7 @@ add_library(offline_lc_minimal_lib
   src/core/RtkOutageSmoothingConstraintBuilder.cpp
   src/core/RtkHeadingAlignmentEstimator.cpp
   src/core/RtkVelocityConstraintBuilder.cpp
+  src/core/RtkOutageBazReestimatePlanner.cpp
   src/core/RtkOutageWindowPlanner.cpp
   src/core/RtkVerticalDriftGateWeighting.cpp
   src/core/RtkVerticalDriftReferenceEstimator.cpp

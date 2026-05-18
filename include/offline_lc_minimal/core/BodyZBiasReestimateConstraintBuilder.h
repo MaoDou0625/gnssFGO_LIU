@@ -30,8 +30,12 @@ class BodyZBiasReestimateConstraintBuilder {
  private:
   [[nodiscard]] std::vector<std::size_t> StateIndicesInSegment(
     const BodyZBiasReestimateSegmentRow &segment) const;
+  [[nodiscard]] const BodyZBiasReestimateSegmentRow *SegmentForState(
+    std::size_t state_index) const;
   [[nodiscard]] long long SegmentIndexForState(std::size_t state_index) const;
   [[nodiscard]] bool CrossesReestimateBoundary(const VerticalJumpImuIntervalRecord &interval) const;
+  [[nodiscard]] bool BoundaryTouchesRtkOutageSegment(
+    const VerticalJumpImuIntervalRecord &interval) const;
 
   BodyZBiasReestimateConstraintBuildRequest request_;
 };

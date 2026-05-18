@@ -15,6 +15,7 @@
 #include "offline_lc_minimal/core/VerticalJumpBiasConstraintBuilder.h"
 #include "offline_lc_minimal/core/BodyZBiasReestimateConstraintBuilder.h"
 #include "offline_lc_minimal/core/BodyZBiasReestimatePlanner.h"
+#include "offline_lc_minimal/core/RtkOutageBazReestimatePlanner.h"
 #include "offline_lc_minimal/core/VerticalAccelBiasGmConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpImpulseConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalJumpImuMasker.h"
@@ -76,6 +77,14 @@ offline_lc_minimal::BodyZSeedJumpWindowRow MakeJumpWindow(const double start_tim
   offline_lc_minimal::BodyZSeedJumpWindowRow window;
   window.start_time_s = start_time_s;
   window.end_time_s = end_time_s;
+  return window;
+}
+
+offline_lc_minimal::RtkOutageWindowRow MakeOutageWindow(const double start_time_s, const double end_time_s) {
+  offline_lc_minimal::RtkOutageWindowRow window;
+  window.start_time_s = start_time_s;
+  window.end_time_s = end_time_s;
+  window.duration_s = end_time_s - start_time_s;
   return window;
 }
 
@@ -426,6 +435,159 @@ void TestBodyZBiasReestimatePlannerSubtractsJumpWindows() {
     {},
     offline_lc_minimal::BodyZBiasReestimatePlannerOptions{0.0, 0.0, 5.0});
   ExpectTrue(short_segments.empty(), "short jump windows should not become ba_z reestimate segments");
+}
+
+void TestRtkOutageBazReestimatePlannerAddsOutageSegments() {
+  const std::vector<offline_lc_minimal::RtkOutageWindowRow> outage_windows{
+    MakeOutageWindow(0.0, 10.0),
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows{
+    MakeJumpWindow(4.0, 6.0),
+  };
+
+  const std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> segments =
+    offline_lc_minimal::PlanRtkOutageBazReestimateSegments(
+      {},
+      outage_windows,
+      jump_windows,
+      offline_lc_minimal::RtkOutageBazReestimatePlannerOptions{0.5, 0.4});
+
+  ExpectNear(static_cast<double>(segments.size()), 2.0, 0.0, "RTK outage segment count is wrong");
+  ExpectNear(segments[0].start_time_s, 0.0, 1e-12, "first RTK segment start is wrong");
+  ExpectNear(segments[0].end_time_s, 3.5, 1e-12, "first RTK segment end is wrong");
+  ExpectNear(segments[1].start_time_s, 6.5, 1e-12, "second RTK segment start is wrong");
+  ExpectNear(segments[1].end_time_s, 10.0, 1e-12, "second RTK segment end is wrong");
+  ExpectTrue(segments[0].source_type == "RTK_OUTAGE", "RTK segment source type is wrong");
+  ExpectNear(
+    static_cast<double>(segments[0].source_outage_window_index),
+    0.0,
+    0.0,
+    "RTK source outage index is wrong");
+  ExpectNear(segments[0].detected_bias_delta_mps2, 0.0, 0.0, "RTK-only bias delta should be zero");
+}
+
+void TestRtkOutageBazReestimatePlannerMergesBodyZOverlap() {
+  offline_lc_minimal::BodyZBiasReestimateSegmentRow body_z_segment;
+  body_z_segment.segment_index = 0;
+  body_z_segment.source_type = "BODY_Z_BIAS";
+  body_z_segment.source_bias_window_index = 4;
+  body_z_segment.bias_window_start_time_s = 10.0;
+  body_z_segment.bias_window_end_time_s = 20.0;
+  body_z_segment.start_time_s = 10.0;
+  body_z_segment.end_time_s = 20.0;
+  body_z_segment.duration_s = 10.0;
+  body_z_segment.detected_bias_delta_mps2 = -0.25;
+
+  const std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> segments =
+    offline_lc_minimal::PlanRtkOutageBazReestimateSegments(
+      {body_z_segment},
+      {MakeOutageWindow(8.0, 22.0)},
+      {},
+      offline_lc_minimal::RtkOutageBazReestimatePlannerOptions{0.0, 0.0});
+
+  ExpectNear(static_cast<double>(segments.size()), 1.0, 0.0, "merged segment count is wrong");
+  ExpectNear(segments.front().start_time_s, 8.0, 1e-12, "merged segment start is wrong");
+  ExpectNear(segments.front().end_time_s, 22.0, 1e-12, "merged segment end is wrong");
+  ExpectTrue(segments.front().source_type == "BODY_Z_BIAS", "body-z source should win overlaps");
+  ExpectNear(
+    static_cast<double>(segments.front().source_bias_window_index),
+    4.0,
+    0.0,
+    "body-z source index should be preserved");
+  ExpectNear(
+    static_cast<double>(segments.front().source_outage_window_index),
+    0.0,
+    0.0,
+    "merged segment should remember outage source");
+  ExpectNear(
+    segments.front().detected_bias_delta_mps2,
+    -0.25,
+    1e-12,
+    "body-z detected delta should win overlaps");
+}
+
+void TestRtkOutageBazReestimateBuilderCountsBazBreaks() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_baz_reestimate = true;
+  config.vertical_jump_bias_prior_sigma_mps2 = 0.05;
+  const auto pim = MakePreintegratedMeasurements();
+
+  gtsam::NonlinearFactorGraph graph;
+  for (std::size_t index = 0; index < 4; ++index) {
+    graph.add(gtsam::CombinedImuFactor(
+      symbol::X(index),
+      symbol::V(index),
+      symbol::X(index + 1U),
+      symbol::V(index + 1U),
+      symbol::B(index),
+      symbol::B(index + 1U),
+      pim));
+  }
+
+  const std::vector<double> state_timestamps{0.0, 0.5, 1.0, 1.5, 2.0};
+  const std::vector<offline_lc_minimal::VerticalJumpImuIntervalRecord> intervals{
+    {0, 1, 0.0, 0.5, 0, pim},
+    {1, 2, 0.5, 1.0, 1, pim},
+    {2, 3, 1.0, 1.5, 2, pim},
+    {3, 4, 1.5, 2.0, 3, pim},
+  };
+  std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> segments;
+  offline_lc_minimal::BodyZBiasReestimateSegmentRow segment;
+  segment.segment_index = 0;
+  segment.source_type = "RTK_OUTAGE";
+  segment.source_outage_window_index = 0;
+  segment.start_time_s = 0.5;
+  segment.end_time_s = 1.5;
+  segment.duration_s = 1.0;
+  segment.detected_bias_delta_mps2 = 0.0;
+  segments.push_back(segment);
+
+  gtsam::Values initial_values;
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    initial_values.insert(
+      symbol::B(index),
+      gtsam::imuBias::ConstantBias(
+        gtsam::Vector3(0.01, -0.02, 0.10),
+        gtsam::Vector3(0.001, -0.002, 0.003)));
+  }
+  offline_lc_minimal::RunSummary summary;
+
+  offline_lc_minimal::BodyZBiasReestimateConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.segments = &segments;
+  request.imu_intervals = &intervals;
+  request.graph = &graph;
+  request.initial_values = &initial_values;
+  request.run_summary = &summary;
+  offline_lc_minimal::BodyZBiasReestimateConstraintBuilder(std::move(request)).Apply();
+
+  ExpectNear(
+    static_cast<double>(summary.rtk_outage_baz_reestimate_segment_count),
+    1.0,
+    0.0,
+    "RTK outage ba_z segment count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.rtk_outage_baz_reestimate_boundary_break_count),
+    2.0,
+    0.0,
+    "RTK outage ba_z boundary break count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.rtk_outage_baz_reestimate_prior_factor_count),
+    1.0,
+    0.0,
+    "RTK outage ba_z weak prior count is wrong");
+  ExpectNear(segments.front().prior_target_ba_z_mps2, 0.10, 1e-12, "RTK-only prior target should use entry ba_z");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::BazContinuityBreakCombinedImuFactor>(graph.at(0)) != nullptr,
+    "RTK entry boundary should use ba_z continuity break factor");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalMaskedCombinedImuFactor>(graph.at(0)) == nullptr,
+    "RTK entry boundary should not mask z/vz IMU rows");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::BazContinuityBreakCombinedImuFactor>(graph.at(3)) != nullptr,
+    "RTK exit boundary should use ba_z continuity break factor");
 }
 
 void TestBodyZBiasReestimateBuilderBreaksBoundaryAndAddsWeakPrior() {
@@ -2204,6 +2366,15 @@ int main() {
     RunTest(
       "TestBodyZBiasReestimatePlannerSubtractsJumpWindows",
       TestBodyZBiasReestimatePlannerSubtractsJumpWindows);
+    RunTest(
+      "TestRtkOutageBazReestimatePlannerAddsOutageSegments",
+      TestRtkOutageBazReestimatePlannerAddsOutageSegments);
+    RunTest(
+      "TestRtkOutageBazReestimatePlannerMergesBodyZOverlap",
+      TestRtkOutageBazReestimatePlannerMergesBodyZOverlap);
+    RunTest(
+      "TestRtkOutageBazReestimateBuilderCountsBazBreaks",
+      TestRtkOutageBazReestimateBuilderCountsBazBreaks);
     RunTest(
       "TestBodyZBiasReestimateBuilderBreaksBoundaryAndAddsWeakPrior",
       TestBodyZBiasReestimateBuilderBreaksBoundaryAndAddsWeakPrior);

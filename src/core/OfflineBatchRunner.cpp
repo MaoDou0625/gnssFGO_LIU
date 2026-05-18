@@ -36,6 +36,7 @@
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
+#include "offline_lc_minimal/core/RtkOutageBazReestimatePlanner.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageSmoothingConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkVelocityConstraintBuilder.h"
@@ -980,6 +981,16 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     nhc_constraint_windows = BuildRtkOutageNHCWindows(
       run_result.body_z_seed_jump_windows,
       planned_rtk_outage_windows);
+    if (config_.enable_rtk_outage_baz_reestimate) {
+      run_result.body_z_bias_reestimate_segments =
+        PlanRtkOutageBazReestimateSegments(
+          run_result.body_z_bias_reestimate_segments,
+          planned_rtk_outage_windows,
+          run_result.body_z_seed_jump_windows,
+          RtkOutageBazReestimatePlannerOptions{
+            config_.vertical_velocity_delta_jump_padding_s,
+            config_.vertical_jump_segmented_bias_min_segment_s});
+    }
   }
 
   std::vector<VerticalMotionAdaptiveReweightingDiagnosticRow> adaptive_reweighting_diagnostics;
@@ -1028,8 +1039,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.rtk_outage_smoothing_enabled =
     config_.enable_rtk_outage_smoothing;
+  run_result.run_summary.rtk_outage_baz_reestimate_enabled =
+    config_.enable_rtk_outage_smoothing &&
+    config_.enable_rtk_outage_baz_reestimate;
   run_result.run_summary.rtk_outage_window_count = 0;
   run_result.run_summary.rtk_outage_window_with_body_z_jump_count = 0;
+  run_result.run_summary.rtk_outage_baz_reestimate_segment_count = 0;
+  run_result.run_summary.rtk_outage_baz_reestimate_boundary_break_count = 0;
+  run_result.run_summary.rtk_outage_baz_reestimate_prior_factor_count = 0;
   run_result.run_summary.rtk_outage_position_ramp_factor_count = 0;
   run_result.run_summary.rtk_outage_velocity_delta_factor_count = 0;
   run_result.run_summary.rtk_outage_velocity_delta_skipped_body_z_jump_count = 0;
