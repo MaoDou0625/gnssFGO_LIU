@@ -105,6 +105,13 @@ struct RunSummary {
   double rtk_vertical_drift_gate_weight_mean = std::numeric_limits<double>::quiet_NaN();
   double rtk_vertical_drift_gate_weight_min = std::numeric_limits<double>::quiet_NaN();
   double rtk_vertical_drift_gate_max_violation_m = std::numeric_limits<double>::quiet_NaN();
+  bool rtk_vertical_drift_causal_reference_enabled = false;
+  std::size_t rtk_vertical_drift_causal_reference_sample_count = 0;
+  double rtk_vertical_drift_causal_reference_max_full_delta_m =
+    std::numeric_limits<double>::quiet_NaN();
+  std::size_t rtk_outage_causal_reference_prefix_run_count = 0;
+  double rtk_outage_causal_reference_boundary_time_s =
+    std::numeric_limits<double>::quiet_NaN();
   bool rtk_vertical_lowpass_reference_enabled = false;
   double rtk_vertical_lowpass_reference_cutoff_hz = std::numeric_limits<double>::quiet_NaN();
   std::size_t rtk_vertical_lowpass_reference_valid_count = 0;
@@ -117,6 +124,12 @@ struct RunSummary {
   std::size_t rtk_outage_baz_reestimate_segment_count = 0;
   std::size_t rtk_outage_baz_reestimate_boundary_break_count = 0;
   std::size_t rtk_outage_baz_reestimate_prior_factor_count = 0;
+  bool rtk_outage_preoutage_vertical_fence_enabled = false;
+  std::size_t rtk_outage_preoutage_vertical_fence_factor_count = 0;
+  double rtk_outage_preoutage_vertical_fence_max_delta_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double rtk_outage_preoutage_vertical_fence_max_vz_delta_mps =
+    std::numeric_limits<double>::quiet_NaN();
   std::size_t rtk_outage_position_ramp_factor_count = 0;
   std::size_t rtk_outage_velocity_delta_factor_count = 0;
   std::size_t rtk_outage_velocity_delta_skipped_body_z_jump_count = 0;
@@ -413,6 +426,16 @@ struct RunSummary {
         << "rtk_vertical_drift_gate_weight_min=" << rtk_vertical_drift_gate_weight_min << '\n'
         << "rtk_vertical_drift_gate_max_violation_m="
         << rtk_vertical_drift_gate_max_violation_m << '\n'
+        << "rtk_vertical_drift_causal_reference_enabled="
+        << (rtk_vertical_drift_causal_reference_enabled ? "true" : "false") << '\n'
+        << "rtk_vertical_drift_causal_reference_sample_count="
+        << rtk_vertical_drift_causal_reference_sample_count << '\n'
+        << "rtk_vertical_drift_causal_reference_max_full_delta_m="
+        << rtk_vertical_drift_causal_reference_max_full_delta_m << '\n'
+        << "rtk_outage_causal_reference_prefix_run_count="
+        << rtk_outage_causal_reference_prefix_run_count << '\n'
+        << "rtk_outage_causal_reference_boundary_time_s="
+        << rtk_outage_causal_reference_boundary_time_s << '\n'
         << "rtk_vertical_lowpass_reference_enabled="
         << (rtk_vertical_lowpass_reference_enabled ? "true" : "false") << '\n'
         << "rtk_vertical_lowpass_reference_cutoff_hz="
@@ -434,6 +457,14 @@ struct RunSummary {
         << rtk_outage_baz_reestimate_boundary_break_count << '\n'
         << "rtk_outage_baz_reestimate_prior_factor_count="
         << rtk_outage_baz_reestimate_prior_factor_count << '\n'
+        << "rtk_outage_preoutage_vertical_fence_enabled="
+        << (rtk_outage_preoutage_vertical_fence_enabled ? "true" : "false") << '\n'
+        << "rtk_outage_preoutage_vertical_fence_factor_count="
+        << rtk_outage_preoutage_vertical_fence_factor_count << '\n'
+        << "rtk_outage_preoutage_vertical_fence_max_delta_m="
+        << rtk_outage_preoutage_vertical_fence_max_delta_m << '\n'
+        << "rtk_outage_preoutage_vertical_fence_max_vz_delta_mps="
+        << rtk_outage_preoutage_vertical_fence_max_vz_delta_mps << '\n'
         << "rtk_outage_position_ramp_factor_count="
         << rtk_outage_position_ramp_factor_count << '\n'
         << "rtk_outage_velocity_delta_factor_count="
@@ -716,6 +747,7 @@ struct OfflineRunResult {
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
   std::vector<RtkVerticalDriftReferenceDiagnosticRow> rtk_vertical_drift_reference_diagnostics;
+  std::vector<RtkOutageCausalNavReferenceRow> rtk_outage_causal_nav_reference_diagnostics;
   std::vector<RtkOutageWindowRow> rtk_outage_windows;
   std::vector<RtkOutageAttitudeHoldDiagnosticRow> rtk_outage_attitude_hold_diagnostics;
   std::vector<RtkOutageVelocityDelta3dDiagnosticRow> rtk_outage_velocity_delta_3d_diagnostics;

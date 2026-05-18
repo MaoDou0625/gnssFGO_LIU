@@ -5,6 +5,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtsam/geometry/Pose3.h>
@@ -97,6 +98,16 @@ gtsam::Values MakeZeroPoseValues(const std::size_t count) {
   gtsam::Values values;
   for (std::size_t index = 0; index < count; ++index) {
     values.insert(symbol::X(index), gtsam::Pose3());
+  }
+  return values;
+}
+
+gtsam::Values MakeConstantUpPoseValues(const std::size_t count, const double up_m) {
+  gtsam::Values values;
+  for (std::size_t index = 0; index < count; ++index) {
+    values.insert(
+      symbol::X(index),
+      gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(0.0, 0.0, up_m)));
   }
   return values;
 }
@@ -373,6 +384,82 @@ void TestLowpassReferenceDoesNotCrossOutageSegments() {
              "lowpass split should mark the outage boundary rows");
 }
 
+void TestCausalReferenceOverridesPreOutageFullOptimizedReference() {
+  offline_lc_minimal::OfflineRunnerConfig config;
+  config.enable_rtk_outage_causal_drift_reference = true;
+  config.enable_rtk_vertical_drift_gate_weighting = false;
+  config.rtk_vertical_drift_max_abs_correction_m = 10.0;
+  config.rtk_vertical_drift_huber_sigma_m = 10.0;
+
+  const auto samples = MakeStaticSamples({1.0, 1.0, 1.0, 1.0, 1.0});
+  const gtsam::Values values = MakeConstantUpPoseValues(samples.size(), 10.0);
+  std::vector<offline_lc_minimal::RtkOutageCausalNavReferenceRow> causal_rows(samples.size());
+  for (std::size_t index = 0; index < causal_rows.size(); ++index) {
+    causal_rows[index].sample_index = index;
+    causal_rows[index].time_s = static_cast<double>(index);
+    causal_rows[index].causal_nav_reference_up_m = 2.0;
+    causal_rows[index].outage_boundary_time_s = 2.0;
+    causal_rows[index].valid = index <= 2U;
+    causal_rows[index].skip_reason = causal_rows[index].valid ? "OK" : "after_causal_boundary";
+  }
+
+  auto request = MakeDynamicRequest(config, samples, values);
+  request.causal_nav_reference_profile = &causal_rows;
+  request.causal_nav_reference_end_time_s = 2.0;
+  const auto result =
+    offline_lc_minimal::RtkVerticalDriftReferenceEstimator(std::move(request)).Estimate(nullptr);
+
+  ExpectTrue(result.profile[1U].valid, "pre-outage causal row should be valid");
+  ExpectNear(
+    result.profile[1U].nav_reference_up_m,
+    2.0,
+    1.0e-12,
+    "pre-outage nav reference should use causal prefix value");
+  ExpectTrue(
+    result.profile[1U].nav_reference_source == "CAUSAL_PREFIX",
+    "pre-outage row should report causal source");
+  ExpectNear(
+    result.profile[1U].full_reference_up_m,
+    10.0,
+    1.0e-12,
+    "diagnostic should retain full optimized reference");
+  ExpectNear(
+    result.profile[1U].full_minus_causal_nav_reference_m,
+    8.0,
+    1.0e-12,
+    "diagnostic should report full-minus-causal difference");
+  ExpectNear(
+    result.profile[3U].nav_reference_up_m,
+    10.0,
+    1.0e-12,
+    "post-outage nav reference should keep full optimized value");
+  ExpectTrue(
+    result.profile[3U].nav_reference_source == "FULL_OPTIMIZED",
+    "post-outage row should report full optimized source");
+}
+
+void TestMissingCausalReferenceDoesNotFallBackToFullBeforeBoundary() {
+  offline_lc_minimal::OfflineRunnerConfig config;
+  config.enable_rtk_outage_causal_drift_reference = true;
+
+  const auto samples = MakeStaticSamples({1.0, 1.0, 1.0});
+  const gtsam::Values values = MakeConstantUpPoseValues(samples.size(), 10.0);
+  std::vector<offline_lc_minimal::RtkOutageCausalNavReferenceRow> causal_rows(samples.size());
+  causal_rows[0].valid = true;
+  causal_rows[0].causal_nav_reference_up_m = 2.0;
+
+  auto request = MakeDynamicRequest(config, samples, values);
+  request.causal_nav_reference_profile = &causal_rows;
+  request.causal_nav_reference_end_time_s = 2.0;
+  const auto result =
+    offline_lc_minimal::RtkVerticalDriftReferenceEstimator(std::move(request)).Estimate(nullptr);
+
+  ExpectTrue(!result.profile[1U].valid, "missing causal pre-outage row should be skipped");
+  ExpectTrue(
+    result.profile[1U].skip_reason == "missing_causal_nav_reference",
+    "pre-outage missing causal reference should not fall back to full optimized state");
+}
+
 void TestGateWeightFormula() {
   offline_lc_minimal::OfflineRunnerConfig config;
   config.vertical_envelope_min_half_width_m = 0.03;
@@ -524,6 +611,31 @@ void TestOutageSegmentDiagnosticsWriterIncludesColumns() {
     "CSV writer should include outage segment diagnostics");
 }
 
+void TestCausalDiagnosticsWriterIncludesColumns() {
+  std::vector<offline_lc_minimal::RtkVerticalDriftReferenceDiagnosticRow> rows(1U);
+  rows.front().sample_index = 7U;
+  rows.front().time_s = 1.0;
+  rows.front().nav_reference_source = "CAUSAL_PREFIX";
+  rows.front().causal_reference_up_m = 2.0;
+  rows.front().full_reference_up_m = 3.0;
+  rows.front().full_minus_causal_nav_reference_m = 1.0;
+  rows.front().causal_reference_boundary_time_s = 10.0;
+
+  const auto path =
+    std::filesystem::temp_directory_path() / "rtk_vertical_drift_reference_causal_writer_test.csv";
+  offline_lc_minimal::WriteRtkVerticalDriftReferenceDiagnosticsCsv(path, rows);
+  std::ifstream stream(path);
+  std::string header;
+  std::getline(stream, header);
+  stream.close();
+  std::filesystem::remove(path);
+  ExpectTrue(
+    header.find("nav_reference_source,causal_reference_up_m,full_reference_up_m,"
+                "full_minus_causal_nav_reference_m,causal_reference_boundary_time_s") !=
+      std::string::npos,
+    "CSV writer should include causal reference diagnostics");
+}
+
 }  // namespace
 
 int main() {
@@ -546,6 +658,12 @@ int main() {
     RunTest(
       "TestLowpassReferenceDoesNotCrossOutageSegments",
       TestLowpassReferenceDoesNotCrossOutageSegments);
+    RunTest(
+      "TestCausalReferenceOverridesPreOutageFullOptimizedReference",
+      TestCausalReferenceOverridesPreOutageFullOptimizedReference);
+    RunTest(
+      "TestMissingCausalReferenceDoesNotFallBackToFullBeforeBoundary",
+      TestMissingCausalReferenceDoesNotFallBackToFullBeforeBoundary);
     RunTest("TestGateWeightFormula", TestGateWeightFormula);
     RunTest("TestGateWeightFloor", TestGateWeightFloor);
     RunTest("TestEstimatorWritesGateDiagnostics", TestEstimatorWritesGateDiagnostics);
@@ -556,6 +674,9 @@ int main() {
     RunTest(
       "TestOutageSegmentDiagnosticsWriterIncludesColumns",
       TestOutageSegmentDiagnosticsWriterIncludesColumns);
+    RunTest(
+      "TestCausalDiagnosticsWriterIncludesColumns",
+      TestCausalDiagnosticsWriterIncludesColumns);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

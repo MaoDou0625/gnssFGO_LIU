@@ -156,6 +156,12 @@ struct OfflineRunnerConfig {
   bool enable_rtk_vertical_drift_outage_segmentation = true;
   bool enable_rtk_vertical_drift_gate_weighting = true;
   double rtk_vertical_drift_gate_weight_floor = 0.05;
+  bool enable_rtk_outage_causal_drift_reference = true;
+  bool enable_rtk_outage_preoutage_vertical_fence = true;
+  int rtk_outage_causal_reference_max_prefix_runs = 1;
+  double rtk_outage_preoutage_fence_stride_s = 0.05;
+  double rtk_outage_preoutage_fence_up_sigma_m = 0.0005;
+  double rtk_outage_preoutage_fence_vz_sigma_mps = 0.0005;
   double rtk_vertical_drift_max_abs_correction_m = 0.050;
   double rtk_vertical_drift_convergence_threshold_m = 0.001;
   int rtk_vertical_drift_outer_iterations = 2;

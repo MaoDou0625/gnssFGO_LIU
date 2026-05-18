@@ -71,14 +71,19 @@ struct DriftOutageWindow {
   double end_time_s = std::numeric_limits<double>::quiet_NaN();
 };
 
-std::optional<double> NavReferenceUpM(
+struct NavReferenceResult {
+  std::optional<double> up_m;
+  std::string source = "UNSET";
+  double causal_up_m = std::numeric_limits<double>::quiet_NaN();
+  double full_up_m = std::numeric_limits<double>::quiet_NaN();
+  double full_minus_causal_m = std::numeric_limits<double>::quiet_NaN();
+  std::string skip_reason;
+};
+
+std::optional<double> FullOptimizedNavReferenceUpM(
   const RtkVerticalDriftReferenceEstimateRequest &request,
   const double corrected_time_s,
-  const bool static_window,
   std::string *skip_reason) {
-  if (static_window) {
-    return request.static_reference_up_m;
-  }
   if (request.optimized_values == nullptr) {
     *skip_reason = "missing_optimized_values";
     return std::nullopt;
@@ -136,6 +141,66 @@ std::optional<double> NavReferenceUpM(
   }
   *skip_reason = "unsupported_sync_status";
   return std::nullopt;
+}
+
+bool HasActiveCausalReferenceBoundary(
+  const RtkVerticalDriftReferenceEstimateRequest &request) {
+  return request.config != nullptr &&
+         request.config->enable_rtk_outage_causal_drift_reference &&
+         request.causal_nav_reference_profile != nullptr &&
+         std::isfinite(request.causal_nav_reference_end_time_s);
+}
+
+NavReferenceResult NavReferenceUpM(
+  const RtkVerticalDriftReferenceEstimateRequest &request,
+  const std::size_t sample_index,
+  const double corrected_time_s,
+  const bool static_window) {
+  NavReferenceResult result;
+  if (static_window) {
+    result.up_m = request.static_reference_up_m;
+    result.source = "STATIC_REFERENCE";
+    result.skip_reason = "OK";
+    return result;
+  }
+
+  if (HasActiveCausalReferenceBoundary(request) &&
+      corrected_time_s <= request.causal_nav_reference_end_time_s + kTiny) {
+    if (sample_index >= request.causal_nav_reference_profile->size()) {
+      result.skip_reason = "missing_causal_nav_reference";
+      return result;
+    }
+    const auto &causal_row = (*request.causal_nav_reference_profile)[sample_index];
+    if (!causal_row.valid || !std::isfinite(causal_row.causal_nav_reference_up_m)) {
+      result.skip_reason = "missing_causal_nav_reference";
+      return result;
+    }
+    result.up_m = causal_row.causal_nav_reference_up_m;
+    result.source = "CAUSAL_PREFIX";
+    result.causal_up_m = causal_row.causal_nav_reference_up_m;
+    std::string full_skip_reason;
+    const std::optional<double> full_up_m =
+      FullOptimizedNavReferenceUpM(request, corrected_time_s, &full_skip_reason);
+    if (full_up_m.has_value() && std::isfinite(*full_up_m)) {
+      result.full_up_m = *full_up_m;
+      result.full_minus_causal_m = result.full_up_m - result.causal_up_m;
+    }
+    result.skip_reason = "OK";
+    return result;
+  }
+
+  std::string skip_reason;
+  const std::optional<double> full_up_m =
+    FullOptimizedNavReferenceUpM(request, corrected_time_s, &skip_reason);
+  if (!full_up_m.has_value() || !std::isfinite(*full_up_m)) {
+    result.skip_reason = skip_reason.empty() ? "missing_nav_reference" : skip_reason;
+    return result;
+  }
+  result.up_m = *full_up_m;
+  result.source = "FULL_OPTIMIZED";
+  result.full_up_m = *full_up_m;
+  result.skip_reason = "OK";
+  return result;
 }
 
 std::vector<DriftOutageWindow> NormalizedDriftOutageWindows(
@@ -367,11 +432,16 @@ RtkVerticalDriftReferenceEstimateResult RtkVerticalDriftReferenceEstimator::Esti
       continue;
     }
 
-    std::string skip_reason;
-    const std::optional<double> nav_up_m =
-      NavReferenceUpM(request_, corrected_time_s, row.static_window_flag, &skip_reason);
-    if (!nav_up_m.has_value() || !std::isfinite(*nav_up_m)) {
-      row.skip_reason = skip_reason.empty() ? "missing_nav_reference" : skip_reason;
+    const NavReferenceResult nav_reference =
+      NavReferenceUpM(request_, sample_index, corrected_time_s, row.static_window_flag);
+    row.nav_reference_source = nav_reference.source;
+    row.causal_reference_up_m = nav_reference.causal_up_m;
+    row.full_reference_up_m = nav_reference.full_up_m;
+    row.full_minus_causal_nav_reference_m = nav_reference.full_minus_causal_m;
+    row.causal_reference_boundary_time_s = request_.causal_nav_reference_end_time_s;
+    if (!nav_reference.up_m.has_value() || !std::isfinite(*nav_reference.up_m)) {
+      row.skip_reason =
+        nav_reference.skip_reason.empty() ? "missing_nav_reference" : nav_reference.skip_reason;
       continue;
     }
 
@@ -382,7 +452,7 @@ RtkVerticalDriftReferenceEstimateResult RtkVerticalDriftReferenceEstimator::Esti
       sigma_u_m = sample.sigma_h_m;
     }
 
-    row.nav_reference_up_m = *nav_up_m;
+    row.nav_reference_up_m = *nav_reference.up_m;
     row.residual_m = row.raw_rtk_up_m - row.nav_reference_up_m;
     const int segment_index =
       outage_segmentation_enabled ? SegmentIndexForTime(corrected_time_s, outage_windows) : 0;
@@ -472,7 +542,9 @@ void PopulateRtkVerticalDriftReferenceSummary(
   std::size_t lowpass_valid_count = 0;
   std::size_t downweighted_count = 0;
   std::size_t outage_boundary_count = 0;
+  std::size_t causal_reference_count = 0;
   bool outage_segmentation_enabled = false;
+  double max_abs_full_minus_causal_m = 0.0;
   bool has_previous_segment = false;
   int previous_segment_index = -1;
   for (const auto &row : profile) {
@@ -496,6 +568,13 @@ void PopulateRtkVerticalDriftReferenceSummary(
     }
     if (row.drift_segment_role != "UNSEGMENTED") {
       outage_segmentation_enabled = true;
+    }
+    if (row.nav_reference_source == "CAUSAL_PREFIX") {
+      ++causal_reference_count;
+      if (std::isfinite(row.full_minus_causal_nav_reference_m)) {
+        max_abs_full_minus_causal_m =
+          std::max(max_abs_full_minus_causal_m, std::abs(row.full_minus_causal_nav_reference_m));
+      }
     }
     max_abs_correction_m = std::max(max_abs_correction_m, std::abs(row.drift_estimate_m));
     if (row.static_window_flag) {
@@ -535,6 +614,11 @@ void PopulateRtkVerticalDriftReferenceSummary(
   run_summary.rtk_vertical_drift_gate_downweighted_count = downweighted_count;
   run_summary.rtk_vertical_drift_gate_max_violation_m =
     valid_count > 0U ? max_gate_violation_m : std::numeric_limits<double>::quiet_NaN();
+  run_summary.rtk_vertical_drift_causal_reference_enabled =
+    config.enable_rtk_outage_causal_drift_reference && causal_reference_count > 0U;
+  run_summary.rtk_vertical_drift_causal_reference_sample_count = causal_reference_count;
+  run_summary.rtk_vertical_drift_causal_reference_max_full_delta_m =
+    causal_reference_count > 0U ? max_abs_full_minus_causal_m : std::numeric_limits<double>::quiet_NaN();
   run_summary.rtk_vertical_lowpass_reference_valid_count = lowpass_valid_count;
   run_summary.rtk_vertical_lowpass_reference_max_abs_delta_m =
     lowpass_valid_count > 0U ? max_abs_lowpass_delta_m : std::numeric_limits<double>::quiet_NaN();

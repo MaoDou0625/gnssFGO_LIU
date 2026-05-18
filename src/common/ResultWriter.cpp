@@ -89,6 +89,11 @@ void ResultWriter::WriteOutputs(
       output_path / "rtk_vertical_drift_reference_diagnostics.csv",
       result.rtk_vertical_drift_reference_diagnostics);
   }
+  if (!result.rtk_outage_causal_nav_reference_diagnostics.empty()) {
+    WriteRtkOutageCausalNavReferenceCsv(
+      output_path / "rtk_outage_causal_nav_reference.csv",
+      result.rtk_outage_causal_nav_reference_diagnostics);
+  }
   if (!result.rtk_outage_windows.empty()) {
     WriteRtkOutageWindowsCsv(
       output_path / "rtk_outage_windows.csv",

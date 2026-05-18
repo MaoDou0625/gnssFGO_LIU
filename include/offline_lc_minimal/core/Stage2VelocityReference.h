@@ -5,12 +5,14 @@
 
 #include <gtsam/nonlinear/Values.h>
 
+#include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Types.h"
 
 namespace offline_lc_minimal {
 
 struct Stage2VelocityReference {
   std::vector<TrajectoryRow> trajectory;
+  std::shared_ptr<const OfflineRunnerConfig> source_config;
 };
 
 [[nodiscard]] std::vector<ReferenceNodeState> BuildStage2ReferenceStatesFromTrajectory(

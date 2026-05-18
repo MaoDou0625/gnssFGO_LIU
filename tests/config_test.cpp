@@ -849,6 +849,24 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
     config.enable_rtk_vertical_drift_outage_segmentation,
     "phase32 should keep outage-aware drift segmentation");
   ExpectTrue(
+    config.enable_rtk_outage_causal_drift_reference,
+    "phase32 should enable outage causal drift reference");
+  ExpectTrue(
+    config.enable_rtk_outage_preoutage_vertical_fence,
+    "phase32 should enable pre-outage vertical fence");
+  ExpectTrue(
+    config.rtk_outage_causal_reference_max_prefix_runs == 1,
+    "phase32 should use one causal prefix run");
+  ExpectTrue(
+    std::abs(config.rtk_outage_preoutage_fence_stride_s - 0.05) < 1e-15,
+    "phase32 pre-outage fence stride should load");
+  ExpectTrue(
+    std::abs(config.rtk_outage_preoutage_fence_up_sigma_m - 0.0005) < 1e-15,
+    "phase32 pre-outage fence up sigma should load");
+  ExpectTrue(
+    std::abs(config.rtk_outage_preoutage_fence_vz_sigma_mps - 0.0005) < 1e-15,
+    "phase32 pre-outage fence vz sigma should load");
+  ExpectTrue(
     config.enable_body_z_nhc_strict_effective_weighting,
     "phase32 should keep strict Body-Z NHC weighting");
   ExpectTrue(
@@ -864,6 +882,12 @@ void TestDefaultOfflineConfigUsesPhase32RtkOutageSmoother() {
   ExpectTrue(
     config.enable_rtk_vertical_drift_outage_segmentation,
     "default config should use outage-aware RTK drift segmentation");
+  ExpectTrue(
+    config.enable_rtk_outage_causal_drift_reference,
+    "default config should use causal RTK outage drift reference");
+  ExpectTrue(
+    config.enable_rtk_outage_preoutage_vertical_fence,
+    "default config should use pre-outage vertical fence");
   ExpectTrue(
     config.enable_body_z_nhc_strict_effective_weighting,
     "default config should use strict Body-Z NHC weighting");
@@ -1311,6 +1335,12 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
   offline_lc_minimal::OverrideConfigField(config, "enable_rtk_vertical_drift_outage_segmentation", "false");
   offline_lc_minimal::OverrideConfigField(config, "enable_rtk_vertical_drift_gate_weighting", "false");
   offline_lc_minimal::OverrideConfigField(config, "rtk_vertical_drift_gate_weight_floor", "0.25");
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_causal_drift_reference", "false");
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_preoutage_vertical_fence", "false");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_causal_reference_max_prefix_runs", "0");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_preoutage_fence_stride_s", "0.4");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_preoutage_fence_up_sigma_m", "0.004");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_preoutage_fence_vz_sigma_mps", "0.005");
   ExpectTrue(
     !config.enable_rtk_vertical_drift_outage_segmentation,
     "RTK vertical drift outage segmentation flag should parse");
@@ -1320,6 +1350,24 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
   ExpectTrue(
     std::abs(config.rtk_vertical_drift_gate_weight_floor - 0.25) < 1e-15,
     "RTK vertical drift gate weight floor should parse");
+  ExpectTrue(
+    !config.enable_rtk_outage_causal_drift_reference,
+    "causal RTK outage drift reference flag should parse");
+  ExpectTrue(
+    !config.enable_rtk_outage_preoutage_vertical_fence,
+    "pre-outage vertical fence flag should parse");
+  ExpectTrue(
+    config.rtk_outage_causal_reference_max_prefix_runs == 0,
+    "causal prefix run count should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_preoutage_fence_stride_s - 0.4) < 1e-15,
+    "pre-outage fence stride should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_preoutage_fence_up_sigma_m - 0.004) < 1e-15,
+    "pre-outage fence up sigma should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_preoutage_fence_vz_sigma_mps - 0.005) < 1e-15,
+    "pre-outage fence vz sigma should parse");
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
   ExpectTrue(
     serialized.find("enable_rtk_vertical_drift_outage_segmentation=false") != std::string::npos,
@@ -1330,6 +1378,18 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
   ExpectTrue(
     serialized.find("rtk_vertical_drift_gate_weight_floor=0.25") != std::string::npos,
     "RTK vertical drift gate weight floor should be serialized");
+  ExpectTrue(
+    serialized.find("enable_rtk_outage_causal_drift_reference=false") != std::string::npos,
+    "causal RTK outage drift reference flag should be serialized");
+  ExpectTrue(
+    serialized.find("enable_rtk_outage_preoutage_vertical_fence=false") != std::string::npos,
+    "pre-outage vertical fence flag should be serialized");
+  ExpectTrue(
+    serialized.find("rtk_outage_causal_reference_max_prefix_runs=0") != std::string::npos,
+    "causal prefix run count should be serialized");
+  ExpectTrue(
+    serialized.find("rtk_outage_preoutage_fence_stride_s=0.4") != std::string::npos,
+    "pre-outage fence stride should be serialized");
   offline_lc_minimal::ValidateConfig(config);
 
   config = offline_lc_minimal::DefaultConfig();
@@ -1351,6 +1411,26 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
     threw = std::string(exception.what()).find("RTK vertical drift reference settings") != std::string::npos;
   }
   ExpectTrue(threw, "RTK vertical drift gate weight floor above one should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_preoutage_fence_stride_s = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK vertical drift reference settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive pre-outage fence stride should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_causal_reference_max_prefix_runs = -1;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK vertical drift reference settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "negative causal prefix run count should be rejected");
 }
 
 void TestAccelerometerBiasUgConfigParsing() {

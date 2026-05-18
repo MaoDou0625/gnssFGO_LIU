@@ -331,6 +331,9 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       !std::isfinite(config.rtk_vertical_white_noise_sigma_m) ||
       !std::isfinite(config.rtk_vertical_drift_huber_sigma_m) ||
       !std::isfinite(config.rtk_vertical_drift_gate_weight_floor) ||
+      !std::isfinite(config.rtk_outage_preoutage_fence_stride_s) ||
+      !std::isfinite(config.rtk_outage_preoutage_fence_up_sigma_m) ||
+      !std::isfinite(config.rtk_outage_preoutage_fence_vz_sigma_mps) ||
       !std::isfinite(config.rtk_vertical_drift_max_abs_correction_m) ||
       !std::isfinite(config.rtk_vertical_drift_convergence_threshold_m) ||
       !std::isfinite(config.rtk_vertical_lowpass_reference_cutoff_hz) ||
@@ -340,6 +343,10 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.rtk_vertical_drift_huber_sigma_m <= 0.0 ||
       config.rtk_vertical_drift_gate_weight_floor <= 0.0 ||
       config.rtk_vertical_drift_gate_weight_floor > 1.0 ||
+      config.rtk_outage_causal_reference_max_prefix_runs < 0 ||
+      config.rtk_outage_preoutage_fence_stride_s <= 0.0 ||
+      config.rtk_outage_preoutage_fence_up_sigma_m <= 0.0 ||
+      config.rtk_outage_preoutage_fence_vz_sigma_mps <= 0.0 ||
       config.rtk_vertical_drift_max_abs_correction_m <= 0.0 ||
       config.rtk_vertical_drift_convergence_threshold_m <= 0.0 ||
       config.rtk_vertical_lowpass_reference_cutoff_hz <= 0.0 ||
@@ -935,6 +942,18 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_rtk_vertical_drift_gate_weighting = ParseBool(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_gate_weight_floor") {
     config.rtk_vertical_drift_gate_weight_floor = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_rtk_outage_causal_drift_reference") {
+    config.enable_rtk_outage_causal_drift_reference = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_rtk_outage_preoutage_vertical_fence") {
+    config.enable_rtk_outage_preoutage_vertical_fence = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_outage_causal_reference_max_prefix_runs") {
+    config.rtk_outage_causal_reference_max_prefix_runs = ParseInt(normalized_value);
+  } else if (normalized_key == "rtk_outage_preoutage_fence_stride_s") {
+    config.rtk_outage_preoutage_fence_stride_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_outage_preoutage_fence_up_sigma_m") {
+    config.rtk_outage_preoutage_fence_up_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_outage_preoutage_fence_vz_sigma_mps") {
+    config.rtk_outage_preoutage_fence_vz_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_max_abs_correction_m") {
     config.rtk_vertical_drift_max_abs_correction_m = ParseDouble(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_convergence_threshold_m") {
@@ -1436,6 +1455,18 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.enable_rtk_vertical_drift_gate_weighting ? "true" : "false") << '\n'
     << "rtk_vertical_drift_gate_weight_floor="
     << config.rtk_vertical_drift_gate_weight_floor << '\n'
+    << "enable_rtk_outage_causal_drift_reference="
+    << (config.enable_rtk_outage_causal_drift_reference ? "true" : "false") << '\n'
+    << "enable_rtk_outage_preoutage_vertical_fence="
+    << (config.enable_rtk_outage_preoutage_vertical_fence ? "true" : "false") << '\n'
+    << "rtk_outage_causal_reference_max_prefix_runs="
+    << config.rtk_outage_causal_reference_max_prefix_runs << '\n'
+    << "rtk_outage_preoutage_fence_stride_s="
+    << config.rtk_outage_preoutage_fence_stride_s << '\n'
+    << "rtk_outage_preoutage_fence_up_sigma_m="
+    << config.rtk_outage_preoutage_fence_up_sigma_m << '\n'
+    << "rtk_outage_preoutage_fence_vz_sigma_mps="
+    << config.rtk_outage_preoutage_fence_vz_sigma_mps << '\n'
     << "rtk_vertical_drift_max_abs_correction_m="
     << config.rtk_vertical_drift_max_abs_correction_m << '\n'
     << "rtk_vertical_drift_convergence_threshold_m="

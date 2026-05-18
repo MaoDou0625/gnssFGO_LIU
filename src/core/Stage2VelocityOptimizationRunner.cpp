@@ -62,6 +62,8 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
 
   auto reference = std::make_shared<Stage2VelocityReference>();
   reference->trajectory = stage1_result.trajectory;
+  reference->source_config =
+    std::make_shared<OfflineRunnerConfig>(request_.config);
 
   OfflineRunnerConfig stage2_config =
     MakeStage2VelocityOptimizationConfig(request_.config);

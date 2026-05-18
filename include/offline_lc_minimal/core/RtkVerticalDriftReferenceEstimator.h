@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <limits>
 #include <vector>
 
 #include <Eigen/Core>
@@ -16,7 +17,9 @@ struct RtkVerticalDriftReferenceEstimateRequest {
   const OfflineRunnerConfig *config = nullptr;
   const std::vector<GnssSolutionSample> *gnss_samples = nullptr;
   const std::vector<RtkOutageWindowRow> *rtk_outage_windows = nullptr;
+  const std::vector<RtkOutageCausalNavReferenceRow> *causal_nav_reference_profile = nullptr;
   const gtsam::Values *optimized_values = nullptr;
+  double causal_nav_reference_end_time_s = std::numeric_limits<double>::quiet_NaN();
   double alignment_start_time_s = 0.0;
   double alignment_end_time_s = 0.0;
   double static_reference_up_m = 0.0;

@@ -2,6 +2,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <boost/pointer_cast.hpp>
@@ -11,6 +12,8 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/common/Config.h"
+#include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
+#include "offline_lc_minimal/core/RtkOutagePreOutageVerticalFenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
 #include "offline_lc_minimal/factor/VelocityDeltaFactor.h"
@@ -240,6 +243,208 @@ void TestBuilderDisabledAddsNoFactors() {
   ExpectTrue(velocity_diagnostics.empty(), "disabled velocity delta should not emit diagnostics");
 }
 
+void TestPreOutageVerticalFenceConstrainsOnlyUpAndVz() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_preoutage_vertical_fence = true;
+  config.rtk_outage_preoutage_fence_stride_s = 1.0;
+  config.rtk_outage_preoutage_fence_up_sigma_m = 0.01;
+  config.rtk_outage_preoutage_fence_vz_sigma_mps = 0.01;
+
+  std::vector<offline_lc_minimal::RtkOutageCausalStateReferenceRow> state_refs(2U);
+  for (std::size_t index = 0; index < state_refs.size(); ++index) {
+    state_refs[index].state_index = index;
+    state_refs[index].time_s = static_cast<double>(index);
+    state_refs[index].reference_up_m = 10.0 + static_cast<double>(index);
+    state_refs[index].reference_vz_mps = -0.01 * static_cast<double>(index);
+    state_refs[index].valid = true;
+    state_refs[index].skip_reason = "OK";
+  }
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  offline_lc_minimal::RtkOutagePreOutageVerticalFenceBuildRequest request;
+  request.config = &config;
+  request.state_references = &state_refs;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  offline_lc_minimal::RtkOutagePreOutageVerticalFenceBuilder(std::move(request)).Build();
+
+  ExpectTrue(summary.rtk_outage_preoutage_vertical_fence_factor_count == 4U,
+             "two states should receive up and vz fence factors");
+  ExpectTrue(graph.size() == 4U, "fence should add two scalar factors per selected state");
+
+  gtsam::Values matching_values;
+  gtsam::Values shifted_xy_values;
+  gtsam::Values shifted_z_values;
+  for (std::size_t index = 0; index < state_refs.size(); ++index) {
+    const auto &row = state_refs[index];
+    matching_values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(gtsam::Rot3::Ypr(0.1, -0.2, 0.3), gtsam::Point3(0.0, 0.0, row.reference_up_m)));
+    matching_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(100.0, -50.0, row.reference_vz_mps));
+    shifted_xy_values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(gtsam::Rot3::Ypr(-0.3, 0.2, -0.1), gtsam::Point3(100.0, -50.0, row.reference_up_m)));
+    shifted_xy_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(-10.0, 20.0, row.reference_vz_mps));
+    shifted_z_values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(0.0, 0.0, row.reference_up_m + 0.1)));
+    shifted_z_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(0.0, 0.0, row.reference_vz_mps - 0.02));
+  }
+
+  ExpectNear(graph.error(matching_values), 0.0, 1.0e-12,
+             "matching vertical states should have zero fence error");
+  ExpectNear(graph.error(shifted_xy_values), 0.0, 1.0e-12,
+             "fence should ignore x/y, horizontal velocity, and attitude");
+  ExpectTrue(graph.error(shifted_z_values) > 1.0,
+             "fence should penalize up and vz changes");
+
+  offline_lc_minimal::PopulateRtkOutagePreOutageVerticalFenceSummary(
+    shifted_z_values,
+    state_refs,
+    summary);
+  ExpectNear(
+    summary.rtk_outage_preoutage_vertical_fence_max_delta_m,
+    0.1,
+    1.0e-12,
+    "summary should report max vertical position delta");
+  ExpectNear(
+    summary.rtk_outage_preoutage_vertical_fence_max_vz_delta_mps,
+    0.02,
+    1.0e-12,
+    "summary should report max vertical velocity delta");
+}
+
+void TestPreOutageVerticalFenceDisabledAddsNoFactors() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_preoutage_vertical_fence = false;
+  std::vector<offline_lc_minimal::RtkOutageCausalStateReferenceRow> state_refs(1U);
+  state_refs.front().state_index = 0U;
+  state_refs.front().time_s = 0.0;
+  state_refs.front().reference_up_m = 1.0;
+  state_refs.front().reference_vz_mps = 0.0;
+  state_refs.front().valid = true;
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  offline_lc_minimal::RtkOutagePreOutageVerticalFenceBuildRequest request;
+  request.config = &config;
+  request.state_references = &state_refs;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  offline_lc_minimal::RtkOutagePreOutageVerticalFenceBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.empty(), "disabled pre-outage fence should add no factors");
+  ExpectTrue(summary.rtk_outage_preoutage_vertical_fence_factor_count == 0U,
+             "disabled pre-outage fence should report zero factors");
+}
+
+offline_lc_minimal::GnssSolutionSample MakeCausalReferenceSample(
+  const double time_s,
+  const double up_m) {
+  offline_lc_minimal::GnssSolutionSample sample;
+  sample.time_s = time_s;
+  sample.enu_position_m = Eigen::Vector3d(0.0, 0.0, up_m);
+  sample.has_enu_position = true;
+  return sample;
+}
+
+offline_lc_minimal::TrajectoryRow MakeCausalReferenceTrajectoryRow(
+  const double time_s,
+  const double up_m,
+  const double vz_mps) {
+  offline_lc_minimal::TrajectoryRow row;
+  row.time_s = time_s;
+  row.enu_position_m = Eigen::Vector3d(0.0, 0.0, up_m);
+  row.enu_velocity_mps = Eigen::Vector3d(0.0, 0.0, vz_mps);
+  row.ypr_rad = Eigen::Vector3d::Zero();
+  row.omega_radps = Eigen::Vector3d::Zero();
+  return row;
+}
+
+void TestCausalReferenceBuilderUsesPrefixBaseConfig() {
+  auto current_config = offline_lc_minimal::DefaultConfig();
+  current_config.enable_rtk_outage_causal_drift_reference = true;
+  current_config.enable_rtk_outage_preoutage_vertical_fence = true;
+  current_config.rtk_outage_causal_reference_max_prefix_runs = 1;
+  current_config.stage1_heading_window_s = 1.0;
+
+  auto prefix_base_config = current_config;
+  prefix_base_config.stage1_heading_window_s = 42.0;
+  prefix_base_config.enable_initial_yaw_override = false;
+
+  offline_lc_minimal::DataSet dataset;
+  dataset.gnss_samples = {
+    MakeCausalReferenceSample(0.0, 1.0),
+    MakeCausalReferenceSample(0.5, 2.0),
+    MakeCausalReferenceSample(1.5, 3.0),
+  };
+
+  std::vector<offline_lc_minimal::RtkOutageWindowRow> outage_windows(1U);
+  outage_windows.front().start_time_s = 1.0;
+  outage_windows.front().end_time_s = 2.0;
+
+  bool prefix_called = false;
+  offline_lc_minimal::RtkOutageCausalReferenceBuildRequest request;
+  request.config = &current_config;
+  request.prefix_base_config = &prefix_base_config;
+  request.dataset = &dataset;
+  request.outage_windows = &outage_windows;
+  request.dynamic_start_time_s = -1.0;
+  request.should_use_sample = [](const offline_lc_minimal::GnssSolutionSample &) {
+    return true;
+  };
+  request.corrected_time_s = [](const offline_lc_minimal::GnssSolutionSample &sample) {
+    return sample.time_s;
+  };
+  request.is_within_imu_coverage = [](double) { return true; };
+  request.run_prefix = [&](offline_lc_minimal::OfflineRunnerConfig config,
+                           offline_lc_minimal::DataSet run_dataset) {
+    prefix_called = true;
+    ExpectTrue(run_dataset.gnss_samples.size() == dataset.gnss_samples.size(),
+               "prefix builder should pass the source dataset through");
+    ExpectNear(config.processing_end_time_s, 1.0, 1.0e-12,
+               "prefix processing end should be the first outage start");
+    ExpectNear(config.stage1_heading_window_s, 42.0, 1.0e-12,
+               "prefix builder should use the causal base config");
+    ExpectTrue(!config.enable_rtk_outage_causal_drift_reference,
+               "prefix run should disable causal reference recursion");
+    ExpectTrue(!config.enable_rtk_outage_preoutage_vertical_fence,
+               "prefix run should disable its own pre-outage fence");
+
+    offline_lc_minimal::OfflineRunResult result;
+    result.trajectory = {
+      MakeCausalReferenceTrajectoryRow(0.0, 10.0, 0.1),
+      MakeCausalReferenceTrajectoryRow(0.5, 11.0, 0.2),
+      MakeCausalReferenceTrajectoryRow(1.0, 12.0, 0.3),
+    };
+    return result;
+  };
+
+  const offline_lc_minimal::RtkOutageCausalReferenceResult result =
+    offline_lc_minimal::RtkOutageCausalReferenceBuilder(std::move(request)).Build();
+
+  ExpectTrue(prefix_called, "causal reference builder should run the prefix solve");
+  ExpectTrue(result.valid, "causal reference builder should return a valid result");
+  ExpectTrue(result.prefix_run_count == 1U, "causal reference builder should run once");
+  ExpectTrue(result.nav_reference_rows.size() == dataset.gnss_samples.size(),
+             "causal nav reference rows should align with GNSS samples");
+  ExpectTrue(result.nav_reference_rows[0].valid,
+             "pre-outage GNSS sample should get a causal reference");
+  ExpectNear(result.nav_reference_rows[0].causal_nav_reference_up_m, 10.0, 1.0e-12,
+             "causal nav reference should come from the prefix trajectory");
+  ExpectTrue(!result.nav_reference_rows[2].valid,
+             "post-outage GNSS sample should not get a pre-outage causal reference");
+  ExpectTrue(result.state_reference_rows.size() == 3U,
+             "state references should cover prefix states through the outage boundary");
+}
+
 }  // namespace
 
 int main() {
@@ -252,6 +457,15 @@ int main() {
       "TestBuilderAddsOutageAttitudeAndVelocityConstraints",
       TestBuilderAddsOutageAttitudeAndVelocityConstraints);
     RunTest("TestBuilderDisabledAddsNoFactors", TestBuilderDisabledAddsNoFactors);
+    RunTest(
+      "TestPreOutageVerticalFenceConstrainsOnlyUpAndVz",
+      TestPreOutageVerticalFenceConstrainsOnlyUpAndVz);
+    RunTest(
+      "TestPreOutageVerticalFenceDisabledAddsNoFactors",
+      TestPreOutageVerticalFenceDisabledAddsNoFactors);
+    RunTest(
+      "TestCausalReferenceBuilderUsesPrefixBaseConfig",
+      TestCausalReferenceBuilderUsesPrefixBaseConfig);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

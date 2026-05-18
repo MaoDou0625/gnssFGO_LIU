@@ -199,6 +199,11 @@ struct RtkVerticalDriftReferenceDiagnosticRow {
   double time_s = std::numeric_limits<double>::quiet_NaN();
   double raw_rtk_up_m = std::numeric_limits<double>::quiet_NaN();
   double nav_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  std::string nav_reference_source = "UNSET";
+  double causal_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double full_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double full_minus_causal_nav_reference_m = std::numeric_limits<double>::quiet_NaN();
+  double causal_reference_boundary_time_s = std::numeric_limits<double>::quiet_NaN();
   double residual_m = std::numeric_limits<double>::quiet_NaN();
   double constant_bias_m = std::numeric_limits<double>::quiet_NaN();
   double drift_estimate_m = std::numeric_limits<double>::quiet_NaN();
@@ -221,6 +226,39 @@ struct RtkVerticalDriftReferenceDiagnosticRow {
   bool lowpass_applied = false;
   bool static_window_flag = false;
   bool valid = false;
+  std::string skip_reason = "UNSET";
+};
+
+struct RtkOutageCausalNavReferenceRow {
+  std::size_t sample_index = 0;
+  double time_s = std::numeric_limits<double>::quiet_NaN();
+  double raw_rtk_up_m = std::numeric_limits<double>::quiet_NaN();
+  double causal_nav_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double causal_up_m = std::numeric_limits<double>::quiet_NaN();
+  double causal_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double source_processing_end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double outage_boundary_time_s = std::numeric_limits<double>::quiet_NaN();
+  long long source_state_index_i = -1;
+  long long source_state_index_j = -1;
+  double state_time_i_s = std::numeric_limits<double>::quiet_NaN();
+  double state_time_j_s = std::numeric_limits<double>::quiet_NaN();
+  double duration_from_state_i_s = std::numeric_limits<double>::quiet_NaN();
+  StateMeasSyncStatus sync_status = StateMeasSyncStatus::kDropped;
+  bool valid = false;
+  std::string source_type = "UNSET";
+  std::string skip_reason = "UNSET";
+};
+
+struct RtkOutageCausalStateReferenceRow {
+  std::size_t state_index = 0;
+  double time_s = std::numeric_limits<double>::quiet_NaN();
+  double reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double reference_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double source_processing_end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double outage_boundary_time_s = std::numeric_limits<double>::quiet_NaN();
+  bool valid = false;
+  bool fence_factor_added = false;
+  std::string source_type = "UNSET";
   std::string skip_reason = "UNSET";
 };
 

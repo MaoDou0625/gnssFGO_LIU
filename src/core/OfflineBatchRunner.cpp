@@ -37,6 +37,8 @@
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
 #include "offline_lc_minimal/core/RtkOutageBazReestimatePlanner.h"
+#include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
+#include "offline_lc_minimal/core/RtkOutagePreOutageVerticalFenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageSmoothingConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkVelocityConstraintBuilder.h"
@@ -993,6 +995,39 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     }
   }
 
+  RtkOutageCausalReferenceResult causal_reference_result;
+  if (config_.enable_rtk_outage_causal_drift_reference &&
+      config_.enable_rtk_outage_smoothing &&
+      !planned_rtk_outage_windows.empty()) {
+    RtkOutageCausalReferenceBuildRequest causal_request;
+    causal_request.config = &config_;
+    causal_request.prefix_base_config =
+      stage2_reference_ != nullptr && stage2_reference_->source_config != nullptr
+        ? stage2_reference_->source_config.get()
+        : &config_;
+    causal_request.dataset = &dataset;
+    causal_request.outage_windows = &planned_rtk_outage_windows;
+    causal_request.dynamic_start_time_s = dynamic_start_time_s;
+    causal_request.should_use_sample = [&](const GnssSolutionSample &sample) {
+      return sample.has_enu_position && PassesGnssQualityFilters(sample);
+    };
+    causal_request.corrected_time_s = [&](const GnssSolutionSample &sample) {
+      return CorrectedGnssTime(sample);
+    };
+    causal_request.is_within_imu_coverage = [&](const double corrected_time_s) {
+      return IsWithinImuCoverage(dataset.imu_samples, corrected_time_s);
+    };
+    causal_request.run_prefix = [](
+                                  OfflineRunnerConfig prefix_config,
+                                  DataSet prefix_dataset) {
+      return OfflineBatchRunner(std::move(prefix_config)).Run(std::move(prefix_dataset));
+    };
+    causal_reference_result =
+      RtkOutageCausalReferenceBuilder(std::move(causal_request)).Build();
+  }
+  run_result.rtk_outage_causal_nav_reference_diagnostics =
+    causal_reference_result.nav_reference_rows;
+
   std::vector<VerticalMotionAdaptiveReweightingDiagnosticRow> adaptive_reweighting_diagnostics;
   VerticalMotionStabilityProfile active_stability_profile;
   const VerticalMotionStabilityProfile *active_stability_profile_ptr = nullptr;
@@ -1041,6 +1076,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.rtk_vertical_drift_segment_count = 0;
   run_result.run_summary.rtk_vertical_drift_outage_boundary_count = 0;
   run_result.run_summary.rtk_vertical_drift_cross_outage_lowpass_blocked = false;
+  run_result.run_summary.rtk_vertical_drift_causal_reference_enabled = false;
+  run_result.run_summary.rtk_vertical_drift_causal_reference_sample_count = 0;
+  run_result.run_summary.rtk_vertical_drift_causal_reference_max_full_delta_m =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.rtk_outage_causal_reference_prefix_run_count =
+    causal_reference_result.prefix_run_count;
+  run_result.run_summary.rtk_outage_causal_reference_boundary_time_s =
+    causal_reference_result.boundary_time_s;
   run_result.run_summary.rtk_outage_smoothing_enabled =
     config_.enable_rtk_outage_smoothing;
   run_result.run_summary.rtk_outage_baz_reestimate_enabled =
@@ -1051,6 +1094,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.rtk_outage_baz_reestimate_segment_count = 0;
   run_result.run_summary.rtk_outage_baz_reestimate_boundary_break_count = 0;
   run_result.run_summary.rtk_outage_baz_reestimate_prior_factor_count = 0;
+  run_result.run_summary.rtk_outage_preoutage_vertical_fence_enabled =
+    config_.enable_rtk_outage_preoutage_vertical_fence && causal_reference_result.valid;
+  run_result.run_summary.rtk_outage_preoutage_vertical_fence_factor_count = 0;
+  run_result.run_summary.rtk_outage_preoutage_vertical_fence_max_delta_m =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.rtk_outage_preoutage_vertical_fence_max_vz_delta_mps =
+    std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.rtk_outage_position_ramp_factor_count = 0;
   run_result.run_summary.rtk_outage_velocity_delta_factor_count = 0;
   run_result.run_summary.rtk_outage_velocity_delta_skipped_body_z_jump_count = 0;
@@ -1190,6 +1240,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     active_rtk_vertical_drift_profile_ptr != nullptr
       ? *active_rtk_vertical_drift_profile_ptr
       : std::vector<RtkVerticalDriftReferenceDiagnosticRow>{};
+  run_result.rtk_outage_causal_nav_reference_diagnostics =
+    causal_reference_result.nav_reference_rows;
   run_result.rtk_velocity_diagnostics.clear();
   run_result.rtk_outage_attitude_hold_diagnostics.clear();
   run_result.rtk_outage_velocity_delta_3d_diagnostics.clear();
@@ -1235,6 +1287,15 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     bias_reestimate_request.initial_values = &optimization_initial_values;
     bias_reestimate_request.run_summary = &run_result.run_summary;
     BodyZBiasReestimateConstraintBuilder(std::move(bias_reestimate_request)).Apply();
+  }
+
+  if (causal_reference_result.valid) {
+    RtkOutagePreOutageVerticalFenceBuildRequest fence_request;
+    fence_request.config = &config_;
+    fence_request.state_references = &causal_reference_result.state_reference_rows;
+    fence_request.graph = &graph_with_gnss;
+    fence_request.run_summary = &run_result.run_summary;
+    RtkOutagePreOutageVerticalFenceBuilder(std::move(fence_request)).Build();
   }
 
   if (config_.enable_vertical_jump_impulse) {
@@ -1494,7 +1555,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     drift_request.config = &config_;
     drift_request.gnss_samples = &dataset.gnss_samples;
     drift_request.rtk_outage_windows = &planned_rtk_outage_windows;
+    drift_request.causal_nav_reference_profile =
+      causal_reference_result.valid ? &causal_reference_result.nav_reference_rows : nullptr;
     drift_request.optimized_values = &optimized_values;
+    drift_request.causal_nav_reference_end_time_s = causal_reference_result.boundary_time_s;
     drift_request.alignment_start_time_s = alignment_start_time_s;
     drift_request.alignment_end_time_s = alignment_end_time_s;
     drift_request.static_reference_up_m = initial_static_rtk_height_reference.reference_up_m;
@@ -1583,6 +1647,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateRtkVerticalDriftReferenceSummary(
     config_,
     run_result.rtk_vertical_drift_reference_diagnostics,
+    run_result.run_summary);
+  PopulateRtkOutagePreOutageVerticalFenceSummary(
+    optimized_values,
+    causal_reference_result.state_reference_rows,
     run_result.run_summary);
   PopulateVerticalVelocityDeltaDiagnostics(
     optimized_values,

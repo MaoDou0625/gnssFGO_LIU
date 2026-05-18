@@ -442,7 +442,9 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
   }
   stream << std::setprecision(17);
   stream
-    << "sample_index,time_s,raw_rtk_up_m,nav_reference_up_m,residual_m,constant_bias_m,"
+    << "sample_index,time_s,raw_rtk_up_m,nav_reference_up_m,nav_reference_source,"
+       "causal_reference_up_m,full_reference_up_m,full_minus_causal_nav_reference_m,"
+       "causal_reference_boundary_time_s,residual_m,constant_bias_m,"
        "drift_estimate_m,corrected_center_up_m,lowpass_center_up_m,lowpass_delta_m,"
        "lowpass_cutoff_hz,white_residual_m,gate_half_width_m,gate_observation_m,"
        "gate_violation_m,gate_weight,effective_white_sigma_m,drift_sigma_m,white_sigma_m,tau_s,"
@@ -453,6 +455,11 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
            << row.time_s << ','
            << row.raw_rtk_up_m << ','
            << row.nav_reference_up_m << ','
+           << row.nav_reference_source << ','
+           << row.causal_reference_up_m << ','
+           << row.full_reference_up_m << ','
+           << row.full_minus_causal_nav_reference_m << ','
+           << row.causal_reference_boundary_time_s << ','
            << row.residual_m << ','
            << row.constant_bias_m << ','
            << row.drift_estimate_m << ','
@@ -475,6 +482,40 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
            << (row.lowpass_applied ? 1 : 0) << ','
            << (row.static_window_flag ? 1 : 0) << ','
            << (row.valid ? 1 : 0) << ','
+           << row.skip_reason << '\n';
+  }
+}
+
+void WriteRtkOutageCausalNavReferenceCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageCausalNavReferenceRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "sample_index,time_s,raw_rtk_up_m,causal_nav_reference_up_m,causal_up_m,"
+       "causal_vz_mps,source_processing_end_time_s,outage_boundary_time_s,"
+       "source_state_index_i,source_state_index_j,state_time_i_s,state_time_j_s,"
+       "duration_from_state_i_s,sync_status,valid,source_type,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.sample_index << ','
+           << row.time_s << ','
+           << row.raw_rtk_up_m << ','
+           << row.causal_nav_reference_up_m << ','
+           << row.causal_up_m << ','
+           << row.causal_vz_mps << ','
+           << row.source_processing_end_time_s << ','
+           << row.outage_boundary_time_s << ','
+           << row.source_state_index_i << ','
+           << row.source_state_index_j << ','
+           << row.state_time_i_s << ','
+           << row.state_time_j_s << ','
+           << row.duration_from_state_i_s << ','
+           << ToString(row.sync_status) << ','
+           << (row.valid ? 1 : 0) << ','
+           << row.source_type << ','
            << row.skip_reason << '\n';
   }
 }
