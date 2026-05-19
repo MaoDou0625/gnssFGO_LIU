@@ -137,8 +137,15 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (config.state_frequency_hz <= 0.0 || config.error_state_frequency_hz <= 0.0) {
     throw std::runtime_error("state and error-state frequencies must be positive");
   }
+  if (!std::isfinite(config.processing_start_time_s) || config.processing_start_time_s < 0.0) {
+    throw std::runtime_error("processing_start_time_s must be finite and non-negative");
+  }
   if (!std::isfinite(config.processing_end_time_s) || config.processing_end_time_s < 0.0) {
     throw std::runtime_error("processing_end_time_s must be finite and non-negative");
+  }
+  if (config.processing_start_time_s > 0.0 && config.processing_end_time_s > 0.0 &&
+      config.processing_end_time_s <= config.processing_start_time_s) {
+    throw std::runtime_error("processing_end_time_s must be after processing_start_time_s");
   }
   if (config.gravity_mps2 <= 0.0 || config.imu_sigma_acc <= 0.0 ||
       config.imu_sigma_gyro <= 0.0 || config.integration_sigma <= 0.0) {
@@ -352,6 +359,9 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.rtk_vertical_lowpass_reference_cutoff_hz <= 0.0 ||
       config.rtk_vertical_drift_outer_iterations < 0) {
     throw std::runtime_error("RTK vertical drift reference settings must be positive");
+  }
+  if (config.rtk_outage_segmented_batch_max_outages < 0) {
+    throw std::runtime_error("RTK outage segmented batch settings must be non-negative");
   }
   if (config.enable_rtk_vertical_drift_reference) {
     if (!config.enable_gnss ||
@@ -671,6 +681,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.state_frequency_hz = ParseDouble(normalized_value);
   } else if (normalized_key == "error_state_frequency_hz") {
     config.error_state_frequency_hz = ParseDouble(normalized_value);
+  } else if (normalized_key == "processing_start_time_s") {
+    config.processing_start_time_s = ParseDouble(normalized_value);
   } else if (normalized_key == "processing_end_time_s") {
     config.processing_end_time_s = ParseDouble(normalized_value);
   } else if (normalized_key == "gnss_time_offset_s") {
@@ -970,6 +982,13 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.rtk_vertical_lowpass_reference_cutoff_hz = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_rtk_outage_smoothing") {
     config.enable_rtk_outage_smoothing = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_rtk_outage_segmented_batch") {
+    config.enable_rtk_outage_segmented_batch = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_outage_segmented_batch_max_outages") {
+    config.rtk_outage_segmented_batch_max_outages = ParseInt(normalized_value);
+  } else if (normalized_key == "rtk_outage_segmented_batch_allow_vertical_boundary_jump") {
+    config.rtk_outage_segmented_batch_allow_vertical_boundary_jump =
+      ParseBool(normalized_value);
   } else if (normalized_key == "enable_rtk_outage_baz_reestimate") {
     config.enable_rtk_outage_baz_reestimate = ParseBool(normalized_value);
   } else if (normalized_key == "rtk_outage_min_gap_s") {
@@ -1303,6 +1322,7 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "write_imu_rate_avp=" << (config.write_imu_rate_avp ? "true" : "false") << '\n'
     << "state_frequency_hz=" << config.state_frequency_hz << '\n'
     << "error_state_frequency_hz=" << config.error_state_frequency_hz << '\n'
+    << "processing_start_time_s=" << config.processing_start_time_s << '\n'
     << "processing_end_time_s=" << config.processing_end_time_s << '\n'
     << "gnss_time_offset_s=" << config.gnss_time_offset_s << '\n'
     << "state_meas_sync_lower_bound_s=" << config.state_meas_sync_lower_bound_s << '\n'
@@ -1483,6 +1503,12 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.rtk_vertical_lowpass_reference_cutoff_hz << '\n'
     << "enable_rtk_outage_smoothing="
     << (config.enable_rtk_outage_smoothing ? "true" : "false") << '\n'
+    << "enable_rtk_outage_segmented_batch="
+    << (config.enable_rtk_outage_segmented_batch ? "true" : "false") << '\n'
+    << "rtk_outage_segmented_batch_max_outages="
+    << config.rtk_outage_segmented_batch_max_outages << '\n'
+    << "rtk_outage_segmented_batch_allow_vertical_boundary_jump="
+    << (config.rtk_outage_segmented_batch_allow_vertical_boundary_jump ? "true" : "false") << '\n'
     << "enable_rtk_outage_baz_reestimate="
     << (config.enable_rtk_outage_baz_reestimate ? "true" : "false") << '\n'
     << "rtk_outage_min_gap_s=" << config.rtk_outage_min_gap_s << '\n'

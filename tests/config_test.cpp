@@ -855,6 +855,15 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
     config.enable_rtk_outage_preoutage_vertical_fence,
     "phase32 should enable pre-outage vertical fence");
   ExpectTrue(
+    config.enable_rtk_outage_segmented_batch,
+    "phase32 should enable outage segmented batch");
+  ExpectTrue(
+    config.rtk_outage_segmented_batch_max_outages == 1,
+    "phase32 should segment the first outage by default");
+  ExpectTrue(
+    config.rtk_outage_segmented_batch_allow_vertical_boundary_jump,
+    "phase32 should allow vertical boundary jumps between outage segments");
+  ExpectTrue(
     config.rtk_outage_causal_reference_max_prefix_runs == 1,
     "phase32 should use one causal prefix run");
   ExpectTrue(
@@ -888,6 +897,9 @@ void TestDefaultOfflineConfigUsesPhase32RtkOutageSmoother() {
   ExpectTrue(
     config.enable_rtk_outage_preoutage_vertical_fence,
     "default config should use pre-outage vertical fence");
+  ExpectTrue(
+    config.enable_rtk_outage_segmented_batch,
+    "default config should use RTK outage segmented batch");
   ExpectTrue(
     config.enable_body_z_nhc_strict_effective_weighting,
     "default config should use strict Body-Z NHC weighting");
@@ -1337,6 +1349,12 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
   offline_lc_minimal::OverrideConfigField(config, "rtk_vertical_drift_gate_weight_floor", "0.25");
   offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_causal_drift_reference", "false");
   offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_preoutage_vertical_fence", "false");
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_segmented_batch", "false");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_segmented_batch_max_outages", "0");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "rtk_outage_segmented_batch_allow_vertical_boundary_jump",
+    "false");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_causal_reference_max_prefix_runs", "0");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_preoutage_fence_stride_s", "0.4");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_preoutage_fence_up_sigma_m", "0.004");
@@ -1356,6 +1374,15 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
   ExpectTrue(
     !config.enable_rtk_outage_preoutage_vertical_fence,
     "pre-outage vertical fence flag should parse");
+  ExpectTrue(
+    !config.enable_rtk_outage_segmented_batch,
+    "outage segmented batch flag should parse");
+  ExpectTrue(
+    config.rtk_outage_segmented_batch_max_outages == 0,
+    "outage segmented batch max outage count should parse");
+  ExpectTrue(
+    !config.rtk_outage_segmented_batch_allow_vertical_boundary_jump,
+    "outage segmented batch boundary jump flag should parse");
   ExpectTrue(
     config.rtk_outage_causal_reference_max_prefix_runs == 0,
     "causal prefix run count should parse");
@@ -1384,6 +1411,16 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
   ExpectTrue(
     serialized.find("enable_rtk_outage_preoutage_vertical_fence=false") != std::string::npos,
     "pre-outage vertical fence flag should be serialized");
+  ExpectTrue(
+    serialized.find("enable_rtk_outage_segmented_batch=false") != std::string::npos,
+    "outage segmented batch flag should be serialized");
+  ExpectTrue(
+    serialized.find("rtk_outage_segmented_batch_max_outages=0") != std::string::npos,
+    "outage segmented batch max outage count should be serialized");
+  ExpectTrue(
+    serialized.find("rtk_outage_segmented_batch_allow_vertical_boundary_jump=false") !=
+      std::string::npos,
+    "outage segmented batch boundary jump flag should be serialized");
   ExpectTrue(
     serialized.find("rtk_outage_causal_reference_max_prefix_runs=0") != std::string::npos,
     "causal prefix run count should be serialized");
@@ -2072,10 +2109,14 @@ void TestBodyZNHCConfigValidation() {
 
 void TestRtkVelocityConfigValidation() {
   auto config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "processing_start_time_s", "5996.988");
   offline_lc_minimal::OverrideConfigField(config, "processing_end_time_s", "6006.988");
   offline_lc_minimal::OverrideConfigField(config, "enable_rtk_velocity_constraint", "true");
   offline_lc_minimal::OverrideConfigField(config, "rtk_velocity_window_s", "1.5");
   offline_lc_minimal::OverrideConfigField(config, "rtk_velocity_horizontal_sigma_mps", "0.25");
+  ExpectTrue(
+    std::abs(config.processing_start_time_s - 5996.988) < 1e-12,
+    "processing start override should parse");
   ExpectTrue(
     std::abs(config.processing_end_time_s - 6006.988) < 1e-12,
     "processing end override should parse");
@@ -2086,14 +2127,35 @@ void TestRtkVelocityConfigValidation() {
     "RTK velocity sigma should parse");
 
   config = offline_lc_minimal::DefaultConfig();
-  config.processing_end_time_s = -1.0;
+  config.processing_start_time_s = -1.0;
   bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("processing_start_time_s") != std::string::npos;
+  }
+  ExpectTrue(threw, "negative processing start time should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.processing_end_time_s = -1.0;
+  threw = false;
   try {
     offline_lc_minimal::ValidateConfig(config);
   } catch (const std::runtime_error &exception) {
     threw = std::string(exception.what()).find("processing_end_time_s") != std::string::npos;
   }
   ExpectTrue(threw, "negative processing end time should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.processing_start_time_s = 5.0;
+  config.processing_end_time_s = 5.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("processing_start_time_s") != std::string::npos;
+  }
+  ExpectTrue(threw, "processing end should be after processing start");
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_rtk_velocity_constraint = true;
@@ -2161,6 +2223,16 @@ void TestRtkOutageRecoveryConfigValidation() {
     threw = std::string(exception.what()).find("RTK outage smoothing settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive outage 3D velocity sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_segmented_batch_max_outages = -1;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK outage segmented batch") != std::string::npos;
+  }
+  ExpectTrue(threw, "negative segmented batch outage count should be rejected");
 }
 
 void TestInitialYawOverrideConfigValidation() {

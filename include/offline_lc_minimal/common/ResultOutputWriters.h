@@ -62,6 +62,10 @@ void WriteRtkOutageWindowsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkOutageWindowRow> &rows);
 
+void WriteRtkOutageBatchSegmentsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageBatchSegmentRow> &rows);
+
 void WriteRtkOutageAttitudeHoldDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkOutageAttitudeHoldDiagnosticRow> &rows);

@@ -77,9 +77,11 @@ add_library(offline_lc_minimal_lib
   src/core/RunDiagnosticsBuilder.cpp
   src/core/OptimizationStagePolicy.cpp
   src/core/RtkOutageInitialValueSmoother.cpp
+  src/core/RtkOutageBatchSegmentPlanner.cpp
   src/core/RtkOutageCausalReferenceBuilder.cpp
   src/core/RtkOutagePreOutageVerticalFenceBuilder.cpp
   src/core/RtkOutageRecoveryConstraintBuilder.cpp
+  src/core/RtkOutageSegmentedBatchRunner.cpp
   src/core/RtkOutageSmoothingConstraintBuilder.cpp
   src/core/RtkHeadingAlignmentEstimator.cpp
   src/core/RtkVelocityConstraintBuilder.cpp
@@ -94,6 +96,7 @@ add_library(offline_lc_minimal_lib
   src/core/Stage2VehicleNHCConstraintBuilder.cpp
   src/core/Stage2VelocityOptimizationRunner.cpp
   src/core/Stage2VelocityReference.cpp
+  src/core/SegmentedBatchResultAssembler.cpp
   src/core/StaticImuAlignment.cpp
   src/core/TrajectoryResultBuilder.cpp
   src/core/TrajectoryInitializer.cpp

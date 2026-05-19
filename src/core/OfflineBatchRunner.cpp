@@ -40,6 +40,7 @@
 #include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutagePreOutageVerticalFenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
+#include "offline_lc_minimal/core/RtkOutageSegmentedBatchRunner.h"
 #include "offline_lc_minimal/core/RtkOutageSmoothingConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkVelocityConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
@@ -111,6 +112,21 @@ gtsam::Matrix66 ComputeBiasProcessCovariance(const double dt_s, const OfflineRun
   covariance.block<3, 3>(0, 0) = acc_variance * gtsam::I_3x3;
   covariance.block<3, 3>(3, 3) = gyro_variance * gtsam::I_3x3;
   return covariance;
+}
+
+bool Stage2ReferenceMatchesGraphTimeline(
+  const Stage2VelocityReference &reference,
+  const std::vector<double> &state_timestamps) {
+  if (reference.trajectory.size() != state_timestamps.size()) {
+    return false;
+  }
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    if (!std::isfinite(reference.trajectory[index].time_s) ||
+        std::abs(reference.trajectory[index].time_s - state_timestamps[index]) > 1.0e-6) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace
@@ -347,12 +363,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   const std::size_t origin_index = FindOriginIndex(dataset.gnss_samples, dataset.imu_samples);
   const auto &origin_sample = dataset.gnss_samples[origin_index];
   const double alignment_start_time_s = CorrectedGnssTime(origin_sample);
-  const double navigation_start_min_time_s = alignment_start_time_s + config_.static_alignment_duration_s;
+  const double static_alignment_end_time_s =
+    alignment_start_time_s + config_.static_alignment_duration_s;
+  double navigation_start_min_time_s = static_alignment_end_time_s;
+  if (config_.processing_start_time_s > 0.0) {
+    navigation_start_min_time_s =
+      std::max(navigation_start_min_time_s, config_.processing_start_time_s);
+  }
   const std::size_t navigation_start_index =
     FindNavigationStartIndex(dataset.gnss_samples, dataset.imu_samples, origin_index, navigation_start_min_time_s);
   const auto &navigation_start_sample = dataset.gnss_samples[navigation_start_index];
   const double alignment_end_time_s =
-    config_.static_alignment_duration_s > 0.0 ? navigation_start_min_time_s : CorrectedGnssTime(navigation_start_sample);
+    config_.static_alignment_duration_s > 0.0
+      ? static_alignment_end_time_s
+      : CorrectedGnssTime(navigation_start_sample);
   GeoReference geo_reference(origin_sample.lat_rad, origin_sample.lon_rad, origin_sample.h_m);
   PopulateEnuPositions(dataset.gnss_samples, geo_reference);
 
@@ -367,6 +391,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   const double dynamic_start_time_s = CorrectedGnssTime(navigation_start_sample);
   run_result.run_summary.navigation_start_time_s = alignment_start_time_s;
   run_result.run_summary.dynamic_start_time_s = dynamic_start_time_s;
+  run_result.run_summary.processing_start_time_s = config_.processing_start_time_s;
   const InitialPoseEstimate initial_pose =
     TrajectoryInitializer::Estimate(
       dataset.imu_samples,
@@ -862,7 +887,15 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   }
 
   std::vector<ReferenceNodeState> stage2_fixed_reference_states;
-  if (stage2_reference_ != nullptr) {
+  const bool stage2_reference_matches_graph =
+    stage2_reference_ != nullptr &&
+    Stage2ReferenceMatchesGraphTimeline(*stage2_reference_, state_timestamps);
+  const bool defer_stage2_reference_for_segmented_batch =
+    stage2_reference_ != nullptr &&
+    !stage2_reference_matches_graph &&
+    config_.enable_rtk_outage_segmented_batch &&
+    config_.enable_rtk_outage_smoothing;
+  if (stage2_reference_ != nullptr && !defer_stage2_reference_for_segmented_batch) {
     ApplyStage2ReferenceTrajectoryToInitialValues(
       *stage2_reference_,
       state_timestamps,
@@ -995,6 +1028,32 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     }
   }
 
+  if (config_.enable_rtk_outage_segmented_batch &&
+      config_.enable_rtk_outage_smoothing &&
+      !planned_rtk_outage_windows.empty()) {
+    RtkOutageSegmentedBatchRunRequest segmented_request;
+    segmented_request.config = config_;
+    segmented_request.dataset = dataset;
+    segmented_request.stage2_reference = stage2_reference_;
+    segmented_request.outage_windows = planned_rtk_outage_windows;
+    segmented_request.state_timestamps = state_timestamps;
+    segmented_request.dynamic_start_time_s = dynamic_start_time_s;
+    segmented_request.processing_end_time_s = end_time_s;
+    segmented_request.run_once = [](
+                                   OfflineRunnerConfig segment_config,
+                                   std::shared_ptr<const Stage2VelocityReference> stage2_reference,
+                                   DataSet segment_dataset) {
+      return OfflineBatchRunner(
+        std::move(segment_config),
+        std::move(stage2_reference)).Run(std::move(segment_dataset));
+    };
+    return RtkOutageSegmentedBatchRunner(std::move(segmented_request)).Run();
+  }
+  if (defer_stage2_reference_for_segmented_batch) {
+    throw std::runtime_error(
+      "segmented Stage2 reference does not match the full graph and no RTK outage segment was planned");
+  }
+
   RtkOutageCausalReferenceResult causal_reference_result;
   if (config_.enable_rtk_outage_causal_drift_reference &&
       config_.enable_rtk_outage_smoothing &&
@@ -1086,6 +1145,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     causal_reference_result.boundary_time_s;
   run_result.run_summary.rtk_outage_smoothing_enabled =
     config_.enable_rtk_outage_smoothing;
+  run_result.run_summary.rtk_outage_segmented_batch_enabled = false;
+  run_result.run_summary.rtk_outage_batch_segment_count = 0;
+  run_result.run_summary.rtk_outage_segmented_batch_run_count = 0;
+  run_result.run_summary.rtk_outage_segmented_batch_vertical_boundary_jump_allowed =
+    config_.rtk_outage_segmented_batch_allow_vertical_boundary_jump;
   run_result.run_summary.rtk_outage_baz_reestimate_enabled =
     config_.enable_rtk_outage_smoothing &&
     config_.enable_rtk_outage_baz_reestimate;

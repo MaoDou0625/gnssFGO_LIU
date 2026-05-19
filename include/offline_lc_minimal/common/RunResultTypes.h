@@ -118,6 +118,10 @@ struct RunSummary {
   double rtk_vertical_lowpass_reference_max_abs_delta_m =
     std::numeric_limits<double>::quiet_NaN();
   bool rtk_outage_smoothing_enabled = false;
+  bool rtk_outage_segmented_batch_enabled = false;
+  std::size_t rtk_outage_batch_segment_count = 0;
+  std::size_t rtk_outage_segmented_batch_run_count = 0;
+  bool rtk_outage_segmented_batch_vertical_boundary_jump_allowed = false;
   bool rtk_outage_baz_reestimate_enabled = true;
   std::size_t rtk_outage_window_count = 0;
   std::size_t rtk_outage_window_with_body_z_jump_count = 0;
@@ -308,6 +312,7 @@ struct RunSummary {
   double alignment_start_time_s = 0.0;
   double navigation_start_time_s = 0.0;
   double dynamic_start_time_s = 0.0;
+  double processing_start_time_s = 0.0;
   double processing_end_time_s = 0.0;
   double static_alignment_duration_s = 0.0;
   std::string yaw_source = "fallback";
@@ -446,6 +451,13 @@ struct RunSummary {
         << rtk_vertical_lowpass_reference_max_abs_delta_m << '\n'
         << "rtk_outage_smoothing_enabled="
         << (rtk_outage_smoothing_enabled ? "true" : "false") << '\n'
+        << "rtk_outage_segmented_batch_enabled="
+        << (rtk_outage_segmented_batch_enabled ? "true" : "false") << '\n'
+        << "rtk_outage_batch_segment_count=" << rtk_outage_batch_segment_count << '\n'
+        << "rtk_outage_segmented_batch_run_count="
+        << rtk_outage_segmented_batch_run_count << '\n'
+        << "rtk_outage_segmented_batch_vertical_boundary_jump_allowed="
+        << (rtk_outage_segmented_batch_vertical_boundary_jump_allowed ? "true" : "false") << '\n'
         << "rtk_outage_baz_reestimate_enabled="
         << (rtk_outage_baz_reestimate_enabled ? "true" : "false") << '\n'
         << "rtk_outage_window_count=" << rtk_outage_window_count << '\n'
@@ -704,6 +716,7 @@ struct RunSummary {
         << "alignment_start_time_s=" << alignment_start_time_s << '\n'
         << "navigation_start_time_s=" << navigation_start_time_s << '\n'
         << "dynamic_start_time_s=" << dynamic_start_time_s << '\n'
+        << "processing_start_time_s=" << processing_start_time_s << '\n'
         << "processing_end_time_s=" << processing_end_time_s << '\n'
         << "static_alignment_duration_s=" << static_alignment_duration_s << '\n'
         << "yaw_source=" << yaw_source << '\n'
@@ -749,6 +762,7 @@ struct OfflineRunResult {
   std::vector<RtkVerticalDriftReferenceDiagnosticRow> rtk_vertical_drift_reference_diagnostics;
   std::vector<RtkOutageCausalNavReferenceRow> rtk_outage_causal_nav_reference_diagnostics;
   std::vector<RtkOutageWindowRow> rtk_outage_windows;
+  std::vector<RtkOutageBatchSegmentRow> rtk_outage_batch_segments;
   std::vector<RtkOutageAttitudeHoldDiagnosticRow> rtk_outage_attitude_hold_diagnostics;
   std::vector<RtkOutageVelocityDelta3dDiagnosticRow> rtk_outage_velocity_delta_3d_diagnostics;
   std::vector<RtkVelocityDiagnosticRow> rtk_velocity_diagnostics;

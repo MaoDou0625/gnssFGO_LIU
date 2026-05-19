@@ -288,6 +288,20 @@ struct RtkOutageWindowRow {
   std::string skip_reason = "UNSET";
 };
 
+struct RtkOutageBatchSegmentRow {
+  std::size_t segment_index = 0;
+  std::string segment_role = "UNSET";
+  long long source_outage_window_index = -1;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double duration_s = std::numeric_limits<double>::quiet_NaN();
+  bool planned = false;
+  bool vertical_boundary_jump_allowed = false;
+  std::string start_boundary_source = "UNSET";
+  std::string end_boundary_source = "UNSET";
+  std::string skip_reason = "UNSET";
+};
+
 struct RtkVelocityDiagnosticRow {
   std::size_t sample_index = 0;
   std::size_t state_index = 0;

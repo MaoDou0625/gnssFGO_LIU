@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 
 #include <gtsam/inference/Symbol.h>
@@ -37,13 +38,32 @@ void ValidateReferenceSizeAndTimes(
   const std::vector<TrajectoryRow> &trajectory,
   const std::vector<double> &state_timestamps) {
   if (trajectory.size() != state_timestamps.size()) {
-    throw std::runtime_error("stage2 reference trajectory size does not match graph timeline");
+      std::ostringstream oss;
+      oss.precision(17);
+      oss << "stage2 reference trajectory size does not match graph timeline"
+        << ": reference_size=" << trajectory.size()
+        << ", state_count=" << state_timestamps.size();
+    if (!trajectory.empty()) {
+      oss << ", reference_start_s=" << trajectory.front().time_s
+          << ", reference_end_s=" << trajectory.back().time_s;
+    }
+    if (!state_timestamps.empty()) {
+      oss << ", state_start_s=" << state_timestamps.front()
+          << ", state_end_s=" << state_timestamps.back();
+    }
+    throw std::runtime_error(oss.str());
   }
   for (std::size_t index = 0; index < trajectory.size(); ++index) {
     if (!std::isfinite(trajectory[index].time_s) ||
         std::abs(trajectory[index].time_s - state_timestamps[index]) >
           kTimestampToleranceS) {
-      throw std::runtime_error("stage2 reference trajectory timestamps do not match graph timeline");
+      std::ostringstream oss;
+      oss.precision(17);
+      oss << "stage2 reference trajectory timestamps do not match graph timeline"
+          << ": index=" << index
+          << ", reference_time_s=" << trajectory[index].time_s
+          << ", state_time_s=" << state_timestamps[index];
+      throw std::runtime_error(oss.str());
     }
   }
 }

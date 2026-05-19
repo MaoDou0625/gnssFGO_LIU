@@ -24,6 +24,7 @@ struct OfflineRunnerConfig {
   bool write_imu_rate_avp = false;
   double state_frequency_hz = 20.0;
   double error_state_frequency_hz = 1.0;
+  double processing_start_time_s = 0.0;
   double processing_end_time_s = 0.0;
   double gnss_time_offset_s = 0.0;
   double state_meas_sync_lower_bound_s = -0.02;
@@ -170,6 +171,9 @@ struct OfflineRunnerConfig {
   bool enable_rtk_vertical_lowpass_reference = false;
   double rtk_vertical_lowpass_reference_cutoff_hz = 0.10;
   bool enable_rtk_outage_smoothing = false;
+  bool enable_rtk_outage_segmented_batch = true;
+  int rtk_outage_segmented_batch_max_outages = 1;
+  bool rtk_outage_segmented_batch_allow_vertical_boundary_jump = true;
   bool enable_rtk_outage_baz_reestimate = true;
   double rtk_outage_min_gap_s = 2.0;
   double rtk_outage_position_ramp_sigma_m = 0.05;

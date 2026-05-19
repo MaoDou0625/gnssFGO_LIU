@@ -99,6 +99,11 @@ void ResultWriter::WriteOutputs(
       output_path / "rtk_outage_windows.csv",
       result.rtk_outage_windows);
   }
+  if (!result.rtk_outage_batch_segments.empty()) {
+    WriteRtkOutageBatchSegmentsCsv(
+      output_path / "rtk_outage_batch_segments.csv",
+      result.rtk_outage_batch_segments);
+  }
   if (!result.rtk_outage_attitude_hold_diagnostics.empty()) {
     WriteRtkOutageAttitudeHoldDiagnosticsCsv(
       output_path / "rtk_outage_attitude_hold_diagnostics.csv",

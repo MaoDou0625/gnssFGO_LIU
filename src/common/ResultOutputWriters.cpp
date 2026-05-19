@@ -564,6 +564,28 @@ void WriteRtkOutageWindowsCsv(
   }
 }
 
+void WriteRtkOutageBatchSegmentsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageBatchSegmentRow> &rows) {
+  std::ofstream out(path);
+  out << "segment_index,segment_role,source_outage_window_index,start_time_s,end_time_s,"
+         "duration_s,planned,vertical_boundary_jump_allowed,start_boundary_source,"
+         "end_boundary_source,skip_reason\n";
+  for (const auto &row : rows) {
+    out << row.segment_index << ','
+        << row.segment_role << ','
+        << row.source_outage_window_index << ','
+        << row.start_time_s << ','
+        << row.end_time_s << ','
+        << row.duration_s << ','
+        << (row.planned ? 1 : 0) << ','
+        << (row.vertical_boundary_jump_allowed ? 1 : 0) << ','
+        << row.start_boundary_source << ','
+        << row.end_boundary_source << ','
+        << row.skip_reason << '\n';
+  }
+}
+
 void WriteRtkOutageAttitudeHoldDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkOutageAttitudeHoldDiagnosticRow> &rows) {

@@ -9,7 +9,9 @@
 #include <gtsam/inference/Symbol.h>
 
 #include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
+#include "offline_lc_minimal/core/RtkOutageBatchSegmentPlanner.h"
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
+#include "offline_lc_minimal/core/SegmentedBatchResultAssembler.h"
 
 namespace {
 
@@ -202,6 +204,107 @@ void TestInitialValueSmootherResetsOutageHeightWithoutRemovingFixedAnchors() {
   ExpectTrue(windows.front().initial_value_smoothed_state_count == 4U, "smoothed state count is wrong");
 }
 
+void TestBatchSegmentPlannerSplitsFirstPlannedOutage() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_segmented_batch = true;
+  config.rtk_outage_segmented_batch_max_outages = 1;
+  config.rtk_outage_segmented_batch_allow_vertical_boundary_jump = true;
+
+  std::vector<offline_lc_minimal::RtkOutageWindowRow> outages(1U);
+  outages.front().window_index = 7U;
+  outages.front().pre_anchor_state_index = 3U;
+  outages.front().post_anchor_state_index = 5U;
+  outages.front().start_time_s = 10.0;
+  outages.front().end_time_s = 20.0;
+  outages.front().skip_reason = "PLANNED";
+  const std::vector<double> state_timestamps{0.0, 2.0, 8.0, 10.1, 15.0, 20.2, 30.0};
+
+  offline_lc_minimal::RtkOutageBatchSegmentPlanRequest request;
+  request.config = &config;
+  request.outage_windows = &outages;
+  request.state_timestamps = &state_timestamps;
+  request.dynamic_start_time_s = 2.0;
+  request.final_end_time_s = 30.0;
+
+  const std::vector<offline_lc_minimal::RtkOutageBatchSegmentRow> segments =
+    offline_lc_minimal::RtkOutageBatchSegmentPlanner(std::move(request)).Plan();
+  ExpectTrue(segments.size() == 3U, "first outage should produce pre/outage/post segments");
+  ExpectTrue(segments[0].segment_role == "PRE_RTK_VALID", "first segment role is wrong");
+  ExpectTrue(segments[1].segment_role == "RTK_OUTAGE", "second segment role is wrong");
+  ExpectTrue(segments[2].segment_role == "POST_RTK_VALID", "third segment role is wrong");
+  ExpectTrue(std::abs(segments[0].start_time_s - 2.0) < 1e-12, "pre start is wrong");
+  ExpectTrue(std::abs(segments[0].end_time_s - 10.1) < 1e-12, "pre end should use anchor state time");
+  ExpectTrue(std::abs(segments[1].start_time_s - 10.1) < 1e-12, "outage start should use anchor state time");
+  ExpectTrue(std::abs(segments[1].end_time_s - 20.2) < 1e-12, "outage end should use anchor state time");
+  ExpectTrue(std::abs(segments[2].start_time_s - 20.2) < 1e-12, "post start should use anchor state time");
+  ExpectTrue(std::abs(segments[2].end_time_s - 30.0) < 1e-12, "post end is wrong");
+  ExpectTrue(segments[1].source_outage_window_index == 7, "source outage index should be retained");
+  ExpectTrue(segments[1].vertical_boundary_jump_allowed, "boundary jump flag should be retained");
+}
+
+offline_lc_minimal::TrajectoryRow MakeTrajectoryRow(const double time_s, const double up_m) {
+  offline_lc_minimal::TrajectoryRow row;
+  row.time_s = time_s;
+  row.enu_position_m = Eigen::Vector3d(0.0, 0.0, up_m);
+  return row;
+}
+
+void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
+  offline_lc_minimal::RtkOutageBatchSegmentRow pre;
+  pre.segment_index = 0U;
+  pre.segment_role = "PRE_RTK_VALID";
+  pre.start_time_s = 0.0;
+  pre.end_time_s = 10.0;
+  pre.planned = true;
+  offline_lc_minimal::RtkOutageBatchSegmentRow outage;
+  outage.segment_index = 1U;
+  outage.segment_role = "RTK_OUTAGE";
+  outage.start_time_s = 10.0;
+  outage.end_time_s = 20.0;
+  outage.planned = true;
+  offline_lc_minimal::RtkOutageBatchSegmentRow post;
+  post.segment_index = 2U;
+  post.segment_role = "POST_RTK_VALID";
+  post.start_time_s = 20.0;
+  post.end_time_s = 30.0;
+  post.planned = true;
+
+  offline_lc_minimal::OfflineRunResult pre_result;
+  pre_result.trajectory = {
+    MakeTrajectoryRow(0.0, 0.0),
+    MakeTrajectoryRow(10.0, 10.0)};
+  offline_lc_minimal::OfflineRunResult outage_result;
+  outage_result.trajectory = {
+    MakeTrajectoryRow(10.0, 100.0),
+    MakeTrajectoryRow(15.0, 15.0),
+    MakeTrajectoryRow(20.0, 20.0)};
+  offline_lc_minimal::OfflineRunResult post_result;
+  post_result.trajectory = {
+    MakeTrajectoryRow(20.0, 200.0),
+    MakeTrajectoryRow(30.0, 30.0)};
+
+  offline_lc_minimal::SegmentedBatchResultAssemblerRequest request;
+  request.pieces = {
+    {pre, pre_result},
+    {outage, outage_result},
+    {post, post_result}};
+  request.processing_end_time_s = 30.0;
+  request.vertical_boundary_jump_allowed = true;
+
+  const offline_lc_minimal::OfflineRunResult assembled =
+    offline_lc_minimal::SegmentedBatchResultAssembler(std::move(request)).Assemble();
+  ExpectTrue(assembled.trajectory.size() == 5U, "assembled trajectory should not duplicate boundaries");
+  ExpectTrue(std::abs(assembled.trajectory[1].enu_position_m.z() - 10.0) < 1e-12,
+             "pre boundary value should be retained at outage start");
+  ExpectTrue(std::abs(assembled.trajectory[3].enu_position_m.z() - 20.0) < 1e-12,
+             "outage boundary value should be retained at post start");
+  ExpectTrue(assembled.run_summary.rtk_outage_segmented_batch_enabled,
+             "assembled summary should mark segmented batch enabled");
+  ExpectTrue(assembled.run_summary.rtk_outage_batch_segment_count == 3U,
+             "assembled summary should count segments");
+}
+
 }  // namespace
 
 int main() {
@@ -215,6 +318,12 @@ int main() {
     RunTest(
       "TestInitialValueSmootherResetsOutageHeightWithoutRemovingFixedAnchors",
       TestInitialValueSmootherResetsOutageHeightWithoutRemovingFixedAnchors);
+    RunTest(
+      "TestBatchSegmentPlannerSplitsFirstPlannedOutage",
+      TestBatchSegmentPlannerSplitsFirstPlannedOutage);
+    RunTest(
+      "TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates",
+      TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;
