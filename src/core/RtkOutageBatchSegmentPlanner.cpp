@@ -12,7 +12,7 @@ namespace {
 constexpr double kTimeEpsilonS = 1.0e-9;
 
 bool IsPlannedOutage(const RtkOutageWindowRow &window) {
-  return window.skip_reason == "PLANNED" &&
+  return (window.skip_reason == "PLANNED" || window.skip_reason == "ADDED") &&
          std::isfinite(window.start_time_s) &&
          std::isfinite(window.end_time_s) &&
          window.end_time_s > window.start_time_s + kTimeEpsilonS;

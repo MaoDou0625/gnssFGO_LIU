@@ -15,6 +15,7 @@
 #include "offline_lc_minimal/core/Stage2AttitudeHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage2HorizontalHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage2VehicleNHCConstraintBuilder.h"
+#include "offline_lc_minimal/core/Stage2VelocityOptimizationRunner.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
 #include "offline_lc_minimal/factor/HorizontalHoldFactor.h"
 #include "offline_lc_minimal/factor/VehicleVelocityNHCFactor.h"
@@ -74,6 +75,36 @@ std::vector<offline_lc_minimal::ReferenceNodeState> MakeReferenceStates(
       0.2);
   }
   return states;
+}
+
+std::vector<offline_lc_minimal::TrajectoryRow> MakeTrajectoryRows(
+  const double start_time_s,
+  const double end_time_s) {
+  std::vector<offline_lc_minimal::TrajectoryRow> rows;
+  const int start = static_cast<int>(std::ceil(start_time_s - 1e-9));
+  const int end = static_cast<int>(std::floor(end_time_s + 1e-9));
+  for (int time_s = start; time_s <= end; ++time_s) {
+    offline_lc_minimal::TrajectoryRow row;
+    row.time_s = static_cast<double>(time_s);
+    row.enu_position_m = Eigen::Vector3d(0.0, 0.0, 0.01 * static_cast<double>(time_s));
+    row.enu_velocity_mps = Eigen::Vector3d::Zero();
+    rows.push_back(row);
+  }
+  return rows;
+}
+
+offline_lc_minimal::RtkOutageWindowRow MakePlannedOutageWindow() {
+  offline_lc_minimal::RtkOutageWindowRow row;
+  row.window_index = 0U;
+  row.pre_anchor_state_index = 10U;
+  row.post_anchor_state_index = 20U;
+  row.pre_anchor_time_s = 10.0;
+  row.post_anchor_time_s = 20.0;
+  row.start_time_s = 10.0;
+  row.end_time_s = 20.0;
+  row.duration_s = 10.0;
+  row.skip_reason = "ADDED";
+  return row;
 }
 
 void TestVehicleVelocityFactorsUseVelocityAndMountOnly() {
@@ -379,6 +410,97 @@ void TestStage2PolicyDisablesRtkVelocityAndAttitudeReference() {
              "stage2 should enable graph-internal vehicle NHC");
 }
 
+void TestSegmentedStage2RunsIndependentChildStage2Solves() {
+  struct CallRecord {
+    bool enable_stage2_velocity_optimization = false;
+    bool enable_rtk_outage_segmented_batch = false;
+    bool enable_attitude_reference_constraint = false;
+    bool has_stage2_reference = false;
+    double processing_start_time_s = 0.0;
+    double processing_end_time_s = 0.0;
+  };
+
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage1_yaw_refinement = true;
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_segmented_batch = true;
+  config.enable_attitude_reference_constraint = true;
+  config.rtk_outage_segmented_batch_max_outages = 1;
+
+  std::vector<CallRecord> calls;
+  offline_lc_minimal::Stage2VelocityOptimizationRequest request;
+  request.config = config;
+  request.dataset = offline_lc_minimal::DataSet{};
+  request.run_once = [&](const offline_lc_minimal::OfflineRunnerConfig &run_config,
+                         std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> reference,
+                         offline_lc_minimal::DataSet) {
+    calls.push_back(CallRecord{
+      run_config.enable_stage2_velocity_optimization,
+      run_config.enable_rtk_outage_segmented_batch,
+      run_config.enable_attitude_reference_constraint,
+      reference != nullptr,
+      run_config.processing_start_time_s,
+      run_config.processing_end_time_s});
+
+    offline_lc_minimal::OfflineRunResult result;
+    const double start_time_s = run_config.processing_start_time_s;
+    const double end_time_s =
+      run_config.processing_end_time_s > 0.0 ? run_config.processing_end_time_s : 30.0;
+    result.run_summary.dynamic_start_time_s = start_time_s;
+    result.run_summary.processing_start_time_s = start_time_s;
+    result.run_summary.processing_end_time_s = end_time_s;
+    result.trajectory = MakeTrajectoryRows(start_time_s, end_time_s);
+
+    if (calls.size() == 1U) {
+      result.run_summary.dynamic_start_time_s = 0.0;
+      result.run_summary.processing_start_time_s = 0.0;
+      result.run_summary.processing_end_time_s = 30.0;
+      result.trajectory = MakeTrajectoryRows(0.0, 30.0);
+      result.rtk_outage_windows.push_back(MakePlannedOutageWindow());
+    }
+    return result;
+  };
+
+  const offline_lc_minimal::OfflineRunResult result =
+    offline_lc_minimal::Stage2VelocityOptimizationRunner(std::move(request)).Run();
+
+  ExpectTrue(calls.size() == 4U,
+             "segmented stage2 should make one planning pass plus three child solves");
+  ExpectTrue(!calls[0].enable_stage2_velocity_optimization,
+             "planning pass should disable stage2 optimization");
+  ExpectTrue(!calls[0].enable_rtk_outage_segmented_batch,
+             "planning pass should disable segmented recursion");
+  ExpectTrue(!calls[0].has_stage2_reference,
+             "planning pass should not receive a full stage2 reference");
+
+  for (std::size_t index = 1U; index < calls.size(); ++index) {
+    ExpectTrue(calls[index].enable_stage2_velocity_optimization,
+               "segment child should run a complete stage2 solve");
+    ExpectTrue(!calls[index].enable_rtk_outage_segmented_batch,
+               "segment child should disable segmented recursion");
+    ExpectTrue(calls[index].enable_attitude_reference_constraint,
+               "segment child should preserve attitude reference for its own stage1 solve");
+    ExpectTrue(!calls[index].has_stage2_reference,
+               "segment child should not use a sliced full-stage reference");
+  }
+  ExpectNear(calls[1].processing_start_time_s, 0.0, 1e-12,
+             "pre child start should match the prefix run");
+  ExpectNear(calls[1].processing_end_time_s, 10.0, 1e-12,
+             "pre child end should stop at outage start");
+  ExpectNear(calls[2].processing_start_time_s, 0.0, 1e-12,
+             "outage child start should run as a causal prefix");
+  ExpectNear(calls[2].processing_end_time_s, 20.0, 1e-12,
+             "outage child end should match outage end");
+  ExpectNear(calls[3].processing_start_time_s, 20.0, 1e-12,
+             "post child start should match outage end");
+
+  ExpectTrue(result.run_summary.rtk_outage_segmented_batch_enabled,
+             "assembled result should mark segmented batch enabled");
+  ExpectTrue(result.run_summary.rtk_outage_batch_segment_count == 3U,
+             "assembled result should contain pre/outage/post segments");
+}
+
 void TestStage2ConfigParsingAndValidation() {
   auto config = offline_lc_minimal::DefaultConfig();
   offline_lc_minimal::OverrideConfigField(config, "enable_stage2_velocity_optimization", "true");
@@ -425,6 +547,7 @@ int main() {
     RunTest("TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors", TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors);
     RunTest("TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma", TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma);
     RunTest("TestStage2PolicyDisablesRtkVelocityAndAttitudeReference", TestStage2PolicyDisablesRtkVelocityAndAttitudeReference);
+    RunTest("TestSegmentedStage2RunsIndependentChildStage2Solves", TestSegmentedStage2RunsIndependentChildStage2Solves);
     RunTest("TestStage2ConfigParsingAndValidation", TestStage2ConfigParsingAndValidation);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';

@@ -25,7 +25,6 @@ OfflineRunnerConfig MakeChildConfig(
   config.enable_rtk_outage_causal_drift_reference = false;
   config.enable_rtk_outage_preoutage_vertical_fence = false;
   config.enable_rtk_vertical_lowpass_reference = false;
-  config.enable_attitude_reference_constraint = false;
   config.processing_start_time_s = segment.start_time_s;
   config.processing_end_time_s = segment.end_time_s;
 
@@ -36,12 +35,9 @@ OfflineRunnerConfig MakeChildConfig(
     }
   } else if (segment.segment_role == "RTK_OUTAGE") {
     if (source_outage != nullptr) {
-      config.processing_start_time_s = source_outage->start_time_s;
+      config.processing_start_time_s = 0.0;
       config.processing_end_time_s = source_outage->end_time_s;
     }
-    config.enable_rtk_outage_smoothing = false;
-    config.enable_rtk_vertical_drift_reference = false;
-    config.enable_vertical_motion_adaptive_reweighting = false;
   } else if (segment.segment_role == "POST_RTK_VALID") {
     if (source_outage != nullptr) {
       config.processing_start_time_s = source_outage->end_time_s;
