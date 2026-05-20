@@ -21,6 +21,8 @@ struct RtkOutageSegmentedBatchRunRequest {
   DataSet dataset;
   std::shared_ptr<const Stage2VelocityReference> stage2_reference;
   std::vector<RtkOutageWindowRow> outage_windows;
+  std::vector<BodyZBiasReestimateSegmentRow> bias_reestimate_segments;
+  std::vector<GnssFactorRecord> gnss_factor_records;
   std::vector<double> state_timestamps;
   double dynamic_start_time_s = 0.0;
   double processing_end_time_s = 0.0;

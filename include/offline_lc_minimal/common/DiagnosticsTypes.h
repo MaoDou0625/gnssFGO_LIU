@@ -302,6 +302,80 @@ struct RtkOutageBatchSegmentRow {
   std::string skip_reason = "UNSET";
 };
 
+struct RtkOutageBoundaryReferenceRow {
+  std::size_t window_index = 0;
+  std::string boundary_role = "UNSET";
+  std::string source_type = "UNSET";
+  double target_time_s = std::numeric_limits<double>::quiet_NaN();
+  long long target_state_index = -1;
+  bool valid = false;
+  bool has_up = false;
+  bool has_vz = false;
+  bool has_ba_z = false;
+  bool add_up_constraint = false;
+  bool add_vz_constraint = false;
+  bool add_ba_z_constraint = false;
+  double reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double reference_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double reference_ba_z_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double up_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double vz_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double ba_z_sigma_mps2 = std::numeric_limits<double>::quiet_NaN();
+  std::string skip_reason = "UNSET";
+};
+
+struct RtkOutageRecoveryReferenceRow {
+  std::size_t window_index = 0;
+  double outage_end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double fit_start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double fit_end_time_s = std::numeric_limits<double>::quiet_NaN();
+  std::size_t valid_fix_sample_count = 0;
+  int min_fix_sample_count = 0;
+  bool valid = false;
+  double reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double reference_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double first_sample_time_s = std::numeric_limits<double>::quiet_NaN();
+  double last_sample_time_s = std::numeric_limits<double>::quiet_NaN();
+  double first_sample_up_m = std::numeric_limits<double>::quiet_NaN();
+  double last_sample_up_m = std::numeric_limits<double>::quiet_NaN();
+  std::string skip_reason = "UNSET";
+};
+
+struct RtkOutageBiasContinuityPolicyRow {
+  std::size_t window_index = 0;
+  std::string boundary_role = "UNSET";
+  bool ba_z_continuity_allowed = true;
+  bool overlaps_reestimate_segment = false;
+  double max_abs_detected_delta_ug = std::numeric_limits<double>::quiet_NaN();
+  double threshold_ug = std::numeric_limits<double>::quiet_NaN();
+  std::string reset_reason = "NONE";
+};
+
+struct RtkOutageBoundaryDiagnosticRow {
+  std::size_t window_index = 0;
+  std::string boundary_role = "UNSET";
+  std::string source_type = "UNSET";
+  std::size_t target_state_index = 0;
+  double target_time_s = std::numeric_limits<double>::quiet_NaN();
+  bool valid = false;
+  bool up_factor_added = false;
+  bool vz_factor_added = false;
+  bool ba_z_factor_added = false;
+  double reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_up_m = std::numeric_limits<double>::quiet_NaN();
+  double up_residual_m = std::numeric_limits<double>::quiet_NaN();
+  double up_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double reference_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double vz_residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double vz_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double reference_ba_z_ug = std::numeric_limits<double>::quiet_NaN();
+  double optimized_ba_z_ug = std::numeric_limits<double>::quiet_NaN();
+  double ba_z_residual_ug = std::numeric_limits<double>::quiet_NaN();
+  double ba_z_sigma_ug = std::numeric_limits<double>::quiet_NaN();
+  std::string skip_reason = "UNSET";
+};
+
 struct RtkVelocityDiagnosticRow {
   std::size_t sample_index = 0;
   std::size_t state_index = 0;

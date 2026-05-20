@@ -37,6 +37,7 @@
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
 #include "offline_lc_minimal/core/RtkOutageBazReestimatePlanner.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutagePreOutageVerticalFenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
@@ -1041,6 +1042,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     segmented_request.dataset = dataset;
     segmented_request.stage2_reference = stage2_reference_;
     segmented_request.outage_windows = planned_rtk_outage_windows;
+    segmented_request.bias_reestimate_segments = run_result.body_z_bias_reestimate_segments;
     segmented_request.state_timestamps = state_timestamps;
     segmented_request.dynamic_start_time_s = dynamic_start_time_s;
     segmented_request.processing_end_time_s = end_time_s;
@@ -1163,6 +1165,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.rtk_outage_baz_reestimate_segment_count = 0;
   run_result.run_summary.rtk_outage_baz_reestimate_boundary_break_count = 0;
   run_result.run_summary.rtk_outage_baz_reestimate_prior_factor_count = 0;
+  run_result.run_summary.rtk_outage_boundary_constraints_enabled =
+    config_.enable_rtk_outage_boundary_constraints;
+  run_result.run_summary.rtk_outage_boundary_reference_count = 0;
+  run_result.run_summary.rtk_outage_boundary_up_factor_count = 0;
+  run_result.run_summary.rtk_outage_boundary_vz_factor_count = 0;
+  run_result.run_summary.rtk_outage_boundary_baz_factor_count = 0;
   run_result.run_summary.rtk_outage_preoutage_vertical_fence_enabled =
     config_.enable_rtk_outage_preoutage_vertical_fence && causal_reference_result.valid;
   run_result.run_summary.rtk_outage_preoutage_vertical_fence_factor_count = 0;
@@ -1311,6 +1319,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       : std::vector<RtkVerticalDriftReferenceDiagnosticRow>{};
   run_result.rtk_outage_causal_nav_reference_diagnostics =
     causal_reference_result.nav_reference_rows;
+  run_result.rtk_outage_boundary_diagnostics.clear();
   run_result.rtk_velocity_diagnostics.clear();
   run_result.rtk_outage_attitude_hold_diagnostics.clear();
   run_result.rtk_outage_velocity_delta_3d_diagnostics.clear();
@@ -1356,6 +1365,18 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     bias_reestimate_request.initial_values = &optimization_initial_values;
     bias_reestimate_request.run_summary = &run_result.run_summary;
     BodyZBiasReestimateConstraintBuilder(std::move(bias_reestimate_request)).Apply();
+  }
+
+  if (stage2_reference_ != nullptr &&
+      !stage2_reference_->boundary_references.empty()) {
+    RtkOutageBoundaryConstraintBuildRequest boundary_request;
+    boundary_request.config = &config_;
+    boundary_request.state_timestamps = &state_timestamps;
+    boundary_request.boundary_references = &stage2_reference_->boundary_references;
+    boundary_request.graph = &graph_with_gnss;
+    boundary_request.run_summary = &run_result.run_summary;
+    boundary_request.diagnostics = &run_result.rtk_outage_boundary_diagnostics;
+    RtkOutageBoundaryConstraintBuilder(std::move(boundary_request)).Build();
   }
 
   if (causal_reference_result.valid) {
@@ -1615,6 +1636,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.rtk_outage_attitude_hold_diagnostics,
     run_result.rtk_outage_velocity_delta_3d_diagnostics,
     run_result.run_summary);
+  PopulateRtkOutageBoundaryDiagnostics(
+    optimized_values,
+    run_result.rtk_outage_boundary_diagnostics);
   completed_adaptive_pass_count = adaptive_pass + 1;
 
   bool finalize_adaptive_pass = adaptive_pass + 1 >= adaptive_pass_limit;

@@ -6,13 +6,16 @@
 #include <vector>
 
 #include <boost/pointer_cast.hpp>
+#include <gtsam/geometry/Pose3.h>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
+#include <gtsam/navigation/ImuBias.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutagePreOutageVerticalFenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
@@ -345,6 +348,121 @@ void TestPreOutageVerticalFenceDisabledAddsNoFactors() {
              "disabled pre-outage fence should report zero factors");
 }
 
+void TestBoundaryConstraintBuilderConstrainsOnlyUpVzAndBaz() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_boundary_constraints = true;
+  config.rtk_outage_boundary_up_sigma_m = 0.01;
+  config.rtk_outage_boundary_vz_sigma_mps = 0.02;
+  config.rtk_outage_boundary_baz_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(50.0);
+
+  const std::vector<double> timestamps{0.0, 1.0, 2.0};
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> references(1U);
+  references.front().window_index = 1U;
+  references.front().boundary_role = "OUTAGE_END";
+  references.front().source_type = "POST_RECOVERY_OPTIMIZED";
+  references.front().target_time_s = 1.0;
+  references.front().valid = true;
+  references.front().has_up = true;
+  references.front().has_vz = true;
+  references.front().has_ba_z = true;
+  references.front().add_up_constraint = true;
+  references.front().add_vz_constraint = true;
+  references.front().add_ba_z_constraint = true;
+  references.front().reference_up_m = 10.0;
+  references.front().reference_vz_mps = -0.1;
+  references.front().reference_ba_z_mps2 =
+    offline_lc_minimal::MicroGToMps2(120.0);
+  references.front().up_sigma_m = config.rtk_outage_boundary_up_sigma_m;
+  references.front().vz_sigma_mps = config.rtk_outage_boundary_vz_sigma_mps;
+  references.front().ba_z_sigma_mps2 = config.rtk_outage_boundary_baz_sigma_mps2;
+  references.front().skip_reason = "OK";
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::RtkOutageBoundaryDiagnosticRow> diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.boundary_references = &references;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 3U, "boundary should add up, vz, and ba_z scalar factors");
+  ExpectTrue(summary.rtk_outage_boundary_up_factor_count == 1U,
+             "up factor count is wrong");
+  ExpectTrue(summary.rtk_outage_boundary_vz_factor_count == 1U,
+             "vz factor count is wrong");
+  ExpectTrue(summary.rtk_outage_boundary_baz_factor_count == 1U,
+             "ba_z factor count is wrong");
+
+  gtsam::Values matching_values;
+  gtsam::Values shifted_attitude_values;
+  gtsam::Values shifted_vertical_values;
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    matching_values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(
+        gtsam::Rot3::Ypr(0.1, -0.2, 0.3),
+        gtsam::Point3(0.0, 0.0, index == 1U ? 10.0 : 0.0)));
+    matching_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(2.0, 3.0, index == 1U ? -0.1 : 0.0));
+    matching_values.insert(
+      gtsam::symbol_shorthand::B(index),
+      gtsam::imuBias::ConstantBias(
+        gtsam::Vector3(0.0, 0.0, index == 1U ? offline_lc_minimal::MicroGToMps2(120.0) : 0.0),
+        gtsam::Vector3::Zero()));
+
+    shifted_attitude_values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(
+        gtsam::Rot3::Ypr(-1.0, 0.5, -0.3),
+        gtsam::Point3(50.0, -40.0, index == 1U ? 10.0 : 0.0)));
+    shifted_attitude_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(-2.0, 4.0, index == 1U ? -0.1 : 0.0));
+    shifted_attitude_values.insert(
+      gtsam::symbol_shorthand::B(index),
+      gtsam::imuBias::ConstantBias(
+        gtsam::Vector3(9.0, -8.0, index == 1U ? offline_lc_minimal::MicroGToMps2(120.0) : 0.0),
+        gtsam::Vector3::Zero()));
+
+    shifted_vertical_values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(
+        gtsam::Rot3(),
+        gtsam::Point3(0.0, 0.0, index == 1U ? 10.2 : 0.0)));
+    shifted_vertical_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(0.0, 0.0, index == 1U ? -0.2 : 0.0));
+    shifted_vertical_values.insert(
+      gtsam::symbol_shorthand::B(index),
+      gtsam::imuBias::ConstantBias(
+        gtsam::Vector3(0.0, 0.0, index == 1U ? offline_lc_minimal::MicroGToMps2(220.0) : 0.0),
+        gtsam::Vector3::Zero()));
+  }
+
+  ExpectNear(graph.error(matching_values), 0.0, 1.0e-12,
+             "matching boundary state should have zero error");
+  ExpectNear(graph.error(shifted_attitude_values), 0.0, 1.0e-12,
+             "boundary should ignore attitude, horizontal position, velocity, and x/y bias");
+  ExpectTrue(graph.error(shifted_vertical_values) > 1.0,
+             "boundary should penalize up, vz, and ba_z changes");
+
+  offline_lc_minimal::PopulateRtkOutageBoundaryDiagnostics(
+    shifted_vertical_values,
+    diagnostics);
+  ExpectNear(diagnostics.front().up_residual_m, 0.2, 1.0e-12,
+             "boundary diagnostics should report up residual");
+  ExpectNear(diagnostics.front().vz_residual_mps, -0.1, 1.0e-12,
+             "boundary diagnostics should report vz residual");
+  ExpectNear(diagnostics.front().ba_z_residual_ug, 100.0, 1.0e-9,
+             "boundary diagnostics should report ba_z residual in ug");
+}
+
 offline_lc_minimal::GnssSolutionSample MakeCausalReferenceSample(
   const double time_s,
   const double up_m) {
@@ -463,6 +581,9 @@ int main() {
     RunTest(
       "TestPreOutageVerticalFenceDisabledAddsNoFactors",
       TestPreOutageVerticalFenceDisabledAddsNoFactors);
+    RunTest(
+      "TestBoundaryConstraintBuilderConstrainsOnlyUpVzAndBaz",
+      TestBoundaryConstraintBuilderConstrainsOnlyUpVzAndBaz);
     RunTest(
       "TestCausalReferenceBuilderUsesPrefixBaseConfig",
       TestCausalReferenceBuilderUsesPrefixBaseConfig);

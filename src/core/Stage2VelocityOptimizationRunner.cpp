@@ -80,6 +80,8 @@ std::optional<OfflineRunResult> TryRunSegmentedStage2(
   segmented_request.dataset = request.dataset;
   segmented_request.stage2_reference = std::move(reference);
   segmented_request.outage_windows = stage1_result.rtk_outage_windows;
+  segmented_request.bias_reestimate_segments = stage1_result.body_z_bias_reestimate_segments;
+  segmented_request.gnss_factor_records = stage1_result.gnss_factor_records;
   segmented_request.state_timestamps = std::move(state_timestamps);
   segmented_request.dynamic_start_time_s =
     stage1_result.run_summary.dynamic_start_time_s;

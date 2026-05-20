@@ -104,6 +104,21 @@ void ResultWriter::WriteOutputs(
       output_path / "rtk_outage_batch_segments.csv",
       result.rtk_outage_batch_segments);
   }
+  if (!result.rtk_outage_recovery_references.empty()) {
+    WriteRtkOutageRecoveryReferenceCsv(
+      output_path / "rtk_outage_recovery_reference.csv",
+      result.rtk_outage_recovery_references);
+  }
+  if (!result.rtk_outage_bias_continuity_policy.empty()) {
+    WriteRtkOutageBiasContinuityPolicyCsv(
+      output_path / "rtk_outage_bias_continuity_policy.csv",
+      result.rtk_outage_bias_continuity_policy);
+  }
+  if (!result.rtk_outage_boundary_diagnostics.empty()) {
+    WriteRtkOutageBoundaryDiagnosticsCsv(
+      output_path / "rtk_outage_boundary_diagnostics.csv",
+      result.rtk_outage_boundary_diagnostics);
+  }
   if (!result.rtk_outage_attitude_hold_diagnostics.empty()) {
     WriteRtkOutageAttitudeHoldDiagnosticsCsv(
       output_path / "rtk_outage_attitude_hold_diagnostics.csv",

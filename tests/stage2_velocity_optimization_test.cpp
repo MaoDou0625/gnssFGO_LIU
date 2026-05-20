@@ -107,6 +107,24 @@ offline_lc_minimal::RtkOutageWindowRow MakePlannedOutageWindow() {
   return row;
 }
 
+offline_lc_minimal::GnssSolutionSample MakeRecoveryGnssSample(
+  const double time_s,
+  const double up_m) {
+  offline_lc_minimal::GnssSolutionSample sample;
+  sample.time_s = time_s;
+  sample.lat_rad = 1.0;
+  sample.lon_rad = 1.0;
+  sample.h_m = 10.0;
+  sample.sigma_lat_m = 0.01;
+  sample.sigma_lon_m = 0.01;
+  sample.sigma_h_m = 0.01;
+  sample.best_sol_status_code = 1;
+  sample.gnssfgo_type_code = 1;
+  sample.enu_position_m = Eigen::Vector3d(0.0, 0.0, up_m);
+  sample.has_enu_position = true;
+  return sample;
+}
+
 void TestStage2ReferenceAttitudeHorizontalApplicationPreservesVerticalComponents() {
   offline_lc_minimal::Stage2VelocityReference reference;
   offline_lc_minimal::TrajectoryRow row;
@@ -499,6 +517,12 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
   offline_lc_minimal::Stage2VelocityOptimizationRequest request;
   request.config = config;
   request.dataset = offline_lc_minimal::DataSet{};
+  request.dataset.gnss_samples = {
+    MakeRecoveryGnssSample(20.0, 0.20),
+    MakeRecoveryGnssSample(20.4, 0.21),
+    MakeRecoveryGnssSample(20.8, 0.22),
+    MakeRecoveryGnssSample(21.2, 0.23),
+    MakeRecoveryGnssSample(21.6, 0.24)};
   request.run_once = [&](const offline_lc_minimal::OfflineRunnerConfig &run_config,
                          std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> reference,
                          offline_lc_minimal::DataSet) {
@@ -567,12 +591,12 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
              "pre child start should match the prefix run");
   ExpectNear(calls[1].processing_end_time_s, 10.0, 1e-12,
              "pre child end should stop at outage start");
-  ExpectNear(calls[2].processing_start_time_s, 0.0, 1e-12,
-             "outage child start should run as a causal prefix");
-  ExpectNear(calls[2].processing_end_time_s, 20.0, 1e-12,
+  ExpectNear(calls[2].processing_start_time_s, 20.0, 1e-12,
+             "post child should run before outage and start at outage end");
+  ExpectNear(calls[3].processing_start_time_s, 0.0, 1e-12,
+             "outage child start should run as a causal prefix after post");
+  ExpectNear(calls[3].processing_end_time_s, 20.0, 1e-12,
              "outage child end should match outage end");
-  ExpectNear(calls[3].processing_start_time_s, 20.0, 1e-12,
-             "post child start should match outage end");
 
   ExpectTrue(result.run_summary.rtk_outage_segmented_batch_enabled,
              "assembled result should mark segmented batch enabled");

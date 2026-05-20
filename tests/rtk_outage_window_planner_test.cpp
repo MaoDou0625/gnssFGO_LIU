@@ -9,7 +9,9 @@
 #include <gtsam/inference/Symbol.h>
 
 #include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
+#include "offline_lc_minimal/core/RtkOutageBiasContinuityPolicy.h"
 #include "offline_lc_minimal/core/RtkOutageBatchSegmentPlanner.h"
+#include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
 #include "offline_lc_minimal/core/SegmentedBatchResultAssembler.h"
 
@@ -204,6 +206,129 @@ void TestInitialValueSmootherResetsOutageHeightWithoutRemovingFixedAnchors() {
   ExpectTrue(windows.front().initial_value_smoothed_state_count == 4U, "smoothed state count is wrong");
 }
 
+offline_lc_minimal::GnssSolutionSample MakeRecoverySample(
+  const double time_s,
+  const int gnssfgo_type_code,
+  const double up_m,
+  const int best_sol_status_code = 1,
+  const bool has_position = true) {
+  offline_lc_minimal::GnssSolutionSample sample =
+    MakeGnssSample(time_s, gnssfgo_type_code, best_sol_status_code, has_position);
+  sample.enu_position_m = Eigen::Vector3d(0.0, 0.0, up_m);
+  sample.has_enu_position = has_position;
+  return sample;
+}
+
+void TestRecoveryReferenceUsesOnlyValidRtkFixSamples() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_recovery_reference_min_fix_samples = 3;
+  config.rtk_outage_recovery_reference_max_duration_s = 2.0;
+
+  std::vector<offline_lc_minimal::RtkOutageWindowRow> outages(1U);
+  outages.front().window_index = 3U;
+  outages.front().end_time_s = 10.0;
+  outages.front().skip_reason = "PLANNED";
+
+  const std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeRecoverySample(10.0, 1, 100.0),
+    MakeRecoverySample(10.5, 2, 500.0),
+    MakeRecoverySample(10.5, 1, 100.05),
+    MakeRecoverySample(11.0, 1, 100.10),
+    MakeRecoverySample(11.5, 1, 900.0, 0),
+    MakeRecoverySample(13.0, 1, 1000.0)};
+
+  offline_lc_minimal::RtkOutageRecoveryReferenceBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.outage_windows = &outages;
+  request.passes_gnss_quality_filters =
+    [&](const offline_lc_minimal::GnssSolutionSample &sample) {
+      return PassesQualityFilters(config, sample);
+    };
+  request.corrected_time_s =
+    [](const offline_lc_minimal::GnssSolutionSample &sample) {
+      return sample.time_s;
+    };
+
+  const std::vector<offline_lc_minimal::RtkOutageRecoveryReferenceRow> rows =
+    offline_lc_minimal::RtkOutageRecoveryReferenceBuilder(std::move(request)).Build();
+  ExpectTrue(rows.size() == 1U, "one recovery reference row should be emitted");
+  ExpectTrue(rows.front().valid, "three RTKFIX samples should produce a valid recovery reference");
+  ExpectTrue(rows.front().valid_fix_sample_count == 3U, "only RTKFIX samples should be counted");
+  ExpectTrue(std::abs(rows.front().reference_up_m - 100.0) < 1e-12,
+             "recovery fit should extrapolate up to outage end");
+  ExpectTrue(std::abs(rows.front().reference_vz_mps - 0.10) < 1e-12,
+             "recovery fit should estimate vertical velocity");
+}
+
+void TestRecoveryReferenceSkipsWhenSamplesAreInsufficient() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_recovery_reference_min_fix_samples = 3;
+  config.rtk_outage_recovery_reference_max_duration_s = 2.0;
+
+  std::vector<offline_lc_minimal::RtkOutageWindowRow> outages(1U);
+  outages.front().window_index = 4U;
+  outages.front().end_time_s = 10.0;
+  outages.front().skip_reason = "PLANNED";
+
+  const std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeRecoverySample(10.0, 1, 100.0),
+    MakeRecoverySample(10.5, 2, 100.1),
+    MakeRecoverySample(11.0, 1, 100.2, 0)};
+
+  offline_lc_minimal::RtkOutageRecoveryReferenceBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.outage_windows = &outages;
+  request.passes_gnss_quality_filters =
+    [&](const offline_lc_minimal::GnssSolutionSample &sample) {
+      return PassesQualityFilters(config, sample);
+    };
+  request.corrected_time_s =
+    [](const offline_lc_minimal::GnssSolutionSample &sample) {
+      return sample.time_s;
+    };
+
+  const std::vector<offline_lc_minimal::RtkOutageRecoveryReferenceRow> rows =
+    offline_lc_minimal::RtkOutageRecoveryReferenceBuilder(std::move(request)).Build();
+  ExpectTrue(rows.size() == 1U, "one recovery reference row should be emitted");
+  ExpectTrue(!rows.front().valid, "insufficient RTKFIX samples should be skipped");
+  ExpectTrue(rows.front().skip_reason == "insufficient_rtkfix_samples",
+             "skip reason should explain insufficient recovery support");
+}
+
+void TestBiasContinuityPolicyBreaksForLargeReestimateWindow() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_baz_continuity_break_delta_threshold_mps2 =
+    offline_lc_minimal::MicroGToMps2(1000.0);
+
+  std::vector<offline_lc_minimal::RtkOutageWindowRow> outages(1U);
+  outages.front().window_index = 5U;
+  outages.front().start_time_s = 10.0;
+  outages.front().end_time_s = 20.0;
+  outages.front().skip_reason = "PLANNED";
+
+  std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> segments(1U);
+  segments.front().source_outage_window_index = 5;
+  segments.front().start_time_s = 11.0;
+  segments.front().end_time_s = 19.0;
+  segments.front().detected_bias_delta_mps2 =
+    offline_lc_minimal::MicroGToMps2(1500.0);
+
+  offline_lc_minimal::RtkOutageBiasContinuityPolicyRequest request;
+  request.config = &config;
+  request.outage_windows = &outages;
+  request.bias_reestimate_segments = &segments;
+  const std::vector<offline_lc_minimal::RtkOutageBiasContinuityPolicyRow> rows =
+    offline_lc_minimal::RtkOutageBiasContinuityPolicy(std::move(request)).Build();
+  ExpectTrue(rows.size() == 2U, "policy should emit start and end boundary rows");
+  for (const auto &row : rows) {
+    ExpectTrue(!row.ba_z_continuity_allowed, "large reestimate should break ba_z continuity");
+    ExpectTrue(row.reset_reason == "delta_threshold_exceeded",
+               "policy should report the threshold reset reason");
+  }
+}
+
 void TestBatchSegmentPlannerSplitsFirstPlannedOutage() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_rtk_outage_smoothing = true;
@@ -254,18 +379,21 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   offline_lc_minimal::RtkOutageBatchSegmentRow pre;
   pre.segment_index = 0U;
   pre.segment_role = "PRE_RTK_VALID";
+  pre.source_outage_window_index = 0;
   pre.start_time_s = 0.0;
   pre.end_time_s = 10.0;
   pre.planned = true;
   offline_lc_minimal::RtkOutageBatchSegmentRow outage;
   outage.segment_index = 1U;
   outage.segment_role = "RTK_OUTAGE";
+  outage.source_outage_window_index = 0;
   outage.start_time_s = 10.0;
   outage.end_time_s = 20.0;
   outage.planned = true;
   offline_lc_minimal::RtkOutageBatchSegmentRow post;
   post.segment_index = 2U;
   post.segment_role = "POST_RTK_VALID";
+  post.source_outage_window_index = 0;
   post.start_time_s = 20.0;
   post.end_time_s = 30.0;
   post.planned = true;
@@ -278,10 +406,10 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   outage_result.trajectory = {
     MakeTrajectoryRow(10.0, 100.0),
     MakeTrajectoryRow(15.0, 15.0),
-    MakeTrajectoryRow(20.0, 20.0)};
+    MakeTrajectoryRow(19.95, 20.0)};
   offline_lc_minimal::OfflineRunResult post_result;
   post_result.trajectory = {
-    MakeTrajectoryRow(20.0, 200.0),
+    MakeTrajectoryRow(19.95, 200.0),
     MakeTrajectoryRow(30.0, 30.0)};
 
   offline_lc_minimal::SegmentedBatchResultAssemblerRequest request;
@@ -289,6 +417,11 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
     {pre, pre_result},
     {outage, outage_result},
     {post, post_result}};
+  offline_lc_minimal::RtkOutageWindowRow outage_window;
+  outage_window.window_index = 0U;
+  outage_window.start_time_s = 10.0;
+  outage_window.end_time_s = 19.95;
+  request.outage_windows = {outage_window};
   request.processing_end_time_s = 30.0;
   request.vertical_boundary_jump_allowed = true;
 
@@ -297,8 +430,8 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   ExpectTrue(assembled.trajectory.size() == 5U, "assembled trajectory should not duplicate boundaries");
   ExpectTrue(std::abs(assembled.trajectory[1].enu_position_m.z() - 10.0) < 1e-12,
              "pre boundary value should be retained at outage start");
-  ExpectTrue(std::abs(assembled.trajectory[3].enu_position_m.z() - 20.0) < 1e-12,
-             "outage boundary value should be retained at post start");
+  ExpectTrue(std::abs(assembled.trajectory[3].enu_position_m.z() - 200.0) < 1e-12,
+             "post boundary value should be retained at outage recovery");
   ExpectTrue(assembled.run_summary.rtk_outage_segmented_batch_enabled,
              "assembled summary should mark segmented batch enabled");
   ExpectTrue(assembled.run_summary.rtk_outage_batch_segment_count == 3U,
@@ -318,6 +451,15 @@ int main() {
     RunTest(
       "TestInitialValueSmootherResetsOutageHeightWithoutRemovingFixedAnchors",
       TestInitialValueSmootherResetsOutageHeightWithoutRemovingFixedAnchors);
+    RunTest(
+      "TestRecoveryReferenceUsesOnlyValidRtkFixSamples",
+      TestRecoveryReferenceUsesOnlyValidRtkFixSamples);
+    RunTest(
+      "TestRecoveryReferenceSkipsWhenSamplesAreInsufficient",
+      TestRecoveryReferenceSkipsWhenSamplesAreInsufficient);
+    RunTest(
+      "TestBiasContinuityPolicyBreaksForLargeReestimateWindow",
+      TestBiasContinuityPolicyBreaksForLargeReestimateWindow);
     RunTest(
       "TestBatchSegmentPlannerSplitsFirstPlannedOutage",
       TestBatchSegmentPlannerSplitsFirstPlannedOutage);

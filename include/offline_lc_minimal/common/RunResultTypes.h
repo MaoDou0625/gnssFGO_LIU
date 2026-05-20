@@ -128,6 +128,11 @@ struct RunSummary {
   std::size_t rtk_outage_baz_reestimate_segment_count = 0;
   std::size_t rtk_outage_baz_reestimate_boundary_break_count = 0;
   std::size_t rtk_outage_baz_reestimate_prior_factor_count = 0;
+  bool rtk_outage_boundary_constraints_enabled = true;
+  std::size_t rtk_outage_boundary_reference_count = 0;
+  std::size_t rtk_outage_boundary_up_factor_count = 0;
+  std::size_t rtk_outage_boundary_vz_factor_count = 0;
+  std::size_t rtk_outage_boundary_baz_factor_count = 0;
   bool rtk_outage_preoutage_vertical_fence_enabled = false;
   std::size_t rtk_outage_preoutage_vertical_fence_factor_count = 0;
   double rtk_outage_preoutage_vertical_fence_max_delta_m =
@@ -469,6 +474,16 @@ struct RunSummary {
         << rtk_outage_baz_reestimate_boundary_break_count << '\n'
         << "rtk_outage_baz_reestimate_prior_factor_count="
         << rtk_outage_baz_reestimate_prior_factor_count << '\n'
+        << "rtk_outage_boundary_constraints_enabled="
+        << (rtk_outage_boundary_constraints_enabled ? "true" : "false") << '\n'
+        << "rtk_outage_boundary_reference_count="
+        << rtk_outage_boundary_reference_count << '\n'
+        << "rtk_outage_boundary_up_factor_count="
+        << rtk_outage_boundary_up_factor_count << '\n'
+        << "rtk_outage_boundary_vz_factor_count="
+        << rtk_outage_boundary_vz_factor_count << '\n'
+        << "rtk_outage_boundary_baz_factor_count="
+        << rtk_outage_boundary_baz_factor_count << '\n'
         << "rtk_outage_preoutage_vertical_fence_enabled="
         << (rtk_outage_preoutage_vertical_fence_enabled ? "true" : "false") << '\n'
         << "rtk_outage_preoutage_vertical_fence_factor_count="
@@ -763,6 +778,9 @@ struct OfflineRunResult {
   std::vector<RtkOutageCausalNavReferenceRow> rtk_outage_causal_nav_reference_diagnostics;
   std::vector<RtkOutageWindowRow> rtk_outage_windows;
   std::vector<RtkOutageBatchSegmentRow> rtk_outage_batch_segments;
+  std::vector<RtkOutageRecoveryReferenceRow> rtk_outage_recovery_references;
+  std::vector<RtkOutageBiasContinuityPolicyRow> rtk_outage_bias_continuity_policy;
+  std::vector<RtkOutageBoundaryDiagnosticRow> rtk_outage_boundary_diagnostics;
   std::vector<RtkOutageAttitudeHoldDiagnosticRow> rtk_outage_attitude_hold_diagnostics;
   std::vector<RtkOutageVelocityDelta3dDiagnosticRow> rtk_outage_velocity_delta_3d_diagnostics;
   std::vector<RtkVelocityDiagnosticRow> rtk_velocity_diagnostics;

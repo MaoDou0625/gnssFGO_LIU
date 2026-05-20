@@ -175,6 +175,13 @@ struct OfflineRunnerConfig {
   int rtk_outage_segmented_batch_max_outages = 1;
   bool rtk_outage_segmented_batch_allow_vertical_boundary_jump = true;
   bool enable_rtk_outage_baz_reestimate = true;
+  bool enable_rtk_outage_boundary_constraints = true;
+  int rtk_outage_recovery_reference_min_fix_samples = 5;
+  double rtk_outage_recovery_reference_max_duration_s = 2.0;
+  double rtk_outage_boundary_up_sigma_m = 0.005;
+  double rtk_outage_boundary_vz_sigma_mps = 0.02;
+  double rtk_outage_boundary_baz_sigma_mps2 = 4.903325e-4;
+  double rtk_outage_baz_continuity_break_delta_threshold_mps2 = 9.80665e-3;
   double rtk_outage_min_gap_s = 2.0;
   double rtk_outage_position_ramp_sigma_m = 0.05;
   double rtk_outage_velocity_delta_sigma_mps = 0.02;

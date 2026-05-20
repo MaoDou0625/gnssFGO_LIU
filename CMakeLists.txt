@@ -77,10 +77,13 @@ add_library(offline_lc_minimal_lib
   src/core/RunDiagnosticsBuilder.cpp
   src/core/OptimizationStagePolicy.cpp
   src/core/RtkOutageInitialValueSmoother.cpp
+  src/core/RtkOutageBiasContinuityPolicy.cpp
   src/core/RtkOutageBatchSegmentPlanner.cpp
+  src/core/RtkOutageBoundaryConstraintBuilder.cpp
   src/core/RtkOutageCausalReferenceBuilder.cpp
   src/core/RtkOutagePreOutageVerticalFenceBuilder.cpp
   src/core/RtkOutageRecoveryConstraintBuilder.cpp
+  src/core/RtkOutageRecoveryReferenceBuilder.cpp
   src/core/RtkOutageSegmentedBatchRunner.cpp
   src/core/RtkOutageSmoothingConstraintBuilder.cpp
   src/core/RtkHeadingAlignmentEstimator.cpp

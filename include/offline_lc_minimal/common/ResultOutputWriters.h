@@ -66,6 +66,18 @@ void WriteRtkOutageBatchSegmentsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkOutageBatchSegmentRow> &rows);
 
+void WriteRtkOutageRecoveryReferenceCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageRecoveryReferenceRow> &rows);
+
+void WriteRtkOutageBiasContinuityPolicyCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageBiasContinuityPolicyRow> &rows);
+
+void WriteRtkOutageBoundaryDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageBoundaryDiagnosticRow> &rows);
+
 void WriteRtkOutageAttitudeHoldDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkOutageAttitudeHoldDiagnosticRow> &rows);

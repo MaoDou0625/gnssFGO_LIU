@@ -363,6 +363,19 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (config.rtk_outage_segmented_batch_max_outages < 0) {
     throw std::runtime_error("RTK outage segmented batch settings must be non-negative");
   }
+  if (config.rtk_outage_recovery_reference_min_fix_samples <= 0 ||
+      !std::isfinite(config.rtk_outage_recovery_reference_max_duration_s) ||
+      !std::isfinite(config.rtk_outage_boundary_up_sigma_m) ||
+      !std::isfinite(config.rtk_outage_boundary_vz_sigma_mps) ||
+      !std::isfinite(config.rtk_outage_boundary_baz_sigma_mps2) ||
+      !std::isfinite(config.rtk_outage_baz_continuity_break_delta_threshold_mps2) ||
+      config.rtk_outage_recovery_reference_max_duration_s <= 0.0 ||
+      config.rtk_outage_boundary_up_sigma_m <= 0.0 ||
+      config.rtk_outage_boundary_vz_sigma_mps <= 0.0 ||
+      config.rtk_outage_boundary_baz_sigma_mps2 <= 0.0 ||
+      config.rtk_outage_baz_continuity_break_delta_threshold_mps2 <= 0.0) {
+    throw std::runtime_error("RTK outage boundary constraint settings must be positive");
+  }
   if (config.enable_rtk_vertical_drift_reference) {
     if (!config.enable_gnss ||
         config.vertical_constraint_mode != VerticalConstraintMode::kEnvelope ||
@@ -991,6 +1004,22 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
       ParseBool(normalized_value);
   } else if (normalized_key == "enable_rtk_outage_baz_reestimate") {
     config.enable_rtk_outage_baz_reestimate = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_rtk_outage_boundary_constraints") {
+    config.enable_rtk_outage_boundary_constraints = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_outage_recovery_reference_min_fix_samples") {
+    config.rtk_outage_recovery_reference_min_fix_samples = ParseInt(normalized_value);
+  } else if (normalized_key == "rtk_outage_recovery_reference_max_duration_s") {
+    config.rtk_outage_recovery_reference_max_duration_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_outage_boundary_up_sigma_m") {
+    config.rtk_outage_boundary_up_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_outage_boundary_vz_sigma_mps") {
+    config.rtk_outage_boundary_vz_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "rtk_outage_boundary_baz_sigma_ug") {
+    config.rtk_outage_boundary_baz_sigma_mps2 =
+      MicroGToMps2(ParseDouble(normalized_value));
+  } else if (normalized_key == "rtk_outage_baz_continuity_break_delta_threshold_ug") {
+    config.rtk_outage_baz_continuity_break_delta_threshold_mps2 =
+      MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "rtk_outage_min_gap_s") {
     config.rtk_outage_min_gap_s = ParseDouble(normalized_value);
   } else if (normalized_key == "rtk_outage_position_ramp_sigma_m") {
@@ -1511,6 +1540,20 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.rtk_outage_segmented_batch_allow_vertical_boundary_jump ? "true" : "false") << '\n'
     << "enable_rtk_outage_baz_reestimate="
     << (config.enable_rtk_outage_baz_reestimate ? "true" : "false") << '\n'
+    << "enable_rtk_outage_boundary_constraints="
+    << (config.enable_rtk_outage_boundary_constraints ? "true" : "false") << '\n'
+    << "rtk_outage_recovery_reference_min_fix_samples="
+    << config.rtk_outage_recovery_reference_min_fix_samples << '\n'
+    << "rtk_outage_recovery_reference_max_duration_s="
+    << config.rtk_outage_recovery_reference_max_duration_s << '\n'
+    << "rtk_outage_boundary_up_sigma_m="
+    << config.rtk_outage_boundary_up_sigma_m << '\n'
+    << "rtk_outage_boundary_vz_sigma_mps="
+    << config.rtk_outage_boundary_vz_sigma_mps << '\n'
+    << "rtk_outage_boundary_baz_sigma_ug="
+    << Mps2ToMicroG(config.rtk_outage_boundary_baz_sigma_mps2) << '\n'
+    << "rtk_outage_baz_continuity_break_delta_threshold_ug="
+    << Mps2ToMicroG(config.rtk_outage_baz_continuity_break_delta_threshold_mps2) << '\n'
     << "rtk_outage_min_gap_s=" << config.rtk_outage_min_gap_s << '\n'
     << "rtk_outage_position_ramp_sigma_m=" << config.rtk_outage_position_ramp_sigma_m << '\n'
     << "rtk_outage_velocity_delta_sigma_mps="

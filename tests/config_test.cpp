@@ -820,6 +820,30 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
     config.enable_rtk_outage_baz_reestimate,
     "phase32 should enable RTK outage ba_z reestimate");
   ExpectTrue(
+    config.enable_rtk_outage_boundary_constraints,
+    "phase32 should enable RTK outage boundary constraints");
+  ExpectTrue(
+    config.rtk_outage_recovery_reference_min_fix_samples == 5,
+    "phase32 recovery reference sample count should load");
+  ExpectTrue(
+    std::abs(config.rtk_outage_recovery_reference_max_duration_s - 2.0) < 1e-15,
+    "phase32 recovery reference duration should load");
+  ExpectTrue(
+    std::abs(config.rtk_outage_boundary_up_sigma_m - 0.005) < 1e-15,
+    "phase32 boundary up sigma should load");
+  ExpectTrue(
+    std::abs(config.rtk_outage_boundary_vz_sigma_mps - 0.02) < 1e-15,
+    "phase32 boundary vz sigma should load");
+  ExpectTrue(
+    std::abs(offline_lc_minimal::Mps2ToMicroG(config.rtk_outage_boundary_baz_sigma_mps2) -
+             50.0) < 1e-12,
+    "phase32 boundary ba_z sigma should load in ug");
+  ExpectTrue(
+    std::abs(offline_lc_minimal::Mps2ToMicroG(
+               config.rtk_outage_baz_continuity_break_delta_threshold_mps2) -
+             1000.0) < 1e-9,
+    "phase32 ba_z reset threshold should load in ug");
+  ExpectTrue(
     std::abs(config.rtk_outage_min_gap_s - 2.0) < 1e-15,
     "phase32 RTK outage gap threshold should load");
   ExpectTrue(
@@ -925,6 +949,30 @@ void TestDefaultOfflineConfigUsesV14SegmentedStage2() {
   ExpectTrue(
     config.enable_rtk_outage_baz_reestimate,
     "default config should enable RTK outage ba_z reestimate");
+  ExpectTrue(
+    config.enable_rtk_outage_boundary_constraints,
+    "default config should enable RTK outage boundary constraints");
+  ExpectTrue(
+    config.rtk_outage_recovery_reference_min_fix_samples == 5,
+    "default recovery reference sample count should match phase32");
+  ExpectTrue(
+    std::abs(config.rtk_outage_recovery_reference_max_duration_s - 2.0) < 1e-15,
+    "default recovery reference duration should match phase32");
+  ExpectTrue(
+    std::abs(config.rtk_outage_boundary_up_sigma_m - 0.005) < 1e-15,
+    "default boundary up sigma should match phase32");
+  ExpectTrue(
+    std::abs(config.rtk_outage_boundary_vz_sigma_mps - 0.02) < 1e-15,
+    "default boundary vz sigma should match phase32");
+  ExpectTrue(
+    std::abs(offline_lc_minimal::Mps2ToMicroG(config.rtk_outage_boundary_baz_sigma_mps2) -
+             50.0) < 1e-12,
+    "default boundary ba_z sigma should match phase32");
+  ExpectTrue(
+    std::abs(offline_lc_minimal::Mps2ToMicroG(
+               config.rtk_outage_baz_continuity_break_delta_threshold_mps2) -
+             1000.0) < 1e-9,
+    "default ba_z continuity reset threshold should match phase32");
   ExpectTrue(config.enable_rtk_outage_attitude_hold, "default config should enable outage attitude hold");
   ExpectTrue(
     std::abs(config.rtk_outage_attitude_guard_duration_s - 1.0) < 1e-15,
@@ -1366,6 +1414,16 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
     config,
     "rtk_outage_segmented_batch_allow_vertical_boundary_jump",
     "false");
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_boundary_constraints", "false");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_recovery_reference_min_fix_samples", "7");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_recovery_reference_max_duration_s", "3.5");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_boundary_up_sigma_m", "0.006");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_boundary_vz_sigma_mps", "0.03");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_boundary_baz_sigma_ug", "75");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "rtk_outage_baz_continuity_break_delta_threshold_ug",
+    "1200");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_causal_reference_max_prefix_runs", "0");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_preoutage_fence_stride_s", "0.4");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_preoutage_fence_up_sigma_m", "0.004");
@@ -1394,6 +1452,30 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
   ExpectTrue(
     !config.rtk_outage_segmented_batch_allow_vertical_boundary_jump,
     "outage segmented batch boundary jump flag should parse");
+  ExpectTrue(
+    !config.enable_rtk_outage_boundary_constraints,
+    "outage boundary constraint flag should parse");
+  ExpectTrue(
+    config.rtk_outage_recovery_reference_min_fix_samples == 7,
+    "recovery reference min sample count should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_recovery_reference_max_duration_s - 3.5) < 1e-15,
+    "recovery reference max duration should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_boundary_up_sigma_m - 0.006) < 1e-15,
+    "boundary up sigma should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_boundary_vz_sigma_mps - 0.03) < 1e-15,
+    "boundary vz sigma should parse");
+  ExpectTrue(
+    std::abs(offline_lc_minimal::Mps2ToMicroG(config.rtk_outage_boundary_baz_sigma_mps2) -
+             75.0) < 1e-12,
+    "boundary ba_z sigma should parse as ug");
+  ExpectTrue(
+    std::abs(offline_lc_minimal::Mps2ToMicroG(
+               config.rtk_outage_baz_continuity_break_delta_threshold_mps2) -
+             1200.0) < 1e-9,
+    "boundary ba_z reset threshold should parse as ug");
   ExpectTrue(
     config.rtk_outage_causal_reference_max_prefix_runs == 0,
     "causal prefix run count should parse");
@@ -1432,6 +1514,28 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
     serialized.find("rtk_outage_segmented_batch_allow_vertical_boundary_jump=false") !=
       std::string::npos,
     "outage segmented batch boundary jump flag should be serialized");
+  ExpectTrue(
+    serialized.find("enable_rtk_outage_boundary_constraints=false") != std::string::npos,
+    "outage boundary constraint flag should be serialized");
+  ExpectTrue(
+    serialized.find("rtk_outage_recovery_reference_min_fix_samples=7") != std::string::npos,
+    "recovery reference min sample count should be serialized");
+  ExpectTrue(
+    serialized.find("rtk_outage_recovery_reference_max_duration_s=3.5") != std::string::npos,
+    "recovery reference max duration should be serialized");
+  ExpectTrue(
+    serialized.find("rtk_outage_boundary_up_sigma_m=0.006") != std::string::npos,
+    "boundary up sigma should be serialized");
+  ExpectTrue(
+    serialized.find("rtk_outage_boundary_vz_sigma_mps=0.03") != std::string::npos,
+    "boundary vz sigma should be serialized");
+  ExpectTrue(
+    serialized.find("rtk_outage_boundary_baz_sigma_ug=75") != std::string::npos,
+    "boundary ba_z sigma should be serialized in ug");
+  ExpectTrue(
+    serialized.find("rtk_outage_baz_continuity_break_delta_threshold_ug=1200") !=
+      std::string::npos,
+    "boundary ba_z reset threshold should be serialized in ug");
   ExpectTrue(
     serialized.find("rtk_outage_causal_reference_max_prefix_runs=0") != std::string::npos,
     "causal prefix run count should be serialized");
@@ -2189,6 +2293,16 @@ void TestRtkOutageRecoveryConfigValidation() {
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_relative_attitude_sigma_rad", "3e-4");
   offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_velocity_delta_3d", "true");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_velocity_delta_3d_sigma_mps", "0.35");
+  offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_boundary_constraints", "true");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_recovery_reference_min_fix_samples", "6");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_recovery_reference_max_duration_s", "1.5");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_boundary_up_sigma_m", "0.007");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_boundary_vz_sigma_mps", "0.025");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_outage_boundary_baz_sigma_ug", "60");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "rtk_outage_baz_continuity_break_delta_threshold_ug",
+    "1100");
   offline_lc_minimal::ValidateConfig(config);
   ExpectTrue(config.enable_rtk_outage_attitude_hold, "outage attitude hold flag should parse");
   ExpectTrue(config.enable_rtk_outage_baz_reestimate, "outage ba_z reestimate flag should parse");
@@ -2205,6 +2319,28 @@ void TestRtkOutageRecoveryConfigValidation() {
   ExpectTrue(
     std::abs(config.rtk_outage_velocity_delta_3d_sigma_mps - 0.35) < 1e-12,
     "outage 3D velocity sigma should parse");
+  ExpectTrue(config.enable_rtk_outage_boundary_constraints,
+             "outage boundary constraint flag should parse");
+  ExpectTrue(config.rtk_outage_recovery_reference_min_fix_samples == 6,
+             "recovery reference min samples should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_recovery_reference_max_duration_s - 1.5) < 1e-12,
+    "recovery reference duration should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_boundary_up_sigma_m - 0.007) < 1e-12,
+    "boundary up sigma should parse");
+  ExpectTrue(
+    std::abs(config.rtk_outage_boundary_vz_sigma_mps - 0.025) < 1e-12,
+    "boundary vz sigma should parse");
+  ExpectTrue(
+    std::abs(offline_lc_minimal::Mps2ToMicroG(config.rtk_outage_boundary_baz_sigma_mps2) -
+             60.0) < 1e-12,
+    "boundary ba_z sigma should parse");
+  ExpectTrue(
+    std::abs(offline_lc_minimal::Mps2ToMicroG(
+               config.rtk_outage_baz_continuity_break_delta_threshold_mps2) -
+             1100.0) < 1e-9,
+    "boundary ba_z continuity threshold should parse");
 
   config.rtk_outage_absolute_attitude_sigma_rad = 0.0;
   bool threw = false;
@@ -2244,6 +2380,26 @@ void TestRtkOutageRecoveryConfigValidation() {
     threw = std::string(exception.what()).find("RTK outage segmented batch") != std::string::npos;
   }
   ExpectTrue(threw, "negative segmented batch outage count should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_recovery_reference_min_fix_samples = 0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK outage boundary constraint settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive recovery min sample count should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_boundary_baz_sigma_mps2 = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK outage boundary constraint settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive boundary ba_z sigma should be rejected");
 }
 
 void TestInitialYawOverrideConfigValidation() {

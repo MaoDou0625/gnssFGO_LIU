@@ -586,6 +586,101 @@ void WriteRtkOutageBatchSegmentsCsv(
   }
 }
 
+void WriteRtkOutageRecoveryReferenceCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageRecoveryReferenceRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,outage_end_time_s,fit_start_time_s,fit_end_time_s,"
+       "valid_fix_sample_count,min_fix_sample_count,valid,reference_up_m,"
+       "reference_vz_mps,first_sample_time_s,last_sample_time_s,"
+       "first_sample_up_m,last_sample_up_m,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.outage_end_time_s << ','
+           << row.fit_start_time_s << ','
+           << row.fit_end_time_s << ','
+           << row.valid_fix_sample_count << ','
+           << row.min_fix_sample_count << ','
+           << (row.valid ? 1 : 0) << ','
+           << row.reference_up_m << ','
+           << row.reference_vz_mps << ','
+           << row.first_sample_time_s << ','
+           << row.last_sample_time_s << ','
+           << row.first_sample_up_m << ','
+           << row.last_sample_up_m << ','
+           << row.skip_reason << '\n';
+  }
+}
+
+void WriteRtkOutageBiasContinuityPolicyCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageBiasContinuityPolicyRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,boundary_role,ba_z_continuity_allowed,"
+       "overlaps_reestimate_segment,max_abs_detected_delta_ug,threshold_ug,"
+       "reset_reason\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.boundary_role << ','
+           << (row.ba_z_continuity_allowed ? 1 : 0) << ','
+           << (row.overlaps_reestimate_segment ? 1 : 0) << ','
+           << row.max_abs_detected_delta_ug << ','
+           << row.threshold_ug << ','
+           << row.reset_reason << '\n';
+  }
+}
+
+void WriteRtkOutageBoundaryDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RtkOutageBoundaryDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,boundary_role,source_type,target_state_index,target_time_s,"
+       "valid,up_factor_added,vz_factor_added,ba_z_factor_added,"
+       "reference_up_m,optimized_up_m,up_residual_m,up_sigma_m,"
+       "reference_vz_mps,optimized_vz_mps,vz_residual_mps,vz_sigma_mps,"
+       "reference_ba_z_ug,optimized_ba_z_ug,ba_z_residual_ug,ba_z_sigma_ug,"
+       "skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.boundary_role << ','
+           << row.source_type << ','
+           << row.target_state_index << ','
+           << row.target_time_s << ','
+           << (row.valid ? 1 : 0) << ','
+           << (row.up_factor_added ? 1 : 0) << ','
+           << (row.vz_factor_added ? 1 : 0) << ','
+           << (row.ba_z_factor_added ? 1 : 0) << ','
+           << row.reference_up_m << ','
+           << row.optimized_up_m << ','
+           << row.up_residual_m << ','
+           << row.up_sigma_m << ','
+           << row.reference_vz_mps << ','
+           << row.optimized_vz_mps << ','
+           << row.vz_residual_mps << ','
+           << row.vz_sigma_mps << ','
+           << row.reference_ba_z_ug << ','
+           << row.optimized_ba_z_ug << ','
+           << row.ba_z_residual_ug << ','
+           << row.ba_z_sigma_ug << ','
+           << row.skip_reason << '\n';
+  }
+}
+
 void WriteRtkOutageAttitudeHoldDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkOutageAttitudeHoldDiagnosticRow> &rows) {
