@@ -66,7 +66,8 @@ const RtkOutageWindowRow *FindSourceOutage(
 std::shared_ptr<const Stage2VelocityReference> SliceStage2ReferenceForSegment(
   const std::shared_ptr<const Stage2VelocityReference> &reference,
   const OfflineRunnerConfig &child_config,
-  const RtkOutageBatchSegmentRow &segment) {
+  const RtkOutageBatchSegmentRow &segment,
+  const double dynamic_start_fallback_s) {
   if (reference == nullptr) {
     return nullptr;
   }
@@ -135,7 +136,7 @@ std::shared_ptr<const Stage2VelocityReference> SliceStage2ReferenceForSegment(
   }
   const double dynamic_start_time_s = child_config.processing_start_time_s > 0.0
     ? child_config.processing_start_time_s
-    : segment.start_time_s;
+    : dynamic_start_fallback_s;
   const double dynamic_end_time_s = child_config.processing_end_time_s > 0.0
     ? child_config.processing_end_time_s
     : segment.end_time_s;
@@ -199,7 +200,11 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
     OfflineRunnerConfig child_config =
       MakeChildConfig(request_.config, segment, source_outage);
     std::shared_ptr<const Stage2VelocityReference> child_stage2_reference =
-      SliceStage2ReferenceForSegment(request_.stage2_reference, child_config, segment);
+      SliceStage2ReferenceForSegment(
+        request_.stage2_reference,
+        child_config,
+        segment,
+        request_.dynamic_start_time_s);
     OfflineRunResult child_result =
       request_.run_once(
         std::move(child_config),

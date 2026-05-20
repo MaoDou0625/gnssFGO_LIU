@@ -49,49 +49,39 @@ std::vector<double> CollectTrajectoryTimestamps(
   return timestamps;
 }
 
-std::optional<OfflineRunResult> TryRunSegmentedBatch(
-  const Stage2VelocityOptimizationRequest &request) {
+std::optional<OfflineRunResult> TryRunSegmentedStage2(
+  const Stage2VelocityOptimizationRequest &request,
+  const OfflineRunnerConfig &stage2_config,
+  std::shared_ptr<const Stage2VelocityReference> reference,
+  const OfflineRunResult &stage1_result) {
   if (!request.config.enable_rtk_outage_segmented_batch ||
-      !request.config.enable_rtk_outage_smoothing) {
-    return std::nullopt;
-  }
-
-  OfflineRunnerConfig planning_config = request.config;
-  planning_config.enable_stage2_velocity_optimization = false;
-  planning_config.enable_stage1_yaw_refinement = false;
-  planning_config.enable_rtk_outage_segmented_batch = false;
-  planning_config.enable_rtk_outage_causal_drift_reference = false;
-  planning_config.enable_rtk_outage_preoutage_vertical_fence = false;
-  planning_config.enable_rtk_vertical_lowpass_reference = false;
-
-  OfflineRunResult planning_result =
-    request.run_once(planning_config, nullptr, request.dataset);
-  if (planning_result.rtk_outage_windows.empty()) {
+      !request.config.enable_rtk_outage_smoothing ||
+      stage1_result.rtk_outage_windows.empty()) {
     return std::nullopt;
   }
 
   std::vector<double> state_timestamps =
-    CollectTrajectoryTimestamps(planning_result.trajectory);
+    CollectTrajectoryTimestamps(stage1_result.trajectory);
   if (state_timestamps.empty()) {
     throw std::runtime_error(
-      "segmented stage2 planning pass did not produce trajectory timestamps");
+      "global stage1 result did not produce trajectory timestamps for segmented stage2");
   }
 
   double processing_end_time_s =
-    planning_result.run_summary.processing_end_time_s;
+    stage1_result.run_summary.processing_end_time_s;
   if (!std::isfinite(processing_end_time_s) ||
-      processing_end_time_s <= planning_result.run_summary.dynamic_start_time_s) {
+      processing_end_time_s <= stage1_result.run_summary.dynamic_start_time_s) {
     processing_end_time_s = state_timestamps.back();
   }
 
   RtkOutageSegmentedBatchRunRequest segmented_request;
-  segmented_request.config = request.config;
+  segmented_request.config = stage2_config;
   segmented_request.dataset = request.dataset;
-  segmented_request.stage2_reference = nullptr;
-  segmented_request.outage_windows = planning_result.rtk_outage_windows;
+  segmented_request.stage2_reference = std::move(reference);
+  segmented_request.outage_windows = stage1_result.rtk_outage_windows;
   segmented_request.state_timestamps = std::move(state_timestamps);
   segmented_request.dynamic_start_time_s =
-    planning_result.run_summary.dynamic_start_time_s;
+    stage1_result.run_summary.dynamic_start_time_s;
   segmented_request.processing_end_time_s = processing_end_time_s;
   segmented_request.run_once = request.run_once;
   return RtkOutageSegmentedBatchRunner(std::move(segmented_request)).Run();
@@ -108,13 +98,10 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
     throw std::runtime_error("stage2 velocity optimization requires a run_once callback");
   }
 
-  if (auto segmented_result = TryRunSegmentedBatch(request_)) {
-    return std::move(*segmented_result);
-  }
-
   OfflineRunnerConfig stage1_config = request_.config;
   stage1_config.enable_stage2_velocity_optimization = false;
   stage1_config.enable_stage1_yaw_refinement = true;
+  stage1_config.enable_rtk_outage_segmented_batch = false;
   Stage1YawRefinementRequest stage1_request;
   stage1_request.config = stage1_config;
   stage1_request.dataset = request_.dataset;
@@ -138,6 +125,13 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
     stage2_config.enable_initial_yaw_override = true;
     stage2_config.initial_yaw_override_rad =
       stage1_result.run_summary.stage1_yaw_refinement_final_yaw_rad;
+  }
+
+  if (auto segmented_result =
+        TryRunSegmentedStage2(request_, stage2_config, reference, stage1_result)) {
+    CopyStage1Summary(stage1_result, *segmented_result);
+    segmented_result->run_summary.stage2_velocity_optimization_enabled = true;
+    return std::move(*segmented_result);
   }
 
   OfflineRunResult stage2_result =

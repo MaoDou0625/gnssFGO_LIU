@@ -410,8 +410,9 @@ void TestStage2PolicyDisablesRtkVelocityAndAttitudeReference() {
              "stage2 should enable graph-internal vehicle NHC");
 }
 
-void TestSegmentedStage2RunsIndependentChildStage2Solves() {
+void TestSegmentedStage2UsesGlobalStage1ReferenceForChildSolves() {
   struct CallRecord {
+    bool enable_stage1_yaw_refinement = false;
     bool enable_stage2_velocity_optimization = false;
     bool enable_rtk_outage_segmented_batch = false;
     bool enable_attitude_reference_constraint = false;
@@ -436,6 +437,7 @@ void TestSegmentedStage2RunsIndependentChildStage2Solves() {
                          std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> reference,
                          offline_lc_minimal::DataSet) {
     calls.push_back(CallRecord{
+      run_config.enable_stage1_yaw_refinement,
       run_config.enable_stage2_velocity_optimization,
       run_config.enable_rtk_outage_segmented_batch,
       run_config.enable_attitude_reference_constraint,
@@ -466,23 +468,25 @@ void TestSegmentedStage2RunsIndependentChildStage2Solves() {
     offline_lc_minimal::Stage2VelocityOptimizationRunner(std::move(request)).Run();
 
   ExpectTrue(calls.size() == 4U,
-             "segmented stage2 should make one planning pass plus three child solves");
+             "segmented stage2 should make one global stage1 pass plus three child solves");
+  ExpectTrue(!calls[0].enable_stage1_yaw_refinement,
+             "global stage1 run_once should already be inside the yaw refinement runner");
   ExpectTrue(!calls[0].enable_stage2_velocity_optimization,
-             "planning pass should disable stage2 optimization");
+             "global stage1 pass should disable stage2 optimization");
   ExpectTrue(!calls[0].enable_rtk_outage_segmented_batch,
-             "planning pass should disable segmented recursion");
+             "global stage1 pass should disable segmented recursion");
   ExpectTrue(!calls[0].has_stage2_reference,
-             "planning pass should not receive a full stage2 reference");
+             "global stage1 pass should not receive a stage2 reference");
 
   for (std::size_t index = 1U; index < calls.size(); ++index) {
+    ExpectTrue(!calls[index].enable_stage1_yaw_refinement,
+               "segment child should reuse the global stage1 reference");
     ExpectTrue(calls[index].enable_stage2_velocity_optimization,
-               "segment child should run a complete stage2 solve");
+               "segment child should run a stage2 solve");
     ExpectTrue(!calls[index].enable_rtk_outage_segmented_batch,
                "segment child should disable segmented recursion");
-    ExpectTrue(calls[index].enable_attitude_reference_constraint,
-               "segment child should preserve attitude reference for its own stage1 solve");
-    ExpectTrue(!calls[index].has_stage2_reference,
-               "segment child should not use a sliced full-stage reference");
+    ExpectTrue(calls[index].has_stage2_reference,
+               "segment child should use the sliced global stage1 reference");
   }
   ExpectNear(calls[1].processing_start_time_s, 0.0, 1e-12,
              "pre child start should match the prefix run");
@@ -547,7 +551,7 @@ int main() {
     RunTest("TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors", TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors);
     RunTest("TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma", TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma);
     RunTest("TestStage2PolicyDisablesRtkVelocityAndAttitudeReference", TestStage2PolicyDisablesRtkVelocityAndAttitudeReference);
-    RunTest("TestSegmentedStage2RunsIndependentChildStage2Solves", TestSegmentedStage2RunsIndependentChildStage2Solves);
+    RunTest("TestSegmentedStage2UsesGlobalStage1ReferenceForChildSolves", TestSegmentedStage2UsesGlobalStage1ReferenceForChildSolves);
     RunTest("TestStage2ConfigParsingAndValidation", TestStage2ConfigParsingAndValidation);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
