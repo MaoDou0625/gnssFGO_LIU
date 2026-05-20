@@ -17,10 +17,31 @@ namespace {
 
 constexpr double kTimeEpsilonS = 1.0e-9;
 
-OfflineRunnerConfig MakeChildConfig(
+bool IsStandalonePrefixSegment(const RtkOutageBatchSegmentRow &segment) {
+  return segment.segment_role == "PRE_RTK_VALID";
+}
+
+OfflineRunnerConfig MakeStandalonePrefixChildConfig(
   OfflineRunnerConfig config,
+  const RtkOutageWindowRow *source_outage) {
+  config.enable_rtk_outage_segmented_batch = false;
+  config.processing_start_time_s = 0.0;
+  if (source_outage != nullptr) {
+    config.processing_end_time_s = source_outage->start_time_s;
+  }
+  return config;
+}
+
+OfflineRunnerConfig MakeChildConfig(
+  OfflineRunnerConfig stage_config,
+  const OfflineRunnerConfig &base_config,
   const RtkOutageBatchSegmentRow &segment,
   const RtkOutageWindowRow *source_outage) {
+  if (IsStandalonePrefixSegment(segment)) {
+    return MakeStandalonePrefixChildConfig(base_config, source_outage);
+  }
+
+  OfflineRunnerConfig config = stage_config;
   config.enable_rtk_outage_segmented_batch = false;
   config.enable_rtk_outage_causal_drift_reference = false;
   config.enable_rtk_outage_preoutage_vertical_fence = false;
@@ -28,12 +49,7 @@ OfflineRunnerConfig MakeChildConfig(
   config.processing_start_time_s = segment.start_time_s;
   config.processing_end_time_s = segment.end_time_s;
 
-  if (segment.segment_role == "PRE_RTK_VALID") {
-    config.processing_start_time_s = 0.0;
-    if (source_outage != nullptr) {
-      config.processing_end_time_s = source_outage->start_time_s;
-    }
-  } else if (segment.segment_role == "RTK_OUTAGE") {
+  if (segment.segment_role == "RTK_OUTAGE") {
     if (source_outage != nullptr) {
       config.processing_start_time_s = 0.0;
       config.processing_end_time_s = source_outage->end_time_s;
@@ -198,13 +214,15 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
     const RtkOutageWindowRow *source_outage =
       FindSourceOutage(request_.outage_windows, segment);
     OfflineRunnerConfig child_config =
-      MakeChildConfig(request_.config, segment, source_outage);
+      MakeChildConfig(request_.config, request_.base_config, segment, source_outage);
     std::shared_ptr<const Stage2VelocityReference> child_stage2_reference =
-      SliceStage2ReferenceForSegment(
-        request_.stage2_reference,
-        child_config,
-        segment,
-        request_.dynamic_start_time_s);
+      IsStandalonePrefixSegment(segment)
+        ? nullptr
+        : SliceStage2ReferenceForSegment(
+            request_.stage2_reference,
+            child_config,
+            segment,
+            request_.dynamic_start_time_s);
     OfflineRunResult child_result =
       request_.run_once(
         std::move(child_config),

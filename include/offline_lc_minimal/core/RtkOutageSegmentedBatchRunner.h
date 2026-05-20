@@ -16,6 +16,7 @@ using SegmentedBatchRunOnce = std::function<OfflineRunResult(
   DataSet)>;
 
 struct RtkOutageSegmentedBatchRunRequest {
+  OfflineRunnerConfig base_config;
   OfflineRunnerConfig config;
   DataSet dataset;
   std::shared_ptr<const Stage2VelocityReference> stage2_reference;

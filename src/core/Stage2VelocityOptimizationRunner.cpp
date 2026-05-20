@@ -75,6 +75,7 @@ std::optional<OfflineRunResult> TryRunSegmentedStage2(
   }
 
   RtkOutageSegmentedBatchRunRequest segmented_request;
+  segmented_request.base_config = request.config;
   segmented_request.config = stage2_config;
   segmented_request.dataset = request.dataset;
   segmented_request.stage2_reference = std::move(reference);
@@ -129,7 +130,6 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
 
   if (auto segmented_result =
         TryRunSegmentedStage2(request_, stage2_config, reference, stage1_result)) {
-    CopyStage1Summary(stage1_result, *segmented_result);
     segmented_result->run_summary.stage2_velocity_optimization_enabled = true;
     return std::move(*segmented_result);
   }

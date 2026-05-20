@@ -1033,6 +1033,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       config_.enable_rtk_outage_smoothing &&
       !planned_rtk_outage_windows.empty()) {
     RtkOutageSegmentedBatchRunRequest segmented_request;
+    segmented_request.base_config =
+      stage2_reference_ != nullptr && stage2_reference_->source_config != nullptr
+        ? *stage2_reference_->source_config
+        : config_;
     segmented_request.config = config_;
     segmented_request.dataset = dataset;
     segmented_request.stage2_reference = stage2_reference_;

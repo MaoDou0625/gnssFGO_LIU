@@ -476,7 +476,7 @@ void TestStage2PolicyDisablesRtkVelocityAndAttitudeReference() {
              "stage2 should enable graph-internal vehicle NHC");
 }
 
-void TestSegmentedStage2UsesGlobalStage1ReferenceForChildSolves() {
+void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
   struct CallRecord {
     bool enable_stage1_yaw_refinement = false;
     bool enable_stage2_velocity_optimization = false;
@@ -544,15 +544,24 @@ void TestSegmentedStage2UsesGlobalStage1ReferenceForChildSolves() {
   ExpectTrue(!calls[0].has_stage2_reference,
              "global stage1 pass should not receive a stage2 reference");
 
-  for (std::size_t index = 1U; index < calls.size(); ++index) {
+  ExpectTrue(calls[1].enable_stage1_yaw_refinement,
+             "pre segment should run as a standalone cutoff solve");
+  ExpectTrue(calls[1].enable_stage2_velocity_optimization,
+             "pre segment should keep the base stage2 route enabled");
+  ExpectTrue(!calls[1].enable_rtk_outage_segmented_batch,
+             "pre segment should disable segmented recursion");
+  ExpectTrue(!calls[1].has_stage2_reference,
+             "pre segment should not receive the global stage1 reference");
+
+  for (std::size_t index = 2U; index < calls.size(); ++index) {
     ExpectTrue(!calls[index].enable_stage1_yaw_refinement,
-               "segment child should reuse the global stage1 reference");
+               "non-pre segment child should reuse the global stage1 reference");
     ExpectTrue(calls[index].enable_stage2_velocity_optimization,
-               "segment child should run a stage2 solve");
+               "non-pre segment child should run a stage2 solve");
     ExpectTrue(!calls[index].enable_rtk_outage_segmented_batch,
-               "segment child should disable segmented recursion");
+               "non-pre segment child should disable segmented recursion");
     ExpectTrue(calls[index].has_stage2_reference,
-               "segment child should use the sliced global stage1 reference");
+               "non-pre segment child should use the sliced global stage1 reference");
   }
   ExpectNear(calls[1].processing_start_time_s, 0.0, 1e-12,
              "pre child start should match the prefix run");
@@ -620,7 +629,9 @@ int main() {
     RunTest("TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors", TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors);
     RunTest("TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma", TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma);
     RunTest("TestStage2PolicyDisablesRtkVelocityAndAttitudeReference", TestStage2PolicyDisablesRtkVelocityAndAttitudeReference);
-    RunTest("TestSegmentedStage2UsesGlobalStage1ReferenceForChildSolves", TestSegmentedStage2UsesGlobalStage1ReferenceForChildSolves);
+    RunTest(
+      "TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren",
+      TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren);
     RunTest("TestStage2ConfigParsingAndValidation", TestStage2ConfigParsingAndValidation);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
