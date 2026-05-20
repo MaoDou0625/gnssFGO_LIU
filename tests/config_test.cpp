@@ -883,11 +883,22 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
     "phase32 relative yaw reference sigma should load");
 }
 
-void TestDefaultOfflineConfigUsesPhase32RtkOutageSmoother() {
+void TestDefaultOfflineConfigUsesV14SegmentedStage2() {
   const auto config = offline_lc_minimal::LoadConfigFile(
     std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) + "/config/default_offline.cfg",
     offline_lc_minimal::DefaultConfig());
+  ExpectTrue(config.enable_stage1_yaw_refinement, "default config should refine Stage1 yaw");
+  ExpectTrue(config.enable_stage2_velocity_optimization, "default config should enable segmented Stage2");
+  ExpectTrue(
+    config.enable_stage2_vehicle_nhc_constraint,
+    "default config should enable Stage2 vehicle NHC constraints");
   ExpectTrue(config.enable_rtk_vertical_drift_reference, "default config should use RTK drift reference");
+  ExpectTrue(
+    config.enable_rtk_vertical_drift_gate_weighting,
+    "default config should use gate-aware RTK drift weighting");
+  ExpectTrue(
+    !config.enable_rtk_vertical_lowpass_reference,
+    "default config should keep lowpass RTK reference disabled");
   ExpectTrue(
     config.enable_rtk_vertical_drift_outage_segmentation,
     "default config should use outage-aware RTK drift segmentation");
@@ -924,7 +935,7 @@ void TestDefaultOfflineConfigUsesPhase32RtkOutageSmoother() {
   ExpectTrue(config.enable_rtk_outage_velocity_delta_3d, "default config should enable outage 3D velocity delta");
   ExpectTrue(
     std::abs(config.rtk_outage_velocity_delta_3d_sigma_mps - 0.20) < 1e-15,
-    "default outage 3D velocity sigma should match phase32");
+    "default outage 3D velocity sigma should match v1.4 default");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
@@ -2365,8 +2376,8 @@ int main() {
       "TestPhase32RtkOutageSmootherConfigLoads",
       TestPhase32RtkOutageSmootherConfigLoads);
     RunTest(
-      "TestDefaultOfflineConfigUsesPhase32RtkOutageSmoother",
-      TestDefaultOfflineConfigUsesPhase32RtkOutageSmoother);
+      "TestDefaultOfflineConfigUsesV14SegmentedStage2",
+      TestDefaultOfflineConfigUsesV14SegmentedStage2);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
