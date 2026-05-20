@@ -74,6 +74,8 @@ add_library(offline_lc_minimal_lib
   src/core/InitialStaticBiasConstraintBuilder.cpp
   src/core/InitialStaticPositionConstraintBuilder.cpp
   src/core/InitialStaticRtkHeightConstraintBuilder.cpp
+  src/core/LateStaticDetector.cpp
+  src/core/LateStaticVerticalConstraintBuilder.cpp
   src/core/RunDiagnosticsBuilder.cpp
   src/core/OptimizationStagePolicy.cpp
   src/core/RtkOutageInitialValueSmoother.cpp
@@ -217,6 +219,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     tests/rtk_vertical_drift_reference_test.cpp
   )
 
+  add_executable(late_static_detector_test
+    tests/late_static_detector_test.cpp
+  )
+
   add_executable(rtk_velocity_constraint_test
     tests/rtk_velocity_constraint_test.cpp
   )
@@ -298,6 +304,11 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(rtk_vertical_drift_reference_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(late_static_detector_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -396,6 +407,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       rtk_vertical_drift_reference_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      late_static_detector_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -516,6 +533,13 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         ${CMAKE_COMMAND} -E env
         "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
         $<TARGET_FILE:rtk_vertical_drift_reference_test>
+    )
+    add_test(
+      NAME late_static_detector_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:late_static_detector_test>
     )
     add_test(
       NAME rtk_velocity_constraint_test

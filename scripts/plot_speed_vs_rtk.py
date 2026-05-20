@@ -58,6 +58,14 @@ def safe_float(value: str) -> float:
     return parsed
 
 
+def iter_gnss_rows(path: Path):
+    with path.open("r", encoding="utf-8", newline="") as file:
+        for line in file:
+            raw = line.strip().split()
+            if raw:
+                yield raw
+
+
 def ecef_from_llh(lat_rad: float, lon_rad: float, h_m: float) -> tuple[float, float, float]:
     sin_lat = math.sin(lat_rad)
     cos_lat = math.cos(lat_rad)
@@ -104,15 +112,11 @@ def enu_from_llh(
 
 
 def choose_origin(gnss_path: Path, trajectory_path: Path) -> tuple[float, float, float]:
-    with gnss_path.open("r", encoding="utf-8", newline="") as file:
-        reader = csv.reader(file, delimiter="\t")
-        for raw in reader:
-            if not raw:
-                continue
-            try:
-                return safe_float(raw[1]), safe_float(raw[2]), safe_float(raw[3])
-            except (IndexError, ValueError):
-                continue
+    for raw in iter_gnss_rows(gnss_path):
+        try:
+            return safe_float(raw[1]), safe_float(raw[2]), safe_float(raw[3])
+        except (IndexError, ValueError):
+            continue
 
     with trajectory_path.open("r", encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file)

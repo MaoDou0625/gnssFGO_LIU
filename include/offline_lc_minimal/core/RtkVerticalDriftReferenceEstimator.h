@@ -17,6 +17,7 @@ struct RtkVerticalDriftReferenceEstimateRequest {
   const OfflineRunnerConfig *config = nullptr;
   const std::vector<GnssSolutionSample> *gnss_samples = nullptr;
   const std::vector<RtkOutageWindowRow> *rtk_outage_windows = nullptr;
+  const std::vector<LateStaticWindowRow> *late_static_windows = nullptr;
   const std::vector<RtkOutageCausalNavReferenceRow> *causal_nav_reference_profile = nullptr;
   const gtsam::Values *optimized_values = nullptr;
   double causal_nav_reference_end_time_s = std::numeric_limits<double>::quiet_NaN();

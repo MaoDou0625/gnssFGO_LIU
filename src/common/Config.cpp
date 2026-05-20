@@ -267,6 +267,24 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.stage1_outage_body_y_huber_k <= 0.0) {
     throw std::runtime_error("stage1 outage body-y envelope settings must be positive and finite");
   }
+  if (!std::isfinite(config.late_static_window_s) ||
+      !std::isfinite(config.late_static_stride_s) ||
+      !std::isfinite(config.late_static_min_duration_s) ||
+      !std::isfinite(config.late_static_merge_gap_s) ||
+      !std::isfinite(config.late_static_vz_sigma_mps) ||
+      !std::isfinite(config.late_static_up_sigma_m) ||
+      config.late_static_window_s <= 0.0 ||
+      config.late_static_stride_s <= 0.0 ||
+      config.late_static_min_duration_s <= 0.0 ||
+      config.late_static_min_rtkfix_samples <= 1 ||
+      config.late_static_merge_gap_s < 0.0 ||
+      config.late_static_vz_sigma_mps <= 0.0 ||
+      config.late_static_up_sigma_m <= 0.0) {
+    throw std::runtime_error("late-static detection settings must be positive and finite");
+  }
+  if (Lowercase(config.late_static_threshold_method) != "log_otsu") {
+    throw std::runtime_error("late_static_threshold_method must be log_otsu");
+  }
   if (!std::isfinite(config.stage2_attitude_hold_sigma_rad) ||
       !std::isfinite(config.stage2_horizontal_position_hold_sigma_m) ||
       !std::isfinite(config.stage2_horizontal_velocity_hold_sigma_mps) ||
@@ -868,6 +886,28 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.stage1_outage_body_y_max_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "stage1_outage_body_y_huber_k") {
     config.stage1_outage_body_y_huber_k = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_late_static_detection") {
+    config.enable_late_static_detection = ParseBool(normalized_value);
+  } else if (normalized_key == "late_static_window_s") {
+    config.late_static_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "late_static_stride_s") {
+    config.late_static_stride_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "late_static_min_duration_s") {
+    config.late_static_min_duration_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "late_static_threshold_method") {
+    config.late_static_threshold_method = StripQuotes(std::string(normalized_value));
+  } else if (normalized_key == "late_static_min_rtkfix_samples") {
+    config.late_static_min_rtkfix_samples = ParseInt(normalized_value);
+  } else if (normalized_key == "late_static_merge_gap_s") {
+    config.late_static_merge_gap_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "late_static_exclude_initial_static") {
+    config.late_static_exclude_initial_static = ParseBool(normalized_value);
+  } else if (normalized_key == "late_static_exclude_rtk_outage") {
+    config.late_static_exclude_rtk_outage = ParseBool(normalized_value);
+  } else if (normalized_key == "late_static_vz_sigma_mps") {
+    config.late_static_vz_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "late_static_up_sigma_m") {
+    config.late_static_up_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_stage2_velocity_optimization") {
     config.enable_stage2_velocity_optimization = ParseBool(normalized_value);
   } else if (normalized_key == "enable_stage2_vehicle_nhc_constraint") {
@@ -1465,6 +1505,20 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "stage1_outage_body_y_max_sigma_mps="
     << config.stage1_outage_body_y_max_sigma_mps << '\n'
     << "stage1_outage_body_y_huber_k=" << config.stage1_outage_body_y_huber_k << '\n'
+    << "enable_late_static_detection="
+    << (config.enable_late_static_detection ? "true" : "false") << '\n'
+    << "late_static_window_s=" << config.late_static_window_s << '\n'
+    << "late_static_stride_s=" << config.late_static_stride_s << '\n'
+    << "late_static_min_duration_s=" << config.late_static_min_duration_s << '\n'
+    << "late_static_threshold_method=" << config.late_static_threshold_method << '\n'
+    << "late_static_min_rtkfix_samples=" << config.late_static_min_rtkfix_samples << '\n'
+    << "late_static_merge_gap_s=" << config.late_static_merge_gap_s << '\n'
+    << "late_static_exclude_initial_static="
+    << (config.late_static_exclude_initial_static ? "true" : "false") << '\n'
+    << "late_static_exclude_rtk_outage="
+    << (config.late_static_exclude_rtk_outage ? "true" : "false") << '\n'
+    << "late_static_vz_sigma_mps=" << config.late_static_vz_sigma_mps << '\n'
+    << "late_static_up_sigma_m=" << config.late_static_up_sigma_m << '\n'
     << "enable_stage2_velocity_optimization="
     << (config.enable_stage2_velocity_optimization ? "true" : "false") << '\n'
     << "enable_stage2_vehicle_nhc_constraint="

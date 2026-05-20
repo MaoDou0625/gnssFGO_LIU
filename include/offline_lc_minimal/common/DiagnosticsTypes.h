@@ -200,6 +200,7 @@ struct RtkVerticalDriftReferenceDiagnosticRow {
   double raw_rtk_up_m = std::numeric_limits<double>::quiet_NaN();
   double nav_reference_up_m = std::numeric_limits<double>::quiet_NaN();
   std::string nav_reference_source = "UNSET";
+  std::string static_window_source = "NONE";
   double causal_reference_up_m = std::numeric_limits<double>::quiet_NaN();
   double full_reference_up_m = std::numeric_limits<double>::quiet_NaN();
   double full_minus_causal_nav_reference_m = std::numeric_limits<double>::quiet_NaN();
@@ -227,6 +228,70 @@ struct RtkVerticalDriftReferenceDiagnosticRow {
   bool static_window_flag = false;
   bool valid = false;
   std::string skip_reason = "UNSET";
+};
+
+struct LateStaticFeatureDiagnosticRow {
+  std::size_t window_index = 0;
+  double window_start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double window_end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double window_center_time_s = std::numeric_limits<double>::quiet_NaN();
+  std::size_t rtkfix_sample_count = 0;
+  std::size_t imu_sample_count = 0;
+  bool overlaps_initial_static = false;
+  bool overlaps_rtk_outage = false;
+  bool excluded_from_detection = false;
+  bool valid_features = false;
+  double rtk_horizontal_speed_rms_mps = std::numeric_limits<double>::quiet_NaN();
+  double rtk_horizontal_range_m = std::numeric_limits<double>::quiet_NaN();
+  double rtk_up_median_m = std::numeric_limits<double>::quiet_NaN();
+  double rtk_up_range_m = std::numeric_limits<double>::quiet_NaN();
+  double imu_gyro_norm_rms_radps = std::numeric_limits<double>::quiet_NaN();
+  double imu_gyro_norm_p95_radps = std::numeric_limits<double>::quiet_NaN();
+  double imu_acc_norm_mean_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double imu_acc_norm_std_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double log_rtk_horizontal_speed_rms = std::numeric_limits<double>::quiet_NaN();
+  double log_rtk_horizontal_range = std::numeric_limits<double>::quiet_NaN();
+  double log_imu_gyro_norm_rms = std::numeric_limits<double>::quiet_NaN();
+  double log_imu_gyro_norm_p95 = std::numeric_limits<double>::quiet_NaN();
+  bool pass_rtk_speed_rms = false;
+  bool pass_rtk_range = false;
+  bool pass_gyro_rms = false;
+  bool pass_gyro_p95 = false;
+  bool pass_all = false;
+  std::string skip_reason = "UNSET";
+};
+
+struct LateStaticThresholdDiagnosticRow {
+  std::string feature_name = "UNSET";
+  std::string method = "UNSET";
+  bool valid = false;
+  double threshold_value = std::numeric_limits<double>::quiet_NaN();
+  double log_threshold_value = std::numeric_limits<double>::quiet_NaN();
+  std::size_t sample_count = 0;
+  std::size_t static_side_count = 0;
+  std::size_t dynamic_side_count = 0;
+  double separation_score = std::numeric_limits<double>::quiet_NaN();
+  std::string skip_reason = "UNSET";
+};
+
+struct LateStaticWindowRow {
+  std::size_t window_index = 0;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double duration_s = std::numeric_limits<double>::quiet_NaN();
+  std::size_t feature_window_count = 0;
+  bool valid = false;
+  double rtk_median_up_m = std::numeric_limits<double>::quiet_NaN();
+  double rtk_up_range_m = std::numeric_limits<double>::quiet_NaN();
+  double vz_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double up_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  std::size_t vz_factor_count = 0;
+  std::size_t up_factor_count = 0;
+  double max_abs_vz_residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double max_abs_up_residual_m = std::numeric_limits<double>::quiet_NaN();
+  std::string skip_reason = "UNSET";
+  std::vector<std::size_t> vz_factor_state_indices;
+  std::vector<std::size_t> up_factor_state_indices;
 };
 
 struct RtkOutageCausalNavReferenceRow {

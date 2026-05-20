@@ -443,7 +443,7 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
   stream << std::setprecision(17);
   stream
     << "sample_index,time_s,raw_rtk_up_m,nav_reference_up_m,nav_reference_source,"
-       "causal_reference_up_m,full_reference_up_m,full_minus_causal_nav_reference_m,"
+       "static_window_source,causal_reference_up_m,full_reference_up_m,full_minus_causal_nav_reference_m,"
        "causal_reference_boundary_time_s,residual_m,constant_bias_m,"
        "drift_estimate_m,corrected_center_up_m,lowpass_center_up_m,lowpass_delta_m,"
        "lowpass_cutoff_hz,white_residual_m,gate_half_width_m,gate_observation_m,"
@@ -456,6 +456,7 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
            << row.raw_rtk_up_m << ','
            << row.nav_reference_up_m << ','
            << row.nav_reference_source << ','
+           << row.static_window_source << ','
            << row.causal_reference_up_m << ','
            << row.full_reference_up_m << ','
            << row.full_minus_causal_nav_reference_m << ','
@@ -482,6 +483,114 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
            << (row.lowpass_applied ? 1 : 0) << ','
            << (row.static_window_flag ? 1 : 0) << ','
            << (row.valid ? 1 : 0) << ','
+           << row.skip_reason << '\n';
+  }
+}
+
+void WriteLateStaticFeatureDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<LateStaticFeatureDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,window_start_time_s,window_end_time_s,window_center_time_s,"
+       "rtkfix_sample_count,imu_sample_count,overlaps_initial_static,overlaps_rtk_outage,"
+       "excluded_from_detection,valid_features,rtk_horizontal_speed_rms_mps,"
+       "rtk_horizontal_range_m,rtk_up_median_m,rtk_up_range_m,"
+       "imu_gyro_norm_rms_radps,imu_gyro_norm_p95_radps,"
+       "imu_acc_norm_mean_mps2,imu_acc_norm_std_mps2,"
+       "log_rtk_horizontal_speed_rms,log_rtk_horizontal_range,"
+       "log_imu_gyro_norm_rms,log_imu_gyro_norm_p95,"
+       "pass_rtk_speed_rms,pass_rtk_range,pass_gyro_rms,pass_gyro_p95,"
+       "pass_all,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.window_start_time_s << ','
+           << row.window_end_time_s << ','
+           << row.window_center_time_s << ','
+           << row.rtkfix_sample_count << ','
+           << row.imu_sample_count << ','
+           << (row.overlaps_initial_static ? 1 : 0) << ','
+           << (row.overlaps_rtk_outage ? 1 : 0) << ','
+           << (row.excluded_from_detection ? 1 : 0) << ','
+           << (row.valid_features ? 1 : 0) << ','
+           << row.rtk_horizontal_speed_rms_mps << ','
+           << row.rtk_horizontal_range_m << ','
+           << row.rtk_up_median_m << ','
+           << row.rtk_up_range_m << ','
+           << row.imu_gyro_norm_rms_radps << ','
+           << row.imu_gyro_norm_p95_radps << ','
+           << row.imu_acc_norm_mean_mps2 << ','
+           << row.imu_acc_norm_std_mps2 << ','
+           << row.log_rtk_horizontal_speed_rms << ','
+           << row.log_rtk_horizontal_range << ','
+           << row.log_imu_gyro_norm_rms << ','
+           << row.log_imu_gyro_norm_p95 << ','
+           << (row.pass_rtk_speed_rms ? 1 : 0) << ','
+           << (row.pass_rtk_range ? 1 : 0) << ','
+           << (row.pass_gyro_rms ? 1 : 0) << ','
+           << (row.pass_gyro_p95 ? 1 : 0) << ','
+           << (row.pass_all ? 1 : 0) << ','
+           << row.skip_reason << '\n';
+  }
+}
+
+void WriteLateStaticThresholdDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<LateStaticThresholdDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "feature_name,method,valid,threshold_value,log_threshold_value,"
+       "sample_count,static_side_count,dynamic_side_count,separation_score,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.feature_name << ','
+           << row.method << ','
+           << (row.valid ? 1 : 0) << ','
+           << row.threshold_value << ','
+           << row.log_threshold_value << ','
+           << row.sample_count << ','
+           << row.static_side_count << ','
+           << row.dynamic_side_count << ','
+           << row.separation_score << ','
+           << row.skip_reason << '\n';
+  }
+}
+
+void WriteLateStaticWindowsCsv(
+  const std::filesystem::path &path,
+  const std::vector<LateStaticWindowRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,start_time_s,end_time_s,duration_s,feature_window_count,valid,"
+       "rtk_median_up_m,rtk_up_range_m,vz_sigma_mps,up_sigma_m,"
+       "vz_factor_count,up_factor_count,max_abs_vz_residual_mps,"
+       "max_abs_up_residual_m,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.duration_s << ','
+           << row.feature_window_count << ','
+           << (row.valid ? 1 : 0) << ','
+           << row.rtk_median_up_m << ','
+           << row.rtk_up_range_m << ','
+           << row.vz_sigma_mps << ','
+           << row.up_sigma_m << ','
+           << row.vz_factor_count << ','
+           << row.up_factor_count << ','
+           << row.max_abs_vz_residual_mps << ','
+           << row.max_abs_up_residual_m << ','
            << row.skip_reason << '\n';
   }
 }

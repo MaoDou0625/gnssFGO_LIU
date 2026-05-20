@@ -54,6 +54,18 @@ void WriteRtkVerticalDriftReferenceDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<RtkVerticalDriftReferenceDiagnosticRow> &rows);
 
+void WriteLateStaticFeatureDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<LateStaticFeatureDiagnosticRow> &rows);
+
+void WriteLateStaticThresholdDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<LateStaticThresholdDiagnosticRow> &rows);
+
+void WriteLateStaticWindowsCsv(
+  const std::filesystem::path &path,
+  const std::vector<LateStaticWindowRow> &rows);
+
 void WriteRtkOutageCausalNavReferenceCsv(
   const std::filesystem::path &path,
   const std::vector<RtkOutageCausalNavReferenceRow> &rows);

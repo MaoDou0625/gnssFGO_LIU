@@ -89,6 +89,21 @@ void ResultWriter::WriteOutputs(
       output_path / "rtk_vertical_drift_reference_diagnostics.csv",
       result.rtk_vertical_drift_reference_diagnostics);
   }
+  if (!result.late_static_feature_diagnostics.empty()) {
+    WriteLateStaticFeatureDiagnosticsCsv(
+      output_path / "late_static_feature_diagnostics.csv",
+      result.late_static_feature_diagnostics);
+  }
+  if (!result.late_static_threshold_diagnostics.empty()) {
+    WriteLateStaticThresholdDiagnosticsCsv(
+      output_path / "late_static_threshold_diagnostics.csv",
+      result.late_static_threshold_diagnostics);
+  }
+  if (!result.late_static_windows.empty()) {
+    WriteLateStaticWindowsCsv(
+      output_path / "late_static_windows.csv",
+      result.late_static_windows);
+  }
   if (!result.rtk_outage_causal_nav_reference_diagnostics.empty()) {
     WriteRtkOutageCausalNavReferenceCsv(
       output_path / "rtk_outage_causal_nav_reference.csv",

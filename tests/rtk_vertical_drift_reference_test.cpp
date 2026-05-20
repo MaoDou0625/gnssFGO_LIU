@@ -460,6 +460,48 @@ void TestMissingCausalReferenceDoesNotFallBackToFullBeforeBoundary() {
     "pre-outage missing causal reference should not fall back to full optimized state");
 }
 
+void TestLateStaticReferenceOverridesFullOptimizedReference() {
+  offline_lc_minimal::OfflineRunnerConfig config;
+  config.enable_rtk_vertical_drift_gate_weighting = false;
+  config.rtk_vertical_drift_max_abs_correction_m = 10.0;
+  config.rtk_vertical_drift_huber_sigma_m = 10.0;
+
+  const auto samples = MakeStaticSamples({1.0, 1.0, 1.0, 1.0, 1.0});
+  const gtsam::Values values = MakeConstantUpPoseValues(samples.size(), 10.0);
+  std::vector<offline_lc_minimal::LateStaticWindowRow> late_static_windows(1U);
+  late_static_windows.front().start_time_s = 1.0;
+  late_static_windows.front().end_time_s = 3.0;
+  late_static_windows.front().valid = true;
+  late_static_windows.front().rtk_median_up_m = 1.0;
+  late_static_windows.front().skip_reason = "OK";
+
+  auto request = MakeDynamicRequest(config, samples, values);
+  request.late_static_windows = &late_static_windows;
+  const auto result =
+    offline_lc_minimal::RtkVerticalDriftReferenceEstimator(std::move(request)).Estimate(nullptr);
+
+  ExpectTrue(result.profile[2U].valid, "late-static row should be valid");
+  ExpectNear(
+    result.profile[2U].nav_reference_up_m,
+    1.0,
+    1.0e-12,
+    "late-static row should use RTK median static reference");
+  ExpectTrue(
+    result.profile[2U].nav_reference_source == "LATE_STATIC_RTK_REFERENCE",
+    "late-static row should report late-static reference source");
+  ExpectTrue(
+    result.profile[2U].static_window_flag,
+    "late-static row should be marked static");
+  ExpectTrue(
+    result.profile[2U].static_window_source == "LATE_STATIC",
+    "late-static row should record static source");
+  ExpectNear(
+    result.profile[4U].nav_reference_up_m,
+    10.0,
+    1.0e-12,
+    "non-static row should still use full optimized reference");
+}
+
 void TestGateWeightFormula() {
   offline_lc_minimal::OfflineRunnerConfig config;
   config.vertical_envelope_min_half_width_m = 0.03;
@@ -630,7 +672,7 @@ void TestCausalDiagnosticsWriterIncludesColumns() {
   stream.close();
   std::filesystem::remove(path);
   ExpectTrue(
-    header.find("nav_reference_source,causal_reference_up_m,full_reference_up_m,"
+    header.find("nav_reference_source,static_window_source,causal_reference_up_m,full_reference_up_m,"
                 "full_minus_causal_nav_reference_m,causal_reference_boundary_time_s") !=
       std::string::npos,
     "CSV writer should include causal reference diagnostics");
@@ -664,6 +706,9 @@ int main() {
     RunTest(
       "TestMissingCausalReferenceDoesNotFallBackToFullBeforeBoundary",
       TestMissingCausalReferenceDoesNotFallBackToFullBeforeBoundary);
+    RunTest(
+      "TestLateStaticReferenceOverridesFullOptimizedReference",
+      TestLateStaticReferenceOverridesFullOptimizedReference);
     RunTest("TestGateWeightFormula", TestGateWeightFormula);
     RunTest("TestGateWeightFloor", TestGateWeightFloor);
     RunTest("TestEstimatorWritesGateDiagnostics", TestEstimatorWritesGateDiagnostics);

@@ -2438,6 +2438,17 @@ void TestStage1YawRefinementConfigValidation() {
   offline_lc_minimal::OverrideConfigField(config, "stage1_outage_body_y_min_sigma_mps", "0.02");
   offline_lc_minimal::OverrideConfigField(config, "stage1_outage_body_y_max_sigma_mps", "0.09");
   offline_lc_minimal::OverrideConfigField(config, "stage1_outage_body_y_huber_k", "1.6");
+  offline_lc_minimal::OverrideConfigField(config, "enable_late_static_detection", "true");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_window_s", "6.0");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_stride_s", "0.75");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_min_duration_s", "9.0");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_threshold_method", "log_otsu");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_min_rtkfix_samples", "12");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_merge_gap_s", "1.5");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_exclude_initial_static", "false");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_exclude_rtk_outage", "true");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_vz_sigma_mps", "0.003");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_up_sigma_m", "0.025");
   offline_lc_minimal::ValidateConfig(config);
   ExpectTrue(config.enable_stage1_yaw_refinement, "stage1 yaw refinement flag should parse");
   ExpectTrue(config.stage1_yaw_refinement_max_iterations == 8, "stage1 max iterations should parse");
@@ -2471,6 +2482,28 @@ void TestStage1YawRefinementConfigValidation() {
              "stage1 body-y max sigma should parse");
   ExpectTrue(std::abs(config.stage1_outage_body_y_huber_k - 1.6) < 1e-12,
              "stage1 body-y Huber k should parse");
+  ExpectTrue(config.enable_late_static_detection,
+             "late-static detector flag should parse");
+  ExpectTrue(std::abs(config.late_static_window_s - 6.0) < 1e-12,
+             "late-static window should parse");
+  ExpectTrue(std::abs(config.late_static_stride_s - 0.75) < 1e-12,
+             "late-static stride should parse");
+  ExpectTrue(std::abs(config.late_static_min_duration_s - 9.0) < 1e-12,
+             "late-static min duration should parse");
+  ExpectTrue(config.late_static_threshold_method == "log_otsu",
+             "late-static threshold method should parse");
+  ExpectTrue(config.late_static_min_rtkfix_samples == 12,
+             "late-static min RTKFIX sample count should parse");
+  ExpectTrue(std::abs(config.late_static_merge_gap_s - 1.5) < 1e-12,
+             "late-static merge gap should parse");
+  ExpectTrue(!config.late_static_exclude_initial_static,
+             "late-static initial-static exclusion flag should parse");
+  ExpectTrue(config.late_static_exclude_rtk_outage,
+             "late-static RTK outage exclusion flag should parse");
+  ExpectTrue(std::abs(config.late_static_vz_sigma_mps - 0.003) < 1e-12,
+             "late-static vz sigma should parse");
+  ExpectTrue(std::abs(config.late_static_up_sigma_m - 0.025) < 1e-12,
+             "late-static up sigma should parse");
 
   config = offline_lc_minimal::DefaultConfig();
   config.stage1_yaw_refinement_max_iterations = 0;
@@ -2512,6 +2545,26 @@ void TestStage1YawRefinementConfigValidation() {
     threw = std::string(exception.what()).find("stage1 outage body-y envelope") != std::string::npos;
   }
   ExpectTrue(threw, "stage1 body-y max sigma below min sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.late_static_threshold_method = "fixed";
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("late_static_threshold_method") != std::string::npos;
+  }
+  ExpectTrue(threw, "unsupported late-static threshold method should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.late_static_min_rtkfix_samples = 1;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("late-static detection settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "late-static min RTKFIX sample count should be rejected below two");
 }
 
 }  // namespace

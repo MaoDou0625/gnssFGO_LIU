@@ -125,6 +125,9 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.gnss_consistency_records.clear();
   assembled.vertical_envelope_diagnostics.clear();
   assembled.rtk_vertical_drift_reference_diagnostics.clear();
+  assembled.late_static_feature_diagnostics.clear();
+  assembled.late_static_threshold_diagnostics.clear();
+  assembled.late_static_windows.clear();
   assembled.rtk_outage_causal_nav_reference_diagnostics.clear();
   assembled.rtk_outage_recovery_references.clear();
   assembled.rtk_outage_bias_continuity_policy.clear();
@@ -226,6 +229,17 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       include_start,
       include_end,
       [](const RtkVerticalDriftReferenceDiagnosticRow &row) { return row.time_s; });
+    if (piece.segment.segment_role != "RTK_OUTAGE") {
+      AppendRowsInSegment(
+        assembled.late_static_feature_diagnostics,
+        piece.result.late_static_feature_diagnostics,
+        splice_segment,
+        include_start,
+        include_end,
+        [](const LateStaticFeatureDiagnosticRow &row) { return row.window_center_time_s; });
+      AppendAll(assembled.late_static_threshold_diagnostics, piece.result.late_static_threshold_diagnostics);
+      AppendAll(assembled.late_static_windows, piece.result.late_static_windows);
+    }
     AppendRowsInSegment(
       assembled.rtk_outage_causal_nav_reference_diagnostics,
       piece.result.rtk_outage_causal_nav_reference_diagnostics,
@@ -298,6 +312,24 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.run_summary.rtk_outage_boundary_up_factor_count = 0;
   assembled.run_summary.rtk_outage_boundary_vz_factor_count = 0;
   assembled.run_summary.rtk_outage_boundary_baz_factor_count = 0;
+  assembled.run_summary.late_static_detection_enabled =
+    std::any_of(
+      request_.pieces.begin(),
+      request_.pieces.end(),
+      [](const SegmentedBatchResultPiece &piece) {
+        return piece.result.run_summary.late_static_detection_enabled;
+      });
+  assembled.run_summary.late_static_feature_window_count =
+    assembled.late_static_feature_diagnostics.size();
+  assembled.run_summary.late_static_valid_feature_window_count =
+    static_cast<std::size_t>(
+      std::count_if(
+        assembled.late_static_feature_diagnostics.begin(),
+        assembled.late_static_feature_diagnostics.end(),
+        [](const LateStaticFeatureDiagnosticRow &row) { return row.valid_features; }));
+  assembled.run_summary.late_static_window_count = 0;
+  assembled.run_summary.late_static_vz_factor_count = 0;
+  assembled.run_summary.late_static_up_factor_count = 0;
   for (const auto &piece : request_.pieces) {
     assembled.run_summary.rtk_outage_boundary_reference_count +=
       piece.result.run_summary.rtk_outage_boundary_reference_count;
@@ -307,6 +339,36 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       piece.result.run_summary.rtk_outage_boundary_vz_factor_count;
     assembled.run_summary.rtk_outage_boundary_baz_factor_count +=
       piece.result.run_summary.rtk_outage_boundary_baz_factor_count;
+    if (piece.segment.segment_role != "RTK_OUTAGE") {
+      assembled.run_summary.late_static_window_count +=
+        piece.result.run_summary.late_static_window_count;
+      assembled.run_summary.late_static_vz_factor_count +=
+        piece.result.run_summary.late_static_vz_factor_count;
+      assembled.run_summary.late_static_up_factor_count +=
+        piece.result.run_summary.late_static_up_factor_count;
+      if (!std::isfinite(assembled.run_summary.late_static_rtk_speed_threshold_mps) &&
+          std::isfinite(piece.result.run_summary.late_static_rtk_speed_threshold_mps)) {
+        assembled.run_summary.late_static_rtk_speed_threshold_mps =
+          piece.result.run_summary.late_static_rtk_speed_threshold_mps;
+      }
+      if (!std::isfinite(assembled.run_summary.late_static_gyro_rms_threshold_radps) &&
+          std::isfinite(piece.result.run_summary.late_static_gyro_rms_threshold_radps)) {
+        assembled.run_summary.late_static_gyro_rms_threshold_radps =
+          piece.result.run_summary.late_static_gyro_rms_threshold_radps;
+      }
+    }
+  }
+  for (const auto &row : assembled.late_static_threshold_diagnostics) {
+    if (!row.valid || !std::isfinite(row.threshold_value)) {
+      continue;
+    }
+    if (row.feature_name == "rtk_horizontal_speed_rms_mps" &&
+        !std::isfinite(assembled.run_summary.late_static_rtk_speed_threshold_mps)) {
+      assembled.run_summary.late_static_rtk_speed_threshold_mps = row.threshold_value;
+    } else if (row.feature_name == "imu_gyro_norm_rms_radps" &&
+               !std::isfinite(assembled.run_summary.late_static_gyro_rms_threshold_radps)) {
+      assembled.run_summary.late_static_gyro_rms_threshold_radps = row.threshold_value;
+    }
   }
   assembled.run_summary.processing_start_time_s = request_.processing_start_time_s;
   assembled.run_summary.processing_end_time_s = request_.processing_end_time_s;

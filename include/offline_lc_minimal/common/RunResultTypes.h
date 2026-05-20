@@ -109,6 +109,14 @@ struct RunSummary {
   std::size_t rtk_vertical_drift_causal_reference_sample_count = 0;
   double rtk_vertical_drift_causal_reference_max_full_delta_m =
     std::numeric_limits<double>::quiet_NaN();
+  bool late_static_detection_enabled = false;
+  std::size_t late_static_feature_window_count = 0;
+  std::size_t late_static_valid_feature_window_count = 0;
+  std::size_t late_static_window_count = 0;
+  std::size_t late_static_vz_factor_count = 0;
+  std::size_t late_static_up_factor_count = 0;
+  double late_static_rtk_speed_threshold_mps = std::numeric_limits<double>::quiet_NaN();
+  double late_static_gyro_rms_threshold_radps = std::numeric_limits<double>::quiet_NaN();
   std::size_t rtk_outage_causal_reference_prefix_run_count = 0;
   double rtk_outage_causal_reference_boundary_time_s =
     std::numeric_limits<double>::quiet_NaN();
@@ -449,6 +457,18 @@ struct RunSummary {
         << rtk_vertical_drift_causal_reference_sample_count << '\n'
         << "rtk_vertical_drift_causal_reference_max_full_delta_m="
         << rtk_vertical_drift_causal_reference_max_full_delta_m << '\n'
+        << "late_static_detection_enabled="
+        << (late_static_detection_enabled ? "true" : "false") << '\n'
+        << "late_static_feature_window_count=" << late_static_feature_window_count << '\n'
+        << "late_static_valid_feature_window_count="
+        << late_static_valid_feature_window_count << '\n'
+        << "late_static_window_count=" << late_static_window_count << '\n'
+        << "late_static_vz_factor_count=" << late_static_vz_factor_count << '\n'
+        << "late_static_up_factor_count=" << late_static_up_factor_count << '\n'
+        << "late_static_rtk_speed_threshold_mps="
+        << late_static_rtk_speed_threshold_mps << '\n'
+        << "late_static_gyro_rms_threshold_radps="
+        << late_static_gyro_rms_threshold_radps << '\n'
         << "rtk_outage_causal_reference_prefix_run_count="
         << rtk_outage_causal_reference_prefix_run_count << '\n'
         << "rtk_outage_causal_reference_boundary_time_s="
@@ -793,6 +813,9 @@ struct OfflineRunResult {
   std::vector<GnssConsistencyRecord> gnss_consistency_records;
   std::vector<VerticalEnvelopeDiagnosticRow> vertical_envelope_diagnostics;
   std::vector<RtkVerticalDriftReferenceDiagnosticRow> rtk_vertical_drift_reference_diagnostics;
+  std::vector<LateStaticFeatureDiagnosticRow> late_static_feature_diagnostics;
+  std::vector<LateStaticThresholdDiagnosticRow> late_static_threshold_diagnostics;
+  std::vector<LateStaticWindowRow> late_static_windows;
   std::vector<RtkOutageCausalNavReferenceRow> rtk_outage_causal_nav_reference_diagnostics;
   std::vector<RtkOutageWindowRow> rtk_outage_windows;
   std::vector<RtkOutageBatchSegmentRow> rtk_outage_batch_segments;

@@ -111,6 +111,14 @@ def safe_float(value: str) -> float:
     return parsed
 
 
+def iter_gnss_rows(path: Path):
+    with path.open("r", encoding="utf-8", newline="") as file:
+        for line in file:
+            raw = line.strip().split()
+            if raw:
+                yield raw
+
+
 def ecef_from_llh(lat_rad: float, lon_rad: float, h_m: float) -> tuple[float, float, float]:
     sin_lat = math.sin(lat_rad)
     cos_lat = math.cos(lat_rad)
@@ -163,38 +171,34 @@ def read_rtk_points(
     origin_h_m: float,
 ) -> list[dict[str, float]]:
     rows: list[dict[str, float]] = []
-    with gnss_path.open("r", encoding="utf-8", newline="") as file:
-        reader = csv.reader(file, delimiter="\t")
-        for raw in reader:
-            if not raw:
+    for raw in iter_gnss_rows(gnss_path):
+        try:
+            gnssfgo_type_code = int(float(raw[12]))
+            if gnssfgo_type_code != 1:
                 continue
-            try:
-                gnssfgo_type_code = int(float(raw[12]))
-                if gnssfgo_type_code != 1:
-                    continue
-                time_s = safe_float(raw[0])
-                lat_rad = safe_float(raw[1])
-                lon_rad = safe_float(raw[2])
-                h_m = safe_float(raw[3])
-            except (IndexError, ValueError):
-                continue
+            time_s = safe_float(raw[0])
+            lat_rad = safe_float(raw[1])
+            lon_rad = safe_float(raw[2])
+            h_m = safe_float(raw[3])
+        except (IndexError, ValueError):
+            continue
 
-            east_m, north_m, up_m = enu_from_llh(
-                lat_rad,
-                lon_rad,
-                h_m,
-                origin_lat_rad,
-                origin_lon_rad,
-                origin_h_m,
-            )
-            rows.append(
-                {
-                    "time_s": time_s,
-                    "east_m": east_m,
-                    "north_m": north_m,
-                    "up_m": up_m,
-                }
-            )
+        east_m, north_m, up_m = enu_from_llh(
+            lat_rad,
+            lon_rad,
+            h_m,
+            origin_lat_rad,
+            origin_lon_rad,
+            origin_h_m,
+        )
+        rows.append(
+            {
+                "time_s": time_s,
+                "east_m": east_m,
+                "north_m": north_m,
+                "up_m": up_m,
+            }
+        )
     if not rows:
         raise ValueError(f"No RTKFIX rows found in {gnss_path}")
     return rows
@@ -205,15 +209,11 @@ def choose_origin(
     trajectory_rows: list[dict[str, object]],
     gnss_path: Path,
 ) -> tuple[float, float, float]:
-    with gnss_path.open("r", encoding="utf-8", newline="") as file:
-        reader = csv.reader(file, delimiter="\t")
-        for raw in reader:
-            if not raw:
-                continue
-            try:
-                return safe_float(raw[1]), safe_float(raw[2]), safe_float(raw[3])
-            except (IndexError, ValueError):
-                continue
+    for raw in iter_gnss_rows(gnss_path):
+        try:
+            return safe_float(raw[1]), safe_float(raw[2]), safe_float(raw[3])
+        except (IndexError, ValueError):
+            continue
 
     lat = summary.get("origin_lat_rad")
     lon = summary.get("origin_lon_rad")
@@ -544,11 +544,10 @@ def main() -> int:
 
     trajectory_path = Path(args.trajectory)
     gnss_path = Path(args.gnss)
-    summary_path = Path(args.summary) if args.summary else Path()
     output_path = Path(args.output)
 
     trajectory_rows = read_trajectory(trajectory_path)
-    summary = read_summary(summary_path)
+    summary = read_summary(Path(args.summary)) if args.summary else {}
     origin_lat_rad, origin_lon_rad, origin_h_m = choose_origin(
         summary, trajectory_rows, gnss_path
     )

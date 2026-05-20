@@ -34,6 +34,8 @@
 #include "offline_lc_minimal/core/InitialStaticPositionConstraintBuilder.h"
 #include "offline_lc_minimal/core/InitialStaticRtkHeightConstraintBuilder.h"
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
+#include "offline_lc_minimal/core/LateStaticDetector.h"
+#include "offline_lc_minimal/core/LateStaticVerticalConstraintBuilder.h"
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
 #include "offline_lc_minimal/core/RtkOutageBazReestimatePlanner.h"
@@ -1116,6 +1118,58 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.rtk_outage_causal_nav_reference_diagnostics =
     causal_reference_result.nav_reference_rows;
 
+  if (config_.enable_late_static_detection && stage2_reference_ != nullptr) {
+    LateStaticDetectionRequest late_static_request;
+    late_static_request.config = &config_;
+    late_static_request.imu_samples = &dataset.imu_samples;
+    late_static_request.gnss_samples = &dataset.gnss_samples;
+    late_static_request.rtk_outage_windows = &planned_rtk_outage_windows;
+    late_static_request.processing_start_time_s = config_.processing_start_time_s;
+    late_static_request.processing_end_time_s =
+      config_.processing_end_time_s > 0.0 ? config_.processing_end_time_s : end_time_s;
+    late_static_request.alignment_start_time_s = alignment_start_time_s;
+    late_static_request.alignment_end_time_s = alignment_end_time_s;
+    late_static_request.should_use_rtkfix_sample =
+      [&](const GnssSolutionSample &sample) {
+        return sample.has_enu_position && PassesGnssQualityFilters(sample);
+      };
+    late_static_request.corrected_time_s =
+      [&](const GnssSolutionSample &sample) {
+        return CorrectedGnssTime(sample);
+      };
+    run_result.late_static_feature_diagnostics =
+      LateStaticFeatureExtractor(std::move(late_static_request)).Extract();
+    const LateStaticThresholdSet late_static_thresholds =
+      DataDrivenStaticThresholdEstimator(config_).Estimate(
+        run_result.late_static_feature_diagnostics);
+    run_result.late_static_threshold_diagnostics =
+      late_static_thresholds.diagnostics;
+    run_result.late_static_windows =
+      LateStaticWindowDetector(config_).Detect(
+        late_static_thresholds,
+        &run_result.late_static_feature_diagnostics);
+    run_result.run_summary.late_static_detection_enabled = true;
+    run_result.run_summary.late_static_feature_window_count =
+      run_result.late_static_feature_diagnostics.size();
+    run_result.run_summary.late_static_valid_feature_window_count =
+      static_cast<std::size_t>(
+        std::count_if(
+          run_result.late_static_feature_diagnostics.begin(),
+          run_result.late_static_feature_diagnostics.end(),
+          [](const LateStaticFeatureDiagnosticRow &row) {
+            return row.valid_features;
+          }));
+    run_result.run_summary.late_static_window_count =
+      run_result.late_static_windows.size();
+    run_result.run_summary.late_static_rtk_speed_threshold_mps =
+      late_static_thresholds.rtk_speed_rms_threshold_mps;
+    run_result.run_summary.late_static_gyro_rms_threshold_radps =
+      late_static_thresholds.gyro_rms_threshold_radps;
+  } else {
+    run_result.run_summary.late_static_detection_enabled =
+      config_.enable_late_static_detection && stage2_reference_ != nullptr;
+  }
+
   std::vector<VerticalMotionAdaptiveReweightingDiagnosticRow> adaptive_reweighting_diagnostics;
   VerticalMotionStabilityProfile active_stability_profile;
   const VerticalMotionStabilityProfile *active_stability_profile_ptr = nullptr;
@@ -1619,6 +1673,15 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     stage2_vehicle_request.state_diagnostics =
       &run_result.stage2_vehicle_nhc_state_diagnostics;
     Stage2VehicleNHCConstraintBuilder(std::move(stage2_vehicle_request)).Build();
+
+    LateStaticVerticalConstraintBuildRequest late_static_vertical_request;
+    late_static_vertical_request.config = &config_;
+    late_static_vertical_request.state_timestamps = &state_timestamps;
+    late_static_vertical_request.dynamic_start_index = graph_timeline.dynamic_start_index;
+    late_static_vertical_request.graph = &graph_with_gnss;
+    late_static_vertical_request.run_summary = &run_result.run_summary;
+    late_static_vertical_request.windows = &run_result.late_static_windows;
+    LateStaticVerticalConstraintBuilder(std::move(late_static_vertical_request)).Build();
   }
 
   AttitudeReferenceConstraintBuildRequest attitude_reference_request;
@@ -1693,6 +1756,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     optimized_values,
     run_result.stage1_outage_body_y_state_diagnostics,
     run_result.run_summary);
+  PopulateLateStaticVerticalDiagnostics(
+    optimized_values,
+    run_result.late_static_windows,
+    run_result.run_summary);
   completed_adaptive_pass_count = adaptive_pass + 1;
 
   bool finalize_adaptive_pass = adaptive_pass + 1 >= adaptive_pass_limit;
@@ -1702,6 +1769,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     drift_request.config = &config_;
     drift_request.gnss_samples = &dataset.gnss_samples;
     drift_request.rtk_outage_windows = &planned_rtk_outage_windows;
+    drift_request.late_static_windows = &run_result.late_static_windows;
     drift_request.causal_nav_reference_profile =
       causal_reference_result.valid ? &causal_reference_result.nav_reference_rows : nullptr;
     drift_request.optimized_values = &optimized_values;

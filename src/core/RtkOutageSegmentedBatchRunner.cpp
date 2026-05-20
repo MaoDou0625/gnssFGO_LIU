@@ -57,6 +57,7 @@ OfflineRunnerConfig MakeChildConfig(
       config.processing_start_time_s = 0.0;
       config.processing_end_time_s = source_outage->end_time_s;
     }
+    config.enable_late_static_detection = false;
   } else if (segment.segment_role == "POST_RTK_VALID") {
     if (source_outage != nullptr) {
       config.processing_start_time_s = source_outage->end_time_s;

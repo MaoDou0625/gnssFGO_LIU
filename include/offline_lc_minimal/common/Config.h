@@ -104,6 +104,17 @@ struct OfflineRunnerConfig {
   double stage1_outage_body_y_min_sigma_mps = 0.01;
   double stage1_outage_body_y_max_sigma_mps = 0.08;
   double stage1_outage_body_y_huber_k = 1.345;
+  bool enable_late_static_detection = true;
+  double late_static_window_s = 5.0;
+  double late_static_stride_s = 0.5;
+  double late_static_min_duration_s = 8.0;
+  std::string late_static_threshold_method = "log_otsu";
+  int late_static_min_rtkfix_samples = 10;
+  double late_static_merge_gap_s = 2.0;
+  bool late_static_exclude_initial_static = true;
+  bool late_static_exclude_rtk_outage = true;
+  double late_static_vz_sigma_mps = 0.002;
+  double late_static_up_sigma_m = 0.02;
   bool enable_stage2_velocity_optimization = false;
   bool enable_stage2_vehicle_nhc_constraint = true;
   double stage2_attitude_hold_sigma_rad = 1e-5;

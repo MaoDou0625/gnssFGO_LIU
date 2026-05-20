@@ -80,6 +80,12 @@ struct NavReferenceResult {
   std::string skip_reason;
 };
 
+struct StaticReferenceResult {
+  bool valid = false;
+  double up_m = std::numeric_limits<double>::quiet_NaN();
+  std::string source = "NONE";
+};
+
 std::optional<double> FullOptimizedNavReferenceUpM(
   const RtkVerticalDriftReferenceEstimateRequest &request,
   const double corrected_time_s,
@@ -155,11 +161,13 @@ NavReferenceResult NavReferenceUpM(
   const RtkVerticalDriftReferenceEstimateRequest &request,
   const std::size_t sample_index,
   const double corrected_time_s,
-  const bool static_window) {
+  const StaticReferenceResult &static_reference) {
   NavReferenceResult result;
-  if (static_window) {
-    result.up_m = request.static_reference_up_m;
-    result.source = "STATIC_REFERENCE";
+  if (static_reference.valid) {
+    result.up_m = static_reference.up_m;
+    result.source =
+      static_reference.source == "LATE_STATIC" ? "LATE_STATIC_RTK_REFERENCE" :
+                                                  "STATIC_REFERENCE";
     result.skip_reason = "OK";
     return result;
   }
@@ -200,6 +208,35 @@ NavReferenceResult NavReferenceUpM(
   result.source = "FULL_OPTIMIZED";
   result.full_up_m = *full_up_m;
   result.skip_reason = "OK";
+  return result;
+}
+
+StaticReferenceResult StaticReferenceForTime(
+  const RtkVerticalDriftReferenceEstimateRequest &request,
+  const double corrected_time_s) {
+  StaticReferenceResult result;
+  if (corrected_time_s >= request.alignment_start_time_s &&
+      corrected_time_s <= request.alignment_end_time_s) {
+    result.valid = true;
+    result.up_m = request.static_reference_up_m;
+    result.source = "INITIAL_STATIC";
+    return result;
+  }
+  if (request.late_static_windows == nullptr) {
+    return result;
+  }
+  for (const auto &window : *request.late_static_windows) {
+    if (!window.valid || !std::isfinite(window.rtk_median_up_m)) {
+      continue;
+    }
+    if (corrected_time_s >= window.start_time_s - kTiny &&
+        corrected_time_s <= window.end_time_s + kTiny) {
+      result.valid = true;
+      result.up_m = window.rtk_median_up_m;
+      result.source = "LATE_STATIC";
+      return result;
+    }
+  }
   return result;
 }
 
@@ -419,9 +456,10 @@ RtkVerticalDriftReferenceEstimateResult RtkVerticalDriftReferenceEstimator::Esti
     row.white_sigma_m = request_.config->rtk_vertical_white_noise_sigma_m;
     row.effective_white_sigma_m = request_.config->rtk_vertical_white_noise_sigma_m;
     row.tau_s = request_.config->rtk_vertical_drift_correlation_time_s;
-    row.static_window_flag =
-      corrected_time_s >= request_.alignment_start_time_s &&
-      corrected_time_s <= request_.alignment_end_time_s;
+    const StaticReferenceResult static_reference =
+      StaticReferenceForTime(request_, corrected_time_s);
+    row.static_window_flag = static_reference.valid;
+    row.static_window_source = static_reference.source;
 
     if (!sample.has_enu_position || !std::isfinite(sample.enu_position_m.z())) {
       row.skip_reason = "invalid_up";
@@ -433,7 +471,7 @@ RtkVerticalDriftReferenceEstimateResult RtkVerticalDriftReferenceEstimator::Esti
     }
 
     const NavReferenceResult nav_reference =
-      NavReferenceUpM(request_, sample_index, corrected_time_s, row.static_window_flag);
+      NavReferenceUpM(request_, sample_index, corrected_time_s, static_reference);
     row.nav_reference_source = nav_reference.source;
     row.causal_reference_up_m = nav_reference.causal_up_m;
     row.full_reference_up_m = nav_reference.full_up_m;
