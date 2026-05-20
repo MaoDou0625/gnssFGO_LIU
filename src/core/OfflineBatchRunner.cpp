@@ -899,10 +899,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     ApplyStage2ReferenceTrajectoryToInitialValues(
       *stage2_reference_,
       state_timestamps,
-      initial_values);
-    run_result.trajectory = stage2_reference_->trajectory;
+      initial_values,
+      Stage2AttitudeHorizontalReferenceApplicationOptions());
+    UpdateTrajectoryRowsFromOptimizedValues(initial_values, run_result.trajectory);
     stage2_fixed_reference_states =
-      BuildStage2ReferenceStatesFromTrajectory(stage2_reference_->trajectory);
+      BuildReferenceStatesFromOptimizedValues(state_timestamps, initial_values);
     run_result.attitude_reference_states = stage2_fixed_reference_states;
     if (collect_reference_states) {
       reference_node_states = stage2_fixed_reference_states;

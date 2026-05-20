@@ -107,6 +107,72 @@ offline_lc_minimal::RtkOutageWindowRow MakePlannedOutageWindow() {
   return row;
 }
 
+void TestStage2ReferenceAttitudeHorizontalApplicationPreservesVerticalComponents() {
+  offline_lc_minimal::Stage2VelocityReference reference;
+  offline_lc_minimal::TrajectoryRow row;
+  row.time_s = 0.0;
+  row.enu_position_m = Eigen::Vector3d(1.0, 2.0, 30.0);
+  row.enu_velocity_mps = Eigen::Vector3d(4.0, 5.0, 60.0);
+  row.ypr_rad = Eigen::Vector3d(0.3, -0.2, 0.1);
+  row.bias_acc = Eigen::Vector3d(0.01, 0.02, 0.03);
+  row.bias_gyro = Eigen::Vector3d(0.04, 0.05, 0.06);
+  row.omega_radps = Eigen::Vector3d(0.07, 0.08, 0.09);
+  reference.trajectory.push_back(row);
+
+  gtsam::Values values;
+  values.insert(
+    gtsam::symbol_shorthand::X(0),
+    gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(10.0, 20.0, 300.0)));
+  values.insert(gtsam::symbol_shorthand::V(0), gtsam::Vector3(40.0, 50.0, 600.0));
+  values.insert(
+    gtsam::symbol_shorthand::B(0),
+    gtsam::imuBias::ConstantBias(
+      gtsam::Vector3(0.4, 0.5, 0.6),
+      gtsam::Vector3(0.7, 0.8, 0.9)));
+  values.insert(gtsam::symbol_shorthand::W(0), gtsam::Vector3(1.0, 2.0, 3.0));
+
+  offline_lc_minimal::ApplyStage2ReferenceTrajectoryToInitialValues(
+    reference,
+    std::vector<double>{0.0},
+    values,
+    offline_lc_minimal::Stage2AttitudeHorizontalReferenceApplicationOptions());
+
+  const auto pose = values.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(0));
+  const auto ypr = pose.rotation().ypr();
+  ExpectNear(ypr.x(), 0.3, 1.0e-12, "stage2 reference should apply yaw");
+  ExpectNear(ypr.y(), -0.2, 1.0e-12, "stage2 reference should apply pitch");
+  ExpectNear(ypr.z(), 0.1, 1.0e-12, "stage2 reference should apply roll");
+  ExpectNear(pose.translation().x(), 1.0, 1.0e-12,
+             "stage2 reference should apply horizontal x");
+  ExpectNear(pose.translation().y(), 2.0, 1.0e-12,
+             "stage2 reference should apply horizontal y");
+  ExpectNear(pose.translation().z(), 300.0, 1.0e-12,
+             "stage2 reference should preserve local vertical position");
+
+  const auto velocity = values.at<gtsam::Vector3>(gtsam::symbol_shorthand::V(0));
+  ExpectNear(velocity.x(), 4.0, 1.0e-12,
+             "stage2 reference should apply horizontal vx");
+  ExpectNear(velocity.y(), 5.0, 1.0e-12,
+             "stage2 reference should apply horizontal vy");
+  ExpectNear(velocity.z(), 600.0, 1.0e-12,
+             "stage2 reference should preserve local vertical velocity");
+
+  const auto bias =
+    values.at<gtsam::imuBias::ConstantBias>(gtsam::symbol_shorthand::B(0));
+  ExpectNear(bias.accelerometer().x(), 0.01, 1.0e-12,
+             "stage2 reference should apply ba_x");
+  ExpectNear(bias.accelerometer().y(), 0.02, 1.0e-12,
+             "stage2 reference should apply ba_y");
+  ExpectNear(bias.accelerometer().z(), 0.6, 1.0e-12,
+             "stage2 reference should preserve ba_z");
+  ExpectNear(bias.gyroscope().x(), 0.04, 1.0e-12,
+             "stage2 reference should apply gyro bias x");
+  ExpectNear(bias.gyroscope().y(), 0.05, 1.0e-12,
+             "stage2 reference should apply gyro bias y");
+  ExpectNear(bias.gyroscope().z(), 0.06, 1.0e-12,
+             "stage2 reference should apply gyro bias z");
+}
+
 void TestVehicleVelocityFactorsUseVelocityAndMountOnly() {
   const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
   const auto axes = IdentityAxes();
@@ -544,6 +610,9 @@ void TestStage2ConfigParsingAndValidation() {
 
 int main() {
   try {
+    RunTest(
+      "TestStage2ReferenceAttitudeHorizontalApplicationPreservesVerticalComponents",
+      TestStage2ReferenceAttitudeHorizontalApplicationPreservesVerticalComponents);
     RunTest("TestVehicleVelocityFactorsUseVelocityAndMountOnly", TestVehicleVelocityFactorsUseVelocityAndMountOnly);
     RunTest("TestVehicleZFixedForwardDoesNotPullForwardVelocity", TestVehicleZFixedForwardDoesNotPullForwardVelocity);
     RunTest("TestStage2AttitudeHoldBuilderAddsOneFactorPerState", TestStage2AttitudeHoldBuilderAddsOneFactorPerState);

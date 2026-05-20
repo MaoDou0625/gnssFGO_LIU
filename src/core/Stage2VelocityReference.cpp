@@ -34,6 +34,45 @@ gtsam::Vector3 VectorFromEigen(const Eigen::Vector3d &vector) {
   return gtsam::Vector3(vector.x(), vector.y(), vector.z());
 }
 
+gtsam::Pose3 MergedReferencePose(
+  const TrajectoryRow &row,
+  const gtsam::Pose3 &existing_pose,
+  const Stage2ReferenceApplicationOptions &options) {
+  const gtsam::Pose3 reference_pose = PoseFromTrajectoryRow(row);
+  return gtsam::Pose3(
+    reference_pose.rotation(),
+    gtsam::Point3(
+      reference_pose.translation().x(),
+      reference_pose.translation().y(),
+      options.apply_vertical_position
+        ? reference_pose.translation().z()
+        : existing_pose.translation().z()));
+}
+
+gtsam::Vector3 MergedReferenceVelocity(
+  const TrajectoryRow &row,
+  const gtsam::Vector3 &existing_velocity,
+  const Stage2ReferenceApplicationOptions &options) {
+  gtsam::Vector3 reference_velocity = VectorFromEigen(row.enu_velocity_mps);
+  if (!options.apply_vertical_velocity) {
+    reference_velocity.z() = existing_velocity.z();
+  }
+  return reference_velocity;
+}
+
+gtsam::imuBias::ConstantBias MergedReferenceBias(
+  const TrajectoryRow &row,
+  const gtsam::imuBias::ConstantBias &existing_bias,
+  const Stage2ReferenceApplicationOptions &options) {
+  gtsam::Vector3 reference_accel_bias = VectorFromEigen(row.bias_acc);
+  if (!options.apply_accel_z_bias) {
+    reference_accel_bias.z() = existing_bias.accelerometer().z();
+  }
+  return gtsam::imuBias::ConstantBias(
+    reference_accel_bias,
+    VectorFromEigen(row.bias_gyro));
+}
+
 void ValidateReferenceSizeAndTimes(
   const std::vector<TrajectoryRow> &trajectory,
   const std::vector<double> &state_timestamps) {
@@ -70,6 +109,15 @@ void ValidateReferenceSizeAndTimes(
 
 }  // namespace
 
+Stage2ReferenceApplicationOptions
+Stage2AttitudeHorizontalReferenceApplicationOptions() {
+  Stage2ReferenceApplicationOptions options;
+  options.apply_vertical_position = false;
+  options.apply_vertical_velocity = false;
+  options.apply_accel_z_bias = false;
+  return options;
+}
+
 std::vector<ReferenceNodeState> BuildStage2ReferenceStatesFromTrajectory(
   const std::vector<TrajectoryRow> &trajectory) {
   std::vector<ReferenceNodeState> states;
@@ -91,17 +139,29 @@ std::vector<ReferenceNodeState> BuildStage2ReferenceStatesFromTrajectory(
 void ApplyStage2ReferenceTrajectoryToInitialValues(
   const Stage2VelocityReference &reference,
   const std::vector<double> &state_timestamps,
-  gtsam::Values &values) {
+  gtsam::Values &values,
+  const Stage2ReferenceApplicationOptions &options) {
   ValidateReferenceSizeAndTimes(reference.trajectory, state_timestamps);
   for (std::size_t state_index = 0; state_index < reference.trajectory.size(); ++state_index) {
     const auto &row = reference.trajectory[state_index];
-    values.update(X(state_index), PoseFromTrajectoryRow(row));
-    values.update(V(state_index), VectorFromEigen(row.enu_velocity_mps));
+    values.update(
+      X(state_index),
+      MergedReferencePose(
+        row,
+        values.at<gtsam::Pose3>(X(state_index)),
+        options));
+    values.update(
+      V(state_index),
+      MergedReferenceVelocity(
+        row,
+        values.at<gtsam::Vector3>(V(state_index)),
+        options));
     values.update(
       B(state_index),
-      gtsam::imuBias::ConstantBias(
-        VectorFromEigen(row.bias_acc),
-        VectorFromEigen(row.bias_gyro)));
+      MergedReferenceBias(
+        row,
+        values.at<gtsam::imuBias::ConstantBias>(B(state_index)),
+        options));
     values.update(W(state_index), VectorFromEigen(row.omega_radps));
   }
 }
