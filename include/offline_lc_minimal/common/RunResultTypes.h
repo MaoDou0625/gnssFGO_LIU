@@ -201,6 +201,13 @@ struct RunSummary {
   double body_z_nhc_corrected_max_velocity_residual_mps = std::numeric_limits<double>::quiet_NaN();
   double body_z_nhc_corrected_max_abs_displacement_residual_m =
     std::numeric_limits<double>::quiet_NaN();
+  bool stage1_outage_body_y_envelope_enabled = false;
+  std::size_t stage1_outage_body_y_envelope_count = 0;
+  std::size_t stage1_outage_body_y_envelope_valid_count = 0;
+  std::size_t stage1_outage_body_y_velocity_factor_count = 0;
+  double stage1_outage_body_y_mean_mps = std::numeric_limits<double>::quiet_NaN();
+  double stage1_outage_body_y_rmse_mps = std::numeric_limits<double>::quiet_NaN();
+  double stage1_outage_body_y_deadband_mps = std::numeric_limits<double>::quiet_NaN();
   bool stage2_velocity_optimization_enabled = false;
   std::size_t stage2_attitude_hold_factor_count = 0;
   std::size_t stage2_horizontal_position_hold_factor_count = 0;
@@ -579,6 +586,17 @@ struct RunSummary {
         << body_z_nhc_corrected_max_velocity_residual_mps << '\n'
         << "body_z_nhc_corrected_max_abs_displacement_residual_m="
         << body_z_nhc_corrected_max_abs_displacement_residual_m << '\n'
+        << "stage1_outage_body_y_envelope_enabled="
+        << (stage1_outage_body_y_envelope_enabled ? "true" : "false") << '\n'
+        << "stage1_outage_body_y_envelope_count="
+        << stage1_outage_body_y_envelope_count << '\n'
+        << "stage1_outage_body_y_envelope_valid_count="
+        << stage1_outage_body_y_envelope_valid_count << '\n'
+        << "stage1_outage_body_y_velocity_factor_count="
+        << stage1_outage_body_y_velocity_factor_count << '\n'
+        << "stage1_outage_body_y_mean_mps=" << stage1_outage_body_y_mean_mps << '\n'
+        << "stage1_outage_body_y_rmse_mps=" << stage1_outage_body_y_rmse_mps << '\n'
+        << "stage1_outage_body_y_deadband_mps=" << stage1_outage_body_y_deadband_mps << '\n'
         << "stage2_velocity_optimization_enabled="
         << (stage2_velocity_optimization_enabled ? "true" : "false") << '\n'
         << "stage2_attitude_hold_factor_count=" << stage2_attitude_hold_factor_count << '\n'
@@ -795,6 +813,8 @@ struct OfflineRunResult {
   std::vector<BodyZHorizontalLeakageDiagnosticRow> body_z_nhc_horizontal_leakage_diagnostics;
   std::vector<BodyZNHCDiagnosticRow> body_z_nhc_diagnostics;
   std::vector<BodyZNHCStateDiagnosticRow> body_z_nhc_state_diagnostics;
+  std::vector<Stage1OutageBodyYEnvelopeRow> stage1_outage_body_y_envelopes;
+  std::vector<Stage1OutageBodyYStateDiagnosticRow> stage1_outage_body_y_state_diagnostics;
   std::vector<Stage2MountLeakageDiagnosticRow> stage2_mount_leakage_diagnostics;
   std::vector<Stage2VehicleNHCStateDiagnosticRow> stage2_vehicle_nhc_state_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;

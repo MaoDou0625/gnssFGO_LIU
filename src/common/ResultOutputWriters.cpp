@@ -841,6 +841,80 @@ void WriteStage1YawRefinementDiagnosticsCsv(
   }
 }
 
+void WriteStage1OutageBodyYEnvelopeCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage1OutageBodyYEnvelopeRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,outage_start_time_s,outage_end_time_s,pre_window_start_time_s,"
+       "pre_window_end_time_s,candidate_sample_count,used_sample_count,"
+       "skipped_low_speed_count,skipped_invalid_count,valid,min_speed_mps,"
+       "mean_body_y_mps,rmse_body_y_mps,p95_abs_body_y_mps,deadband_mps,"
+       "sigma_mps,huber_k,factor_count,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.outage_start_time_s << ','
+           << row.outage_end_time_s << ','
+           << row.pre_window_start_time_s << ','
+           << row.pre_window_end_time_s << ','
+           << row.candidate_sample_count << ','
+           << row.used_sample_count << ','
+           << row.skipped_low_speed_count << ','
+           << row.skipped_invalid_count << ','
+           << (row.valid ? 1 : 0) << ','
+           << row.min_speed_mps << ','
+           << row.mean_body_y_mps << ','
+           << row.rmse_body_y_mps << ','
+           << row.p95_abs_body_y_mps << ','
+           << row.deadband_mps << ','
+           << row.sigma_mps << ','
+           << row.huber_k << ','
+           << row.factor_count << ','
+           << row.skip_reason << '\n';
+  }
+}
+
+void WriteStage1OutageBodyYStateDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage1OutageBodyYStateDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,state_index,time_s,factor_added,skip_reason,"
+       "mean_body_y_mps,rmse_body_y_mps,deadband_mps,sigma_mps,"
+       "body_y_axis_x,body_y_axis_y,body_y_axis_z,optimized_vx_mps,"
+       "optimized_vy_mps,optimized_vz_mps,optimized_body_y_mps,"
+       "centered_body_y_mps,deadband_residual_mps,normalized_residual\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.state_index << ','
+           << row.time_s << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << row.mean_body_y_mps << ','
+           << row.rmse_body_y_mps << ','
+           << row.deadband_mps << ','
+           << row.sigma_mps << ','
+           << row.body_y_axis_x << ','
+           << row.body_y_axis_y << ','
+           << row.body_y_axis_z << ','
+           << row.optimized_vx_mps << ','
+           << row.optimized_vy_mps << ','
+           << row.optimized_vz_mps << ','
+           << row.optimized_body_y_mps << ','
+           << row.centered_body_y_mps << ','
+           << row.deadband_residual_mps << ','
+           << row.normalized_residual << '\n';
+  }
+}
+
 void WriteStaticAlignmentValidationCsv(
   const std::filesystem::path &path,
   const std::vector<StaticAlignmentValidationRow> &rows) {

@@ -2430,6 +2430,15 @@ void TestStage1YawRefinementConfigValidation() {
   offline_lc_minimal::OverrideConfigField(config, "stage1_heading_min_displacement_m", "0.30");
   offline_lc_minimal::OverrideConfigField(config, "stage1_heading_noise_floor_rad", "0.01");
   offline_lc_minimal::OverrideConfigField(config, "stage1_yaw_update_max_rad", "1.0");
+  offline_lc_minimal::OverrideConfigField(config, "enable_stage1_outage_body_y_envelope", "true");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_outage_body_y_pre_window_s", "45");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_outage_body_y_deadband_rmse_multiplier", "2.5");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_outage_body_y_min_sample_count", "42");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_outage_body_y_min_speed_mps", "0.6");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_outage_body_y_min_sigma_mps", "0.02");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_outage_body_y_max_sigma_mps", "0.09");
+  offline_lc_minimal::OverrideConfigField(config, "stage1_outage_body_y_huber_k", "1.6");
+  offline_lc_minimal::ValidateConfig(config);
   ExpectTrue(config.enable_stage1_yaw_refinement, "stage1 yaw refinement flag should parse");
   ExpectTrue(config.stage1_yaw_refinement_max_iterations == 8, "stage1 max iterations should parse");
   ExpectTrue(std::abs(config.stage1_heading_window_s - 1.5) < 1e-12, "stage1 heading window should parse");
@@ -2445,6 +2454,23 @@ void TestStage1YawRefinementConfigValidation() {
   ExpectTrue(
     std::abs(config.stage1_yaw_update_max_rad - 1.0) < 1e-12,
     "stage1 yaw update cap should parse");
+  ExpectTrue(config.enable_stage1_outage_body_y_envelope,
+             "stage1 outage body-y envelope flag should parse");
+  ExpectTrue(std::abs(config.stage1_outage_body_y_pre_window_s - 45.0) < 1e-12,
+             "stage1 body-y PRE window should parse");
+  ExpectTrue(
+    std::abs(config.stage1_outage_body_y_deadband_rmse_multiplier - 2.5) < 1e-12,
+    "stage1 body-y deadband multiplier should parse");
+  ExpectTrue(config.stage1_outage_body_y_min_sample_count == 42,
+             "stage1 body-y min sample count should parse");
+  ExpectTrue(std::abs(config.stage1_outage_body_y_min_speed_mps - 0.6) < 1e-12,
+             "stage1 body-y min speed should parse");
+  ExpectTrue(std::abs(config.stage1_outage_body_y_min_sigma_mps - 0.02) < 1e-12,
+             "stage1 body-y min sigma should parse");
+  ExpectTrue(std::abs(config.stage1_outage_body_y_max_sigma_mps - 0.09) < 1e-12,
+             "stage1 body-y max sigma should parse");
+  ExpectTrue(std::abs(config.stage1_outage_body_y_huber_k - 1.6) < 1e-12,
+             "stage1 body-y Huber k should parse");
 
   config = offline_lc_minimal::DefaultConfig();
   config.stage1_yaw_refinement_max_iterations = 0;
@@ -2475,6 +2501,17 @@ void TestStage1YawRefinementConfigValidation() {
     threw = std::string(exception.what()).find("stage1 yaw refinement settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-finite stage1 noise floor should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage1_outage_body_y_max_sigma_mps =
+    config.stage1_outage_body_y_min_sigma_mps * 0.5;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("stage1 outage body-y envelope") != std::string::npos;
+  }
+  ExpectTrue(threw, "stage1 body-y max sigma below min sigma should be rejected");
 }
 
 }  // namespace

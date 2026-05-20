@@ -1,5 +1,6 @@
 #include "offline_lc_minimal/core/Stage2VelocityOptimizationRunner.h"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <optional>
@@ -9,6 +10,7 @@
 
 #include "offline_lc_minimal/core/OptimizationStagePolicy.h"
 #include "offline_lc_minimal/core/RtkOutageSegmentedBatchRunner.h"
+#include "offline_lc_minimal/core/Stage1OutageLateralVelocityEnvelopeEstimator.h"
 #include "offline_lc_minimal/core/Stage1YawRefinementRunner.h"
 
 namespace offline_lc_minimal {
@@ -35,6 +37,24 @@ void CopyStage1Summary(
     stage1_result.run_summary.stage1_yaw_refinement_final_noise_rad;
   stage2_result.run_summary.stage1_yaw_refinement_final_update_rad =
     stage1_result.run_summary.stage1_yaw_refinement_final_update_rad;
+  stage2_result.stage1_outage_body_y_envelopes =
+    stage1_result.stage1_outage_body_y_envelopes;
+  stage2_result.stage1_outage_body_y_state_diagnostics =
+    stage1_result.stage1_outage_body_y_state_diagnostics;
+  stage2_result.run_summary.stage1_outage_body_y_envelope_enabled =
+    stage1_result.run_summary.stage1_outage_body_y_envelope_enabled;
+  stage2_result.run_summary.stage1_outage_body_y_envelope_count =
+    stage1_result.run_summary.stage1_outage_body_y_envelope_count;
+  stage2_result.run_summary.stage1_outage_body_y_envelope_valid_count =
+    stage1_result.run_summary.stage1_outage_body_y_envelope_valid_count;
+  stage2_result.run_summary.stage1_outage_body_y_velocity_factor_count =
+    stage1_result.run_summary.stage1_outage_body_y_velocity_factor_count;
+  stage2_result.run_summary.stage1_outage_body_y_mean_mps =
+    stage1_result.run_summary.stage1_outage_body_y_mean_mps;
+  stage2_result.run_summary.stage1_outage_body_y_rmse_mps =
+    stage1_result.run_summary.stage1_outage_body_y_rmse_mps;
+  stage2_result.run_summary.stage1_outage_body_y_deadband_mps =
+    stage1_result.run_summary.stage1_outage_body_y_deadband_mps;
 }
 
 std::vector<double> CollectTrajectoryTimestamps(
@@ -108,13 +128,60 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
   Stage1YawRefinementRequest stage1_request;
   stage1_request.config = stage1_config;
   stage1_request.dataset = request_.dataset;
-  stage1_request.run_once = [&](const OfflineRunnerConfig &config, DataSet dataset) {
-    return request_.run_once(config, nullptr, std::move(dataset));
+  stage1_request.run_once = [&](
+                               const OfflineRunnerConfig &config,
+                               std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> body_y_reference,
+                               DataSet dataset) {
+    return request_.run_once(config, nullptr, std::move(body_y_reference), std::move(dataset));
   };
   OfflineRunResult stage1_result =
     Stage1YawRefinementRunner(std::move(stage1_request)).Run();
   if (stage1_result.trajectory.empty()) {
     throw std::runtime_error("stage2 velocity optimization received an empty stage1 trajectory");
+  }
+
+  std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> body_y_reference;
+  if (request_.config.enable_stage1_outage_body_y_envelope &&
+      !stage1_result.rtk_outage_windows.empty()) {
+    Stage1OutageLateralVelocityEnvelopeEstimateRequest envelope_request;
+    envelope_request.config = &request_.config;
+    envelope_request.outage_windows = &stage1_result.rtk_outage_windows;
+    envelope_request.trajectory = &stage1_result.trajectory;
+    auto mutable_reference =
+      std::make_shared<Stage1OutageBodyYEnvelopeReference>(
+        Stage1OutageLateralVelocityEnvelopeEstimator(
+          std::move(envelope_request)).Estimate());
+    const bool has_valid_envelope =
+      std::any_of(
+        mutable_reference->envelopes.begin(),
+        mutable_reference->envelopes.end(),
+        [](const Stage1OutageBodyYEnvelopeRow &row) {
+          return row.valid;
+        });
+    if (has_valid_envelope) {
+      body_y_reference = mutable_reference;
+      Stage1YawRefinementRequest constrained_stage1_request;
+      constrained_stage1_request.config = stage1_config;
+      constrained_stage1_request.dataset = request_.dataset;
+      constrained_stage1_request.body_y_envelope_reference = body_y_reference;
+      constrained_stage1_request.run_once = [&](
+                                              const OfflineRunnerConfig &config,
+                                              std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> reference,
+                                              DataSet dataset) {
+        return request_.run_once(config, nullptr, std::move(reference), std::move(dataset));
+      };
+      stage1_result =
+        Stage1YawRefinementRunner(std::move(constrained_stage1_request)).Run();
+      if (stage1_result.trajectory.empty()) {
+        throw std::runtime_error(
+          "stage2 velocity optimization received an empty constrained stage1 trajectory");
+      }
+    } else {
+      stage1_result.stage1_outage_body_y_envelopes = mutable_reference->envelopes;
+      stage1_result.run_summary.stage1_outage_body_y_envelope_enabled = true;
+      stage1_result.run_summary.stage1_outage_body_y_envelope_count =
+        mutable_reference->envelopes.size();
+    }
   }
 
   auto reference = std::make_shared<Stage2VelocityReference>();
@@ -132,12 +199,13 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
 
   if (auto segmented_result =
         TryRunSegmentedStage2(request_, stage2_config, reference, stage1_result)) {
+    CopyStage1Summary(stage1_result, *segmented_result);
     segmented_result->run_summary.stage2_velocity_optimization_enabled = true;
     return std::move(*segmented_result);
   }
 
   OfflineRunResult stage2_result =
-    request_.run_once(stage2_config, reference, request_.dataset);
+    request_.run_once(stage2_config, reference, nullptr, request_.dataset);
   CopyStage1Summary(stage1_result, stage2_result);
   stage2_result.run_summary.stage2_velocity_optimization_enabled = true;
   return stage2_result;

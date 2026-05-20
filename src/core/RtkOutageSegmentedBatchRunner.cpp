@@ -377,6 +377,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
     return request_.run_once(
       std::move(passthrough_config),
       request_.stage2_reference,
+      nullptr,
       request_.dataset);
   }
 
@@ -414,6 +415,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       return request_.run_once(
         std::move(child_config),
         std::move(child_stage2_reference),
+        nullptr,
         request_.dataset);
     };
 
@@ -460,6 +462,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
     OfflineRunResult post_result = request_.run_once(
       std::move(post_config),
       WithBoundaryReferences(std::move(post_reference), std::move(post_boundary_refs)),
+      nullptr,
       request_.dataset);
 
     std::vector<RtkOutageBiasContinuityPolicyRow> bias_policy =
@@ -506,6 +509,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
     OfflineRunResult outage_result = request_.run_once(
       std::move(outage_config),
       WithBoundaryReferences(std::move(outage_reference), std::move(outage_boundary_refs)),
+      nullptr,
       request_.dataset);
 
     std::vector<SegmentedBatchResultPiece> pieces;
@@ -537,6 +541,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       request_.run_once(
         std::move(child_config),
         std::move(child_stage2_reference),
+        nullptr,
         request_.dataset);
     pieces.push_back(SegmentedBatchResultPiece{segment, std::move(child_result)});
   }

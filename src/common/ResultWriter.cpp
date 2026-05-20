@@ -139,6 +139,16 @@ void ResultWriter::WriteOutputs(
       output_path / "stage1_yaw_refinement_diagnostics.csv",
       result.stage1_yaw_refinement_diagnostics);
   }
+  if (!result.stage1_outage_body_y_envelopes.empty()) {
+    WriteStage1OutageBodyYEnvelopeCsv(
+      output_path / "stage1_outage_body_y_envelope.csv",
+      result.stage1_outage_body_y_envelopes);
+  }
+  if (!result.stage1_outage_body_y_state_diagnostics.empty()) {
+    WriteStage1OutageBodyYStateDiagnosticsCsv(
+      output_path / "stage1_outage_body_y_state_diagnostics.csv",
+      result.stage1_outage_body_y_state_diagnostics);
+  }
   if (!result.static_alignment_validation.empty()) {
     WriteStaticAlignmentValidationCsv(
       output_path / "static_alignment_validation.csv",

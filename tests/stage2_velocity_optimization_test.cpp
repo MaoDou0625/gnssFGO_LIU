@@ -1,5 +1,8 @@
+#include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -7,6 +10,7 @@
 #include <boost/pointer_cast.hpp>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
+#include <gtsam/geometry/Pose3.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 
@@ -14,10 +18,13 @@
 #include "offline_lc_minimal/core/OptimizationStagePolicy.h"
 #include "offline_lc_minimal/core/Stage2AttitudeHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage2HorizontalHoldBuilder.h"
+#include "offline_lc_minimal/core/Stage1OutageBodyYEnvelopeConstraintBuilder.h"
+#include "offline_lc_minimal/core/Stage1OutageLateralVelocityEnvelopeEstimator.h"
 #include "offline_lc_minimal/core/Stage2VehicleNHCConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage2VelocityOptimizationRunner.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
 #include "offline_lc_minimal/factor/HorizontalHoldFactor.h"
+#include "offline_lc_minimal/factor/FixedAxisBodyYVelocityEnvelopeFactor.h"
 #include "offline_lc_minimal/factor/VehicleVelocityNHCFactor.h"
 #include "offline_lc_minimal/factor/VehicleZFixedForwardNHCFactor.h"
 
@@ -89,6 +96,19 @@ std::vector<offline_lc_minimal::TrajectoryRow> MakeTrajectoryRows(
     row.enu_position_m = Eigen::Vector3d(0.0, 0.0, 0.01 * static_cast<double>(time_s));
     row.enu_velocity_mps = Eigen::Vector3d::Zero();
     rows.push_back(row);
+  }
+  return rows;
+}
+
+std::vector<offline_lc_minimal::TrajectoryRow> MakeMovingTrajectoryRows(
+  const double start_time_s,
+  const double end_time_s) {
+  auto rows = MakeTrajectoryRows(start_time_s, end_time_s);
+  for (std::size_t index = 0; index < rows.size(); ++index) {
+    rows[index].enu_velocity_mps = Eigen::Vector3d(
+      1.0,
+      index % 2U == 0U ? 0.0 : 0.02,
+      0.0);
   }
   return rows;
 }
@@ -494,6 +514,221 @@ void TestStage2PolicyDisablesRtkVelocityAndAttitudeReference() {
              "stage2 should enable graph-internal vehicle NHC");
 }
 
+void TestFixedAxisBodyYVelocityEnvelopeFactorDeadband() {
+  const gtsam::Vector3 body_y_axis = gtsam::Vector3::UnitY();
+  const double mean_body_y_mps = 0.01;
+  const double deadband_mps = 0.04;
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 0.02);
+  offline_lc_minimal::factor::FixedAxisBodyYVelocityEnvelopeFactor factor(
+    gtsam::symbol_shorthand::V(0),
+    body_y_axis,
+    mean_body_y_mps,
+    deadband_mps,
+    noise);
+
+  gtsam::Matrix jacobian;
+  const gtsam::Vector inside =
+    factor.evaluateError(gtsam::Vector3(1.0, 0.03, 0.0), jacobian);
+  ExpectNear(inside[0], 0.0, 1e-12, "inside deadband residual should be zero");
+  ExpectNear(jacobian.norm(), 0.0, 1e-12, "inside deadband jacobian should be zero");
+
+  const gtsam::Vector outside =
+    factor.evaluateError(gtsam::Vector3(1.0, 0.08, 0.0), jacobian);
+  ExpectNear(outside[0], 0.03, 1e-12,
+             "outside deadband residual should subtract deadband");
+  ExpectNear(jacobian(0, 0), 0.0, 1e-12, "body-y factor should not observe nav-x");
+  ExpectNear(jacobian(0, 1), 1.0, 1e-12, "body-y factor should observe fixed y-axis");
+  ExpectNear(jacobian(0, 2), 0.0, 1e-12, "body-y factor should not observe nav-z");
+}
+
+void TestStage1OutageBodyYEnvelopeEstimatorStatsAndSkips() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage1_outage_body_y_envelope = true;
+  config.stage1_outage_body_y_pre_window_s = 5.0;
+  config.stage1_outage_body_y_min_sample_count = 4;
+  config.stage1_outage_body_y_min_speed_mps = 0.5;
+  config.stage1_outage_body_y_min_sigma_mps = 0.005;
+  config.stage1_outage_body_y_max_sigma_mps = 0.08;
+
+  const std::vector<offline_lc_minimal::TrajectoryRow> trajectory =
+    MakeMovingTrajectoryRows(0.0, 20.0);
+  std::vector<offline_lc_minimal::RtkOutageWindowRow> outages{
+    MakePlannedOutageWindow()};
+
+  offline_lc_minimal::Stage1OutageLateralVelocityEnvelopeEstimateRequest request;
+  request.config = &config;
+  request.outage_windows = &outages;
+  request.trajectory = &trajectory;
+  const auto estimate =
+    offline_lc_minimal::Stage1OutageLateralVelocityEnvelopeEstimator(request).Estimate();
+  ExpectTrue(estimate.envelopes.size() == 1U, "estimator should return one outage row");
+  const auto &row = estimate.envelopes.front();
+  ExpectTrue(row.valid, "valid PRE samples should produce a body-y envelope");
+  ExpectTrue(row.used_sample_count == 5U, "pre window should sample five 1 Hz states");
+  ExpectNear(row.mean_body_y_mps, 0.012, 1e-12,
+             "mean body-y should come from PRE velocity");
+  ExpectNear(row.rmse_body_y_mps, 0.009797958971132712, 1e-12,
+             "RMSE should be centered around the PRE mean");
+  ExpectNear(row.deadband_mps, 2.0 * row.rmse_body_y_mps, 1e-12,
+             "deadband should be the configured RMSE multiplier");
+
+  config.stage1_outage_body_y_min_speed_mps = 2.0;
+  const auto skipped =
+    offline_lc_minimal::Stage1OutageLateralVelocityEnvelopeEstimator(request).Estimate();
+  ExpectTrue(!skipped.envelopes.front().valid,
+             "low-speed PRE samples should skip the envelope");
+  ExpectTrue(skipped.envelopes.front().skip_reason == "INSUFFICIENT_SAMPLES",
+             "low-speed rejection should fall back to insufficient samples");
+  ExpectTrue(skipped.envelopes.front().skipped_low_speed_count == 5U,
+             "low-speed skipped count should be recorded");
+
+  std::vector<offline_lc_minimal::RtkOutageWindowRow> no_outages;
+  request.outage_windows = &no_outages;
+  const auto empty =
+    offline_lc_minimal::Stage1OutageLateralVelocityEnvelopeEstimator(request).Estimate();
+  ExpectTrue(empty.envelopes.empty(), "no outage windows should produce no envelope rows");
+}
+
+void TestStage1OutageBodyYEnvelopeBuilderAddsOnlyOutageFactors() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage1_outage_body_y_envelope = true;
+
+  offline_lc_minimal::Stage1OutageBodyYEnvelopeReference reference;
+  reference.reference_states.resize(5U);
+  for (std::size_t index = 0; index < reference.reference_states.size(); ++index) {
+    reference.reference_states[index].time_s = static_cast<double>(index);
+    reference.reference_states[index].pose = gtsam::Pose3();
+  }
+  offline_lc_minimal::Stage1OutageBodyYEnvelopeRow envelope;
+  envelope.window_index = 7U;
+  envelope.outage_start_time_s = 1.5;
+  envelope.outage_end_time_s = 3.0;
+  envelope.valid = true;
+  envelope.mean_body_y_mps = 0.01;
+  envelope.rmse_body_y_mps = 0.02;
+  envelope.deadband_mps = 0.04;
+  envelope.sigma_mps = 0.02;
+  envelope.huber_k = 1.345;
+  envelope.skip_reason = "OK";
+  reference.envelopes.push_back(envelope);
+
+  std::vector<double> state_timestamps{0.0, 1.0, 2.0, 3.0, 4.0};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::Stage1OutageBodyYEnvelopeRow> envelopes;
+  std::vector<offline_lc_minimal::Stage1OutageBodyYStateDiagnosticRow> diagnostics;
+  offline_lc_minimal::Stage1OutageBodyYEnvelopeConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.reference = &reference;
+  request.dynamic_start_index = 0U;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.envelopes = &envelopes;
+  request.state_diagnostics = &diagnostics;
+  offline_lc_minimal::Stage1OutageBodyYEnvelopeConstraintBuilder(request).Build();
+
+  ExpectTrue(graph.size() == 2U, "builder should add factors only for outage states");
+  ExpectTrue(diagnostics.size() == 2U, "builder should emit one diagnostic per factor");
+  ExpectTrue(diagnostics[0].state_index == 2U && diagnostics[1].state_index == 3U,
+             "builder should skip PRE and POST states");
+  ExpectTrue(envelopes.front().factor_count == 2U,
+             "envelope CSV row should record the added factor count");
+  ExpectTrue(summary.stage1_outage_body_y_velocity_factor_count == 2U,
+             "summary should count body-y envelope factors");
+}
+
+void TestStage2RunsConstrainedStage1BeforeSegmentedStage2() {
+  struct CallRecord {
+    bool has_stage2_reference = false;
+    bool has_body_y_reference = false;
+    bool enable_stage2_velocity_optimization = false;
+    bool enable_rtk_outage_segmented_batch = false;
+  };
+
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage1_yaw_refinement = true;
+  config.stage1_yaw_refinement_max_iterations = 1;
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_segmented_batch = true;
+  config.enable_stage1_outage_body_y_envelope = true;
+  config.stage1_outage_body_y_pre_window_s = 5.0;
+  config.stage1_outage_body_y_min_sample_count = 4;
+  config.stage1_outage_body_y_min_speed_mps = 0.5;
+  config.rtk_outage_segmented_batch_max_outages = 1;
+
+  std::vector<CallRecord> calls;
+  offline_lc_minimal::Stage2VelocityOptimizationRequest request;
+  request.config = config;
+  request.dataset = offline_lc_minimal::DataSet{};
+  request.dataset.gnss_samples = {
+    MakeRecoveryGnssSample(20.0, 0.20),
+    MakeRecoveryGnssSample(20.4, 0.21),
+    MakeRecoveryGnssSample(20.8, 0.22),
+    MakeRecoveryGnssSample(21.2, 0.23),
+    MakeRecoveryGnssSample(21.6, 0.24)};
+  request.run_once = [&](
+                       const offline_lc_minimal::OfflineRunnerConfig &run_config,
+                       std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> stage2_reference,
+                       std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference> body_y_reference,
+                       offline_lc_minimal::DataSet) {
+    calls.push_back(CallRecord{
+      stage2_reference != nullptr,
+      body_y_reference != nullptr,
+      run_config.enable_stage2_velocity_optimization,
+      run_config.enable_rtk_outage_segmented_batch});
+
+    offline_lc_minimal::OfflineRunResult result;
+    const double start_time_s = run_config.processing_start_time_s;
+    const double end_time_s =
+      run_config.processing_end_time_s > 0.0 ? run_config.processing_end_time_s : 30.0;
+    result.run_summary.dynamic_start_time_s = start_time_s;
+    result.run_summary.processing_start_time_s = start_time_s;
+    result.run_summary.processing_end_time_s = end_time_s;
+    result.trajectory = MakeMovingTrajectoryRows(start_time_s, end_time_s);
+    if (calls.size() <= 2U) {
+      result.run_summary.dynamic_start_time_s = 0.0;
+      result.run_summary.processing_start_time_s = 0.0;
+      result.run_summary.processing_end_time_s = 30.0;
+      result.trajectory = MakeMovingTrajectoryRows(0.0, 30.0);
+      result.rtk_outage_windows.push_back(MakePlannedOutageWindow());
+    }
+    if (body_y_reference != nullptr) {
+      result.stage1_outage_body_y_envelopes = body_y_reference->envelopes;
+      result.run_summary.stage1_outage_body_y_envelope_enabled = true;
+      result.run_summary.stage1_outage_body_y_envelope_count =
+        body_y_reference->envelopes.size();
+      result.run_summary.stage1_outage_body_y_envelope_valid_count =
+        static_cast<std::size_t>(
+          std::count_if(
+            body_y_reference->envelopes.begin(),
+            body_y_reference->envelopes.end(),
+            [](const offline_lc_minimal::Stage1OutageBodyYEnvelopeRow &row) {
+              return row.valid;
+            }));
+    }
+    return result;
+  };
+
+  const auto result =
+    offline_lc_minimal::Stage2VelocityOptimizationRunner(std::move(request)).Run();
+  ExpectTrue(calls.size() == 5U,
+             "body-y envelope flow should run baseline Stage1, constrained Stage1, then three segments");
+  ExpectTrue(!calls[0].has_body_y_reference && !calls[0].has_stage2_reference,
+             "baseline Stage1 should not receive body-y or stage2 references");
+  ExpectTrue(calls[1].has_body_y_reference && !calls[1].has_stage2_reference,
+             "constrained Stage1 should receive the estimated body-y envelope");
+  for (std::size_t index = 2U; index < calls.size(); ++index) {
+    ExpectTrue(!calls[index].has_body_y_reference,
+               "segmented Stage2 children should not add Stage1 body-y factors");
+  }
+  ExpectTrue(result.stage1_outage_body_y_envelopes.size() == 1U,
+             "assembled Stage2 result should keep Stage1 body-y envelope diagnostics");
+  ExpectTrue(result.run_summary.stage2_velocity_optimization_enabled,
+             "assembled result should still mark Stage2 enabled");
+}
+
 void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
   struct CallRecord {
     bool enable_stage1_yaw_refinement = false;
@@ -511,6 +746,7 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
   config.enable_rtk_outage_smoothing = true;
   config.enable_rtk_outage_segmented_batch = true;
   config.enable_attitude_reference_constraint = true;
+  config.enable_stage1_outage_body_y_envelope = false;
   config.rtk_outage_segmented_batch_max_outages = 1;
 
   std::vector<CallRecord> calls;
@@ -525,6 +761,7 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
     MakeRecoveryGnssSample(21.6, 0.24)};
   request.run_once = [&](const offline_lc_minimal::OfflineRunnerConfig &run_config,
                          std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> reference,
+                         std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
                          offline_lc_minimal::DataSet) {
     calls.push_back(CallRecord{
       run_config.enable_stage1_yaw_refinement,
@@ -653,6 +890,16 @@ int main() {
     RunTest("TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors", TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors);
     RunTest("TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma", TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma);
     RunTest("TestStage2PolicyDisablesRtkVelocityAndAttitudeReference", TestStage2PolicyDisablesRtkVelocityAndAttitudeReference);
+    RunTest("TestFixedAxisBodyYVelocityEnvelopeFactorDeadband", TestFixedAxisBodyYVelocityEnvelopeFactorDeadband);
+    RunTest(
+      "TestStage1OutageBodyYEnvelopeEstimatorStatsAndSkips",
+      TestStage1OutageBodyYEnvelopeEstimatorStatsAndSkips);
+    RunTest(
+      "TestStage1OutageBodyYEnvelopeBuilderAddsOnlyOutageFactors",
+      TestStage1OutageBodyYEnvelopeBuilderAddsOnlyOutageFactors);
+    RunTest(
+      "TestStage2RunsConstrainedStage1BeforeSegmentedStage2",
+      TestStage2RunsConstrainedStage1BeforeSegmentedStage2);
     RunTest(
       "TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren",
       TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren);

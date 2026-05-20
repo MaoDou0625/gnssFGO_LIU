@@ -46,6 +46,7 @@
 #include "offline_lc_minimal/core/RtkVelocityConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
 #include "offline_lc_minimal/core/RtkVerticalDriftReferenceEstimator.h"
+#include "offline_lc_minimal/core/Stage1OutageBodyYEnvelopeConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage2AttitudeHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage2HorizontalHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage2VehicleNHCConstraintBuilder.h"
@@ -140,6 +141,14 @@ OfflineBatchRunner::OfflineBatchRunner(
   std::shared_ptr<const Stage2VelocityReference> stage2_reference)
     : config_(std::move(config)),
       stage2_reference_(std::move(stage2_reference)) {}
+
+OfflineBatchRunner::OfflineBatchRunner(
+  OfflineRunnerConfig config,
+  std::shared_ptr<const Stage2VelocityReference> stage2_reference,
+  std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference)
+    : config_(std::move(config)),
+      stage2_reference_(std::move(stage2_reference)),
+      stage1_body_y_reference_(std::move(stage1_body_y_reference)) {}
 
 double OfflineBatchRunner::CorrectedGnssTime(const GnssSolutionSample &sample) const {
   return sample.time_s - config_.gnss_time_offset_s;
@@ -326,8 +335,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     request.run_once = [](
                          const OfflineRunnerConfig &config,
                          std::shared_ptr<const Stage2VelocityReference> stage2_reference,
+                         std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference,
                          DataSet run_dataset) {
-      return OfflineBatchRunner(config, std::move(stage2_reference)).Run(std::move(run_dataset));
+      return OfflineBatchRunner(
+        config,
+        std::move(stage2_reference),
+        std::move(stage1_body_y_reference)).Run(std::move(run_dataset));
     };
     return Stage2VelocityOptimizationRunner(std::move(request)).Run();
   }
@@ -335,8 +348,15 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     Stage1YawRefinementRequest request;
     request.config = config_;
     request.dataset = std::move(dataset);
-    request.run_once = [](const OfflineRunnerConfig &config, DataSet run_dataset) {
-      return OfflineBatchRunner(config).Run(std::move(run_dataset));
+    request.body_y_envelope_reference = stage1_body_y_reference_;
+    request.run_once = [](
+                         const OfflineRunnerConfig &config,
+                         std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference,
+                         DataSet run_dataset) {
+      return OfflineBatchRunner(
+        config,
+        nullptr,
+        std::move(stage1_body_y_reference)).Run(std::move(run_dataset));
     };
     return Stage1YawRefinementRunner(std::move(request)).Run();
   }
@@ -1049,10 +1069,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     segmented_request.run_once = [](
                                    OfflineRunnerConfig segment_config,
                                    std::shared_ptr<const Stage2VelocityReference> stage2_reference,
+                                   std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference,
                                    DataSet segment_dataset) {
       return OfflineBatchRunner(
         std::move(segment_config),
-        std::move(stage2_reference)).Run(std::move(segment_dataset));
+        std::move(stage2_reference),
+        std::move(stage1_body_y_reference)).Run(std::move(segment_dataset));
     };
     return RtkOutageSegmentedBatchRunner(std::move(segmented_request)).Run();
   }
@@ -1249,6 +1271,18 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.body_z_nhc_corrected_max_abs_displacement_residual_m =
     std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage1_outage_body_y_envelope_enabled =
+    config_.enable_stage1_outage_body_y_envelope &&
+    stage1_body_y_reference_ != nullptr;
+  run_result.run_summary.stage1_outage_body_y_envelope_count = 0;
+  run_result.run_summary.stage1_outage_body_y_envelope_valid_count = 0;
+  run_result.run_summary.stage1_outage_body_y_velocity_factor_count = 0;
+  run_result.run_summary.stage1_outage_body_y_mean_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage1_outage_body_y_rmse_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage1_outage_body_y_deadband_mps =
+    std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.stage2_velocity_optimization_enabled =
     stage2_reference_ != nullptr && config_.enable_stage2_velocity_optimization;
   run_result.run_summary.stage2_attitude_hold_factor_count = 0;
@@ -1330,6 +1364,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.relative_yaw_reference_diagnostics.clear();
   run_result.body_z_nhc_horizontal_leakage_diagnostics.clear();
   run_result.body_z_nhc_diagnostics.clear();
+  run_result.stage1_outage_body_y_envelopes.clear();
+  run_result.stage1_outage_body_y_state_diagnostics.clear();
   run_result.stage2_mount_leakage_diagnostics.clear();
   run_result.stage2_vehicle_nhc_state_diagnostics.clear();
   run_result.vertical_jump_masked_imu_diagnostics.clear();
@@ -1539,6 +1575,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   rtk_outage_request.outage_windows = &run_result.rtk_outage_windows;
   RtkOutageSmoothingConstraintBuilder(std::move(rtk_outage_request)).Build();
 
+  if (stage1_body_y_reference_ != nullptr) {
+    Stage1OutageBodyYEnvelopeConstraintBuildRequest body_y_request;
+    body_y_request.config = &config_;
+    body_y_request.state_timestamps = &state_timestamps;
+    body_y_request.reference = stage1_body_y_reference_.get();
+    body_y_request.dynamic_start_index = graph_timeline.dynamic_start_index;
+    body_y_request.graph = &graph_with_gnss;
+    body_y_request.run_summary = &run_result.run_summary;
+    body_y_request.envelopes = &run_result.stage1_outage_body_y_envelopes;
+    body_y_request.state_diagnostics =
+      &run_result.stage1_outage_body_y_state_diagnostics;
+    Stage1OutageBodyYEnvelopeConstraintBuilder(std::move(body_y_request)).Build();
+  }
+
   BodyZNHCConstraintBuildRequest body_z_nhc_request;
   body_z_nhc_request.config = &config_;
   body_z_nhc_request.state_timestamps = &state_timestamps;
@@ -1639,6 +1689,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateRtkOutageBoundaryDiagnostics(
     optimized_values,
     run_result.rtk_outage_boundary_diagnostics);
+  PopulateStage1OutageBodyYEnvelopeDiagnostics(
+    optimized_values,
+    run_result.stage1_outage_body_y_state_diagnostics,
+    run_result.run_summary);
   completed_adaptive_pass_count = adaptive_pass + 1;
 
   bool finalize_adaptive_pass = adaptive_pass + 1 >= adaptive_pass_limit;

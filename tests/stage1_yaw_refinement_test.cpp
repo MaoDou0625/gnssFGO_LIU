@@ -1,6 +1,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -192,6 +193,7 @@ void TestStage1RunnerUpdatesYawOverrideAndConverges() {
   request.dataset = dataset;
   request.run_once = [&](
                        const offline_lc_minimal::OfflineRunnerConfig &run_config,
+                       std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
                        offline_lc_minimal::DataSet) {
     ++call_count;
     if (call_count == 2) {
@@ -244,6 +246,7 @@ void TestStage1RunnerHonorsMaxIterations() {
   request.dataset = dataset;
   request.run_once = [](
                        const offline_lc_minimal::OfflineRunnerConfig &,
+                       std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
                        offline_lc_minimal::DataSet) {
     offline_lc_minimal::OfflineRunResult result;
     result.trajectory = MakeTrajectory(0.5);

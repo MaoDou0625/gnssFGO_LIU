@@ -96,6 +96,14 @@ struct OfflineRunnerConfig {
   double stage1_heading_min_displacement_m = 0.2;
   double stage1_heading_noise_floor_rad = 0.00872664626;
   double stage1_yaw_update_max_rad = 1.57079632679;
+  bool enable_stage1_outage_body_y_envelope = true;
+  double stage1_outage_body_y_pre_window_s = 60.0;
+  double stage1_outage_body_y_deadband_rmse_multiplier = 2.0;
+  int stage1_outage_body_y_min_sample_count = 100;
+  double stage1_outage_body_y_min_speed_mps = 0.5;
+  double stage1_outage_body_y_min_sigma_mps = 0.01;
+  double stage1_outage_body_y_max_sigma_mps = 0.08;
+  double stage1_outage_body_y_huber_k = 1.345;
   bool enable_stage2_velocity_optimization = false;
   bool enable_stage2_vehicle_nhc_constraint = true;
   double stage2_attitude_hold_sigma_rad = 1e-5;

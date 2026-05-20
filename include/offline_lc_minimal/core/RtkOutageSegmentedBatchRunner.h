@@ -6,6 +6,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/RunResultTypes.h"
+#include "offline_lc_minimal/core/Stage1OutageLateralVelocityEnvelopeEstimator.h"
 #include "offline_lc_minimal/core/Stage2VelocityReference.h"
 
 namespace offline_lc_minimal {
@@ -13,6 +14,7 @@ namespace offline_lc_minimal {
 using SegmentedBatchRunOnce = std::function<OfflineRunResult(
   OfflineRunnerConfig,
   std::shared_ptr<const Stage2VelocityReference>,
+  std::shared_ptr<const Stage1OutageBodyYEnvelopeReference>,
   DataSet)>;
 
 struct RtkOutageSegmentedBatchRunRequest {

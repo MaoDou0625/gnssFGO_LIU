@@ -94,6 +94,14 @@ void WriteStage1YawRefinementDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<Stage1YawRefinementDiagnosticRow> &rows);
 
+void WriteStage1OutageBodyYEnvelopeCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage1OutageBodyYEnvelopeRow> &rows);
+
+void WriteStage1OutageBodyYStateDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage1OutageBodyYStateDiagnosticRow> &rows);
+
 void WriteStaticAlignmentValidationCsv(
   const std::filesystem::path &path,
   const std::vector<StaticAlignmentValidationRow> &rows);

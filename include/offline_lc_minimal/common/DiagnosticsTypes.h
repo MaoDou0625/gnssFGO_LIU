@@ -702,6 +702,50 @@ struct Stage2MountLeakageDiagnosticRow {
   double optimized_vehicle_z_max_abs_mps = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct Stage1OutageBodyYEnvelopeRow {
+  std::size_t window_index = 0;
+  double outage_start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double outage_end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double pre_window_start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double pre_window_end_time_s = std::numeric_limits<double>::quiet_NaN();
+  std::size_t candidate_sample_count = 0;
+  std::size_t used_sample_count = 0;
+  std::size_t skipped_low_speed_count = 0;
+  std::size_t skipped_invalid_count = 0;
+  bool valid = false;
+  double min_speed_mps = std::numeric_limits<double>::quiet_NaN();
+  double mean_body_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double rmse_body_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double p95_abs_body_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double deadband_mps = std::numeric_limits<double>::quiet_NaN();
+  double sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double huber_k = std::numeric_limits<double>::quiet_NaN();
+  std::size_t factor_count = 0;
+  std::string skip_reason = "UNSET";
+};
+
+struct Stage1OutageBodyYStateDiagnosticRow {
+  std::size_t window_index = 0;
+  std::size_t state_index = 0;
+  double time_s = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+  double mean_body_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double rmse_body_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double deadband_mps = std::numeric_limits<double>::quiet_NaN();
+  double sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double body_y_axis_x = std::numeric_limits<double>::quiet_NaN();
+  double body_y_axis_y = std::numeric_limits<double>::quiet_NaN();
+  double body_y_axis_z = std::numeric_limits<double>::quiet_NaN();
+  double optimized_vx_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_vy_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_body_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double centered_body_y_mps = std::numeric_limits<double>::quiet_NaN();
+  double deadband_residual_mps = std::numeric_limits<double>::quiet_NaN();
+  double normalized_residual = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct Stage2VehicleNHCStateDiagnosticRow {
   std::size_t window_index = 0;
   std::size_t state_index = 0;

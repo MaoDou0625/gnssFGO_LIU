@@ -252,6 +252,21 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.stage1_yaw_update_max_rad <= 0.0) {
     throw std::runtime_error("stage1 yaw refinement settings must be positive and finite");
   }
+  if (!std::isfinite(config.stage1_outage_body_y_pre_window_s) ||
+      !std::isfinite(config.stage1_outage_body_y_deadband_rmse_multiplier) ||
+      !std::isfinite(config.stage1_outage_body_y_min_speed_mps) ||
+      !std::isfinite(config.stage1_outage_body_y_min_sigma_mps) ||
+      !std::isfinite(config.stage1_outage_body_y_max_sigma_mps) ||
+      !std::isfinite(config.stage1_outage_body_y_huber_k) ||
+      config.stage1_outage_body_y_pre_window_s <= 0.0 ||
+      config.stage1_outage_body_y_deadband_rmse_multiplier <= 0.0 ||
+      config.stage1_outage_body_y_min_sample_count <= 0 ||
+      config.stage1_outage_body_y_min_speed_mps < 0.0 ||
+      config.stage1_outage_body_y_min_sigma_mps <= 0.0 ||
+      config.stage1_outage_body_y_max_sigma_mps < config.stage1_outage_body_y_min_sigma_mps ||
+      config.stage1_outage_body_y_huber_k <= 0.0) {
+    throw std::runtime_error("stage1 outage body-y envelope settings must be positive and finite");
+  }
   if (!std::isfinite(config.stage2_attitude_hold_sigma_rad) ||
       !std::isfinite(config.stage2_horizontal_position_hold_sigma_m) ||
       !std::isfinite(config.stage2_horizontal_velocity_hold_sigma_mps) ||
@@ -837,6 +852,22 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.stage1_heading_noise_floor_rad = ParseDouble(normalized_value);
   } else if (normalized_key == "stage1_yaw_update_max_rad") {
     config.stage1_yaw_update_max_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_stage1_outage_body_y_envelope") {
+    config.enable_stage1_outage_body_y_envelope = ParseBool(normalized_value);
+  } else if (normalized_key == "stage1_outage_body_y_pre_window_s") {
+    config.stage1_outage_body_y_pre_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage1_outage_body_y_deadband_rmse_multiplier") {
+    config.stage1_outage_body_y_deadband_rmse_multiplier = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage1_outage_body_y_min_sample_count") {
+    config.stage1_outage_body_y_min_sample_count = ParseInt(normalized_value);
+  } else if (normalized_key == "stage1_outage_body_y_min_speed_mps") {
+    config.stage1_outage_body_y_min_speed_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage1_outage_body_y_min_sigma_mps") {
+    config.stage1_outage_body_y_min_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage1_outage_body_y_max_sigma_mps") {
+    config.stage1_outage_body_y_max_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage1_outage_body_y_huber_k") {
+    config.stage1_outage_body_y_huber_k = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_stage2_velocity_optimization") {
     config.enable_stage2_velocity_optimization = ParseBool(normalized_value);
   } else if (normalized_key == "enable_stage2_vehicle_nhc_constraint") {
@@ -1419,6 +1450,21 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "stage1_heading_min_displacement_m=" << config.stage1_heading_min_displacement_m << '\n'
     << "stage1_heading_noise_floor_rad=" << config.stage1_heading_noise_floor_rad << '\n'
     << "stage1_yaw_update_max_rad=" << config.stage1_yaw_update_max_rad << '\n'
+    << "enable_stage1_outage_body_y_envelope="
+    << (config.enable_stage1_outage_body_y_envelope ? "true" : "false") << '\n'
+    << "stage1_outage_body_y_pre_window_s="
+    << config.stage1_outage_body_y_pre_window_s << '\n'
+    << "stage1_outage_body_y_deadband_rmse_multiplier="
+    << config.stage1_outage_body_y_deadband_rmse_multiplier << '\n'
+    << "stage1_outage_body_y_min_sample_count="
+    << config.stage1_outage_body_y_min_sample_count << '\n'
+    << "stage1_outage_body_y_min_speed_mps="
+    << config.stage1_outage_body_y_min_speed_mps << '\n'
+    << "stage1_outage_body_y_min_sigma_mps="
+    << config.stage1_outage_body_y_min_sigma_mps << '\n'
+    << "stage1_outage_body_y_max_sigma_mps="
+    << config.stage1_outage_body_y_max_sigma_mps << '\n'
+    << "stage1_outage_body_y_huber_k=" << config.stage1_outage_body_y_huber_k << '\n'
     << "enable_stage2_velocity_optimization="
     << (config.enable_stage2_velocity_optimization ? "true" : "false") << '\n'
     << "enable_stage2_vehicle_nhc_constraint="

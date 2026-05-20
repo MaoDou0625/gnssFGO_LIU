@@ -108,7 +108,10 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
   bool converged = false;
 
   for (int iteration = 1; iteration <= stage_config.stage1_yaw_refinement_max_iterations; ++iteration) {
-    last_result = request_.run_once(stage_config, request_.dataset);
+    last_result = request_.run_once(
+      stage_config,
+      request_.body_y_envelope_reference,
+      request_.dataset);
     const double input_yaw_rad = InitialYawForNextUpdate(stage_config, last_result);
     final_yaw_rad = input_yaw_rad;
 
