@@ -113,8 +113,8 @@ struct OfflineRunnerConfig {
   double late_static_merge_gap_s = 2.0;
   bool late_static_exclude_initial_static = true;
   bool late_static_exclude_rtk_outage = true;
-  double late_static_vz_sigma_mps = 0.002;
-  double late_static_up_sigma_m = 0.001;
+  double late_static_vz_sigma_mps = 0.0005;
+  double late_static_up_sigma_m = 0.02;
   double late_static_height_hold_sigma_m = 0.001;
   bool enable_stage2_velocity_optimization = false;
   bool enable_stage2_vehicle_nhc_constraint = true;

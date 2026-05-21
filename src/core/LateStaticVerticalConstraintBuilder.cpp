@@ -85,7 +85,7 @@ void LateStaticVerticalConstraintBuilder::Build() const {
     window.vz_sigma_mps = request_.config->late_static_vz_sigma_mps;
     window.up_sigma_m = request_.config->late_static_up_sigma_m;
     window.height_hold_sigma_m = request_.config->late_static_height_hold_sigma_m;
-    std::size_t previous_static_state_index = std::numeric_limits<std::size_t>::max();
+    std::size_t reference_static_state_index = std::numeric_limits<std::size_t>::max();
     for (std::size_t state_index = request_.dynamic_start_index;
          state_index < request_.state_timestamps->size();
          ++state_index) {
@@ -109,17 +109,18 @@ void LateStaticVerticalConstraintBuilder::Build() const {
       window.up_factor_state_indices.push_back(state_index);
       ++window.up_factor_count;
 
-      if (previous_static_state_index != std::numeric_limits<std::size_t>::max()) {
+      if (reference_static_state_index == std::numeric_limits<std::size_t>::max()) {
+        reference_static_state_index = state_index;
+      } else {
         request_.graph->add(
           factor::StaticVerticalPositionHoldFactor(
-            symbol::X(previous_static_state_index),
+            symbol::X(reference_static_state_index),
             symbol::X(state_index),
             height_hold_noise));
         window.height_hold_factor_state_index_pairs.push_back(
-          {previous_static_state_index, state_index});
+          {reference_static_state_index, state_index});
         ++window.height_hold_factor_count;
       }
-      previous_static_state_index = state_index;
     }
   }
   AccumulateSummary(*request_.windows, *request_.run_summary);

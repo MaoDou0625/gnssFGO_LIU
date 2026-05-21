@@ -2,6 +2,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <boost/pointer_cast.hpp>
@@ -117,7 +118,7 @@ offline_lc_minimal::OfflineRunnerConfig MakeLateStaticConfig() {
   config.late_static_merge_gap_s = 5.0;
   config.late_static_exclude_initial_static = true;
   config.late_static_exclude_rtk_outage = true;
-  config.late_static_vz_sigma_mps = 0.002;
+  config.late_static_vz_sigma_mps = 0.0005;
   config.late_static_up_sigma_m = 0.02;
   config.late_static_height_hold_sigma_m = 0.001;
   return config;
@@ -267,7 +268,15 @@ void TestLateStaticVerticalBuilderAddsOnlyUpAndVzFactors() {
   ExpectTrue(windows.front().up_factor_count == 4U, "builder should add one up prior per static state");
   ExpectTrue(
     windows.front().height_hold_factor_count == 3U,
-    "builder should add one height hold factor per adjacent static state pair");
+    "builder should add one height hold factor from the reference state to each later static state");
+  ExpectTrue(
+    windows.front().height_hold_factor_state_index_pairs.size() == 3U,
+    "builder should record height hold factor state pairs");
+  ExpectTrue(
+    windows.front().height_hold_factor_state_index_pairs[0U] == std::make_pair<std::size_t, std::size_t>(2U, 3U) &&
+      windows.front().height_hold_factor_state_index_pairs[1U] == std::make_pair<std::size_t, std::size_t>(2U, 4U) &&
+      windows.front().height_hold_factor_state_index_pairs[2U] == std::make_pair<std::size_t, std::size_t>(2U, 5U),
+    "late-static height hold should use the window's first state as the fixed reference");
   ExpectTrue(graph.size() == 11U, "builder should add up, vz, and height hold priors");
   const auto first_vz =
     boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalVelocityPriorFactor>(graph.at(0));
