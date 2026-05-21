@@ -573,9 +573,9 @@ void WriteLateStaticWindowsCsv(
   stream << std::setprecision(17);
   stream
     << "window_index,start_time_s,end_time_s,duration_s,feature_window_count,valid,"
-       "rtk_median_up_m,rtk_up_range_m,vz_sigma_mps,up_sigma_m,"
-       "vz_factor_count,up_factor_count,max_abs_vz_residual_mps,"
-       "max_abs_up_residual_m,skip_reason\n";
+       "rtk_median_up_m,rtk_up_range_m,vz_sigma_mps,up_sigma_m,height_hold_sigma_m,"
+       "vz_factor_count,up_factor_count,height_hold_factor_count,max_abs_vz_residual_mps,"
+       "max_abs_up_residual_m,max_abs_height_hold_residual_m,skip_reason\n";
   for (const auto &row : rows) {
     stream << row.window_index << ','
            << row.start_time_s << ','
@@ -587,10 +587,13 @@ void WriteLateStaticWindowsCsv(
            << row.rtk_up_range_m << ','
            << row.vz_sigma_mps << ','
            << row.up_sigma_m << ','
+           << row.height_hold_sigma_m << ','
            << row.vz_factor_count << ','
            << row.up_factor_count << ','
+           << row.height_hold_factor_count << ','
            << row.max_abs_vz_residual_mps << ','
            << row.max_abs_up_residual_m << ','
+           << row.max_abs_height_hold_residual_m << ','
            << row.skip_reason << '\n';
   }
 }

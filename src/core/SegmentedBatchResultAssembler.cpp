@@ -330,6 +330,7 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.run_summary.late_static_window_count = 0;
   assembled.run_summary.late_static_vz_factor_count = 0;
   assembled.run_summary.late_static_up_factor_count = 0;
+  assembled.run_summary.late_static_height_hold_factor_count = 0;
   for (const auto &piece : request_.pieces) {
     assembled.run_summary.rtk_outage_boundary_reference_count +=
       piece.result.run_summary.rtk_outage_boundary_reference_count;
@@ -346,6 +347,8 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
         piece.result.run_summary.late_static_vz_factor_count;
       assembled.run_summary.late_static_up_factor_count +=
         piece.result.run_summary.late_static_up_factor_count;
+      assembled.run_summary.late_static_height_hold_factor_count +=
+        piece.result.run_summary.late_static_height_hold_factor_count;
       if (!std::isfinite(assembled.run_summary.late_static_rtk_speed_threshold_mps) &&
           std::isfinite(piece.result.run_summary.late_static_rtk_speed_threshold_mps)) {
         assembled.run_summary.late_static_rtk_speed_threshold_mps =

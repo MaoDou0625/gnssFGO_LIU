@@ -11,6 +11,7 @@
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/core/LateStaticDetector.h"
 #include "offline_lc_minimal/core/LateStaticVerticalConstraintBuilder.h"
+#include "offline_lc_minimal/factor/StaticVerticalPositionHoldFactor.h"
 #include "offline_lc_minimal/factor/VerticalRtkFactors.h"
 #include "offline_lc_minimal/factor/VerticalVelocityPriorFactor.h"
 
@@ -118,6 +119,7 @@ offline_lc_minimal::OfflineRunnerConfig MakeLateStaticConfig() {
   config.late_static_exclude_rtk_outage = true;
   config.late_static_vz_sigma_mps = 0.002;
   config.late_static_up_sigma_m = 0.02;
+  config.late_static_height_hold_sigma_m = 0.001;
   return config;
 }
 
@@ -262,18 +264,26 @@ void TestLateStaticVerticalBuilderAddsOnlyUpAndVzFactors() {
   offline_lc_minimal::LateStaticVerticalConstraintBuilder(request).Build();
 
   ExpectTrue(windows.front().vz_factor_count == 4U, "builder should add one vz prior per static state");
-  ExpectTrue(windows.front().up_factor_count == 4U, "builder should add 1 Hz up priors at 1 Hz states");
-  ExpectTrue(graph.size() == 8U, "builder should add only up and vz priors");
+  ExpectTrue(windows.front().up_factor_count == 4U, "builder should add one up prior per static state");
+  ExpectTrue(
+    windows.front().height_hold_factor_count == 3U,
+    "builder should add one height hold factor per adjacent static state pair");
+  ExpectTrue(graph.size() == 11U, "builder should add up, vz, and height hold priors");
   const auto first_vz =
     boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalVelocityPriorFactor>(graph.at(0));
   const auto first_up =
     boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalPositionFactor>(graph.at(1));
+  const auto first_hold =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::StaticVerticalPositionHoldFactor>(graph.at(4));
   ExpectTrue(first_vz.get() != nullptr, "first factor should constrain vertical velocity");
   ExpectTrue(first_up.get() != nullptr, "second factor should constrain vertical position");
+  ExpectTrue(first_hold.get() != nullptr, "builder should add static height hold factors");
   ExpectTrue(summary.late_static_vz_factor_count == 4U,
              "summary should count vz priors");
   ExpectTrue(summary.late_static_up_factor_count == 4U,
              "summary should count up priors");
+  ExpectTrue(summary.late_static_height_hold_factor_count == 3U,
+             "summary should count height hold factors");
 }
 
 }  // namespace

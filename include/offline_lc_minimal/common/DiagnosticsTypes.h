@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Core>
@@ -285,13 +286,17 @@ struct LateStaticWindowRow {
   double rtk_up_range_m = std::numeric_limits<double>::quiet_NaN();
   double vz_sigma_mps = std::numeric_limits<double>::quiet_NaN();
   double up_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double height_hold_sigma_m = std::numeric_limits<double>::quiet_NaN();
   std::size_t vz_factor_count = 0;
   std::size_t up_factor_count = 0;
+  std::size_t height_hold_factor_count = 0;
   double max_abs_vz_residual_mps = std::numeric_limits<double>::quiet_NaN();
   double max_abs_up_residual_m = std::numeric_limits<double>::quiet_NaN();
+  double max_abs_height_hold_residual_m = std::numeric_limits<double>::quiet_NaN();
   std::string skip_reason = "UNSET";
   std::vector<std::size_t> vz_factor_state_indices;
   std::vector<std::size_t> up_factor_state_indices;
+  std::vector<std::pair<std::size_t, std::size_t>> height_hold_factor_state_index_pairs;
 };
 
 struct RtkOutageCausalNavReferenceRow {

@@ -2449,6 +2449,7 @@ void TestStage1YawRefinementConfigValidation() {
   offline_lc_minimal::OverrideConfigField(config, "late_static_exclude_rtk_outage", "true");
   offline_lc_minimal::OverrideConfigField(config, "late_static_vz_sigma_mps", "0.003");
   offline_lc_minimal::OverrideConfigField(config, "late_static_up_sigma_m", "0.025");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_height_hold_sigma_m", "0.004");
   offline_lc_minimal::ValidateConfig(config);
   ExpectTrue(config.enable_stage1_yaw_refinement, "stage1 yaw refinement flag should parse");
   ExpectTrue(config.stage1_yaw_refinement_max_iterations == 8, "stage1 max iterations should parse");
@@ -2504,6 +2505,8 @@ void TestStage1YawRefinementConfigValidation() {
              "late-static vz sigma should parse");
   ExpectTrue(std::abs(config.late_static_up_sigma_m - 0.025) < 1e-12,
              "late-static up sigma should parse");
+  ExpectTrue(std::abs(config.late_static_height_hold_sigma_m - 0.004) < 1e-12,
+             "late-static height hold sigma should parse");
 
   config = offline_lc_minimal::DefaultConfig();
   config.stage1_yaw_refinement_max_iterations = 0;
@@ -2565,6 +2568,16 @@ void TestStage1YawRefinementConfigValidation() {
     threw = std::string(exception.what()).find("late-static detection settings") != std::string::npos;
   }
   ExpectTrue(threw, "late-static min RTKFIX sample count should be rejected below two");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.late_static_height_hold_sigma_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("late-static detection settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "late-static height hold sigma should be positive");
 }
 
 }  // namespace

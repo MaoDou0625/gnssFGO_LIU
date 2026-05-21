@@ -9,6 +9,7 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
 
+#include "offline_lc_minimal/factor/StaticVerticalPositionHoldFactor.h"
 #include "offline_lc_minimal/factor/VerticalRtkFactors.h"
 #include "offline_lc_minimal/factor/VerticalVelocityPriorFactor.h"
 
@@ -18,7 +19,6 @@ namespace {
 namespace symbol = gtsam::symbol_shorthand;
 
 constexpr double kTimeEpsilonS = 1.0e-9;
-constexpr double kUpPriorStrideS = 1.0;
 
 bool TimeInWindow(const double time_s, const LateStaticWindowRow &window) {
   return std::isfinite(time_s) &&
@@ -37,9 +37,11 @@ void AccumulateSummary(
         [](const LateStaticWindowRow &row) { return row.valid; }));
   summary.late_static_vz_factor_count = 0U;
   summary.late_static_up_factor_count = 0U;
+  summary.late_static_height_hold_factor_count = 0U;
   for (const auto &window : windows) {
     summary.late_static_vz_factor_count += window.vz_factor_count;
     summary.late_static_up_factor_count += window.up_factor_count;
+    summary.late_static_height_hold_factor_count += window.height_hold_factor_count;
   }
 }
 
@@ -65,18 +67,25 @@ void LateStaticVerticalConstraintBuilder::Build() const {
     gtsam::noiseModel::Isotropic::Sigma(1, request_.config->late_static_vz_sigma_mps);
   const auto up_noise =
     gtsam::noiseModel::Isotropic::Sigma(1, request_.config->late_static_up_sigma_m);
+  const auto height_hold_noise =
+    gtsam::noiseModel::Isotropic::Sigma(
+      1,
+      request_.config->late_static_height_hold_sigma_m);
 
   for (auto &window : *request_.windows) {
     window.vz_factor_count = 0U;
     window.up_factor_count = 0U;
+    window.height_hold_factor_count = 0U;
     window.vz_factor_state_indices.clear();
     window.up_factor_state_indices.clear();
+    window.height_hold_factor_state_index_pairs.clear();
     if (!window.valid || !std::isfinite(window.rtk_median_up_m)) {
       continue;
     }
     window.vz_sigma_mps = request_.config->late_static_vz_sigma_mps;
     window.up_sigma_m = request_.config->late_static_up_sigma_m;
-    double last_up_factor_time_s = -std::numeric_limits<double>::infinity();
+    window.height_hold_sigma_m = request_.config->late_static_height_hold_sigma_m;
+    std::size_t previous_static_state_index = std::numeric_limits<std::size_t>::max();
     for (std::size_t state_index = request_.dynamic_start_index;
          state_index < request_.state_timestamps->size();
          ++state_index) {
@@ -92,16 +101,25 @@ void LateStaticVerticalConstraintBuilder::Build() const {
       window.vz_factor_state_indices.push_back(state_index);
       ++window.vz_factor_count;
 
-      if (time_s >= last_up_factor_time_s + kUpPriorStrideS - kTimeEpsilonS) {
+      request_.graph->add(
+        factor::VerticalPositionFactor(
+          symbol::X(state_index),
+          window.rtk_median_up_m,
+          up_noise));
+      window.up_factor_state_indices.push_back(state_index);
+      ++window.up_factor_count;
+
+      if (previous_static_state_index != std::numeric_limits<std::size_t>::max()) {
         request_.graph->add(
-          factor::VerticalPositionFactor(
+          factor::StaticVerticalPositionHoldFactor(
+            symbol::X(previous_static_state_index),
             symbol::X(state_index),
-            window.rtk_median_up_m,
-            up_noise));
-        window.up_factor_state_indices.push_back(state_index);
-        ++window.up_factor_count;
-        last_up_factor_time_s = time_s;
+            height_hold_noise));
+        window.height_hold_factor_state_index_pairs.push_back(
+          {previous_static_state_index, state_index});
+        ++window.height_hold_factor_count;
       }
+      previous_static_state_index = state_index;
     }
   }
   AccumulateSummary(*request_.windows, *request_.run_summary);
@@ -114,6 +132,7 @@ void PopulateLateStaticVerticalDiagnostics(
   run_summary.late_static_window_count = 0U;
   run_summary.late_static_vz_factor_count = 0U;
   run_summary.late_static_up_factor_count = 0U;
+  run_summary.late_static_height_hold_factor_count = 0U;
   for (auto &window : windows) {
     if (!window.valid) {
       continue;
@@ -121,6 +140,7 @@ void PopulateLateStaticVerticalDiagnostics(
     ++run_summary.late_static_window_count;
     run_summary.late_static_vz_factor_count += window.vz_factor_count;
     run_summary.late_static_up_factor_count += window.up_factor_count;
+    run_summary.late_static_height_hold_factor_count += window.height_hold_factor_count;
 
     double max_abs_vz = 0.0;
     bool has_vz = false;
@@ -150,6 +170,25 @@ void PopulateLateStaticVerticalDiagnostics(
     }
     window.max_abs_up_residual_m =
       has_up ? max_abs_up : std::numeric_limits<double>::quiet_NaN();
+
+    double max_abs_height_hold = 0.0;
+    bool has_height_hold = false;
+    for (const auto &[state_i, state_j] : window.height_hold_factor_state_index_pairs) {
+      const gtsam::Key key_i = symbol::X(state_i);
+      const gtsam::Key key_j = symbol::X(state_j);
+      if (!optimized_values.exists(key_i) || !optimized_values.exists(key_j)) {
+        continue;
+      }
+      const auto pose_i = optimized_values.at<gtsam::Pose3>(key_i);
+      const auto pose_j = optimized_values.at<gtsam::Pose3>(key_j);
+      max_abs_height_hold =
+        std::max(
+          max_abs_height_hold,
+          std::abs(pose_j.translation().z() - pose_i.translation().z()));
+      has_height_hold = true;
+    }
+    window.max_abs_height_hold_residual_m =
+      has_height_hold ? max_abs_height_hold : std::numeric_limits<double>::quiet_NaN();
   }
 }
 

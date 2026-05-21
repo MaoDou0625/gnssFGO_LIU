@@ -273,13 +273,15 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       !std::isfinite(config.late_static_merge_gap_s) ||
       !std::isfinite(config.late_static_vz_sigma_mps) ||
       !std::isfinite(config.late_static_up_sigma_m) ||
+      !std::isfinite(config.late_static_height_hold_sigma_m) ||
       config.late_static_window_s <= 0.0 ||
       config.late_static_stride_s <= 0.0 ||
       config.late_static_min_duration_s <= 0.0 ||
       config.late_static_min_rtkfix_samples <= 1 ||
       config.late_static_merge_gap_s < 0.0 ||
       config.late_static_vz_sigma_mps <= 0.0 ||
-      config.late_static_up_sigma_m <= 0.0) {
+      config.late_static_up_sigma_m <= 0.0 ||
+      config.late_static_height_hold_sigma_m <= 0.0) {
     throw std::runtime_error("late-static detection settings must be positive and finite");
   }
   if (Lowercase(config.late_static_threshold_method) != "log_otsu") {
@@ -908,6 +910,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.late_static_vz_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "late_static_up_sigma_m") {
     config.late_static_up_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "late_static_height_hold_sigma_m") {
+    config.late_static_height_hold_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_stage2_velocity_optimization") {
     config.enable_stage2_velocity_optimization = ParseBool(normalized_value);
   } else if (normalized_key == "enable_stage2_vehicle_nhc_constraint") {
@@ -1519,6 +1523,7 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.late_static_exclude_rtk_outage ? "true" : "false") << '\n'
     << "late_static_vz_sigma_mps=" << config.late_static_vz_sigma_mps << '\n'
     << "late_static_up_sigma_m=" << config.late_static_up_sigma_m << '\n'
+    << "late_static_height_hold_sigma_m=" << config.late_static_height_hold_sigma_m << '\n'
     << "enable_stage2_velocity_optimization="
     << (config.enable_stage2_velocity_optimization ? "true" : "false") << '\n'
     << "enable_stage2_vehicle_nhc_constraint="

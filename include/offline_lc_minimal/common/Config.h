@@ -114,7 +114,8 @@ struct OfflineRunnerConfig {
   bool late_static_exclude_initial_static = true;
   bool late_static_exclude_rtk_outage = true;
   double late_static_vz_sigma_mps = 0.002;
-  double late_static_up_sigma_m = 0.02;
+  double late_static_up_sigma_m = 0.001;
+  double late_static_height_hold_sigma_m = 0.001;
   bool enable_stage2_velocity_optimization = false;
   bool enable_stage2_vehicle_nhc_constraint = true;
   double stage2_attitude_hold_sigma_rad = 1e-5;

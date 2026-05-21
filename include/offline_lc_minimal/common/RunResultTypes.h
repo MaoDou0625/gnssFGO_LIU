@@ -115,6 +115,7 @@ struct RunSummary {
   std::size_t late_static_window_count = 0;
   std::size_t late_static_vz_factor_count = 0;
   std::size_t late_static_up_factor_count = 0;
+  std::size_t late_static_height_hold_factor_count = 0;
   double late_static_rtk_speed_threshold_mps = std::numeric_limits<double>::quiet_NaN();
   double late_static_gyro_rms_threshold_radps = std::numeric_limits<double>::quiet_NaN();
   std::size_t rtk_outage_causal_reference_prefix_run_count = 0;
@@ -465,6 +466,8 @@ struct RunSummary {
         << "late_static_window_count=" << late_static_window_count << '\n'
         << "late_static_vz_factor_count=" << late_static_vz_factor_count << '\n'
         << "late_static_up_factor_count=" << late_static_up_factor_count << '\n'
+        << "late_static_height_hold_factor_count="
+        << late_static_height_hold_factor_count << '\n'
         << "late_static_rtk_speed_threshold_mps="
         << late_static_rtk_speed_threshold_mps << '\n'
         << "late_static_gyro_rms_threshold_radps="
