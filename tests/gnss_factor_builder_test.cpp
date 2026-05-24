@@ -132,6 +132,69 @@ void TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors() {
   ExpectTrue(envelope_diagnostics.empty(), "direct_z should not emit envelope diagnostics");
 }
 
+void TestBuilderCanDisableVerticalFactorsWhileKeepingHorizontal() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kDirectZ;
+  config.early_gnss_relaxation_duration_s = 0.0;
+
+  std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeGnssSample(0.0),
+    MakeGnssSample(1.0),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  std::vector<offline_lc_minimal::TrajectoryRow> trajectory(2);
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::GnssFactorRecord> factor_records;
+  std::vector<offline_lc_minimal::GnssConsistencyRecord> consistency_records;
+  std::vector<offline_lc_minimal::VerticalEnvelopeDiagnosticRow> envelope_diagnostics;
+
+  offline_lc_minimal::GnssFactorBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.navigation_start_index = 0;
+  request.graph = &graph;
+  request.trajectory = &trajectory;
+  request.run_summary = &summary;
+  request.factor_records = &factor_records;
+  request.consistency_records = &consistency_records;
+  request.vertical_envelope_diagnostics = &envelope_diagnostics;
+  request.collect_consistency_records = true;
+  request.dynamic_start_time_s = 1.0;
+  request.disable_vertical_factors = true;
+  request.should_use_sample = [](const auto &) { return true; };
+  request.is_within_imu_coverage = [](double) { return true; };
+  request.corrected_time_s = [](const auto &sample) { return sample.time_s; };
+  request.clamped_sigma_m = [](const auto &) { return Eigen::Vector3d(0.1, 0.2, 0.3); };
+  request.find_state_for_time_s = [](double) {
+    offline_lc_minimal::StateMeasSyncResult result;
+    result.status = offline_lc_minimal::StateMeasSyncStatus::kSynchronizedI;
+    result.key_index_i = 1;
+    result.key_index_j = 1;
+    result.timestamp_i_s = 1.0;
+    result.timestamp_j_s = 1.0;
+    return result;
+  };
+  request.trajectory_row_index_for_state = [](std::size_t state_index) {
+    return static_cast<long long>(state_index);
+  };
+
+  offline_lc_minimal::GnssFactorBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 1U, "vertical-disabled GNSS should add only the horizontal factor");
+  ExpectTrue(
+    static_cast<bool>(boost::dynamic_pointer_cast<offline_lc_minimal::factor::HorizontalPositionFactor>(graph[0])),
+    "remaining GNSS factor should be horizontal");
+  ExpectTrue(factor_records.size() == 1U, "used sample should still be recorded");
+  ExpectTrue(factor_records.front().factor_used, "horizontal-only sample should be marked used");
+  ExpectTrue(
+    !factor_records.front().vertical_direct_position_factor_used,
+    "vertical-disabled sample should not report a direct vertical factor");
+  ExpectTrue(
+    !consistency_records.front().vertical_direct_position_factor_used,
+    "vertical-disabled consistency record should not report a direct vertical factor");
+  ExpectTrue(trajectory[1].gnss_factor_used, "horizontal-only sample should still mark trajectory GNSS support");
+}
+
 void TestRejectedNonFixedSampleAddsNoGnssFactors() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.drop_non_rtkfix = true;
@@ -918,6 +981,9 @@ int main() {
     RunTest(
       "TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors",
       TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors);
+    RunTest(
+      "TestBuilderCanDisableVerticalFactorsWhileKeepingHorizontal",
+      TestBuilderCanDisableVerticalFactorsWhileKeepingHorizontal);
     RunTest(
       "TestRejectedNonFixedSampleAddsNoGnssFactors",
       TestRejectedNonFixedSampleAddsNoGnssFactors);

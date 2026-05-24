@@ -301,6 +301,17 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.stage2_vehicle_y_nhc_displacement_sigma_m <= 0.0) {
     throw std::runtime_error("stage2 velocity optimization settings must be positive and finite");
   }
+  if (!std::isfinite(config.stage3_vertical_reference_lowpass_cutoff_hz) ||
+      !std::isfinite(config.stage3_vertical_anchor_sigma_m) ||
+      config.stage3_vertical_reference_lowpass_cutoff_hz <= 0.0 ||
+      config.stage3_vertical_anchor_sigma_m <= 0.0) {
+    throw std::runtime_error("stage3 vertical reference settings must be positive and finite");
+  }
+  if (config.enable_stage3_vertical_reference_optimization &&
+      !config.enable_stage2_velocity_optimization) {
+    throw std::runtime_error(
+      "enable_stage3_vertical_reference_optimization requires enable_stage2_velocity_optimization");
+  }
   if (config.initial_static_zupt_velocity_sigma_mps <= 0.0 ||
       config.initial_static_zaru_sigma_radps <= 0.0 ||
       config.initial_static_specific_force_sigma_mps2 <= 0.0 ||
@@ -928,6 +939,14 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.stage2_vehicle_y_nhc_velocity_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "stage2_vehicle_y_nhc_displacement_sigma_m") {
     config.stage2_vehicle_y_nhc_displacement_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_stage3_vertical_reference_optimization") {
+    config.enable_stage3_vertical_reference_optimization = ParseBool(normalized_value);
+  } else if (normalized_key == "stage3_vertical_reference_lowpass_cutoff_hz") {
+    config.stage3_vertical_reference_lowpass_cutoff_hz = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_vertical_anchor_sigma_m") {
+    config.stage3_vertical_anchor_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_disable_rtk_outage_segmented_batch") {
+    config.stage3_disable_rtk_outage_segmented_batch = ParseBool(normalized_value);
   } else if (normalized_key == "static_alignment_duration_s") {
     config.static_alignment_duration_s = ParseDouble(normalized_value);
   } else if (normalized_key == "imu_dual_vector_window_s") {
@@ -1539,6 +1558,14 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.stage2_vehicle_y_nhc_velocity_sigma_mps << '\n'
     << "stage2_vehicle_y_nhc_displacement_sigma_m="
     << config.stage2_vehicle_y_nhc_displacement_sigma_m << '\n'
+    << "enable_stage3_vertical_reference_optimization="
+    << (config.enable_stage3_vertical_reference_optimization ? "true" : "false") << '\n'
+    << "stage3_vertical_reference_lowpass_cutoff_hz="
+    << config.stage3_vertical_reference_lowpass_cutoff_hz << '\n'
+    << "stage3_vertical_anchor_sigma_m="
+    << config.stage3_vertical_anchor_sigma_m << '\n'
+    << "stage3_disable_rtk_outage_segmented_batch="
+    << (config.stage3_disable_rtk_outage_segmented_batch ? "true" : "false") << '\n'
     << "static_alignment_duration_s=" << config.static_alignment_duration_s << '\n'
     << "imu_dual_vector_window_s=" << config.imu_dual_vector_window_s << '\n'
     << "imu_dual_vector_min_sample_count=" << config.imu_dual_vector_min_sample_count << '\n'

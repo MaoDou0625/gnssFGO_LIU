@@ -103,6 +103,10 @@ add_library(offline_lc_minimal_lib
   src/core/Stage2VehicleNHCConstraintBuilder.cpp
   src/core/Stage2VelocityOptimizationRunner.cpp
   src/core/Stage2VelocityReference.cpp
+  src/core/Stage3VerticalReferenceConstraintBuilder.cpp
+  src/core/Stage3VerticalReferenceOptimizationRunner.cpp
+  src/core/Stage3VerticalReferenceProfilePlanner.cpp
+  src/core/Stage3VerticalReferenceTimelineAligner.cpp
   src/core/SegmentedBatchResultAssembler.cpp
   src/core/StaticImuAlignment.cpp
   src/core/TrajectoryResultBuilder.cpp
@@ -243,6 +247,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     tests/stage2_velocity_optimization_test.cpp
   )
 
+  add_executable(stage3_vertical_reference_test
+    tests/stage3_vertical_reference_test.cpp
+  )
+
   target_compile_definitions(config_test
     PRIVATE
       OFFLINE_LC_MINIMAL_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
@@ -334,6 +342,11 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(stage2_velocity_optimization_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(stage3_vertical_reference_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -443,6 +456,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       stage2_velocity_optimization_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      stage3_vertical_reference_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -576,6 +595,13 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
         $<TARGET_FILE:stage2_velocity_optimization_test>
     )
+    add_test(
+      NAME stage3_vertical_reference_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:stage3_vertical_reference_test>
+    )
   else()
     add_test(
       NAME vertical_rtk_factors_test
@@ -644,6 +670,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     add_test(
       NAME stage2_velocity_optimization_test
       COMMAND $<TARGET_FILE:stage2_velocity_optimization_test>
+    )
+    add_test(
+      NAME stage3_vertical_reference_test
+      COMMAND $<TARGET_FILE:stage3_vertical_reference_test>
     )
   endif()
 endif()

@@ -238,6 +238,18 @@ struct RunSummary {
   double stage2_mount_k_zy_rad = std::numeric_limits<double>::quiet_NaN();
   double stage2_mount_k_yx_rad = std::numeric_limits<double>::quiet_NaN();
   double stage2_max_abs_yaw_delta_rad = std::numeric_limits<double>::quiet_NaN();
+  bool stage3_vertical_reference_optimization_enabled = false;
+  double stage3_vertical_reference_lowpass_cutoff_hz =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_vertical_anchor_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  std::size_t stage3_vertical_reference_factor_count = 0;
+  std::size_t stage3_vertical_reference_skipped_count = 0;
+  double stage3_vertical_reference_mean_abs_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_vertical_reference_max_abs_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_vertical_reference_max_abs_lowpass_delta_m =
+    std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_jump_combined_imu_factor_count = 0;
   std::size_t vertical_jump_masked_imu_factor_count = 0;
   std::size_t vertical_jump_impulse_factor_count = 0;
@@ -653,6 +665,21 @@ struct RunSummary {
         << "stage2_mount_k_zy_rad=" << stage2_mount_k_zy_rad << '\n'
         << "stage2_mount_k_yx_rad=" << stage2_mount_k_yx_rad << '\n'
         << "stage2_max_abs_yaw_delta_rad=" << stage2_max_abs_yaw_delta_rad << '\n'
+        << "stage3_vertical_reference_optimization_enabled="
+        << (stage3_vertical_reference_optimization_enabled ? "true" : "false") << '\n'
+        << "stage3_vertical_reference_lowpass_cutoff_hz="
+        << stage3_vertical_reference_lowpass_cutoff_hz << '\n'
+        << "stage3_vertical_anchor_sigma_m=" << stage3_vertical_anchor_sigma_m << '\n'
+        << "stage3_vertical_reference_factor_count="
+        << stage3_vertical_reference_factor_count << '\n'
+        << "stage3_vertical_reference_skipped_count="
+        << stage3_vertical_reference_skipped_count << '\n'
+        << "stage3_vertical_reference_mean_abs_residual_m="
+        << stage3_vertical_reference_mean_abs_residual_m << '\n'
+        << "stage3_vertical_reference_max_abs_residual_m="
+        << stage3_vertical_reference_max_abs_residual_m << '\n'
+        << "stage3_vertical_reference_max_abs_lowpass_delta_m="
+        << stage3_vertical_reference_max_abs_lowpass_delta_m << '\n'
         << "vertical_jump_combined_imu_factor_count=" << vertical_jump_combined_imu_factor_count << '\n'
         << "vertical_jump_masked_imu_factor_count=" << vertical_jump_masked_imu_factor_count << '\n'
         << "vertical_jump_impulse_factor_count=" << vertical_jump_impulse_factor_count << '\n'
@@ -843,6 +870,7 @@ struct OfflineRunResult {
   std::vector<Stage1OutageBodyYStateDiagnosticRow> stage1_outage_body_y_state_diagnostics;
   std::vector<Stage2MountLeakageDiagnosticRow> stage2_mount_leakage_diagnostics;
   std::vector<Stage2VehicleNHCStateDiagnosticRow> stage2_vehicle_nhc_state_diagnostics;
+  std::vector<Stage3VerticalReferenceDiagnosticRow> stage3_vertical_reference_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;
   std::vector<VerticalJumpImpulseDiagnosticRow> vertical_jump_impulse_diagnostics;
   std::vector<VerticalJumpBiasDiagnosticRow> vertical_jump_bias_diagnostics;

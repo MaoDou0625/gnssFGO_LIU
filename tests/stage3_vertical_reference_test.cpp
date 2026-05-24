@@ -1,0 +1,409 @@
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <limits>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <gtsam/geometry/Pose3.h>
+#include <gtsam/inference/Symbol.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/Values.h>
+
+#include "offline_lc_minimal/common/Config.h"
+#include "offline_lc_minimal/core/Stage3VerticalReferenceConstraintBuilder.h"
+#include "offline_lc_minimal/core/Stage3VerticalReferenceOptimizationRunner.h"
+#include "offline_lc_minimal/core/Stage3VerticalReferenceProfilePlanner.h"
+#include "offline_lc_minimal/core/Stage3VerticalReferenceTimelineAligner.h"
+#include "offline_lc_minimal/factor/VerticalRtkFactors.h"
+
+namespace {
+
+template <typename Function>
+void RunTest(const std::string &name, Function &&function) {
+  try {
+    function();
+  } catch (const std::exception &exception) {
+    throw std::runtime_error(name + ": " + exception.what());
+  }
+}
+
+void ExpectTrue(const bool condition, const std::string &message) {
+  if (!condition) {
+    throw std::runtime_error(message);
+  }
+}
+
+void ExpectNear(
+  const double actual,
+  const double expected,
+  const double tolerance,
+  const std::string &message) {
+  if (std::abs(actual - expected) > tolerance) {
+    throw std::runtime_error(
+      message + ": actual=" + std::to_string(actual) +
+      " expected=" + std::to_string(expected));
+  }
+}
+
+std::vector<offline_lc_minimal::TrajectoryRow> MakeTrajectory(
+  const std::size_t count,
+  const double high_frequency_amplitude_m = 0.0) {
+  std::vector<offline_lc_minimal::TrajectoryRow> trajectory;
+  trajectory.reserve(count);
+  for (std::size_t index = 0; index < count; ++index) {
+    offline_lc_minimal::TrajectoryRow row;
+    row.time_s = static_cast<double>(index);
+    const double high_frequency_m =
+      index % 2U == 0U ? high_frequency_amplitude_m : -high_frequency_amplitude_m;
+    row.enu_position_m =
+      Eigen::Vector3d(0.0, 0.0, 0.01 * static_cast<double>(index) + high_frequency_m);
+    row.enu_velocity_mps = Eigen::Vector3d(1.0, 0.0, 0.0);
+    trajectory.push_back(row);
+  }
+  return trajectory;
+}
+
+gtsam::Pose3 MakePose(const double up_m) {
+  return gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(1.0, 2.0, up_m));
+}
+
+void TestProfilePlannerBuildsFiniteZeroPhaseLowpass() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
+  config.stage3_vertical_anchor_sigma_m = 0.015;
+  const auto trajectory = MakeTrajectory(21U, 0.05);
+
+  offline_lc_minimal::Stage3VerticalReferenceProfilePlanRequest request;
+  request.config = &config;
+  request.stage2_trajectory = &trajectory;
+  const auto reference =
+    offline_lc_minimal::Stage3VerticalReferenceProfilePlanner(std::move(request)).Plan();
+
+  ExpectTrue(
+    reference.rows.size() == trajectory.size(),
+    "profile should keep one row per Stage2 trajectory state");
+  double max_abs_delta_m = 0.0;
+  for (std::size_t index = 0; index < reference.rows.size(); ++index) {
+    const auto &row = reference.rows[index];
+    ExpectTrue(row.state_index == index, "profile row should stay state-aligned");
+    ExpectNear(row.time_s, trajectory[index].time_s, 1.0e-12, "profile time should stay aligned");
+    ExpectTrue(std::isfinite(row.stage2_lowpass_up_m), "lowpass reference should be finite");
+    ExpectTrue(row.skip_reason == "PLANNED", "finite rows should be planned");
+    max_abs_delta_m = std::max(max_abs_delta_m, std::abs(row.lowpass_delta_m));
+  }
+  ExpectTrue(max_abs_delta_m > 0.005, "lowpass should remove visible high-frequency content");
+}
+
+void TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
+  config.stage3_vertical_anchor_sigma_m = 0.015;
+
+  offline_lc_minimal::Stage3VerticalReference reference;
+  for (std::size_t index = 0; index < 4U; ++index) {
+    offline_lc_minimal::Stage3VerticalReferenceDiagnosticRow row;
+    row.state_index = index;
+    row.time_s = static_cast<double>(index);
+    row.stage2_up_m = 10.0 * static_cast<double>(index);
+    row.stage2_lowpass_up_m = row.stage2_up_m;
+    row.lowpass_delta_m = 0.0;
+    row.skip_reason = "PLANNED";
+    reference.rows.push_back(row);
+  }
+  const std::vector<double> state_timestamps{0.0, 1.0, 2.0, 3.0};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::Stage3VerticalReferenceDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::Stage3VerticalReferenceConstraintBuildRequest request;
+  request.config = &config;
+  request.reference = &reference;
+  request.state_timestamps = &state_timestamps;
+  request.dynamic_start_index = 2U;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::Stage3VerticalReferenceConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 2U, "only dynamic states should receive Stage3 vertical anchors");
+  ExpectTrue(diagnostics.size() == 4U, "diagnostics should include skipped static states");
+  ExpectTrue(!diagnostics[0].factor_added, "initial static state 0 should be skipped");
+  ExpectTrue(!diagnostics[1].factor_added, "initial static state 1 should be skipped");
+  ExpectTrue(diagnostics[2].factor_added, "dynamic state 2 should get an anchor");
+  ExpectTrue(diagnostics[3].factor_added, "dynamic state 3 should get an anchor");
+  ExpectTrue(summary.stage3_vertical_reference_factor_count == 2U, "factor count should be tracked");
+  ExpectTrue(summary.stage3_vertical_reference_skipped_count == 2U, "skip count should be tracked");
+
+  gtsam::Values optimized_values;
+  optimized_values.insert(gtsam::symbol_shorthand::X(0), MakePose(0.0));
+  optimized_values.insert(gtsam::symbol_shorthand::X(1), MakePose(10.0));
+  optimized_values.insert(gtsam::symbol_shorthand::X(2), MakePose(20.01));
+  optimized_values.insert(gtsam::symbol_shorthand::X(3), MakePose(29.98));
+  offline_lc_minimal::PopulateStage3VerticalReferenceDiagnostics(
+    optimized_values,
+    diagnostics,
+    summary);
+
+  ExpectNear(diagnostics[2].residual_m, 0.01, 1.0e-12, "state 2 residual should be optimized minus reference");
+  ExpectNear(diagnostics[3].residual_m, -0.02, 1.0e-12, "state 3 residual should be optimized minus reference");
+  ExpectNear(
+    summary.stage3_vertical_reference_mean_abs_residual_m,
+    0.015,
+    1.0e-12,
+    "mean absolute Stage3 residual should be summarized");
+  ExpectNear(
+    summary.stage3_vertical_reference_max_abs_residual_m,
+    0.02,
+    1.0e-12,
+      "max absolute Stage3 residual should be summarized");
+}
+
+void TestTimelineAlignerResamplesSegmentedStage2Reference() {
+  offline_lc_minimal::Stage2VelocityReference stage2_reference;
+  stage2_reference.trajectory = MakeTrajectory(5U, 0.0);
+  for (std::size_t index = 0; index < stage2_reference.trajectory.size(); ++index) {
+    stage2_reference.trajectory[index].time_s = static_cast<double>(index);
+    stage2_reference.trajectory[index].enu_position_m.z() = 10.0 * static_cast<double>(index);
+    stage2_reference.trajectory[index].enu_velocity_mps.z() = static_cast<double>(index);
+    stage2_reference.trajectory[index].bias_acc.z() = 0.1 * static_cast<double>(index);
+  }
+
+  offline_lc_minimal::Stage3VerticalReference stage3_reference;
+  for (std::size_t index = 0; index < stage2_reference.trajectory.size(); ++index) {
+    offline_lc_minimal::Stage3VerticalReferenceDiagnosticRow row;
+    row.state_index = index;
+    row.time_s = stage2_reference.trajectory[index].time_s;
+    row.stage2_up_m = stage2_reference.trajectory[index].enu_position_m.z();
+    row.stage2_lowpass_up_m = row.stage2_up_m + 1.0;
+    row.lowpass_delta_m = 1.0;
+    row.sigma_m = 0.015;
+    row.skip_reason = "PLANNED";
+    stage3_reference.rows.push_back(row);
+  }
+
+  const std::vector<double> target_timestamps{0.0, 0.5, 1.0, 1.5, 2.0};
+  const auto aligned =
+    offline_lc_minimal::AlignStage3VerticalReferencesToTimeline(
+      stage2_reference,
+      stage3_reference,
+      target_timestamps);
+
+  ExpectTrue(
+    aligned.stage2_reference.trajectory.size() == target_timestamps.size(),
+    "aligned Stage2 reference should match target timeline size");
+  ExpectTrue(
+    aligned.stage3_reference.rows.size() == target_timestamps.size(),
+    "aligned Stage3 reference should match target timeline size");
+  ExpectNear(
+    aligned.stage2_reference.trajectory[1].enu_position_m.z(),
+    5.0,
+    1.0e-12,
+    "Stage2 position should be linearly interpolated");
+  ExpectNear(
+    aligned.stage2_reference.trajectory[3].enu_velocity_mps.z(),
+    1.5,
+    1.0e-12,
+    "Stage2 velocity should be linearly interpolated");
+  ExpectNear(
+    aligned.stage2_reference.trajectory[3].bias_acc.z(),
+    0.15,
+    1.0e-12,
+    "Stage2 accel bias should be linearly interpolated");
+  ExpectNear(
+    aligned.stage3_reference.rows[1].stage2_lowpass_up_m,
+    6.0,
+    1.0e-12,
+    "Stage3 lowpass up should be interpolated on the same timeline");
+  ExpectNear(
+    aligned.stage3_reference.rows[1].lowpass_delta_m,
+    1.0,
+    1.0e-12,
+    "Stage3 lowpass delta should remain lowpass minus Stage2 up");
+}
+
+void TestTimelineAlignerRejectsMissingStage2Coverage() {
+  offline_lc_minimal::Stage2VelocityReference stage2_reference;
+  stage2_reference.trajectory = MakeTrajectory(4U, 0.0);
+  stage2_reference.trajectory[0].time_s = 0.0;
+  stage2_reference.trajectory[1].time_s = 1.0;
+  stage2_reference.trajectory[2].time_s = 3.0;
+  stage2_reference.trajectory[3].time_s = 4.0;
+
+  offline_lc_minimal::Stage3VerticalReference stage3_reference;
+  for (std::size_t index = 0; index < stage2_reference.trajectory.size(); ++index) {
+    offline_lc_minimal::Stage3VerticalReferenceDiagnosticRow row;
+    row.state_index = index;
+    row.time_s = stage2_reference.trajectory[index].time_s;
+    row.stage2_up_m = stage2_reference.trajectory[index].enu_position_m.z();
+    row.stage2_lowpass_up_m = row.stage2_up_m;
+    row.skip_reason = "PLANNED";
+    stage3_reference.rows.push_back(row);
+  }
+
+  bool threw = false;
+  try {
+    (void)offline_lc_minimal::AlignStage3VerticalReferencesToTimeline(
+      stage2_reference,
+      stage3_reference,
+      std::vector<double>{0.0, 1.0, 2.0, 3.0});
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("does not cover the Stage3 graph timeline") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "Stage3 aligner should reject missing Stage2 trajectory coverage");
+}
+
+void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage3_vertical_reference_optimization = true;
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_stage1_yaw_refinement = true;
+  config.enable_rtk_outage_segmented_batch = true;
+  config.stage3_disable_rtk_outage_segmented_batch = true;
+  config.enable_rtk_vertical_drift_reference = true;
+  config.enable_rtk_vertical_lowpass_reference = true;
+  config.enable_rtk_outage_causal_drift_reference = true;
+  config.enable_rtk_outage_preoutage_vertical_fence = true;
+  config.enable_late_static_detection = true;
+
+  struct Call {
+    bool enable_stage3 = false;
+    bool enable_stage2 = false;
+    bool enable_stage1 = false;
+    bool enable_segmented_batch = false;
+    bool enable_rtk_vertical_drift = false;
+    bool enable_rtk_vertical_lowpass = false;
+    bool enable_causal_reference = false;
+    bool enable_preoutage_fence = false;
+    bool enable_late_static = false;
+    bool enable_body_z_nhc = false;
+    bool enable_stage2_vehicle_nhc = false;
+    bool has_stage2_reference = false;
+    bool has_stage3_reference = false;
+  };
+  std::vector<Call> calls;
+
+  offline_lc_minimal::Stage3VerticalReferenceOptimizationRequest request;
+  request.config = config;
+  request.dataset = offline_lc_minimal::DataSet{};
+  request.run_once = [&](const offline_lc_minimal::OfflineRunnerConfig &run_config,
+                         std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> stage2_reference,
+                         std::shared_ptr<const offline_lc_minimal::Stage3VerticalReference> stage3_reference,
+                         offline_lc_minimal::DataSet) {
+    calls.push_back(Call{
+      run_config.enable_stage3_vertical_reference_optimization,
+      run_config.enable_stage2_velocity_optimization,
+      run_config.enable_stage1_yaw_refinement,
+      run_config.enable_rtk_outage_segmented_batch,
+      run_config.enable_rtk_vertical_drift_reference,
+      run_config.enable_rtk_vertical_lowpass_reference,
+      run_config.enable_rtk_outage_causal_drift_reference,
+      run_config.enable_rtk_outage_preoutage_vertical_fence,
+      run_config.enable_late_static_detection,
+      run_config.enable_body_z_nhc_constraint,
+      run_config.enable_stage2_vehicle_nhc_constraint,
+      static_cast<bool>(stage2_reference),
+      static_cast<bool>(stage3_reference)});
+
+    offline_lc_minimal::OfflineRunResult result;
+    if (!stage2_reference && !stage3_reference) {
+      result.trajectory = MakeTrajectory(11U, 0.02);
+      return result;
+    }
+    ExpectTrue(static_cast<bool>(stage2_reference), "Stage3 pass should receive Stage2 reference");
+    ExpectTrue(static_cast<bool>(stage3_reference), "Stage3 pass should receive lowpass reference");
+    result.trajectory = stage2_reference->trajectory;
+    result.stage3_vertical_reference_diagnostics = stage3_reference->rows;
+    return result;
+  };
+
+  const auto result =
+    offline_lc_minimal::Stage3VerticalReferenceOptimizationRunner(std::move(request)).Run();
+  ExpectTrue(calls.size() == 2U, "Stage3 runner should run exactly Stage2 then Stage3");
+  ExpectTrue(!calls[0].enable_stage3, "Stage2 source pass should disable Stage3 recursion");
+  ExpectTrue(!calls[0].has_stage2_reference, "Stage2 source pass should not receive a Stage2 reference");
+  ExpectTrue(!calls[0].has_stage3_reference, "Stage2 source pass should not receive a Stage3 reference");
+  ExpectTrue(!calls[1].enable_stage3, "Stage3 pass should also disable Stage3 recursion");
+  ExpectTrue(calls[1].enable_stage2, "Stage3 pass should keep Stage2 constraint system enabled");
+  ExpectTrue(!calls[1].enable_stage1, "Stage3 pass should not re-run Stage1 yaw refinement");
+  ExpectTrue(!calls[1].enable_segmented_batch, "Stage3 pass should disable RTK outage segmented batch");
+  ExpectTrue(!calls[1].enable_rtk_vertical_drift, "Stage3 pass should disable RTK vertical drift reference");
+  ExpectTrue(!calls[1].enable_rtk_vertical_lowpass, "Stage3 pass should disable RTK vertical lowpass reference");
+  ExpectTrue(!calls[1].enable_causal_reference, "Stage3 pass should disable causal RTK drift reference");
+  ExpectTrue(!calls[1].enable_preoutage_fence, "Stage3 pass should disable pre-outage vertical fence");
+  ExpectTrue(!calls[1].enable_late_static, "Stage3 pass should disable late-static raw RTK height anchors");
+  ExpectTrue(!calls[1].enable_body_z_nhc, "Stage3 pass should keep Stage2 policy's Body-Z NHC disabled");
+  ExpectTrue(calls[1].enable_stage2_vehicle_nhc, "Stage3 pass should keep Stage2 vehicle NHC enabled");
+  ExpectTrue(calls[1].has_stage2_reference, "Stage3 pass should receive Stage2 reference");
+  ExpectTrue(calls[1].has_stage3_reference, "Stage3 pass should receive Stage3 reference");
+  ExpectTrue(
+    result.run_summary.stage3_vertical_reference_optimization_enabled,
+    "runner summary should mark Stage3 enabled");
+}
+
+void TestStage3RunnerAlwaysDisablesSegmentedBatch() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage3_vertical_reference_optimization = true;
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_rtk_outage_segmented_batch = true;
+  config.stage3_disable_rtk_outage_segmented_batch = false;
+
+  std::vector<bool> segmented_flags;
+  offline_lc_minimal::Stage3VerticalReferenceOptimizationRequest request;
+  request.config = config;
+  request.dataset = offline_lc_minimal::DataSet{};
+  request.run_once = [&](const offline_lc_minimal::OfflineRunnerConfig &run_config,
+                         std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> stage2_reference,
+                         std::shared_ptr<const offline_lc_minimal::Stage3VerticalReference> stage3_reference,
+                         offline_lc_minimal::DataSet) {
+    segmented_flags.push_back(run_config.enable_rtk_outage_segmented_batch);
+    offline_lc_minimal::OfflineRunResult result;
+    if (!stage2_reference && !stage3_reference) {
+      result.trajectory = MakeTrajectory(5U, 0.01);
+      return result;
+    }
+    result.trajectory = stage2_reference->trajectory;
+    return result;
+  };
+
+  (void)offline_lc_minimal::Stage3VerticalReferenceOptimizationRunner(std::move(request)).Run();
+  ExpectTrue(segmented_flags.size() == 2U, "Stage3 runner should run two passes");
+  ExpectTrue(segmented_flags[0], "Stage2 source pass should preserve the requested segmented setting");
+  ExpectTrue(
+    !segmented_flags[1],
+    "Stage3 pass should always disable segmented batch even if the compatibility flag is false");
+}
+
+}  // namespace
+
+int main() {
+  try {
+    RunTest(
+      "TestProfilePlannerBuildsFiniteZeroPhaseLowpass",
+      TestProfilePlannerBuildsFiniteZeroPhaseLowpass);
+    RunTest(
+      "TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics",
+      TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics);
+    RunTest(
+      "TestTimelineAlignerResamplesSegmentedStage2Reference",
+      TestTimelineAlignerResamplesSegmentedStage2Reference);
+    RunTest(
+      "TestTimelineAlignerRejectsMissingStage2Coverage",
+      TestTimelineAlignerRejectsMissingStage2Coverage);
+    RunTest(
+      "TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion",
+      TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion);
+    RunTest(
+      "TestStage3RunnerAlwaysDisablesSegmentedBatch",
+      TestStage3RunnerAlwaysDisablesSegmentedBatch);
+  } catch (const std::exception &exception) {
+    std::cerr << exception.what() << '\n';
+    return 1;
+  }
+  return 0;
+}

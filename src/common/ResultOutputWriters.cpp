@@ -1494,6 +1494,31 @@ void WriteStage2VehicleNHCStateDiagnosticsCsv(
   }
 }
 
+void WriteStage3VerticalReferenceDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage3VerticalReferenceDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "state_index,time_s,stage2_up_m,stage2_lowpass_up_m,lowpass_delta_m,"
+       "optimized_up_m,residual_m,sigma_m,factor_added,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.state_index << ','
+           << row.time_s << ','
+           << row.stage2_up_m << ','
+           << row.stage2_lowpass_up_m << ','
+           << row.lowpass_delta_m << ','
+           << row.optimized_up_m << ','
+           << row.residual_m << ','
+           << row.sigma_m << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << '\n';
+  }
+}
+
 void WriteVerticalJumpMaskedImuDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpMaskedImuDiagnosticRow> &rows) {

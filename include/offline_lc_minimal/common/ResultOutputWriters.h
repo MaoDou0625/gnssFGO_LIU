@@ -158,6 +158,10 @@ void WriteStage2VehicleNHCStateDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<Stage2VehicleNHCStateDiagnosticRow> &rows);
 
+void WriteStage3VerticalReferenceDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage3VerticalReferenceDiagnosticRow> &rows);
+
 void WriteVerticalJumpMaskedImuDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpMaskedImuDiagnosticRow> &rows);

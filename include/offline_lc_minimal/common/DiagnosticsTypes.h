@@ -231,6 +231,19 @@ struct RtkVerticalDriftReferenceDiagnosticRow {
   std::string skip_reason = "UNSET";
 };
 
+struct Stage3VerticalReferenceDiagnosticRow {
+  std::size_t state_index = 0;
+  double time_s = std::numeric_limits<double>::quiet_NaN();
+  double stage2_up_m = std::numeric_limits<double>::quiet_NaN();
+  double stage2_lowpass_up_m = std::numeric_limits<double>::quiet_NaN();
+  double lowpass_delta_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_up_m = std::numeric_limits<double>::quiet_NaN();
+  double residual_m = std::numeric_limits<double>::quiet_NaN();
+  double sigma_m = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+};
+
 struct LateStaticFeatureDiagnosticRow {
   std::size_t window_index = 0;
   double window_start_time_s = std::numeric_limits<double>::quiet_NaN();

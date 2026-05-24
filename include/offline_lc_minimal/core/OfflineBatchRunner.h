@@ -6,6 +6,7 @@
 #include "offline_lc_minimal/common/GeoUtils.h"
 #include "offline_lc_minimal/common/Types.h"
 #include "offline_lc_minimal/core/Stage1OutageLateralVelocityEnvelopeEstimator.h"
+#include "offline_lc_minimal/core/Stage3VerticalReferenceProfilePlanner.h"
 #include "offline_lc_minimal/core/Stage2VelocityReference.h"
 
 namespace offline_lc_minimal {
@@ -20,6 +21,11 @@ class OfflineBatchRunner {
     OfflineRunnerConfig config,
     std::shared_ptr<const Stage2VelocityReference> stage2_reference,
     std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference);
+  OfflineBatchRunner(
+    OfflineRunnerConfig config,
+    std::shared_ptr<const Stage2VelocityReference> stage2_reference,
+    std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference,
+    std::shared_ptr<const Stage3VerticalReference> stage3_vertical_reference);
 
   [[nodiscard]] OfflineRunResult Run(DataSet dataset) const;
   [[nodiscard]] const OfflineRunnerConfig &config() const { return config_; }
@@ -51,6 +57,7 @@ class OfflineBatchRunner {
   OfflineRunnerConfig config_;
   std::shared_ptr<const Stage2VelocityReference> stage2_reference_;
   std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference_;
+  std::shared_ptr<const Stage3VerticalReference> stage3_vertical_reference_;
 };
 
 }  // namespace offline_lc_minimal

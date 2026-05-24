@@ -212,6 +212,12 @@ void GnssFactorBuilder::Build() const {
       sigma_m *= 1.0 + alpha * (request_.config->early_gnss_relaxation_scale - 1.0);
     }
     FillSigmaFields(sigma_m, *vertical_policy, &factor_record, &consistency_record);
+    if (request_.disable_vertical_factors) {
+      factor_record.vertical_direct_position_factor_used = false;
+      consistency_record.vertical_direct_position_factor_used = false;
+      consistency_record.vertical_sigma_u_used_m =
+        std::numeric_limits<double>::quiet_NaN();
+    }
 
     bool factor_used = false;
     if (sync_result.status == StateMeasSyncStatus::kSynchronizedI ||
@@ -262,6 +268,9 @@ void GnssFactorBuilder::AddSynchronizedFactors(
     symbol::X(state_index),
     horizontal_measurement,
     horizontal_noise));
+  if (request_.disable_vertical_factors) {
+    return;
+  }
   VerticalConstraintPolicyContext context;
   context.graph = request_.graph;
   context.envelope_diagnostics = request_.vertical_envelope_diagnostics;
@@ -297,6 +306,9 @@ void GnssFactorBuilder::AddInterpolatedFactors(
     gtsam::Vector3::Zero(),
     horizontal_noise,
     interpolator));
+  if (request_.disable_vertical_factors) {
+    return;
+  }
   VerticalConstraintPolicyContext context;
   context.graph = request_.graph;
   context.envelope_diagnostics = request_.vertical_envelope_diagnostics;

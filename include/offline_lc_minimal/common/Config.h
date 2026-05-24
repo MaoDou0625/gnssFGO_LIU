@@ -124,6 +124,10 @@ struct OfflineRunnerConfig {
   double stage2_mount_leakage_prior_sigma_rad = 0.02;
   double stage2_vehicle_y_nhc_velocity_sigma_mps = 0.05;
   double stage2_vehicle_y_nhc_displacement_sigma_m = 0.05;
+  bool enable_stage3_vertical_reference_optimization = false;
+  double stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
+  double stage3_vertical_anchor_sigma_m = 0.015;
+  bool stage3_disable_rtk_outage_segmented_batch = true;
   double static_alignment_duration_s = 0.0;
   double imu_dual_vector_window_s = 100.0;
   int imu_dual_vector_min_sample_count = 1000;

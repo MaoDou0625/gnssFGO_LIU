@@ -916,6 +916,9 @@ void TestDefaultOfflineConfigUsesV14SegmentedStage2() {
   ExpectTrue(
     config.enable_stage2_vehicle_nhc_constraint,
     "default config should enable Stage2 vehicle NHC constraints");
+  ExpectTrue(
+    !config.enable_stage3_vertical_reference_optimization,
+    "default config should keep Stage3 vertical reference optimization disabled");
   ExpectTrue(config.enable_rtk_vertical_drift_reference, "default config should use RTK drift reference");
   ExpectTrue(
     config.enable_rtk_vertical_drift_gate_weighting,
@@ -1583,6 +1586,118 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
     threw = std::string(exception.what()).find("RTK vertical drift reference settings") != std::string::npos;
   }
   ExpectTrue(threw, "negative causal prefix run count should be rejected");
+}
+
+void TestStage3VerticalReferenceConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  ExpectTrue(
+    !config.enable_stage3_vertical_reference_optimization,
+    "Stage3 should be disabled by default");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.05) < 1e-15,
+    "Stage3 default cutoff should be 0.05 Hz");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_anchor_sigma_m - 0.015) < 1e-15,
+    "Stage3 default anchor sigma should be 0.015 m");
+  ExpectTrue(
+    config.stage3_disable_rtk_outage_segmented_batch,
+    "Stage3 segmented-batch compatibility flag should default to true");
+
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_stage3_vertical_reference_optimization",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_stage2_velocity_optimization",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_reference_lowpass_cutoff_hz",
+    "0.03");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_anchor_sigma_m",
+    "0.02");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_disable_rtk_outage_segmented_batch",
+    "false");
+  ExpectTrue(config.enable_stage3_vertical_reference_optimization, "Stage3 enable flag should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.03) < 1e-15,
+    "Stage3 cutoff should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_anchor_sigma_m - 0.02) < 1e-15,
+    "Stage3 anchor sigma should parse");
+  ExpectTrue(!config.stage3_disable_rtk_outage_segmented_batch, "Stage3 segmented flag should parse");
+  const std::string serialized = offline_lc_minimal::ConfigToString(config);
+  ExpectTrue(
+    serialized.find("enable_stage3_vertical_reference_optimization=true") != std::string::npos,
+    "Stage3 enable flag should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_reference_lowpass_cutoff_hz=0.03") != std::string::npos,
+    "Stage3 cutoff should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_anchor_sigma_m=0.02") != std::string::npos,
+    "Stage3 anchor sigma should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_disable_rtk_outage_segmented_batch=false") != std::string::npos,
+    "Stage3 segmented flag should be serialized");
+  offline_lc_minimal::ValidateConfig(config);
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_lowpass_cutoff_hz = 0.0;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("stage3 vertical reference settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive Stage3 cutoff should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_anchor_sigma_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("stage3 vertical reference settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive Stage3 anchor sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage3_vertical_reference_optimization = true;
+  config.enable_stage2_velocity_optimization = false;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("requires enable_stage2_velocity_optimization") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "Stage3 should require Stage2 to be enabled");
+}
+
+void TestStage3ExperimentConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1rtkjumpcut1_stage3_stage2_lowpass_vertical_anchor.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.enable_stage3_vertical_reference_optimization,
+    "Stage3 experiment config should enable Stage3");
+  ExpectTrue(config.enable_stage2_velocity_optimization, "Stage3 experiment should keep Stage2 enabled");
+  ExpectTrue(
+    config.stage3_disable_rtk_outage_segmented_batch,
+    "Stage3 experiment should disable segmented batch inside Stage3 pass");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.05) < 1e-15,
+    "Stage3 experiment cutoff should be 0.05 Hz");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_anchor_sigma_m - 0.015) < 1e-15,
+    "Stage3 experiment anchor sigma should be 0.015 m");
 }
 
 void TestAccelerometerBiasUgConfigParsing() {
@@ -2637,6 +2752,12 @@ int main() {
     RunTest(
       "TestDefaultOfflineConfigUsesV14SegmentedStage2",
       TestDefaultOfflineConfigUsesV14SegmentedStage2);
+    RunTest(
+      "TestStage3VerticalReferenceConfigValidation",
+      TestStage3VerticalReferenceConfigValidation);
+    RunTest(
+      "TestStage3ExperimentConfigLoads",
+      TestStage3ExperimentConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);

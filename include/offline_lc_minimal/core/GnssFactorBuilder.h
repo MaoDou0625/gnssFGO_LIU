@@ -29,6 +29,7 @@ struct GnssFactorBuildRequest {
     nullptr;
   bool collect_consistency_records = false;
   double dynamic_start_time_s = 0.0;
+  bool disable_vertical_factors = false;
 
   std::function<bool(const GnssSolutionSample &sample)> should_use_sample;
   std::function<bool(double corrected_time_s)> is_within_imu_coverage;
