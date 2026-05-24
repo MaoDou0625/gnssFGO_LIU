@@ -125,6 +125,18 @@ VerticalEnvelopeCenterSigmaMode ParseVerticalEnvelopeCenterSigmaMode(const std::
   throw std::runtime_error("invalid vertical envelope center sigma mode: " + value);
 }
 
+Stage3VerticalReferenceConstraintMode ParseStage3VerticalReferenceConstraintMode(
+  const std::string &value) {
+  const std::string lowered = Lowercase(value);
+  if (lowered == "gaussian") {
+    return Stage3VerticalReferenceConstraintMode::kGaussian;
+  }
+  if (lowered == "envelope") {
+    return Stage3VerticalReferenceConstraintMode::kEnvelope;
+  }
+  throw std::runtime_error("invalid Stage3 vertical reference constraint mode: " + value);
+}
+
 }  // namespace
 
 void ValidateConfig(const OfflineRunnerConfig &config) {
@@ -305,7 +317,32 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       !std::isfinite(config.stage3_vertical_anchor_sigma_m) ||
       config.stage3_vertical_reference_lowpass_cutoff_hz <= 0.0 ||
       config.stage3_vertical_anchor_sigma_m <= 0.0) {
-    throw std::runtime_error("stage3 vertical reference settings must be positive and finite");
+    throw std::runtime_error(
+      "stage3 vertical reference settings must be finite and positive");
+  }
+  if (config.stage3_vertical_reference_constraint_mode ==
+      Stage3VerticalReferenceConstraintMode::kEnvelope) {
+    if (!std::isfinite(config.stage3_vertical_envelope_half_width_m) ||
+        !std::isfinite(config.stage3_vertical_envelope_sigma_m) ||
+        config.stage3_vertical_envelope_half_width_m <= 0.0 ||
+        config.stage3_vertical_envelope_sigma_m <= 0.0) {
+      throw std::runtime_error(
+        "stage3 vertical envelope settings must be finite with positive sigmas and half-widths");
+    }
+    if (config.enable_stage3_vertical_envelope_center_pull) {
+      if (!std::isfinite(config.stage3_vertical_envelope_center_sigma_m) ||
+          !std::isfinite(config.stage3_vertical_envelope_center_deadband_m) ||
+          config.stage3_vertical_envelope_center_sigma_m <= 0.0 ||
+          config.stage3_vertical_envelope_center_deadband_m < 0.0) {
+        throw std::runtime_error(
+          "stage3 vertical envelope center-pull settings must be finite with positive sigma");
+      }
+      if (config.stage3_vertical_envelope_center_deadband_m >=
+          config.stage3_vertical_envelope_half_width_m) {
+        throw std::runtime_error(
+          "stage3 vertical envelope center deadband must be smaller than the half-width");
+      }
+    }
   }
   if (config.enable_stage3_vertical_reference_optimization &&
       !config.enable_stage2_velocity_optimization) {
@@ -945,6 +982,19 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.stage3_vertical_reference_lowpass_cutoff_hz = ParseDouble(normalized_value);
   } else if (normalized_key == "stage3_vertical_anchor_sigma_m") {
     config.stage3_vertical_anchor_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_vertical_reference_constraint_mode") {
+    config.stage3_vertical_reference_constraint_mode =
+      ParseStage3VerticalReferenceConstraintMode(normalized_value);
+  } else if (normalized_key == "stage3_vertical_envelope_half_width_m") {
+    config.stage3_vertical_envelope_half_width_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_vertical_envelope_sigma_m") {
+    config.stage3_vertical_envelope_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_stage3_vertical_envelope_center_pull") {
+    config.enable_stage3_vertical_envelope_center_pull = ParseBool(normalized_value);
+  } else if (normalized_key == "stage3_vertical_envelope_center_sigma_m") {
+    config.stage3_vertical_envelope_center_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_vertical_envelope_center_deadband_m") {
+    config.stage3_vertical_envelope_center_deadband_m = ParseDouble(normalized_value);
   } else if (normalized_key == "stage3_disable_rtk_outage_segmented_batch") {
     config.stage3_disable_rtk_outage_segmented_batch = ParseBool(normalized_value);
   } else if (normalized_key == "static_alignment_duration_s") {
@@ -1564,6 +1614,18 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.stage3_vertical_reference_lowpass_cutoff_hz << '\n'
     << "stage3_vertical_anchor_sigma_m="
     << config.stage3_vertical_anchor_sigma_m << '\n'
+    << "stage3_vertical_reference_constraint_mode="
+    << ToString(config.stage3_vertical_reference_constraint_mode) << '\n'
+    << "stage3_vertical_envelope_half_width_m="
+    << config.stage3_vertical_envelope_half_width_m << '\n'
+    << "stage3_vertical_envelope_sigma_m="
+    << config.stage3_vertical_envelope_sigma_m << '\n'
+    << "enable_stage3_vertical_envelope_center_pull="
+    << (config.enable_stage3_vertical_envelope_center_pull ? "true" : "false") << '\n'
+    << "stage3_vertical_envelope_center_sigma_m="
+    << config.stage3_vertical_envelope_center_sigma_m << '\n'
+    << "stage3_vertical_envelope_center_deadband_m="
+    << config.stage3_vertical_envelope_center_deadband_m << '\n'
     << "stage3_disable_rtk_outage_segmented_batch="
     << (config.stage3_disable_rtk_outage_segmented_batch ? "true" : "false") << '\n'
     << "static_alignment_duration_s=" << config.static_alignment_duration_s << '\n'

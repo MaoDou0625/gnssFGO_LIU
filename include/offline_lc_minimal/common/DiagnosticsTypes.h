@@ -240,6 +240,16 @@ struct Stage3VerticalReferenceDiagnosticRow {
   double optimized_up_m = std::numeric_limits<double>::quiet_NaN();
   double residual_m = std::numeric_limits<double>::quiet_NaN();
   double sigma_m = std::numeric_limits<double>::quiet_NaN();
+  std::string constraint_mode = "gaussian";
+  double reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double envelope_half_width_m = std::numeric_limits<double>::quiet_NaN();
+  double envelope_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double envelope_overflow_residual_m = std::numeric_limits<double>::quiet_NaN();
+  bool center_pull_factor_added = false;
+  double center_pull_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double center_pull_deadband_m = std::numeric_limits<double>::quiet_NaN();
+  double center_pull_residual_m = std::numeric_limits<double>::quiet_NaN();
+  bool outside_gate = false;
   bool factor_added = false;
   std::string skip_reason = "UNSET";
 };

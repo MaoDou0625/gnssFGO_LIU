@@ -1435,13 +1435,44 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     active_stage3_vertical_reference != nullptr
       ? config_.stage3_vertical_anchor_sigma_m
       : std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_vertical_reference_constraint_mode =
+    active_stage3_vertical_reference != nullptr
+      ? ToString(config_.stage3_vertical_reference_constraint_mode)
+      : "disabled";
   run_result.run_summary.stage3_vertical_reference_factor_count = 0;
+  run_result.run_summary.stage3_vertical_reference_center_pull_factor_count = 0;
+  run_result.run_summary.stage3_vertical_reference_total_factor_count = 0;
   run_result.run_summary.stage3_vertical_reference_skipped_count = 0;
   run_result.run_summary.stage3_vertical_reference_mean_abs_residual_m =
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.stage3_vertical_reference_max_abs_residual_m =
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.stage3_vertical_reference_max_abs_lowpass_delta_m =
+    std::numeric_limits<double>::quiet_NaN();
+  const bool stage3_envelope_summary_enabled =
+    active_stage3_vertical_reference != nullptr &&
+    config_.stage3_vertical_reference_constraint_mode ==
+      Stage3VerticalReferenceConstraintMode::kEnvelope;
+  run_result.run_summary.stage3_vertical_envelope_half_width_m =
+    stage3_envelope_summary_enabled
+      ? config_.stage3_vertical_envelope_half_width_m
+      : std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_vertical_envelope_sigma_m =
+    stage3_envelope_summary_enabled
+      ? config_.stage3_vertical_envelope_sigma_m
+      : std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_vertical_envelope_center_sigma_m =
+    stage3_envelope_summary_enabled && config_.enable_stage3_vertical_envelope_center_pull
+      ? config_.stage3_vertical_envelope_center_sigma_m
+      : std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_vertical_envelope_center_deadband_m =
+    stage3_envelope_summary_enabled && config_.enable_stage3_vertical_envelope_center_pull
+      ? config_.stage3_vertical_envelope_center_deadband_m
+      : std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_vertical_envelope_outside_gate_count = 0;
+  run_result.run_summary.stage3_vertical_envelope_max_abs_overflow_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_vertical_envelope_max_abs_center_pull_residual_m =
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.vertical_jump_combined_imu_factor_count = 0;
   run_result.run_summary.vertical_jump_masked_imu_factor_count = 0;

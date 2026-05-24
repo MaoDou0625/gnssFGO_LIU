@@ -1504,7 +1504,10 @@ void WriteStage3VerticalReferenceDiagnosticsCsv(
   stream << std::setprecision(17);
   stream
     << "state_index,time_s,stage2_up_m,stage2_lowpass_up_m,lowpass_delta_m,"
-       "optimized_up_m,residual_m,sigma_m,factor_added,skip_reason\n";
+       "optimized_up_m,residual_m,sigma_m,constraint_mode,reference_up_m,"
+       "envelope_half_width_m,envelope_sigma_m,envelope_overflow_residual_m,"
+       "center_pull_factor_added,center_pull_sigma_m,center_pull_deadband_m,"
+       "center_pull_residual_m,outside_gate,factor_added,skip_reason\n";
   for (const auto &row : rows) {
     stream << row.state_index << ','
            << row.time_s << ','
@@ -1514,6 +1517,16 @@ void WriteStage3VerticalReferenceDiagnosticsCsv(
            << row.optimized_up_m << ','
            << row.residual_m << ','
            << row.sigma_m << ','
+           << row.constraint_mode << ','
+           << row.reference_up_m << ','
+           << row.envelope_half_width_m << ','
+           << row.envelope_sigma_m << ','
+           << row.envelope_overflow_residual_m << ','
+           << (row.center_pull_factor_added ? 1 : 0) << ','
+           << row.center_pull_sigma_m << ','
+           << row.center_pull_deadband_m << ','
+           << row.center_pull_residual_m << ','
+           << (row.outside_gate ? 1 : 0) << ','
            << (row.factor_added ? 1 : 0) << ','
            << row.skip_reason << '\n';
   }

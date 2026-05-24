@@ -117,6 +117,8 @@ OfflineRunResult Stage3VerticalReferenceOptimizationRunner::Run() const {
     request_.config.stage3_vertical_reference_lowpass_cutoff_hz;
   stage3_result.run_summary.stage3_vertical_anchor_sigma_m =
     request_.config.stage3_vertical_anchor_sigma_m;
+  stage3_result.run_summary.stage3_vertical_reference_constraint_mode =
+    ToString(request_.config.stage3_vertical_reference_constraint_mode);
   return stage3_result;
 }
 

@@ -102,6 +102,8 @@ void TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
   config.stage3_vertical_anchor_sigma_m = 0.015;
+  config.stage3_vertical_reference_constraint_mode =
+    offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kGaussian;
 
   offline_lc_minimal::Stage3VerticalReference reference;
   for (std::size_t index = 0; index < 4U; ++index) {
@@ -130,12 +132,18 @@ void TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics() {
   offline_lc_minimal::Stage3VerticalReferenceConstraintBuilder(std::move(request)).Build();
 
   ExpectTrue(graph.size() == 2U, "only dynamic states should receive Stage3 vertical anchors");
+  ExpectTrue(
+    static_cast<bool>(boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalPositionFactor>(graph[0])),
+    "gaussian mode should add vertical position factors");
   ExpectTrue(diagnostics.size() == 4U, "diagnostics should include skipped static states");
   ExpectTrue(!diagnostics[0].factor_added, "initial static state 0 should be skipped");
   ExpectTrue(!diagnostics[1].factor_added, "initial static state 1 should be skipped");
   ExpectTrue(diagnostics[2].factor_added, "dynamic state 2 should get an anchor");
   ExpectTrue(diagnostics[3].factor_added, "dynamic state 3 should get an anchor");
   ExpectTrue(summary.stage3_vertical_reference_factor_count == 2U, "factor count should be tracked");
+  ExpectTrue(
+    summary.stage3_vertical_reference_constraint_mode == "gaussian",
+    "summary should record gaussian mode");
   ExpectTrue(summary.stage3_vertical_reference_skipped_count == 2U, "skip count should be tracked");
 
   gtsam::Values optimized_values;
@@ -160,6 +168,110 @@ void TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics() {
     0.02,
     1.0e-12,
       "max absolute Stage3 residual should be summarized");
+}
+
+void TestConstraintBuilderEnvelopeModeUsesGateAndCenterPull() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_constraint_mode =
+    offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope;
+  config.stage3_vertical_envelope_half_width_m = 0.008;
+  config.stage3_vertical_envelope_sigma_m = 0.003;
+  config.enable_stage3_vertical_envelope_center_pull = true;
+  config.stage3_vertical_envelope_center_sigma_m = 0.006;
+  config.stage3_vertical_envelope_center_deadband_m = 0.002;
+
+  offline_lc_minimal::Stage3VerticalReference reference;
+  for (std::size_t index = 0; index < 3U; ++index) {
+    offline_lc_minimal::Stage3VerticalReferenceDiagnosticRow row;
+    row.state_index = index;
+    row.time_s = static_cast<double>(index);
+    row.stage2_up_m = 1.0;
+    row.stage2_lowpass_up_m = 1.0;
+    row.lowpass_delta_m = 0.0;
+    row.skip_reason = "PLANNED";
+    reference.rows.push_back(row);
+  }
+  const std::vector<double> state_timestamps{0.0, 1.0, 2.0};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::Stage3VerticalReferenceDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::Stage3VerticalReferenceConstraintBuildRequest request;
+  request.config = &config;
+  request.reference = &reference;
+  request.state_timestamps = &state_timestamps;
+  request.dynamic_start_index = 1U;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::Stage3VerticalReferenceConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 4U, "envelope mode should add gate and center-pull factors per dynamic state");
+  const auto envelope_factor =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalEnvelopeFactor>(graph[0]);
+  const auto center_pull_factor =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalEnvelopeCenterPullFactor>(graph[1]);
+  ExpectTrue(static_cast<bool>(envelope_factor), "primary Stage3 factor should be an envelope");
+  ExpectTrue(static_cast<bool>(center_pull_factor), "center-pull factor should be added");
+  ExpectNear(
+    envelope_factor->evaluateError(MakePose(1.004))[0],
+    0.0,
+    1.0e-12,
+    "inside-gate envelope residual should be zero");
+  ExpectNear(
+    envelope_factor->evaluateError(MakePose(1.012))[0],
+    0.004,
+    1.0e-12,
+    "outside-gate envelope residual should be overflow amount");
+  ExpectNear(
+    center_pull_factor->evaluateError(MakePose(1.001))[0],
+    0.0,
+    1.0e-12,
+    "inside center deadband residual should be zero");
+  ExpectNear(
+    center_pull_factor->evaluateError(MakePose(1.012))[0],
+    0.006,
+    1.0e-12,
+    "center-pull residual should be bounded by gate half-width");
+  ExpectTrue(summary.stage3_vertical_reference_factor_count == 2U, "primary factor count should be tracked");
+  ExpectTrue(
+    summary.stage3_vertical_reference_center_pull_factor_count == 2U,
+    "center-pull factor count should be tracked");
+  ExpectTrue(
+    summary.stage3_vertical_reference_total_factor_count == 4U,
+    "total Stage3 factor count should include gate and center-pull factors");
+  ExpectTrue(diagnostics[1].constraint_mode == "envelope", "diagnostic should record envelope mode");
+  ExpectNear(diagnostics[1].envelope_half_width_m, 0.008, 1.0e-12, "diagnostic should record half-width");
+
+  gtsam::Values optimized_values;
+  optimized_values.insert(gtsam::symbol_shorthand::X(0), MakePose(1.0));
+  optimized_values.insert(gtsam::symbol_shorthand::X(1), MakePose(1.004));
+  optimized_values.insert(gtsam::symbol_shorthand::X(2), MakePose(1.012));
+  offline_lc_minimal::PopulateStage3VerticalReferenceDiagnostics(
+    optimized_values,
+    diagnostics,
+    summary);
+
+  ExpectTrue(!diagnostics[1].outside_gate, "inside-gate optimized state should be marked inside");
+  ExpectTrue(diagnostics[2].outside_gate, "outside-gate optimized state should be marked outside");
+  ExpectNear(
+    diagnostics[2].envelope_overflow_residual_m,
+    0.004,
+    1.0e-12,
+    "diagnostic overflow residual should match factor residual");
+  ExpectNear(
+    diagnostics[2].center_pull_residual_m,
+    0.006,
+    1.0e-12,
+    "diagnostic center-pull residual should match factor residual");
+  ExpectTrue(
+    summary.stage3_vertical_envelope_outside_gate_count == 1U,
+    "summary should count optimized states outside the gate");
+  ExpectNear(
+    summary.stage3_vertical_envelope_max_abs_overflow_residual_m,
+    0.004,
+    1.0e-12,
+    "summary should track max overflow residual");
 }
 
 void TestTimelineAlignerResamplesSegmentedStage2Reference() {
@@ -389,6 +501,9 @@ int main() {
     RunTest(
       "TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics",
       TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics);
+    RunTest(
+      "TestConstraintBuilderEnvelopeModeUsesGateAndCenterPull",
+      TestConstraintBuilderEnvelopeModeUsesGateAndCenterPull);
     RunTest(
       "TestTimelineAlignerResamplesSegmentedStage2Reference",
       TestTimelineAlignerResamplesSegmentedStage2Reference);

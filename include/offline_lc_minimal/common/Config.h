@@ -127,6 +127,13 @@ struct OfflineRunnerConfig {
   bool enable_stage3_vertical_reference_optimization = false;
   double stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
   double stage3_vertical_anchor_sigma_m = 0.015;
+  Stage3VerticalReferenceConstraintMode stage3_vertical_reference_constraint_mode =
+    Stage3VerticalReferenceConstraintMode::kGaussian;
+  double stage3_vertical_envelope_half_width_m = 0.008;
+  double stage3_vertical_envelope_sigma_m = 0.003;
+  bool enable_stage3_vertical_envelope_center_pull = true;
+  double stage3_vertical_envelope_center_sigma_m = 0.006;
+  double stage3_vertical_envelope_center_deadband_m = 0.002;
   bool stage3_disable_rtk_outage_segmented_batch = true;
   double static_alignment_duration_s = 0.0;
   double imu_dual_vector_window_s = 100.0;

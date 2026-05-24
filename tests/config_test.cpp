@@ -1600,6 +1600,25 @@ void TestStage3VerticalReferenceConfigValidation() {
     std::abs(config.stage3_vertical_anchor_sigma_m - 0.015) < 1e-15,
     "Stage3 default anchor sigma should be 0.015 m");
   ExpectTrue(
+    config.stage3_vertical_reference_constraint_mode ==
+      offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kGaussian,
+    "Stage3 default constraint mode should be gaussian");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_envelope_half_width_m - 0.008) < 1e-15,
+    "Stage3 default envelope half-width should be 0.008 m");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_envelope_sigma_m - 0.003) < 1e-15,
+    "Stage3 default envelope sigma should be 0.003 m");
+  ExpectTrue(
+    config.enable_stage3_vertical_envelope_center_pull,
+    "Stage3 envelope center pull should default on for experiment configs");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_envelope_center_sigma_m - 0.006) < 1e-15,
+    "Stage3 default envelope center sigma should be 0.006 m");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_envelope_center_deadband_m - 0.002) < 1e-15,
+    "Stage3 default envelope center deadband should be 0.002 m");
+  ExpectTrue(
     config.stage3_disable_rtk_outage_segmented_batch,
     "Stage3 segmented-batch compatibility flag should default to true");
 
@@ -1621,6 +1640,30 @@ void TestStage3VerticalReferenceConfigValidation() {
     "0.02");
   offline_lc_minimal::OverrideConfigField(
     config,
+    "stage3_vertical_reference_constraint_mode",
+    "envelope");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_envelope_half_width_m",
+    "0.012");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_envelope_sigma_m",
+    "0.004");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_stage3_vertical_envelope_center_pull",
+    "false");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_envelope_center_sigma_m",
+    "0.007");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_envelope_center_deadband_m",
+    "0.003");
+  offline_lc_minimal::OverrideConfigField(
+    config,
     "stage3_disable_rtk_outage_segmented_batch",
     "false");
   ExpectTrue(config.enable_stage3_vertical_reference_optimization, "Stage3 enable flag should parse");
@@ -1630,6 +1673,25 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     std::abs(config.stage3_vertical_anchor_sigma_m - 0.02) < 1e-15,
     "Stage3 anchor sigma should parse");
+  ExpectTrue(
+    config.stage3_vertical_reference_constraint_mode ==
+      offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope,
+    "Stage3 envelope mode should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_envelope_half_width_m - 0.012) < 1e-15,
+    "Stage3 envelope half-width should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_envelope_sigma_m - 0.004) < 1e-15,
+    "Stage3 envelope sigma should parse");
+  ExpectTrue(
+    !config.enable_stage3_vertical_envelope_center_pull,
+    "Stage3 envelope center-pull flag should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_envelope_center_sigma_m - 0.007) < 1e-15,
+    "Stage3 envelope center sigma should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_envelope_center_deadband_m - 0.003) < 1e-15,
+    "Stage3 envelope center deadband should parse");
   ExpectTrue(!config.stage3_disable_rtk_outage_segmented_batch, "Stage3 segmented flag should parse");
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
   ExpectTrue(
@@ -1641,6 +1703,24 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("stage3_vertical_anchor_sigma_m=0.02") != std::string::npos,
     "Stage3 anchor sigma should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_reference_constraint_mode=envelope") != std::string::npos,
+    "Stage3 envelope mode should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_envelope_half_width_m=0.012") != std::string::npos,
+    "Stage3 envelope half-width should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_envelope_sigma_m=0.004") != std::string::npos,
+    "Stage3 envelope sigma should be serialized");
+  ExpectTrue(
+    serialized.find("enable_stage3_vertical_envelope_center_pull=false") != std::string::npos,
+    "Stage3 envelope center-pull flag should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_envelope_center_sigma_m=0.007") != std::string::npos,
+    "Stage3 envelope center sigma should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_envelope_center_deadband_m=0.003") != std::string::npos,
+    "Stage3 envelope center deadband should be serialized");
   ExpectTrue(
     serialized.find("stage3_disable_rtk_outage_segmented_batch=false") != std::string::npos,
     "Stage3 segmented flag should be serialized");
@@ -1665,6 +1745,72 @@ void TestStage3VerticalReferenceConfigValidation() {
     threw = std::string(exception.what()).find("stage3 vertical reference settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive Stage3 anchor sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  threw = false;
+  try {
+    offline_lc_minimal::OverrideConfigField(
+      config,
+      "stage3_vertical_reference_constraint_mode",
+      "invalid_mode");
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("Stage3 vertical reference constraint mode") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "invalid Stage3 constraint mode should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_constraint_mode =
+    offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope;
+  config.stage3_vertical_envelope_half_width_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("stage3 vertical envelope settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive Stage3 envelope half-width should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_constraint_mode =
+    offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope;
+  config.stage3_vertical_envelope_sigma_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("stage3 vertical envelope settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive Stage3 envelope sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_constraint_mode =
+    offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope;
+  config.stage3_vertical_envelope_center_deadband_m =
+    config.stage3_vertical_envelope_half_width_m;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("center deadband") != std::string::npos;
+  }
+  ExpectTrue(threw, "Stage3 center deadband should be smaller than the half-width");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_envelope_half_width_m = 0.0;
+  config.stage3_vertical_envelope_sigma_m = 0.0;
+  config.stage3_vertical_envelope_center_deadband_m = 1.0;
+  offline_lc_minimal::ValidateConfig(config);
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_constraint_mode =
+    offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope;
+  config.enable_stage3_vertical_envelope_center_pull = false;
+  config.stage3_vertical_envelope_center_sigma_m = 0.0;
+  config.stage3_vertical_envelope_center_deadband_m =
+    config.stage3_vertical_envelope_half_width_m;
+  offline_lc_minimal::ValidateConfig(config);
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_stage3_vertical_reference_optimization = true;
@@ -1698,6 +1844,27 @@ void TestStage3ExperimentConfigLoads() {
   ExpectTrue(
     std::abs(config.stage3_vertical_anchor_sigma_m - 0.015) < 1e-15,
     "Stage3 experiment anchor sigma should be 0.015 m");
+
+  const auto envelope_config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1rtkjumpcut1_stage3_lowpass_vertical_envelope_gate.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    envelope_config.enable_stage3_vertical_reference_optimization,
+    "Stage3 envelope-gate config should enable Stage3");
+  ExpectTrue(
+    envelope_config.stage3_vertical_reference_constraint_mode ==
+      offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope,
+    "Stage3 envelope-gate config should select envelope mode");
+  ExpectTrue(
+    std::abs(envelope_config.stage3_vertical_envelope_half_width_m - 0.008) < 1e-15,
+    "Stage3 envelope-gate config should use 8 mm half-width");
+  ExpectTrue(
+    std::abs(envelope_config.stage3_vertical_envelope_sigma_m - 0.003) < 1e-15,
+    "Stage3 envelope-gate config should use 3 mm envelope sigma");
+  ExpectTrue(
+    envelope_config.enable_stage3_vertical_envelope_center_pull,
+    "Stage3 envelope-gate config should enable bounded center-pull");
 }
 
 void TestAccelerometerBiasUgConfigParsing() {

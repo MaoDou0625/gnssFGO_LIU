@@ -242,13 +242,26 @@ struct RunSummary {
   double stage3_vertical_reference_lowpass_cutoff_hz =
     std::numeric_limits<double>::quiet_NaN();
   double stage3_vertical_anchor_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  std::string stage3_vertical_reference_constraint_mode = "gaussian";
   std::size_t stage3_vertical_reference_factor_count = 0;
+  std::size_t stage3_vertical_reference_center_pull_factor_count = 0;
+  std::size_t stage3_vertical_reference_total_factor_count = 0;
   std::size_t stage3_vertical_reference_skipped_count = 0;
   double stage3_vertical_reference_mean_abs_residual_m =
     std::numeric_limits<double>::quiet_NaN();
   double stage3_vertical_reference_max_abs_residual_m =
     std::numeric_limits<double>::quiet_NaN();
   double stage3_vertical_reference_max_abs_lowpass_delta_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_vertical_envelope_half_width_m = std::numeric_limits<double>::quiet_NaN();
+  double stage3_vertical_envelope_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double stage3_vertical_envelope_center_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double stage3_vertical_envelope_center_deadband_m =
+    std::numeric_limits<double>::quiet_NaN();
+  std::size_t stage3_vertical_envelope_outside_gate_count = 0;
+  double stage3_vertical_envelope_max_abs_overflow_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_vertical_envelope_max_abs_center_pull_residual_m =
     std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_jump_combined_imu_factor_count = 0;
   std::size_t vertical_jump_masked_imu_factor_count = 0;
@@ -670,8 +683,14 @@ struct RunSummary {
         << "stage3_vertical_reference_lowpass_cutoff_hz="
         << stage3_vertical_reference_lowpass_cutoff_hz << '\n'
         << "stage3_vertical_anchor_sigma_m=" << stage3_vertical_anchor_sigma_m << '\n'
+        << "stage3_vertical_reference_constraint_mode="
+        << stage3_vertical_reference_constraint_mode << '\n'
         << "stage3_vertical_reference_factor_count="
         << stage3_vertical_reference_factor_count << '\n'
+        << "stage3_vertical_reference_center_pull_factor_count="
+        << stage3_vertical_reference_center_pull_factor_count << '\n'
+        << "stage3_vertical_reference_total_factor_count="
+        << stage3_vertical_reference_total_factor_count << '\n'
         << "stage3_vertical_reference_skipped_count="
         << stage3_vertical_reference_skipped_count << '\n'
         << "stage3_vertical_reference_mean_abs_residual_m="
@@ -680,6 +699,19 @@ struct RunSummary {
         << stage3_vertical_reference_max_abs_residual_m << '\n'
         << "stage3_vertical_reference_max_abs_lowpass_delta_m="
         << stage3_vertical_reference_max_abs_lowpass_delta_m << '\n'
+        << "stage3_vertical_envelope_half_width_m="
+        << stage3_vertical_envelope_half_width_m << '\n'
+        << "stage3_vertical_envelope_sigma_m=" << stage3_vertical_envelope_sigma_m << '\n'
+        << "stage3_vertical_envelope_center_sigma_m="
+        << stage3_vertical_envelope_center_sigma_m << '\n'
+        << "stage3_vertical_envelope_center_deadband_m="
+        << stage3_vertical_envelope_center_deadband_m << '\n'
+        << "stage3_vertical_envelope_outside_gate_count="
+        << stage3_vertical_envelope_outside_gate_count << '\n'
+        << "stage3_vertical_envelope_max_abs_overflow_residual_m="
+        << stage3_vertical_envelope_max_abs_overflow_residual_m << '\n'
+        << "stage3_vertical_envelope_max_abs_center_pull_residual_m="
+        << stage3_vertical_envelope_max_abs_center_pull_residual_m << '\n'
         << "vertical_jump_combined_imu_factor_count=" << vertical_jump_combined_imu_factor_count << '\n'
         << "vertical_jump_masked_imu_factor_count=" << vertical_jump_masked_imu_factor_count << '\n'
         << "vertical_jump_impulse_factor_count=" << vertical_jump_impulse_factor_count << '\n'
