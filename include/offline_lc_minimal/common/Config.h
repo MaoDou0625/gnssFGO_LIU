@@ -128,6 +128,8 @@ struct OfflineRunnerConfig {
   double stage2_lowfreq_vertical_reference_cutoff_hz = 0.05;
   GnssVerticalReferenceSource stage2_lowfreq_vertical_reference_source =
     GnssVerticalReferenceSource::kStage2Lowpass;
+  bool enable_stage2_lowfreq_final_dvz_relaxation = false;
+  double stage2_lowfreq_final_dvz_sigma_scale = 1.0;
   bool enable_stage3_vertical_reference_optimization = false;
   double stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
   double stage3_vertical_anchor_sigma_m = 0.015;
@@ -245,6 +247,7 @@ struct OfflineRunnerConfig {
   double vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
   double vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
   double vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+  double vertical_velocity_delta_sigma_scale = 1.0;
   bool enable_vertical_motion_adaptive_reweighting = false;
   int vertical_motion_adaptive_outer_iterations = 2;
   double vertical_motion_adaptive_convergence_score_epsilon = 1.0e-3;

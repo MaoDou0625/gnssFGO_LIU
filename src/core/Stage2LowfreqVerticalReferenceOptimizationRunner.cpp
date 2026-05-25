@@ -9,16 +9,26 @@ namespace {
 
 OfflineRunnerConfig MakeSourceConfig(OfflineRunnerConfig config) {
   config.enable_stage2_lowfreq_vertical_reference_optimization = false;
+  config.enable_stage2_lowfreq_final_dvz_relaxation = false;
   config.enable_stage3_vertical_reference_optimization = false;
   config.gnss_vertical_reference_source = GnssVerticalReferenceSource::kRawRtk;
   config.enable_rtk_vertical_lowpass_reference = false;
   return config;
 }
 
+void ApplyFinalDvzRelaxation(OfflineRunnerConfig &config) {
+  if (!config.enable_stage2_lowfreq_final_dvz_relaxation) {
+    return;
+  }
+  const double scale = config.stage2_lowfreq_final_dvz_sigma_scale;
+  config.vertical_velocity_delta_sigma_scale *= scale;
+}
+
 OfflineRunnerConfig MakeFinalConfig(OfflineRunnerConfig config) {
   config.enable_stage3_vertical_reference_optimization = false;
   config.gnss_vertical_reference_source =
     config.stage2_lowfreq_vertical_reference_source;
+  ApplyFinalDvzRelaxation(config);
   return config;
 }
 
@@ -71,6 +81,10 @@ OfflineRunResult Stage2LowfreqVerticalReferenceOptimizationRunner::Run() const {
     ToString(request_.config.stage2_lowfreq_vertical_reference_source);
   final_result.run_summary.stage2_lowfreq_vertical_reference_cutoff_hz =
     request_.config.stage2_lowfreq_vertical_reference_cutoff_hz;
+  final_result.run_summary.stage2_lowfreq_final_dvz_relaxation_enabled =
+    request_.config.enable_stage2_lowfreq_final_dvz_relaxation;
+  final_result.run_summary.stage2_lowfreq_final_dvz_sigma_scale =
+    request_.config.stage2_lowfreq_final_dvz_sigma_scale;
   final_result.stage2_lowfreq_vertical_reference_diagnostics =
     lowpass_reference->rows;
   return final_result;

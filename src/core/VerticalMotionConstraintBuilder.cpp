@@ -71,14 +71,16 @@ VerticalVelocityDeltaDiagnosticRow MakeDiagnosticRow(
   return row;
 }
 
-bool ApplyClampedTargetSigmaFallback(VerticalVelocityDeltaDiagnosticRow &row) {
+bool ApplyClampedTargetSigmaFallback(
+  VerticalVelocityDeltaDiagnosticRow &row,
+  const double output_sigma_scale) {
   if (!row.target_clamped ||
       row.sigma_model == "legacy" ||
       row.sigma_model == "legacy_clamped_target") {
     return false;
   }
   row.sigma_model = "legacy_clamped_target";
-  row.sigma_mps = row.legacy_sigma_mps;
+  row.sigma_mps = row.legacy_sigma_mps * output_sigma_scale;
   if (std::isfinite(row.adaptive_motion_score)) {
     row.adaptive_sigma_mps = row.sigma_mps;
     row.adaptive_sigma_ratio =
@@ -123,7 +125,8 @@ void VerticalMotionConstraintBuilder::Build() const {
     const VerticalVelocityDeltaSigmaResult sigma = sigma_model.Compute(dt_s, stability_entry);
     VerticalVelocityDeltaDiagnosticRow row =
       MakeDiagnosticRow(record, sigma, TargetDeltaVzMps(record, dt_s), request_.outer_pass, stability_entry);
-    const bool used_clamped_target_fallback = ApplyClampedTargetSigmaFallback(row);
+    const bool used_clamped_target_fallback =
+      ApplyClampedTargetSigmaFallback(row, request_.config->vertical_velocity_delta_sigma_scale);
 
     if (!request_.config->enable_vertical_velocity_delta_constraint) {
       row.skip_reason = "DISABLED";

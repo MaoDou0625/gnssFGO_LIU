@@ -5,11 +5,30 @@
 #include <utility>
 
 namespace offline_lc_minimal {
+namespace {
+
+void ApplyOutputScale(VerticalVelocityDeltaSigmaResult &result, const double scale) {
+  if (scale == 1.0) {
+    return;
+  }
+  result.sigma_mps *= scale;
+  result.sigma_floor_mps *= scale;
+  result.sigma_ceiling_mps *= scale;
+}
+
+}  // namespace
 
 VerticalVelocityDeltaSigmaModel::VerticalVelocityDeltaSigmaModel(const OfflineRunnerConfig &config)
     : config_(config) {}
 
 VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::Compute(const double dt_s) const {
+  VerticalVelocityDeltaSigmaResult result = ComputeWithoutOutputScale(dt_s);
+  ApplyOutputScale(result, config_.vertical_velocity_delta_sigma_scale);
+  return result;
+}
+
+VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::ComputeWithoutOutputScale(
+  const double dt_s) const {
   const double positive_dt_s = std::max(dt_s, 0.0);
   VerticalVelocityDeltaSigmaResult result;
   result.legacy_sigma_mps = std::max(
@@ -38,12 +57,13 @@ VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::Compute(const 
 VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::Compute(
   const double dt_s,
   const VerticalMotionAdaptiveReweightingDiagnosticRow *stability_entry) const {
-  VerticalVelocityDeltaSigmaResult base = Compute(dt_s);
+  VerticalVelocityDeltaSigmaResult base = ComputeWithoutOutputScale(dt_s);
   if (!config_.enable_vertical_motion_adaptive_reweighting ||
       stability_entry == nullptr ||
       !std::isfinite(stability_entry->motion_score) ||
       stability_entry->in_jump_padding ||
       !config_.enable_vertical_velocity_delta_bias_consistent_sigma) {
+    ApplyOutputScale(base, config_.vertical_velocity_delta_sigma_scale);
     return base;
   }
 
@@ -77,6 +97,7 @@ VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::Compute(
   result.clamped_ceiling =
     result.sigma_mps >= result.sigma_ceiling_mps &&
     blended_sigma > result.sigma_ceiling_mps;
+  ApplyOutputScale(result, config_.vertical_velocity_delta_sigma_scale);
   return result;
 }
 

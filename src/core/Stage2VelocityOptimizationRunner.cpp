@@ -124,6 +124,7 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
   OfflineRunnerConfig stage1_config = request_.config;
   stage1_config.enable_stage2_velocity_optimization = false;
   stage1_config.enable_stage2_lowfreq_vertical_reference_optimization = false;
+  stage1_config.enable_stage2_lowfreq_final_dvz_relaxation = false;
   stage1_config.enable_stage1_yaw_refinement = true;
   stage1_config.enable_rtk_outage_segmented_batch = false;
   stage1_config.gnss_vertical_reference_source =

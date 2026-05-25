@@ -352,6 +352,21 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
     throw std::runtime_error(
       "stage2 lowfreq vertical reference optimization is incompatible with Stage3 vertical reference optimization");
   }
+  if (!std::isfinite(config.stage2_lowfreq_final_dvz_sigma_scale) ||
+      config.stage2_lowfreq_final_dvz_sigma_scale <= 0.0) {
+    throw std::runtime_error(
+      "stage2 lowfreq final DVZ relaxation scale must be finite and positive");
+  }
+  if (config.enable_stage2_lowfreq_final_dvz_relaxation &&
+      !config.enable_stage2_lowfreq_vertical_reference_optimization) {
+    throw std::runtime_error(
+      "stage2 lowfreq final DVZ relaxation requires stage2 lowfreq vertical reference optimization");
+  }
+  if (config.enable_stage2_lowfreq_final_dvz_relaxation &&
+      config.stage2_lowfreq_final_dvz_sigma_scale < 1.0) {
+    throw std::runtime_error(
+      "stage2 lowfreq final DVZ relaxation requires a sigma scale >= 1");
+  }
   if (!std::isfinite(config.stage3_vertical_reference_lowpass_cutoff_hz) ||
       !std::isfinite(config.stage3_vertical_anchor_sigma_m) ||
       config.stage3_vertical_reference_lowpass_cutoff_hz <= 0.0 ||
@@ -571,6 +586,8 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_velocity_delta_attitude_sigma_rad <= 0.0 ||
       config.vertical_velocity_delta_sigma_floor_mps <= 0.0 ||
       config.vertical_velocity_delta_sigma_ceiling_mps <= 0.0 ||
+      !std::isfinite(config.vertical_velocity_delta_sigma_scale) ||
+      config.vertical_velocity_delta_sigma_scale <= 0.0 ||
       config.vertical_motion_adaptive_outer_iterations < 0 ||
       config.vertical_motion_adaptive_convergence_score_epsilon <= 0.0 ||
       config.vertical_motion_adaptive_stability_window_s <= 0.0 ||
@@ -1031,6 +1048,12 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
   } else if (normalized_key == "stage2_lowfreq_vertical_reference_source") {
     config.stage2_lowfreq_vertical_reference_source =
       ParseGnssVerticalReferenceSource(normalized_value);
+  } else if (normalized_key == "enable_stage2_lowfreq_final_dvz_relaxation") {
+    config.enable_stage2_lowfreq_final_dvz_relaxation =
+      ParseBool(normalized_value);
+  } else if (normalized_key == "stage2_lowfreq_final_dvz_sigma_scale") {
+    config.stage2_lowfreq_final_dvz_sigma_scale =
+      ParseDouble(normalized_value);
   } else if (normalized_key == "enable_stage3_vertical_reference_optimization") {
     config.enable_stage3_vertical_reference_optimization = ParseBool(normalized_value);
   } else if (normalized_key == "stage3_vertical_reference_lowpass_cutoff_hz") {
@@ -1276,6 +1299,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_velocity_delta_sigma_floor_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_sigma_ceiling_mps") {
     config.vertical_velocity_delta_sigma_ceiling_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_sigma_scale") {
+    config.vertical_velocity_delta_sigma_scale = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_motion_adaptive_reweighting") {
     config.enable_vertical_motion_adaptive_reweighting = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_motion_adaptive_outer_iterations") {
@@ -1672,6 +1697,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.stage2_lowfreq_vertical_reference_cutoff_hz << '\n'
     << "stage2_lowfreq_vertical_reference_source="
     << ToString(config.stage2_lowfreq_vertical_reference_source) << '\n'
+    << "enable_stage2_lowfreq_final_dvz_relaxation="
+    << (config.enable_stage2_lowfreq_final_dvz_relaxation ? "true" : "false") << '\n'
+    << "stage2_lowfreq_final_dvz_sigma_scale="
+    << config.stage2_lowfreq_final_dvz_sigma_scale << '\n'
     << "enable_stage3_vertical_reference_optimization="
     << (config.enable_stage3_vertical_reference_optimization ? "true" : "false") << '\n'
     << "stage3_vertical_reference_lowpass_cutoff_hz="
@@ -1857,6 +1886,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.vertical_velocity_delta_sigma_floor_mps << '\n'
     << "vertical_velocity_delta_sigma_ceiling_mps="
     << config.vertical_velocity_delta_sigma_ceiling_mps << '\n'
+    << "vertical_velocity_delta_sigma_scale="
+    << config.vertical_velocity_delta_sigma_scale << '\n'
     << "enable_vertical_motion_adaptive_reweighting="
     << (config.enable_vertical_motion_adaptive_reweighting ? "true" : "false") << '\n'
     << "vertical_motion_adaptive_outer_iterations="

@@ -1,5 +1,6 @@
 #include <cmath>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -12,6 +13,7 @@
 #include "offline_lc_minimal/core/RtkOutageBiasContinuityPolicy.h"
 #include "offline_lc_minimal/core/RtkOutageBatchSegmentPlanner.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
+#include "offline_lc_minimal/core/RtkOutageSegmentedBatchRunner.h"
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
 #include "offline_lc_minimal/core/SegmentedBatchResultAssembler.h"
 
@@ -387,6 +389,96 @@ offline_lc_minimal::GnssFactorRecord MakeGnssFactorRecord(
   return row;
 }
 
+void TestSegmentedBatchRunnerSanitizesStandalonePrefixLowfreqDvzRelaxation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_stage2_lowfreq_vertical_reference_optimization = true;
+  config.stage2_lowfreq_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass;
+  config.gnss_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass;
+  config.enable_stage2_lowfreq_final_dvz_relaxation = true;
+  config.stage2_lowfreq_final_dvz_sigma_scale = 10.0;
+  config.vertical_velocity_delta_sigma_scale = 10.0;
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_segmented_batch = true;
+  config.enable_rtk_outage_boundary_constraints = false;
+
+  auto base_config = config;
+  base_config.enable_stage2_lowfreq_vertical_reference_optimization = false;
+  base_config.enable_stage2_lowfreq_final_dvz_relaxation = true;
+  base_config.vertical_velocity_delta_sigma_scale = 1.0;
+  base_config.gnss_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk;
+
+  offline_lc_minimal::RtkOutageWindowRow outage;
+  outage.window_index = 2U;
+  outage.pre_anchor_state_index = 3U;
+  outage.post_anchor_state_index = 5U;
+  outage.start_time_s = 10.0;
+  outage.end_time_s = 20.0;
+  outage.skip_reason = "PLANNED";
+
+  struct Call {
+    bool stage2_lowfreq_enabled = false;
+    bool final_dvz_relaxation_enabled = false;
+    double dvz_sigma_scale = 0.0;
+    double processing_start_time_s = 0.0;
+    double processing_end_time_s = 0.0;
+  };
+  std::vector<Call> calls;
+
+  offline_lc_minimal::RtkOutageSegmentedBatchRunRequest request;
+  request.base_config = base_config;
+  request.config = config;
+  request.dataset = offline_lc_minimal::DataSet{};
+  request.outage_windows = {outage};
+  request.state_timestamps = {0.0, 2.0, 8.0, 10.1, 15.0, 20.2, 30.0};
+  request.dynamic_start_time_s = 2.0;
+  request.processing_end_time_s = 30.0;
+  request.run_once = [&](offline_lc_minimal::OfflineRunnerConfig child_config,
+                         std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference>,
+                         std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
+                         offline_lc_minimal::DataSet) {
+    offline_lc_minimal::ValidateConfig(child_config);
+    calls.push_back(Call{
+      child_config.enable_stage2_lowfreq_vertical_reference_optimization,
+      child_config.enable_stage2_lowfreq_final_dvz_relaxation,
+      child_config.vertical_velocity_delta_sigma_scale,
+      child_config.processing_start_time_s,
+      child_config.processing_end_time_s});
+    offline_lc_minimal::OfflineRunResult result;
+    result.trajectory = {
+      MakeTrajectoryRow(child_config.processing_start_time_s, 0.0),
+      MakeTrajectoryRow(child_config.processing_end_time_s, 1.0)};
+    return result;
+  };
+
+  (void)offline_lc_minimal::RtkOutageSegmentedBatchRunner(std::move(request)).Run();
+  ExpectTrue(calls.size() == 3U, "segmented batch should run pre/outage/post children");
+  ExpectTrue(
+    !calls[0].stage2_lowfreq_enabled,
+    "standalone prefix child should disable Stage2 lowfreq wrapper");
+  ExpectTrue(
+    !calls[0].final_dvz_relaxation_enabled,
+    "standalone prefix child should clear final DVZ relaxation");
+  ExpectTrue(
+    std::abs(calls[0].dvz_sigma_scale - 1.0) < 1e-15,
+    "standalone prefix child should keep neutral DVZ output sigma scale");
+  ExpectTrue(
+    calls[1].stage2_lowfreq_enabled && calls[1].final_dvz_relaxation_enabled,
+    "outage child should keep Stage2 lowfreq final DVZ relaxation");
+  ExpectTrue(
+    std::abs(calls[1].dvz_sigma_scale - 10.0) < 1e-15,
+    "outage child should keep relaxed DVZ output sigma scale");
+  ExpectTrue(
+    calls[2].stage2_lowfreq_enabled && calls[2].final_dvz_relaxation_enabled,
+    "post child should keep Stage2 lowfreq final DVZ relaxation");
+  ExpectTrue(
+    std::abs(calls[2].dvz_sigma_scale - 10.0) < 1e-15,
+    "post child should keep relaxed DVZ output sigma scale");
+}
+
 void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   offline_lc_minimal::RtkOutageBatchSegmentRow pre;
   pre.segment_index = 0U;
@@ -490,6 +582,9 @@ int main() {
     RunTest(
       "TestBatchSegmentPlannerSplitsFirstPlannedOutage",
       TestBatchSegmentPlannerSplitsFirstPlannedOutage);
+    RunTest(
+      "TestSegmentedBatchRunnerSanitizesStandalonePrefixLowfreqDvzRelaxation",
+      TestSegmentedBatchRunnerSanitizesStandalonePrefixLowfreqDvzRelaxation);
     RunTest(
       "TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates",
       TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates);

@@ -1129,6 +1129,18 @@ void TestVerticalVelocityDeltaConfigValidation() {
   config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
   config.enable_vertical_velocity_delta_constraint = true;
+  config.vertical_velocity_delta_sigma_scale = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical velocity delta settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive velocity delta output sigma scale should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
   config.vertical_velocity_delta_sigma_ceiling_mps = config.vertical_velocity_delta_sigma_floor_mps * 0.5;
   threw = false;
   try {
@@ -1850,6 +1862,15 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
       offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass,
     "Stage2 lowfreq default final source should be Stage2 lowpass");
   ExpectTrue(
+    !config.enable_stage2_lowfreq_final_dvz_relaxation,
+    "Stage2 lowfreq final DVZ relaxation should default off");
+  ExpectTrue(
+    std::abs(config.stage2_lowfreq_final_dvz_sigma_scale - 1.0) < 1e-15,
+    "Stage2 lowfreq final DVZ relaxation scale should default to 1");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_sigma_scale - 1.0) < 1e-15,
+    "vertical velocity delta output sigma scale should default to 1");
+  ExpectTrue(
     config.gnss_vertical_reference_source ==
       offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk,
     "GNSS vertical reference should default to raw RTK");
@@ -1874,6 +1895,18 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
     config,
     "gnss_vertical_reference_source",
     "stage2_lowpass");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_stage2_lowfreq_final_dvz_relaxation",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage2_lowfreq_final_dvz_sigma_scale",
+    "10");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "vertical_velocity_delta_sigma_scale",
+    "2.5");
   ExpectTrue(
     config.enable_stage2_lowfreq_vertical_reference_optimization,
     "Stage2 lowfreq enable flag should parse");
@@ -1888,6 +1921,15 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
     config.gnss_vertical_reference_source ==
       offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass,
     "GNSS vertical reference source should parse");
+  ExpectTrue(
+    config.enable_stage2_lowfreq_final_dvz_relaxation,
+    "Stage2 lowfreq final DVZ relaxation flag should parse");
+  ExpectTrue(
+    std::abs(config.stage2_lowfreq_final_dvz_sigma_scale - 10.0) < 1e-15,
+    "Stage2 lowfreq final DVZ relaxation scale should parse");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_sigma_scale - 2.5) < 1e-15,
+    "vertical velocity delta output sigma scale should parse");
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
   ExpectTrue(
     serialized.find("enable_stage2_lowfreq_vertical_reference_optimization=true") != std::string::npos,
@@ -1898,6 +1940,15 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("stage2_lowfreq_vertical_reference_source=stage2_lowpass") != std::string::npos,
     "Stage2 lowfreq source should serialize");
+  ExpectTrue(
+    serialized.find("enable_stage2_lowfreq_final_dvz_relaxation=true") != std::string::npos,
+    "Stage2 lowfreq final DVZ relaxation flag should serialize");
+  ExpectTrue(
+    serialized.find("stage2_lowfreq_final_dvz_sigma_scale=10") != std::string::npos,
+    "Stage2 lowfreq final DVZ relaxation scale should serialize");
+  ExpectTrue(
+    serialized.find("vertical_velocity_delta_sigma_scale=2.5") != std::string::npos,
+    "vertical velocity delta output sigma scale should serialize");
   ExpectTrue(
     serialized.find("gnss_vertical_reference_source=stage2_lowpass") != std::string::npos,
     "GNSS vertical reference source should serialize");
@@ -1955,6 +2006,44 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
       std::string::npos;
   }
   ExpectTrue(threw, "Stage2 lowpass GNSS source should require the wrapper flow");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage2_lowfreq_final_dvz_sigma_scale = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("DVZ relaxation scale") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive Stage2 lowfreq final DVZ relaxation scale should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_lowfreq_final_dvz_relaxation = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("requires stage2 lowfreq vertical reference optimization") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "Stage2 lowfreq final DVZ relaxation should require the wrapper flow");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_stage2_lowfreq_vertical_reference_optimization = true;
+  config.enable_stage2_lowfreq_final_dvz_relaxation = true;
+  config.stage2_lowfreq_final_dvz_sigma_scale = 0.5;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("sigma scale >= 1") != std::string::npos;
+  }
+  ExpectTrue(threw, "enabled Stage2 lowfreq final DVZ relaxation should require scale >= 1");
 
   config = offline_lc_minimal::DefaultConfig();
   threw = false;
@@ -2051,6 +2140,29 @@ void TestStage2LowfreqExperimentConfigLoads() {
   ExpectTrue(
     std::abs(config.stage2_lowfreq_vertical_reference_cutoff_hz - 0.05) < 1e-15,
     "Stage2 lowfreq experiment cutoff should be 0.05 Hz");
+  ExpectTrue(
+    !config.enable_stage2_lowfreq_final_dvz_relaxation,
+    "Stage2 lowfreq base experiment should not relax final DVZ");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_sigma_scale - 1.0) < 1e-15,
+    "Stage2 lowfreq base experiment should keep DVZ output sigma scale neutral");
+
+  const auto relaxed_config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1rtkjumpcut1_stage2_lowfreq_vertical_reference_dvz_relax10.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    relaxed_config.enable_stage2_lowfreq_vertical_reference_optimization,
+    "Stage2 lowfreq relaxed experiment should enable the wrapper");
+  ExpectTrue(
+    relaxed_config.enable_stage2_lowfreq_final_dvz_relaxation,
+    "Stage2 lowfreq relaxed experiment should enable final DVZ relaxation");
+  ExpectTrue(
+    std::abs(relaxed_config.stage2_lowfreq_final_dvz_sigma_scale - 10.0) < 1e-15,
+    "Stage2 lowfreq relaxed experiment should use 10x final DVZ sigma scale");
+  ExpectTrue(
+    std::abs(relaxed_config.vertical_velocity_delta_sigma_scale - 1.0) < 1e-15,
+    "Stage2 lowfreq relaxed experiment should keep base DVZ output sigma scale neutral");
 }
 
 void TestAccelerometerBiasUgConfigParsing() {

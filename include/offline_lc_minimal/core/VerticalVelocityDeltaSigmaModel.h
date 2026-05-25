@@ -29,6 +29,8 @@ class VerticalVelocityDeltaSigmaModel {
     const VerticalMotionAdaptiveReweightingDiagnosticRow *stability_entry) const;
 
  private:
+  [[nodiscard]] VerticalVelocityDeltaSigmaResult ComputeWithoutOutputScale(double dt_s) const;
+
   [[nodiscard]] VerticalVelocityDeltaSigmaResult ComputeBiasConsistent(
     double dt_s,
     double bias_sigma_mps2,

@@ -193,6 +193,38 @@ void TestSigmaModelBiasConsistentComponents() {
   ExpectNear(sigma.sigma_mps, expected_sigma_mps, 1e-15, "bias-consistent sigma is wrong");
 }
 
+void TestSigmaModelOutputScalePreservesPhysicalComponents() {
+  auto base_config = offline_lc_minimal::DefaultConfig();
+  base_config.gravity_mps2 = 9.80665;
+  base_config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
+  base_config.vertical_velocity_delta_acc_sigma_mps2 = 0.10;
+  base_config.vertical_velocity_delta_min_sigma_mps = 0.003;
+  base_config.vertical_velocity_delta_bias_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(0.1);
+  base_config.vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
+  base_config.vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
+  base_config.vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+
+  auto scaled_config = base_config;
+  scaled_config.vertical_velocity_delta_sigma_scale = 10.0;
+  const auto base = offline_lc_minimal::VerticalVelocityDeltaSigmaModel(base_config).Compute(0.05);
+  const auto scaled = offline_lc_minimal::VerticalVelocityDeltaSigmaModel(scaled_config).Compute(0.05);
+
+  ExpectNear(scaled.bias_sigma_mps, base.bias_sigma_mps, 1e-15, "output scale should not change bias component");
+  ExpectNear(
+    scaled.attitude_sigma_mps,
+    base.attitude_sigma_mps,
+    1e-15,
+    "output scale should not change attitude component");
+  ExpectNear(scaled.sigma_floor_mps, base.sigma_floor_mps * 10.0, 1e-15, "output scale should scale floor");
+  ExpectNear(
+    scaled.sigma_ceiling_mps,
+    base.sigma_ceiling_mps * 10.0,
+    1e-15,
+    "output scale should scale ceiling");
+  ExpectNear(scaled.sigma_mps, base.sigma_mps * 10.0, 1e-15, "output scale should scale sigma");
+}
+
 void TestSigmaModelClampFlags() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
@@ -929,6 +961,9 @@ int main() {
     RunTest("TestVerticalVelocityDeltaBiasFactorUsesBaZ", TestVerticalVelocityDeltaBiasFactorUsesBaZ);
     RunTest("TestSigmaModelLegacyMatchesExistingFormula", TestSigmaModelLegacyMatchesExistingFormula);
     RunTest("TestSigmaModelBiasConsistentComponents", TestSigmaModelBiasConsistentComponents);
+    RunTest(
+      "TestSigmaModelOutputScalePreservesPhysicalComponents",
+      TestSigmaModelOutputScalePreservesPhysicalComponents);
     RunTest("TestSigmaModelClampFlags", TestSigmaModelClampFlags);
     RunTest("TestAdaptiveSigmaUsesStaticAndDynamicLimits", TestAdaptiveSigmaUsesStaticAndDynamicLimits);
     RunTest("TestAdaptiveSigmaIntermediateScoreRespectsFloor", TestAdaptiveSigmaIntermediateScoreRespectsFloor);

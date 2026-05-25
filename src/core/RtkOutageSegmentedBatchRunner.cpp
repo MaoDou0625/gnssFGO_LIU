@@ -29,6 +29,7 @@ OfflineRunnerConfig MakeStandalonePrefixChildConfig(
   const RtkOutageWindowRow *source_outage) {
   config.enable_rtk_outage_segmented_batch = false;
   config.enable_stage2_lowfreq_vertical_reference_optimization = false;
+  config.enable_stage2_lowfreq_final_dvz_relaxation = false;
   config.enable_stage3_vertical_reference_optimization = false;
   if (config.gnss_vertical_reference_source !=
       GnssVerticalReferenceSource::kRtkDriftLowpass) {

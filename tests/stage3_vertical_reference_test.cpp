@@ -19,6 +19,7 @@
 #include "offline_lc_minimal/core/Stage3VerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceProfilePlanner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceTimelineAligner.h"
+#include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
 #include "offline_lc_minimal/factor/VerticalRtkFactors.h"
 
 namespace {
@@ -502,6 +503,16 @@ void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
   config.gnss_vertical_reference_source =
     offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk;
   config.stage2_lowfreq_vertical_reference_cutoff_hz = 0.05;
+  config.enable_stage2_lowfreq_final_dvz_relaxation = true;
+  config.stage2_lowfreq_final_dvz_sigma_scale = 10.0;
+  config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.10;
+  config.vertical_velocity_delta_min_sigma_mps = 0.003;
+  config.vertical_velocity_delta_bias_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(0.1);
+  config.vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
+  config.vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
+  config.vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
 
   struct Call {
     bool enable_stage2_lowfreq = false;
@@ -509,6 +520,13 @@ void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
     offline_lc_minimal::GnssVerticalReferenceSource gnss_source =
       offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk;
     bool has_lowpass_reference = false;
+    double dvz_acc_sigma_mps2 = 0.0;
+    double dvz_min_sigma_mps = 0.0;
+    double dvz_floor_mps = 0.0;
+    double dvz_ceiling_mps = 0.0;
+    double dvz_attitude_sigma_rad = 0.0;
+    double dvz_sigma_scale = 0.0;
+    double computed_dvz_sigma_mps = 0.0;
   };
   std::vector<Call> calls;
 
@@ -523,7 +541,16 @@ void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
       run_config.enable_stage2_lowfreq_vertical_reference_optimization,
       run_config.enable_stage3_vertical_reference_optimization,
       run_config.gnss_vertical_reference_source,
-      static_cast<bool>(lowpass_reference)});
+      static_cast<bool>(lowpass_reference),
+      run_config.vertical_velocity_delta_acc_sigma_mps2,
+      run_config.vertical_velocity_delta_min_sigma_mps,
+      run_config.vertical_velocity_delta_sigma_floor_mps,
+      run_config.vertical_velocity_delta_sigma_ceiling_mps,
+      run_config.vertical_velocity_delta_attitude_sigma_rad,
+      run_config.vertical_velocity_delta_sigma_scale,
+      offline_lc_minimal::VerticalVelocityDeltaSigmaModel(run_config)
+        .Compute(0.05)
+        .sigma_mps});
 
     offline_lc_minimal::OfflineRunResult result;
     if (!lowpass_reference) {
@@ -545,15 +572,48 @@ void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
     calls[0].gnss_source == offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk,
     "source pass should use raw RTK vertical GNSS");
   ExpectTrue(!calls[0].has_lowpass_reference, "source pass should not receive a lowpass reference");
+  ExpectNear(calls[0].dvz_acc_sigma_mps2, 0.10, 1e-15, "source pass should not relax DVZ acc sigma");
+  ExpectNear(calls[0].dvz_min_sigma_mps, 0.003, 1e-15, "source pass should not relax DVZ min sigma");
+  ExpectNear(calls[0].dvz_floor_mps, 1.0e-5, 1e-15, "source pass should not relax DVZ floor");
+  ExpectNear(calls[0].dvz_ceiling_mps, 5.0e-4, 1e-15, "source pass should not relax DVZ ceiling");
+  ExpectNear(
+    calls[0].dvz_attitude_sigma_rad,
+    1.0e-4,
+    1e-15,
+    "source pass should not relax DVZ attitude sigma");
+  ExpectNear(calls[0].dvz_sigma_scale, 1.0, 1e-15, "source pass should not relax DVZ output sigma");
   ExpectTrue(calls[1].enable_stage2_lowfreq, "final pass should keep the wrapper flag valid");
   ExpectTrue(!calls[1].enable_stage3, "final pass should keep Stage3 disabled");
   ExpectTrue(
     calls[1].gnss_source == offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass,
     "final pass should switch GNSS vertical reference to Stage2 lowpass");
   ExpectTrue(calls[1].has_lowpass_reference, "final pass should receive the planned lowpass reference");
+  ExpectNear(calls[1].dvz_acc_sigma_mps2, 0.10, 1e-15, "final pass should preserve DVZ acc sigma");
+  ExpectNear(calls[1].dvz_min_sigma_mps, 0.003, 1e-15, "final pass should preserve DVZ min sigma");
+  ExpectNear(calls[1].dvz_floor_mps, 1.0e-5, 1e-15, "final pass should preserve DVZ floor");
+  ExpectNear(calls[1].dvz_ceiling_mps, 5.0e-4, 1e-15, "final pass should preserve DVZ ceiling");
+  ExpectNear(
+    calls[1].dvz_attitude_sigma_rad,
+    1.0e-4,
+    1e-15,
+    "final pass should preserve DVZ attitude sigma");
+  ExpectNear(calls[1].dvz_sigma_scale, 10.0, 1e-15, "final pass should relax DVZ output sigma");
+  ExpectNear(
+    calls[1].computed_dvz_sigma_mps,
+    calls[0].computed_dvz_sigma_mps * 10.0,
+    1e-15,
+    "final pass should relax the computed DVZ sigma by 10x");
   ExpectTrue(
     result.run_summary.stage2_lowfreq_vertical_reference_optimization_enabled,
     "runner summary should mark Stage2 lowfreq enabled");
+  ExpectTrue(
+    result.run_summary.stage2_lowfreq_final_dvz_relaxation_enabled,
+    "runner summary should mark final DVZ relaxation enabled");
+  ExpectNear(
+    result.run_summary.stage2_lowfreq_final_dvz_sigma_scale,
+    10.0,
+    1e-15,
+    "runner summary should report final DVZ relaxation scale");
   ExpectTrue(
     !result.stage2_lowfreq_vertical_reference_diagnostics.empty(),
     "runner should store lowfreq diagnostics in the Stage2-lowfreq container");
