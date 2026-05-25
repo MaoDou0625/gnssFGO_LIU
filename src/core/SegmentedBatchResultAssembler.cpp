@@ -48,6 +48,39 @@ void AppendAll(std::vector<Row> &target, const std::vector<Row> &source) {
   target.insert(target.end(), source.begin(), source.end());
 }
 
+template <typename Row>
+void LabelSegment(Row &row, const RtkOutageBatchSegmentRow &segment) {
+  row.batch_segment_index = static_cast<long long>(segment.segment_index);
+  row.batch_segment_role = segment.segment_role;
+}
+
+template <typename Row>
+void AppendAllWithSegmentLabel(
+  std::vector<Row> &target,
+  const std::vector<Row> &source,
+  const RtkOutageBatchSegmentRow &segment) {
+  for (auto row : source) {
+    LabelSegment(row, segment);
+    target.push_back(std::move(row));
+  }
+}
+
+template <typename Row, typename TimeFn>
+void AppendRowsInSegmentWithSegmentLabel(
+  std::vector<Row> &target,
+  const std::vector<Row> &source,
+  const RtkOutageBatchSegmentRow &segment,
+  const bool include_start,
+  const bool include_end,
+  TimeFn time_fn) {
+  for (auto row : source) {
+    if (InSegment(time_fn(row), segment, include_start, include_end)) {
+      LabelSegment(row, segment);
+      target.push_back(std::move(row));
+    }
+  }
+}
+
 const RtkOutageWindowRow *FindSourceOutage(
   const std::vector<RtkOutageWindowRow> &outage_windows,
   const RtkOutageBatchSegmentRow &segment) {
@@ -140,6 +173,8 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.vertical_position_velocity_consistency_diagnostics.clear();
   assembled.vertical_state_corrections.clear();
   assembled.body_z_bias_reestimate_segments.clear();
+  assembled.stage2_mount_leakage_diagnostics.clear();
+  assembled.stage2_vehicle_nhc_state_diagnostics.clear();
   assembled.rtk_outage_windows = request_.outage_windows;
   assembled.rtk_outage_batch_segments = CollectSegments(request_.pieces);
 
@@ -286,8 +321,19 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       include_start,
       include_end,
       [](const VerticalStateCorrectionRow &row) { return row.corrected_time_s; });
+    AppendRowsInSegmentWithSegmentLabel(
+      assembled.stage2_vehicle_nhc_state_diagnostics,
+      piece.result.stage2_vehicle_nhc_state_diagnostics,
+      splice_segment,
+      include_start,
+      include_end,
+      [](const Stage2VehicleNHCStateDiagnosticRow &row) { return row.time_s; });
 
     AppendAll(assembled.body_z_bias_reestimate_segments, piece.result.body_z_bias_reestimate_segments);
+    AppendAllWithSegmentLabel(
+      assembled.stage2_mount_leakage_diagnostics,
+      piece.result.stage2_mount_leakage_diagnostics,
+      piece.segment);
     AppendAll(assembled.rtk_outage_boundary_diagnostics, piece.result.rtk_outage_boundary_diagnostics);
     AppendAll(assembled.rtk_outage_attitude_hold_diagnostics, piece.result.rtk_outage_attitude_hold_diagnostics);
     AppendAll(assembled.rtk_outage_velocity_delta_3d_diagnostics, piece.result.rtk_outage_velocity_delta_3d_diagnostics);
@@ -331,6 +377,26 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.run_summary.late_static_vz_factor_count = 0;
   assembled.run_summary.late_static_up_factor_count = 0;
   assembled.run_summary.late_static_height_hold_factor_count = 0;
+  assembled.run_summary.stage2_velocity_optimization_enabled =
+    std::any_of(
+      request_.pieces.begin(),
+      request_.pieces.end(),
+      [](const SegmentedBatchResultPiece &piece) {
+        return piece.result.run_summary.stage2_velocity_optimization_enabled;
+      });
+  assembled.run_summary.stage2_attitude_hold_factor_count = 0;
+  assembled.run_summary.stage2_horizontal_position_hold_factor_count = 0;
+  assembled.run_summary.stage2_horizontal_velocity_hold_factor_count = 0;
+  assembled.run_summary.stage2_vehicle_y_nhc_velocity_factor_count = 0;
+  assembled.run_summary.stage2_vehicle_y_nhc_displacement_factor_count = 0;
+  assembled.run_summary.stage2_vehicle_z_nhc_velocity_factor_count = 0;
+  assembled.run_summary.stage2_vehicle_z_nhc_displacement_factor_count = 0;
+  assembled.run_summary.stage2_vehicle_nhc_window_count = 0;
+  assembled.run_summary.stage2_vehicle_nhc_skipped_short_window_count = 0;
+  assembled.run_summary.stage2_vehicle_nhc_skipped_invalid_count = 0;
+  assembled.run_summary.stage2_vehicle_nhc_unique_velocity_factor_count = 0;
+  assembled.run_summary.stage2_vehicle_nhc_velocity_duplicate_state_count = 0;
+  assembled.run_summary.stage2_vehicle_nhc_interval_overlap_count = 0;
   for (const auto &piece : request_.pieces) {
     assembled.run_summary.rtk_outage_boundary_reference_count +=
       piece.result.run_summary.rtk_outage_boundary_reference_count;
@@ -360,6 +426,32 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
           piece.result.run_summary.late_static_gyro_rms_threshold_radps;
       }
     }
+    assembled.run_summary.stage2_attitude_hold_factor_count +=
+      piece.result.run_summary.stage2_attitude_hold_factor_count;
+    assembled.run_summary.stage2_horizontal_position_hold_factor_count +=
+      piece.result.run_summary.stage2_horizontal_position_hold_factor_count;
+    assembled.run_summary.stage2_horizontal_velocity_hold_factor_count +=
+      piece.result.run_summary.stage2_horizontal_velocity_hold_factor_count;
+    assembled.run_summary.stage2_vehicle_y_nhc_velocity_factor_count +=
+      piece.result.run_summary.stage2_vehicle_y_nhc_velocity_factor_count;
+    assembled.run_summary.stage2_vehicle_y_nhc_displacement_factor_count +=
+      piece.result.run_summary.stage2_vehicle_y_nhc_displacement_factor_count;
+    assembled.run_summary.stage2_vehicle_z_nhc_velocity_factor_count +=
+      piece.result.run_summary.stage2_vehicle_z_nhc_velocity_factor_count;
+    assembled.run_summary.stage2_vehicle_z_nhc_displacement_factor_count +=
+      piece.result.run_summary.stage2_vehicle_z_nhc_displacement_factor_count;
+    assembled.run_summary.stage2_vehicle_nhc_window_count +=
+      piece.result.run_summary.stage2_vehicle_nhc_window_count;
+    assembled.run_summary.stage2_vehicle_nhc_skipped_short_window_count +=
+      piece.result.run_summary.stage2_vehicle_nhc_skipped_short_window_count;
+    assembled.run_summary.stage2_vehicle_nhc_skipped_invalid_count +=
+      piece.result.run_summary.stage2_vehicle_nhc_skipped_invalid_count;
+    assembled.run_summary.stage2_vehicle_nhc_unique_velocity_factor_count +=
+      piece.result.run_summary.stage2_vehicle_nhc_unique_velocity_factor_count;
+    assembled.run_summary.stage2_vehicle_nhc_velocity_duplicate_state_count +=
+      piece.result.run_summary.stage2_vehicle_nhc_velocity_duplicate_state_count;
+    assembled.run_summary.stage2_vehicle_nhc_interval_overlap_count +=
+      piece.result.run_summary.stage2_vehicle_nhc_interval_overlap_count;
   }
   for (const auto &row : assembled.late_static_threshold_diagnostics) {
     if (!row.valid || !std::isfinite(row.threshold_value)) {
@@ -381,6 +473,25 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
     assembled.gnss_factor_records.begin(),
     assembled.gnss_factor_records.end(),
     [](const GnssFactorRecord &row) { return row.factor_used; });
+  assembled.run_summary.gnss_vertical_reference_source =
+    request_.pieces.back().result.run_summary.gnss_vertical_reference_source;
+  assembled.run_summary.gnss_vertical_reference_selected_count =
+    static_cast<std::size_t>(
+      std::count_if(
+        assembled.gnss_factor_records.begin(),
+        assembled.gnss_factor_records.end(),
+        [](const GnssFactorRecord &row) {
+          return row.vertical_reference_skip_reason == "OK";
+        }));
+  assembled.run_summary.gnss_vertical_reference_skipped_count =
+    static_cast<std::size_t>(
+      std::count_if(
+        assembled.gnss_factor_records.begin(),
+        assembled.gnss_factor_records.end(),
+        [](const GnssFactorRecord &row) {
+          return row.vertical_reference_skip_reason != "OK" &&
+                 row.vertical_reference_skip_reason != "UNSET";
+        }));
   return assembled;
 }
 

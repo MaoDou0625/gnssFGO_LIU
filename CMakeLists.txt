@@ -68,6 +68,7 @@ add_library(offline_lc_minimal_lib
   src/core/BodyZNHCWeightPlanner.cpp
   src/core/BodyZWindowPipeline.cpp
   src/core/GnssFactorBuilder.cpp
+  src/core/GnssVerticalReferenceSelector.cpp
   src/core/GraphTimelineBuilder.cpp
   src/core/ImuIntegrationUtils.cpp
   src/core/ImuRateAvpReconstructor.cpp
@@ -100,6 +101,7 @@ add_library(offline_lc_minimal_lib
   src/core/Stage1YawRefinementRunner.cpp
   src/core/Stage2AttitudeHoldBuilder.cpp
   src/core/Stage2HorizontalHoldBuilder.cpp
+  src/core/Stage2LowfreqVerticalReferenceOptimizationRunner.cpp
   src/core/Stage2VehicleNHCConstraintBuilder.cpp
   src/core/Stage2VelocityOptimizationRunner.cpp
   src/core/Stage2VelocityReference.cpp

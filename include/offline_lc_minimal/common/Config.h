@@ -124,6 +124,10 @@ struct OfflineRunnerConfig {
   double stage2_mount_leakage_prior_sigma_rad = 0.02;
   double stage2_vehicle_y_nhc_velocity_sigma_mps = 0.05;
   double stage2_vehicle_y_nhc_displacement_sigma_m = 0.05;
+  bool enable_stage2_lowfreq_vertical_reference_optimization = false;
+  double stage2_lowfreq_vertical_reference_cutoff_hz = 0.05;
+  GnssVerticalReferenceSource stage2_lowfreq_vertical_reference_source =
+    GnssVerticalReferenceSource::kStage2Lowpass;
   bool enable_stage3_vertical_reference_optimization = false;
   double stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
   double stage3_vertical_anchor_sigma_m = 0.015;
@@ -180,6 +184,8 @@ struct OfflineRunnerConfig {
   double vertical_envelope_center_sigma_m = 0.60;
   VerticalEnvelopeCenterSigmaMode vertical_envelope_center_sigma_mode = VerticalEnvelopeCenterSigmaMode::kFixed;
   double vertical_envelope_center_deadband_m = 0.01;
+  GnssVerticalReferenceSource gnss_vertical_reference_source =
+    GnssVerticalReferenceSource::kRawRtk;
   bool enable_rtk_vertical_drift_reference = false;
   double rtk_vertical_drift_correlation_time_s = 5.3;
   double rtk_vertical_drift_sigma_m = 0.010;

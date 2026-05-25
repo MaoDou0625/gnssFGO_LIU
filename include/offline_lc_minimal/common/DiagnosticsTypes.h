@@ -32,6 +32,12 @@ struct GnssFactorRecord {
   GnssFixType gnss_fix_type = GnssFixType::kNoSolution;
   StateMeasSyncStatus sync_status = StateMeasSyncStatus::kDropped;
   Eigen::Vector3d measurement_enu_m = Eigen::Vector3d::Zero();
+  std::string vertical_reference_source = "raw_rtk";
+  double raw_rtk_up_m = std::numeric_limits<double>::quiet_NaN();
+  double vertical_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double vertical_reference_highfreq_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
+  std::string vertical_reference_skip_reason = "UNSET";
   double residual_m = std::numeric_limits<double>::quiet_NaN();
 };
 
@@ -765,6 +771,8 @@ struct BodyZNHCStateDiagnosticRow {
 };
 
 struct Stage2MountLeakageDiagnosticRow {
+  long long batch_segment_index = -1;
+  std::string batch_segment_role = "UNSEGMENTED";
   bool enabled = false;
   bool estimate_valid = false;
   std::string skip_reason = "UNSET";
@@ -840,6 +848,8 @@ struct Stage1OutageBodyYStateDiagnosticRow {
 };
 
 struct Stage2VehicleNHCStateDiagnosticRow {
+  long long batch_segment_index = -1;
+  std::string batch_segment_role = "UNSEGMENTED";
   std::size_t window_index = 0;
   std::size_t state_index = 0;
   double time_s = std::numeric_limits<double>::quiet_NaN();

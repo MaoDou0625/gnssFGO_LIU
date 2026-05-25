@@ -134,6 +134,20 @@ void FillSigmaFields(
   record->vertical_direct_position_factor_used = vertical_policy.UsesDirectPositionFactor();
 }
 
+void FillVerticalReferenceFields(
+  const GnssVerticalReferenceSelection &selection,
+  GnssFactorRecord *factor_record) {
+  factor_record->vertical_reference_source = selection.source;
+  factor_record->raw_rtk_up_m = selection.raw_up_m;
+  factor_record->vertical_reference_up_m = selection.selected_up_m;
+  factor_record->vertical_reference_highfreq_residual_m =
+    selection.highfreq_residual_m;
+  factor_record->vertical_reference_skip_reason = selection.skip_reason;
+  if (selection.valid && std::isfinite(selection.selected_up_m)) {
+    factor_record->measurement_enu_m.z() = selection.selected_up_m;
+  }
+}
+
 }  // namespace
 
 GnssFactorBuilder::GnssFactorBuilder(GnssFactorBuildRequest request)
@@ -212,6 +226,31 @@ void GnssFactorBuilder::Build() const {
       sigma_m *= 1.0 + alpha * (request_.config->early_gnss_relaxation_scale - 1.0);
     }
     FillSigmaFields(sigma_m, *vertical_policy, &factor_record, &consistency_record);
+    GnssVerticalReferenceSelectionRequest selection_request;
+    selection_request.source = request_.config->gnss_vertical_reference_source;
+    selection_request.sample = &sample;
+    selection_request.sample_index = sample_index;
+    selection_request.corrected_time_s = corrected_time_s;
+    selection_request.stage2_lowpass_reference =
+      request_.stage2_lowpass_vertical_reference;
+    selection_request.rtk_vertical_drift_reference_profile =
+      request_.rtk_vertical_drift_reference_profile;
+    const GnssVerticalReferenceSelection vertical_reference =
+      GnssVerticalReferenceSelector(std::move(selection_request)).Select();
+    FillVerticalReferenceFields(vertical_reference, &factor_record);
+    request_.run_summary->gnss_vertical_reference_source =
+      request_.config->gnss_vertical_reference_source == GnssVerticalReferenceSource::kRawRtk
+        ? "raw_rtk"
+        : ToString(request_.config->gnss_vertical_reference_source);
+    if (vertical_reference.valid) {
+      ++request_.run_summary->gnss_vertical_reference_selected_count;
+    } else {
+      ++request_.run_summary->gnss_vertical_reference_skipped_count;
+      factor_record.vertical_direct_position_factor_used = false;
+      consistency_record.vertical_direct_position_factor_used = false;
+      consistency_record.vertical_sigma_u_used_m =
+        std::numeric_limits<double>::quiet_NaN();
+    }
     if (request_.disable_vertical_factors) {
       factor_record.vertical_direct_position_factor_used = false;
       consistency_record.vertical_direct_position_factor_used = false;
@@ -222,12 +261,26 @@ void GnssFactorBuilder::Build() const {
     bool factor_used = false;
     if (sync_result.status == StateMeasSyncStatus::kSynchronizedI ||
         sync_result.status == StateMeasSyncStatus::kSynchronizedJ) {
-      AddSynchronizedFactors(sample, sample_index, corrected_time_s, sync_result, sigma_m, *vertical_policy);
+      AddSynchronizedFactors(
+        sample,
+        sample_index,
+        corrected_time_s,
+        sync_result,
+        sigma_m,
+        vertical_reference,
+        *vertical_policy);
       factor_used = true;
       ++request_.run_summary->gnss_synced_factor_count;
     } else if (sync_result.status == StateMeasSyncStatus::kInterpolated &&
                request_.config->enable_gp_interpolated_gnss) {
-      AddInterpolatedFactors(sample, sample_index, corrected_time_s, sync_result, sigma_m, *vertical_policy);
+      AddInterpolatedFactors(
+        sample,
+        sample_index,
+        corrected_time_s,
+        sync_result,
+        sigma_m,
+        vertical_reference,
+        *vertical_policy);
       factor_used = true;
       ++request_.run_summary->gnss_interpolated_factor_count;
     } else if (sync_result.status == StateMeasSyncStatus::kCached) {
@@ -256,6 +309,7 @@ void GnssFactorBuilder::AddSynchronizedFactors(
   const double corrected_time_s,
   const StateMeasSyncResult &sync_result,
   const Eigen::Vector3d &sigma_m,
+  const GnssVerticalReferenceSelection &vertical_reference,
   const VerticalConstraintPolicy &vertical_policy) const {
   const std::size_t state_index =
     sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i
@@ -268,13 +322,14 @@ void GnssFactorBuilder::AddSynchronizedFactors(
     symbol::X(state_index),
     horizontal_measurement,
     horizontal_noise));
-  if (request_.disable_vertical_factors) {
+  if (request_.disable_vertical_factors || !vertical_reference.valid) {
     return;
   }
   VerticalConstraintPolicyContext context;
   context.graph = request_.graph;
   context.envelope_diagnostics = request_.vertical_envelope_diagnostics;
   context.rtk_vertical_drift_reference_profile = request_.rtk_vertical_drift_reference_profile;
+  context.vertical_reference = &vertical_reference;
   vertical_policy.AddSynchronized(sample, sample_index, corrected_time_s, sync_result, sigma_m, context);
 }
 
@@ -284,6 +339,7 @@ void GnssFactorBuilder::AddInterpolatedFactors(
   const double corrected_time_s,
   const StateMeasSyncResult &sync_result,
   const Eigen::Vector3d &sigma_m,
+  const GnssVerticalReferenceSelection &vertical_reference,
   const VerticalConstraintPolicy &vertical_policy) const {
   const auto qc_model =
     gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(kInterpolatorQcVariance));
@@ -306,13 +362,14 @@ void GnssFactorBuilder::AddInterpolatedFactors(
     gtsam::Vector3::Zero(),
     horizontal_noise,
     interpolator));
-  if (request_.disable_vertical_factors) {
+  if (request_.disable_vertical_factors || !vertical_reference.valid) {
     return;
   }
   VerticalConstraintPolicyContext context;
   context.graph = request_.graph;
   context.envelope_diagnostics = request_.vertical_envelope_diagnostics;
   context.rtk_vertical_drift_reference_profile = request_.rtk_vertical_drift_reference_profile;
+  context.vertical_reference = &vertical_reference;
   vertical_policy.AddInterpolated(sample, sample_index, corrected_time_s, sync_result, sigma_m, interpolator, context);
 }
 

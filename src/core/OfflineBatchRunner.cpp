@@ -58,6 +58,7 @@
 #include "offline_lc_minimal/core/Stage3VerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceTimelineAligner.h"
 #include "offline_lc_minimal/core/Stage1YawRefinementRunner.h"
+#include "offline_lc_minimal/core/Stage2LowfreqVerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
 #include "offline_lc_minimal/core/VerticalAdaptiveReweightingLoop.h"
@@ -164,6 +165,18 @@ OfflineBatchRunner::OfflineBatchRunner(
       stage2_reference_(std::move(stage2_reference)),
       stage1_body_y_reference_(std::move(stage1_body_y_reference)),
       stage3_vertical_reference_(std::move(stage3_vertical_reference)) {}
+
+OfflineBatchRunner::OfflineBatchRunner(
+  OfflineRunnerConfig config,
+  std::shared_ptr<const Stage2VelocityReference> stage2_reference,
+  std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference,
+  std::shared_ptr<const Stage3VerticalReference> stage3_vertical_reference,
+  std::shared_ptr<const Stage3VerticalReference> stage2_lowpass_vertical_reference)
+    : config_(std::move(config)),
+      stage2_reference_(std::move(stage2_reference)),
+      stage1_body_y_reference_(std::move(stage1_body_y_reference)),
+      stage3_vertical_reference_(std::move(stage3_vertical_reference)),
+      stage2_lowpass_vertical_reference_(std::move(stage2_lowpass_vertical_reference)) {}
 
 double OfflineBatchRunner::CorrectedGnssTime(const GnssSolutionSample &sample) const {
   return sample.time_s - config_.gnss_time_offset_s;
@@ -343,6 +356,26 @@ Eigen::Vector3d OfflineBatchRunner::ClampGnssSigma(const GnssSolutionSample &sam
 }
 
 OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
+  if (config_.enable_stage2_lowfreq_vertical_reference_optimization &&
+      stage2_reference_ == nullptr &&
+      stage3_vertical_reference_ == nullptr &&
+      stage2_lowpass_vertical_reference_ == nullptr) {
+    Stage2LowfreqVerticalReferenceOptimizationRequest request;
+    request.config = config_;
+    request.dataset = std::move(dataset);
+    request.run_once = [](
+                         const OfflineRunnerConfig &config,
+                         std::shared_ptr<const Stage3VerticalReference> lowpass_reference,
+                         DataSet run_dataset) {
+      return OfflineBatchRunner(
+        config,
+        nullptr,
+        nullptr,
+        nullptr,
+        std::move(lowpass_reference)).Run(std::move(run_dataset));
+    };
+    return Stage2LowfreqVerticalReferenceOptimizationRunner(std::move(request)).Run();
+  }
   if (config_.enable_stage3_vertical_reference_optimization &&
       stage2_reference_ == nullptr &&
       stage3_vertical_reference_ == nullptr) {
@@ -363,10 +396,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     return Stage3VerticalReferenceOptimizationRunner(std::move(request)).Run();
   }
   if (config_.enable_stage2_velocity_optimization && stage2_reference_ == nullptr) {
+    auto stage2_lowpass_vertical_reference = stage2_lowpass_vertical_reference_;
     Stage2VelocityOptimizationRequest request;
     request.config = config_;
     request.dataset = std::move(dataset);
-    request.run_once = [](
+    request.run_once = [stage2_lowpass_vertical_reference](
                          const OfflineRunnerConfig &config,
                          std::shared_ptr<const Stage2VelocityReference> stage2_reference,
                          std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference,
@@ -375,7 +409,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         config,
         std::move(stage2_reference),
         std::move(stage1_body_y_reference),
-        nullptr).Run(std::move(run_dataset));
+        nullptr,
+        stage2_lowpass_vertical_reference).Run(std::move(run_dataset));
     };
     return Stage2VelocityOptimizationRunner(std::move(request)).Run();
   }
@@ -407,6 +442,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   OfflineRunResult run_result;
   run_result.data_summary = dataset.summary;
   run_result.run_summary.gnss_enabled = config_.enable_gnss;
+  run_result.run_summary.gnss_vertical_reference_source =
+    ToString(config_.gnss_vertical_reference_source);
   run_result.run_summary.initial_static_constraints_enabled =
     config_.enable_initial_static_zupt_zaru ||
     config_.enable_initial_static_zero_specific_force ||
@@ -1126,7 +1163,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     segmented_request.state_timestamps = state_timestamps;
     segmented_request.dynamic_start_time_s = dynamic_start_time_s;
     segmented_request.processing_end_time_s = end_time_s;
-    segmented_request.run_once = [](
+    auto stage2_lowpass_vertical_reference = stage2_lowpass_vertical_reference_;
+    segmented_request.run_once = [stage2_lowpass_vertical_reference](
                                    OfflineRunnerConfig segment_config,
                                    std::shared_ptr<const Stage2VelocityReference> stage2_reference,
                                    std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference,
@@ -1135,7 +1173,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         std::move(segment_config),
         std::move(stage2_reference),
         std::move(stage1_body_y_reference),
-        nullptr).Run(std::move(segment_dataset));
+        nullptr,
+        stage2_lowpass_vertical_reference).Run(std::move(segment_dataset));
     };
     return RtkOutageSegmentedBatchRunner(std::move(segmented_request)).Run();
   }
@@ -1330,6 +1369,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.gnss_interpolated_factor_count = 0;
   run_result.run_summary.gnss_dropped_count = 0;
   run_result.run_summary.gnss_cached_count = 0;
+  run_result.run_summary.gnss_vertical_reference_source =
+    ToString(config_.gnss_vertical_reference_source);
+  run_result.run_summary.gnss_vertical_reference_selected_count = 0;
+  run_result.run_summary.gnss_vertical_reference_skipped_count = 0;
   run_result.run_summary.dropped_non_rtkfix_count = 0;
   run_result.run_summary.dropped_no_solution_count = 0;
   run_result.run_summary.dropped_nonfinite_sigma_count = 0;
@@ -1425,6 +1468,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.stage2_max_abs_yaw_delta_rad =
     std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage2_lowfreq_vertical_reference_optimization_enabled =
+    config_.enable_stage2_lowfreq_vertical_reference_optimization;
+  run_result.run_summary.stage2_lowfreq_vertical_reference_source =
+    ToString(config_.stage2_lowfreq_vertical_reference_source);
+  run_result.run_summary.stage2_lowfreq_vertical_reference_cutoff_hz =
+    config_.stage2_lowfreq_vertical_reference_cutoff_hz;
   run_result.run_summary.stage3_vertical_reference_optimization_enabled =
     active_stage3_vertical_reference != nullptr;
   run_result.run_summary.stage3_vertical_reference_lowpass_cutoff_hz =
@@ -1636,6 +1685,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   gnss_request.consistency_records = &run_result.gnss_consistency_records;
   gnss_request.vertical_envelope_diagnostics = &run_result.vertical_envelope_diagnostics;
   gnss_request.rtk_vertical_drift_reference_profile = active_rtk_vertical_drift_profile_ptr;
+  gnss_request.stage2_lowpass_vertical_reference =
+    stage2_lowpass_vertical_reference_.get();
   gnss_request.collect_consistency_records = collect_gnss_consistency;
   gnss_request.dynamic_start_time_s = dynamic_start_time_s;
   gnss_request.disable_vertical_factors = active_stage3_vertical_reference != nullptr;

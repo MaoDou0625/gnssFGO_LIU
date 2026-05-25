@@ -14,6 +14,7 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/common/Config.h"
+#include "offline_lc_minimal/core/Stage2LowfreqVerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceProfilePlanner.h"
@@ -491,6 +492,76 @@ void TestStage3RunnerAlwaysDisablesSegmentedBatch() {
     "Stage3 pass should always disable segmented batch even if the compatibility flag is false");
 }
 
+void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_lowfreq_vertical_reference_optimization = true;
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_stage3_vertical_reference_optimization = false;
+  config.stage2_lowfreq_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass;
+  config.gnss_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk;
+  config.stage2_lowfreq_vertical_reference_cutoff_hz = 0.05;
+
+  struct Call {
+    bool enable_stage2_lowfreq = false;
+    bool enable_stage3 = false;
+    offline_lc_minimal::GnssVerticalReferenceSource gnss_source =
+      offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk;
+    bool has_lowpass_reference = false;
+  };
+  std::vector<Call> calls;
+
+  offline_lc_minimal::Stage2LowfreqVerticalReferenceOptimizationRequest request;
+  request.config = config;
+  request.dataset = offline_lc_minimal::DataSet{};
+  request.run_once = [&](const offline_lc_minimal::OfflineRunnerConfig &run_config,
+                         std::shared_ptr<const offline_lc_minimal::Stage3VerticalReference> lowpass_reference,
+                         offline_lc_minimal::DataSet) {
+    offline_lc_minimal::ValidateConfig(run_config);
+    calls.push_back(Call{
+      run_config.enable_stage2_lowfreq_vertical_reference_optimization,
+      run_config.enable_stage3_vertical_reference_optimization,
+      run_config.gnss_vertical_reference_source,
+      static_cast<bool>(lowpass_reference)});
+
+    offline_lc_minimal::OfflineRunResult result;
+    if (!lowpass_reference) {
+      result.trajectory = MakeTrajectory(11U, 0.02);
+      return result;
+    }
+    result.trajectory = MakeTrajectory(11U, 0.0);
+    return result;
+  };
+
+  const auto result =
+    offline_lc_minimal::Stage2LowfreqVerticalReferenceOptimizationRunner(
+      std::move(request)).Run();
+
+  ExpectTrue(calls.size() == 2U, "Stage2 lowfreq runner should run source then final pass");
+  ExpectTrue(!calls[0].enable_stage2_lowfreq, "source pass should disable Stage2 lowfreq recursion");
+  ExpectTrue(!calls[0].enable_stage3, "source pass should disable Stage3");
+  ExpectTrue(
+    calls[0].gnss_source == offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk,
+    "source pass should use raw RTK vertical GNSS");
+  ExpectTrue(!calls[0].has_lowpass_reference, "source pass should not receive a lowpass reference");
+  ExpectTrue(calls[1].enable_stage2_lowfreq, "final pass should keep the wrapper flag valid");
+  ExpectTrue(!calls[1].enable_stage3, "final pass should keep Stage3 disabled");
+  ExpectTrue(
+    calls[1].gnss_source == offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass,
+    "final pass should switch GNSS vertical reference to Stage2 lowpass");
+  ExpectTrue(calls[1].has_lowpass_reference, "final pass should receive the planned lowpass reference");
+  ExpectTrue(
+    result.run_summary.stage2_lowfreq_vertical_reference_optimization_enabled,
+    "runner summary should mark Stage2 lowfreq enabled");
+  ExpectTrue(
+    !result.stage2_lowfreq_vertical_reference_diagnostics.empty(),
+    "runner should store lowfreq diagnostics in the Stage2-lowfreq container");
+  ExpectTrue(
+    result.stage3_vertical_reference_diagnostics.empty(),
+    "Stage2 lowfreq runner should not populate Stage3 diagnostics");
+}
+
 }  // namespace
 
 int main() {
@@ -516,6 +587,9 @@ int main() {
     RunTest(
       "TestStage3RunnerAlwaysDisablesSegmentedBatch",
       TestStage3RunnerAlwaysDisablesSegmentedBatch);
+    RunTest(
+      "TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2",
+      TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

@@ -28,6 +28,12 @@ OfflineRunnerConfig MakeStandalonePrefixChildConfig(
   OfflineRunnerConfig config,
   const RtkOutageWindowRow *source_outage) {
   config.enable_rtk_outage_segmented_batch = false;
+  config.enable_stage2_lowfreq_vertical_reference_optimization = false;
+  config.enable_stage3_vertical_reference_optimization = false;
+  if (config.gnss_vertical_reference_source !=
+      GnssVerticalReferenceSource::kRtkDriftLowpass) {
+    config.enable_rtk_vertical_lowpass_reference = false;
+  }
   config.processing_start_time_s = 0.0;
   if (source_outage != nullptr) {
     config.processing_end_time_s = source_outage->start_time_s;
@@ -48,7 +54,10 @@ OfflineRunnerConfig MakeChildConfig(
   config.enable_rtk_outage_segmented_batch = false;
   config.enable_rtk_outage_causal_drift_reference = false;
   config.enable_rtk_outage_preoutage_vertical_fence = false;
-  config.enable_rtk_vertical_lowpass_reference = false;
+  if (config.gnss_vertical_reference_source !=
+      GnssVerticalReferenceSource::kRtkDriftLowpass) {
+    config.enable_rtk_vertical_lowpass_reference = false;
+  }
   config.processing_start_time_s = segment.start_time_s;
   config.processing_end_time_s = segment.end_time_s;
 

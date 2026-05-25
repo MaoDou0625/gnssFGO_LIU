@@ -375,6 +375,18 @@ offline_lc_minimal::TrajectoryRow MakeTrajectoryRow(const double time_s, const d
   return row;
 }
 
+offline_lc_minimal::GnssFactorRecord MakeGnssFactorRecord(
+  const double corrected_time_s,
+  const std::string &source,
+  const std::string &skip_reason) {
+  offline_lc_minimal::GnssFactorRecord row;
+  row.corrected_time_s = corrected_time_s;
+  row.factor_used = true;
+  row.vertical_reference_source = source;
+  row.vertical_reference_skip_reason = skip_reason;
+  return row;
+}
+
 void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   offline_lc_minimal::RtkOutageBatchSegmentRow pre;
   pre.segment_index = 0U;
@@ -402,15 +414,24 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   pre_result.trajectory = {
     MakeTrajectoryRow(0.0, 0.0),
     MakeTrajectoryRow(10.0, 10.0)};
+  pre_result.gnss_factor_records = {
+    MakeGnssFactorRecord(5.0, "raw_rtk", "OK")};
+  pre_result.run_summary.gnss_vertical_reference_source = "raw_rtk";
   offline_lc_minimal::OfflineRunResult outage_result;
   outage_result.trajectory = {
     MakeTrajectoryRow(10.0, 100.0),
     MakeTrajectoryRow(15.0, 15.0),
     MakeTrajectoryRow(19.95, 20.0)};
+  outage_result.gnss_factor_records = {
+    MakeGnssFactorRecord(15.0, "stage2_lowpass", "OK")};
+  outage_result.run_summary.gnss_vertical_reference_source = "stage2_lowpass";
   offline_lc_minimal::OfflineRunResult post_result;
   post_result.trajectory = {
     MakeTrajectoryRow(19.95, 200.0),
     MakeTrajectoryRow(30.0, 30.0)};
+  post_result.gnss_factor_records = {
+    MakeGnssFactorRecord(25.0, "stage2_lowpass", "STAGE2_LOWPASS_REFERENCE_UNAVAILABLE")};
+  post_result.run_summary.gnss_vertical_reference_source = "stage2_lowpass";
 
   offline_lc_minimal::SegmentedBatchResultAssemblerRequest request;
   request.pieces = {
@@ -436,6 +457,12 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
              "assembled summary should mark segmented batch enabled");
   ExpectTrue(assembled.run_summary.rtk_outage_batch_segment_count == 3U,
              "assembled summary should count segments");
+  ExpectTrue(assembled.run_summary.gnss_vertical_reference_source == "stage2_lowpass",
+             "assembled summary should keep final segment vertical reference source");
+  ExpectTrue(assembled.run_summary.gnss_vertical_reference_selected_count == 2U,
+             "assembled summary should count selected vertical references");
+  ExpectTrue(assembled.run_summary.gnss_vertical_reference_skipped_count == 1U,
+             "assembled summary should count skipped vertical references");
 }
 
 }  // namespace

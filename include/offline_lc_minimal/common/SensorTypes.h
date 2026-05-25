@@ -53,6 +53,12 @@ enum class VerticalEnvelopeCenterSigmaMode : int {
   kGateSigma = 1,
 };
 
+enum class GnssVerticalReferenceSource : int {
+  kRawRtk = 0,
+  kStage2Lowpass = 1,
+  kRtkDriftLowpass = 2,
+};
+
 enum class Stage3VerticalReferenceConstraintMode : int {
   kGaussian = 0,
   kEnvelope = 1,
@@ -138,6 +144,18 @@ inline std::string ToString(const VerticalEnvelopeCenterSigmaMode mode) {
     case VerticalEnvelopeCenterSigmaMode::kFixed:
     default:
       return "fixed";
+  }
+}
+
+inline std::string ToString(const GnssVerticalReferenceSource source) {
+  switch (source) {
+    case GnssVerticalReferenceSource::kStage2Lowpass:
+      return "stage2_lowpass";
+    case GnssVerticalReferenceSource::kRtkDriftLowpass:
+      return "rtk_drift_lowpass";
+    case GnssVerticalReferenceSource::kRawRtk:
+    default:
+      return "raw_rtk";
   }
 }
 

@@ -58,6 +58,22 @@ offline_lc_minimal::GnssSolutionSample MakeGnssSample(const double time_s) {
   return sample;
 }
 
+offline_lc_minimal::Stage3VerticalReference MakeStage2LowpassReference(
+  const double selected_up_m) {
+  offline_lc_minimal::Stage3VerticalReference reference;
+  for (std::size_t index = 0; index < 2U; ++index) {
+    offline_lc_minimal::Stage3VerticalReferenceDiagnosticRow row;
+    row.state_index = index;
+    row.time_s = static_cast<double>(index);
+    row.stage2_up_m = 6.0;
+    row.stage2_lowpass_up_m = index == 0U ? selected_up_m - 0.1 : selected_up_m;
+    row.lowpass_delta_m = row.stage2_lowpass_up_m - row.stage2_up_m;
+    row.skip_reason = "PLANNED";
+    reference.rows.push_back(row);
+  }
+  return reference;
+}
+
 void TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.gnss_position_noise_model = offline_lc_minimal::GnssNoiseModel::kHuber;
@@ -130,6 +146,238 @@ void TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors() {
     !static_cast<bool>(boost::dynamic_pointer_cast<gtsam::noiseModel::Robust>(vertical_factor->noiseModel())),
     "vertical Phase 1 factor should use plain Gaussian noise");
   ExpectTrue(envelope_diagnostics.empty(), "direct_z should not emit envelope diagnostics");
+}
+
+void TestDirectZUsesStage2LowpassVerticalReference() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kDirectZ;
+  config.gnss_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass;
+  config.early_gnss_relaxation_duration_s = 0.0;
+
+  std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeGnssSample(0.0),
+    MakeGnssSample(1.0),
+  };
+  const offline_lc_minimal::Stage3VerticalReference lowpass_reference =
+    MakeStage2LowpassReference(4.5);
+  gtsam::NonlinearFactorGraph graph;
+  std::vector<offline_lc_minimal::TrajectoryRow> trajectory(2);
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::GnssFactorRecord> factor_records;
+  std::vector<offline_lc_minimal::GnssConsistencyRecord> consistency_records;
+  std::vector<offline_lc_minimal::VerticalEnvelopeDiagnosticRow> envelope_diagnostics;
+
+  offline_lc_minimal::GnssFactorBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.navigation_start_index = 0;
+  request.graph = &graph;
+  request.trajectory = &trajectory;
+  request.run_summary = &summary;
+  request.factor_records = &factor_records;
+  request.consistency_records = &consistency_records;
+  request.vertical_envelope_diagnostics = &envelope_diagnostics;
+  request.stage2_lowpass_vertical_reference = &lowpass_reference;
+  request.collect_consistency_records = true;
+  request.dynamic_start_time_s = 1.0;
+  request.should_use_sample = [](const auto &) { return true; };
+  request.is_within_imu_coverage = [](double) { return true; };
+  request.corrected_time_s = [](const auto &sample) { return sample.time_s; };
+  request.clamped_sigma_m = [](const auto &) { return Eigen::Vector3d(0.1, 0.2, 0.3); };
+  request.find_state_for_time_s = [](double) {
+    offline_lc_minimal::StateMeasSyncResult result;
+    result.status = offline_lc_minimal::StateMeasSyncStatus::kSynchronizedI;
+    result.key_index_i = 1;
+    result.key_index_j = 1;
+    result.timestamp_i_s = 1.0;
+    result.timestamp_j_s = 1.0;
+    return result;
+  };
+  request.trajectory_row_index_for_state = [](std::size_t state_index) {
+    return static_cast<long long>(state_index);
+  };
+
+  offline_lc_minimal::GnssFactorBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 2.0, 0.0, "direct_z should add horizontal and vertical factors");
+  ExpectTrue(summary.gnss_vertical_reference_source == "stage2_lowpass", "summary should record lowpass source");
+  ExpectNear(
+    static_cast<double>(summary.gnss_vertical_reference_selected_count),
+    1.0,
+    0.0,
+    "lowpass reference should be selected");
+  ExpectNear(
+    factor_records.front().raw_rtk_up_m,
+    6.0,
+    1e-12,
+    "diagnostic should retain raw RTK up");
+  ExpectNear(
+    factor_records.front().vertical_reference_up_m,
+    4.5,
+    1e-12,
+    "diagnostic should record selected lowpass up");
+  ExpectNear(
+    factor_records.front().vertical_reference_highfreq_residual_m,
+    1.5,
+    1e-12,
+    "diagnostic should record raw-minus-selected high-frequency residual");
+  ExpectNear(
+    factor_records.front().measurement_enu_m.z(),
+    4.5,
+    1e-12,
+    "GNSS measurement up should be replaced by Stage2 lowpass");
+
+  gtsam::Values values;
+  values.insert(
+    gtsam::symbol_shorthand::X(1),
+    gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(4.0, 5.0, 4.5)));
+  ExpectNear(graph[1]->error(values), 0.0, 1e-12, "vertical factor should use selected lowpass height");
+}
+
+void TestEnvelopeUsesStage2LowpassVerticalReferenceAsGateCenter() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kEnvelope;
+  config.vertical_envelope_gate_sigma_multiple = 2.0;
+  config.vertical_envelope_min_half_width_m = 0.10;
+  config.vertical_envelope_factor_sigma_m = 0.20;
+  config.enable_vertical_envelope_center_pull = false;
+  config.gnss_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass;
+  config.early_gnss_relaxation_duration_s = 0.0;
+
+  std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeGnssSample(0.0),
+    MakeGnssSample(1.0),
+  };
+  const offline_lc_minimal::Stage3VerticalReference lowpass_reference =
+    MakeStage2LowpassReference(4.5);
+  gtsam::NonlinearFactorGraph graph;
+  std::vector<offline_lc_minimal::TrajectoryRow> trajectory(2);
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::GnssFactorRecord> factor_records;
+  std::vector<offline_lc_minimal::GnssConsistencyRecord> consistency_records;
+  std::vector<offline_lc_minimal::VerticalEnvelopeDiagnosticRow> envelope_diagnostics;
+
+  offline_lc_minimal::GnssFactorBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.navigation_start_index = 0;
+  request.graph = &graph;
+  request.trajectory = &trajectory;
+  request.run_summary = &summary;
+  request.factor_records = &factor_records;
+  request.consistency_records = &consistency_records;
+  request.vertical_envelope_diagnostics = &envelope_diagnostics;
+  request.stage2_lowpass_vertical_reference = &lowpass_reference;
+  request.collect_consistency_records = true;
+  request.dynamic_start_time_s = 1.0;
+  request.should_use_sample = [](const auto &) { return true; };
+  request.is_within_imu_coverage = [](double) { return true; };
+  request.corrected_time_s = [](const auto &sample) { return sample.time_s; };
+  request.clamped_sigma_m = [](const auto &) { return Eigen::Vector3d(0.1, 0.2, 0.3); };
+  request.find_state_for_time_s = [](double) {
+    offline_lc_minimal::StateMeasSyncResult result;
+    result.status = offline_lc_minimal::StateMeasSyncStatus::kSynchronizedI;
+    result.key_index_i = 1;
+    result.key_index_j = 1;
+    result.timestamp_i_s = 1.0;
+    result.timestamp_j_s = 1.0;
+    return result;
+  };
+  request.trajectory_row_index_for_state = [](std::size_t state_index) {
+    return static_cast<long long>(state_index);
+  };
+
+  offline_lc_minimal::GnssFactorBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 2.0, 0.0, "envelope should add horizontal and envelope factors");
+  ExpectNear(static_cast<double>(envelope_diagnostics.size()), 1.0, 0.0, "one envelope diagnostic should be emitted");
+  ExpectNear(
+    envelope_diagnostics.front().rtk_up_m,
+    4.5,
+    1e-12,
+    "envelope center should use selected Stage2 lowpass up");
+  ExpectTrue(
+    envelope_diagnostics.front().center_pull_reference_type == "stage2_lowpass",
+    "diagnostic should name the selected vertical reference");
+  ExpectNear(
+    factor_records.front().measurement_enu_m.z(),
+    4.5,
+    1e-12,
+    "recorded GNSS measurement should use selected Stage2 lowpass up");
+}
+
+void TestMissingStage2LowpassVerticalReferenceKeepsHorizontalOnly() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_constraint_mode = offline_lc_minimal::VerticalConstraintMode::kDirectZ;
+  config.gnss_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass;
+  config.early_gnss_relaxation_duration_s = 0.0;
+
+  std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeGnssSample(0.0),
+    MakeGnssSample(1.0),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  std::vector<offline_lc_minimal::TrajectoryRow> trajectory(2);
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::GnssFactorRecord> factor_records;
+  std::vector<offline_lc_minimal::GnssConsistencyRecord> consistency_records;
+  std::vector<offline_lc_minimal::VerticalEnvelopeDiagnosticRow> envelope_diagnostics;
+
+  offline_lc_minimal::GnssFactorBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.navigation_start_index = 0;
+  request.graph = &graph;
+  request.trajectory = &trajectory;
+  request.run_summary = &summary;
+  request.factor_records = &factor_records;
+  request.consistency_records = &consistency_records;
+  request.vertical_envelope_diagnostics = &envelope_diagnostics;
+  request.collect_consistency_records = true;
+  request.dynamic_start_time_s = 1.0;
+  request.should_use_sample = [](const auto &) { return true; };
+  request.is_within_imu_coverage = [](double) { return true; };
+  request.corrected_time_s = [](const auto &sample) { return sample.time_s; };
+  request.clamped_sigma_m = [](const auto &) { return Eigen::Vector3d(0.1, 0.2, 0.3); };
+  request.find_state_for_time_s = [](double) {
+    offline_lc_minimal::StateMeasSyncResult result;
+    result.status = offline_lc_minimal::StateMeasSyncStatus::kSynchronizedI;
+    result.key_index_i = 1;
+    result.key_index_j = 1;
+    result.timestamp_i_s = 1.0;
+    result.timestamp_j_s = 1.0;
+    return result;
+  };
+  request.trajectory_row_index_for_state = [](std::size_t state_index) {
+    return static_cast<long long>(state_index);
+  };
+
+  offline_lc_minimal::GnssFactorBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "missing lowpass should keep horizontal GNSS only");
+  ExpectNear(
+    static_cast<double>(summary.gnss_vertical_reference_selected_count),
+    0.0,
+    0.0,
+    "missing lowpass should not count as selected");
+  ExpectNear(
+    static_cast<double>(summary.gnss_vertical_reference_skipped_count),
+    1.0,
+    0.0,
+    "missing lowpass should count as skipped");
+  ExpectTrue(
+    factor_records.front().vertical_reference_skip_reason ==
+      "STAGE2_LOWPASS_REFERENCE_UNAVAILABLE",
+    "missing lowpass should be diagnosed");
+  ExpectTrue(
+    !factor_records.front().vertical_direct_position_factor_used,
+    "missing lowpass should not report a vertical direct factor");
+  ExpectTrue(
+    !consistency_records.front().vertical_direct_position_factor_used,
+    "missing lowpass should not report a vertical consistency factor");
 }
 
 void TestBuilderCanDisableVerticalFactorsWhileKeepingHorizontal() {
@@ -981,6 +1229,15 @@ int main() {
     RunTest(
       "TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors",
       TestBuilderAddsRobustHorizontalAndGaussianVerticalFactors);
+    RunTest(
+      "TestDirectZUsesStage2LowpassVerticalReference",
+      TestDirectZUsesStage2LowpassVerticalReference);
+    RunTest(
+      "TestEnvelopeUsesStage2LowpassVerticalReferenceAsGateCenter",
+      TestEnvelopeUsesStage2LowpassVerticalReferenceAsGateCenter);
+    RunTest(
+      "TestMissingStage2LowpassVerticalReferenceKeepsHorizontalOnly",
+      TestMissingStage2LowpassVerticalReferenceKeepsHorizontalOnly);
     RunTest(
       "TestBuilderCanDisableVerticalFactorsWhileKeepingHorizontal",
       TestBuilderCanDisableVerticalFactorsWhileKeepingHorizontal);

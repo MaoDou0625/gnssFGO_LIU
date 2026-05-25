@@ -1411,7 +1411,8 @@ void WriteStage2MountLeakageDiagnosticsCsv(
   }
   stream << std::setprecision(17);
   stream
-    << "enabled,estimate_valid,skip_reason,used_sample_count,prior_sigma_rad,"
+    << "batch_segment_index,batch_segment_role,"
+       "enabled,estimate_valid,skip_reason,used_sample_count,prior_sigma_rad,"
        "initial_k_zx_rad,initial_k_zy_rad,initial_k_yx_rad,"
        "optimized_k_zx_rad,optimized_k_zy_rad,optimized_k_yx_rad,"
        "prior_residual_norm,initial_raw_y_rms_mps,initial_raw_y_max_abs_mps,"
@@ -1423,7 +1424,9 @@ void WriteStage2MountLeakageDiagnosticsCsv(
        "optimized_raw_z_rms_mps,optimized_raw_z_max_abs_mps,"
        "optimized_vehicle_z_rms_mps,optimized_vehicle_z_max_abs_mps\n";
   for (const auto &row : rows) {
-    stream << (row.enabled ? 1 : 0) << ','
+    stream << row.batch_segment_index << ','
+           << row.batch_segment_role << ','
+           << (row.enabled ? 1 : 0) << ','
            << (row.estimate_valid ? 1 : 0) << ','
            << row.skip_reason << ','
            << row.used_sample_count << ','
@@ -1463,14 +1466,17 @@ void WriteStage2VehicleNHCStateDiagnosticsCsv(
   }
   stream << std::setprecision(17);
   stream
-    << "window_index,state_index,time_s,nhc_region_type,velocity_factor_used,"
+    << "batch_segment_index,batch_segment_role,"
+       "window_index,state_index,time_s,nhc_region_type,velocity_factor_used,"
        "effective_vehicle_y_sigma_mps,effective_vehicle_z_sigma_mps,"
        "vx_mps,vy_mps,vz_mps,v_body_x_mps,v_body_y_mps,v_body_z_mps,"
        "k_zx_rad,k_zy_rad,k_yx_rad,vehicle_y_correction_mps,"
        "vehicle_z_correction_from_x_mps,vehicle_z_correction_from_y_mps,"
        "v_vehicle_y_mps,v_vehicle_z_mps\n";
   for (const auto &row : rows) {
-    stream << row.window_index << ','
+    stream << row.batch_segment_index << ','
+           << row.batch_segment_role << ','
+           << row.window_index << ','
            << row.state_index << ','
            << row.time_s << ','
            << row.nhc_region_type << ','

@@ -44,6 +44,9 @@ struct RunSummary {
   std::size_t gnss_interpolated_factor_count = 0;
   std::size_t gnss_dropped_count = 0;
   std::size_t gnss_cached_count = 0;
+  std::string gnss_vertical_reference_source = "raw_rtk";
+  std::size_t gnss_vertical_reference_selected_count = 0;
+  std::size_t gnss_vertical_reference_skipped_count = 0;
   std::size_t dropped_non_rtkfix_count = 0;
   std::size_t dropped_no_solution_count = 0;
   std::size_t dropped_nonfinite_sigma_count = 0;
@@ -238,6 +241,10 @@ struct RunSummary {
   double stage2_mount_k_zy_rad = std::numeric_limits<double>::quiet_NaN();
   double stage2_mount_k_yx_rad = std::numeric_limits<double>::quiet_NaN();
   double stage2_max_abs_yaw_delta_rad = std::numeric_limits<double>::quiet_NaN();
+  bool stage2_lowfreq_vertical_reference_optimization_enabled = false;
+  std::string stage2_lowfreq_vertical_reference_source = "raw_rtk";
+  double stage2_lowfreq_vertical_reference_cutoff_hz =
+    std::numeric_limits<double>::quiet_NaN();
   bool stage3_vertical_reference_optimization_enabled = false;
   double stage3_vertical_reference_lowpass_cutoff_hz =
     std::numeric_limits<double>::quiet_NaN();
@@ -387,6 +394,11 @@ struct RunSummary {
         << "gnss_interpolated_factor_count=" << gnss_interpolated_factor_count << '\n'
         << "gnss_dropped_count=" << gnss_dropped_count << '\n'
         << "gnss_cached_count=" << gnss_cached_count << '\n'
+        << "gnss_vertical_reference_source=" << gnss_vertical_reference_source << '\n'
+        << "gnss_vertical_reference_selected_count="
+        << gnss_vertical_reference_selected_count << '\n'
+        << "gnss_vertical_reference_skipped_count="
+        << gnss_vertical_reference_skipped_count << '\n'
         << "dropped_non_rtkfix_count=" << dropped_non_rtkfix_count << '\n'
         << "dropped_no_solution_count=" << dropped_no_solution_count << '\n'
         << "dropped_nonfinite_sigma_count=" << dropped_nonfinite_sigma_count << '\n'
@@ -678,6 +690,12 @@ struct RunSummary {
         << "stage2_mount_k_zy_rad=" << stage2_mount_k_zy_rad << '\n'
         << "stage2_mount_k_yx_rad=" << stage2_mount_k_yx_rad << '\n'
         << "stage2_max_abs_yaw_delta_rad=" << stage2_max_abs_yaw_delta_rad << '\n'
+        << "stage2_lowfreq_vertical_reference_optimization_enabled="
+        << (stage2_lowfreq_vertical_reference_optimization_enabled ? "true" : "false") << '\n'
+        << "stage2_lowfreq_vertical_reference_source="
+        << stage2_lowfreq_vertical_reference_source << '\n'
+        << "stage2_lowfreq_vertical_reference_cutoff_hz="
+        << stage2_lowfreq_vertical_reference_cutoff_hz << '\n'
         << "stage3_vertical_reference_optimization_enabled="
         << (stage3_vertical_reference_optimization_enabled ? "true" : "false") << '\n'
         << "stage3_vertical_reference_lowpass_cutoff_hz="
@@ -902,6 +920,7 @@ struct OfflineRunResult {
   std::vector<Stage1OutageBodyYStateDiagnosticRow> stage1_outage_body_y_state_diagnostics;
   std::vector<Stage2MountLeakageDiagnosticRow> stage2_mount_leakage_diagnostics;
   std::vector<Stage2VehicleNHCStateDiagnosticRow> stage2_vehicle_nhc_state_diagnostics;
+  std::vector<Stage3VerticalReferenceDiagnosticRow> stage2_lowfreq_vertical_reference_diagnostics;
   std::vector<Stage3VerticalReferenceDiagnosticRow> stage3_vertical_reference_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;
   std::vector<VerticalJumpImpulseDiagnosticRow> vertical_jump_impulse_diagnostics;

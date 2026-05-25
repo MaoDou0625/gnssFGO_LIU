@@ -8,6 +8,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Types.h"
+#include "offline_lc_minimal/core/GnssVerticalReferenceSelector.h"
 #include "offline_lc_minimal/gp/GPWNOJInterpolator.h"
 
 namespace offline_lc_minimal {
@@ -17,6 +18,7 @@ struct VerticalConstraintPolicyContext {
   std::vector<VerticalEnvelopeDiagnosticRow> *envelope_diagnostics = nullptr;
   const std::vector<RtkVerticalDriftReferenceDiagnosticRow> *rtk_vertical_drift_reference_profile =
     nullptr;
+  const GnssVerticalReferenceSelection *vertical_reference = nullptr;
 };
 
 class VerticalConstraintPolicy {

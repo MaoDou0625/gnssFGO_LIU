@@ -125,6 +125,20 @@ VerticalEnvelopeCenterSigmaMode ParseVerticalEnvelopeCenterSigmaMode(const std::
   throw std::runtime_error("invalid vertical envelope center sigma mode: " + value);
 }
 
+GnssVerticalReferenceSource ParseGnssVerticalReferenceSource(const std::string &value) {
+  const std::string lowered = Lowercase(value);
+  if (lowered == "raw_rtk") {
+    return GnssVerticalReferenceSource::kRawRtk;
+  }
+  if (lowered == "stage2_lowpass") {
+    return GnssVerticalReferenceSource::kStage2Lowpass;
+  }
+  if (lowered == "rtk_drift_lowpass") {
+    return GnssVerticalReferenceSource::kRtkDriftLowpass;
+  }
+  throw std::runtime_error("invalid GNSS vertical reference source: " + value);
+}
+
 Stage3VerticalReferenceConstraintMode ParseStage3VerticalReferenceConstraintMode(
   const std::string &value) {
   const std::string lowered = Lowercase(value);
@@ -313,6 +327,31 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.stage2_vehicle_y_nhc_displacement_sigma_m <= 0.0) {
     throw std::runtime_error("stage2 velocity optimization settings must be positive and finite");
   }
+  if (!std::isfinite(config.stage2_lowfreq_vertical_reference_cutoff_hz) ||
+      config.stage2_lowfreq_vertical_reference_cutoff_hz <= 0.0) {
+    throw std::runtime_error(
+      "stage2 lowfreq vertical reference settings must be finite and positive");
+  }
+  if (config.enable_stage2_lowfreq_vertical_reference_optimization &&
+      !config.enable_stage2_velocity_optimization) {
+    throw std::runtime_error(
+      "enable_stage2_lowfreq_vertical_reference_optimization requires enable_stage2_velocity_optimization");
+  }
+  if (config.enable_stage2_lowfreq_vertical_reference_optimization &&
+      config.stage2_lowfreq_vertical_reference_source == GnssVerticalReferenceSource::kRawRtk) {
+    throw std::runtime_error(
+      "stage2 lowfreq vertical reference optimization requires a non-raw final reference source");
+  }
+  if (!config.enable_stage2_lowfreq_vertical_reference_optimization &&
+      config.gnss_vertical_reference_source == GnssVerticalReferenceSource::kStage2Lowpass) {
+    throw std::runtime_error(
+      "stage2_lowpass GNSS vertical reference requires stage2 lowfreq vertical reference optimization");
+  }
+  if (config.enable_stage2_lowfreq_vertical_reference_optimization &&
+      config.enable_stage3_vertical_reference_optimization) {
+    throw std::runtime_error(
+      "stage2 lowfreq vertical reference optimization is incompatible with Stage3 vertical reference optimization");
+  }
   if (!std::isfinite(config.stage3_vertical_reference_lowpass_cutoff_hz) ||
       !std::isfinite(config.stage3_vertical_anchor_sigma_m) ||
       config.stage3_vertical_reference_lowpass_cutoff_hz <= 0.0 ||
@@ -482,6 +521,13 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
        !config.rtk_vertical_drift_use_for_center_pull)) {
     throw std::runtime_error(
       "RTK vertical lowpass reference requires RTK vertical drift center-pull reference");
+  }
+  if ((config.gnss_vertical_reference_source == GnssVerticalReferenceSource::kRtkDriftLowpass ||
+       config.stage2_lowfreq_vertical_reference_source == GnssVerticalReferenceSource::kRtkDriftLowpass) &&
+      (!config.enable_rtk_vertical_drift_reference ||
+       !config.enable_rtk_vertical_lowpass_reference)) {
+    throw std::runtime_error(
+      "RTK drift lowpass GNSS vertical reference requires RTK vertical drift lowpass reference");
   }
   if (config.enable_rtk_outage_smoothing && !config.enable_gnss) {
     throw std::runtime_error("RTK outage smoothing requires GNSS input");
@@ -976,6 +1022,15 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.stage2_vehicle_y_nhc_velocity_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "stage2_vehicle_y_nhc_displacement_sigma_m") {
     config.stage2_vehicle_y_nhc_displacement_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_stage2_lowfreq_vertical_reference_optimization") {
+    config.enable_stage2_lowfreq_vertical_reference_optimization =
+      ParseBool(normalized_value);
+  } else if (normalized_key == "stage2_lowfreq_vertical_reference_cutoff_hz") {
+    config.stage2_lowfreq_vertical_reference_cutoff_hz =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage2_lowfreq_vertical_reference_source") {
+    config.stage2_lowfreq_vertical_reference_source =
+      ParseGnssVerticalReferenceSource(normalized_value);
   } else if (normalized_key == "enable_stage3_vertical_reference_optimization") {
     config.enable_stage3_vertical_reference_optimization = ParseBool(normalized_value);
   } else if (normalized_key == "stage3_vertical_reference_lowpass_cutoff_hz") {
@@ -1095,6 +1150,9 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_envelope_center_sigma_mode = ParseVerticalEnvelopeCenterSigmaMode(normalized_value);
   } else if (normalized_key == "vertical_envelope_center_deadband_m") {
     config.vertical_envelope_center_deadband_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "gnss_vertical_reference_source") {
+    config.gnss_vertical_reference_source =
+      ParseGnssVerticalReferenceSource(normalized_value);
   } else if (normalized_key == "enable_rtk_vertical_drift_reference") {
     config.enable_rtk_vertical_drift_reference = ParseBool(normalized_value);
   } else if (normalized_key == "rtk_vertical_drift_correlation_time_s") {
@@ -1608,6 +1666,12 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.stage2_vehicle_y_nhc_velocity_sigma_mps << '\n'
     << "stage2_vehicle_y_nhc_displacement_sigma_m="
     << config.stage2_vehicle_y_nhc_displacement_sigma_m << '\n'
+    << "enable_stage2_lowfreq_vertical_reference_optimization="
+    << (config.enable_stage2_lowfreq_vertical_reference_optimization ? "true" : "false") << '\n'
+    << "stage2_lowfreq_vertical_reference_cutoff_hz="
+    << config.stage2_lowfreq_vertical_reference_cutoff_hz << '\n'
+    << "stage2_lowfreq_vertical_reference_source="
+    << ToString(config.stage2_lowfreq_vertical_reference_source) << '\n'
     << "enable_stage3_vertical_reference_optimization="
     << (config.enable_stage3_vertical_reference_optimization ? "true" : "false") << '\n'
     << "stage3_vertical_reference_lowpass_cutoff_hz="
@@ -1685,6 +1749,7 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "vertical_envelope_center_sigma_m=" << config.vertical_envelope_center_sigma_m << '\n'
     << "vertical_envelope_center_sigma_mode=" << ToString(config.vertical_envelope_center_sigma_mode) << '\n'
     << "vertical_envelope_center_deadband_m=" << config.vertical_envelope_center_deadband_m << '\n'
+    << "gnss_vertical_reference_source=" << ToString(config.gnss_vertical_reference_source) << '\n'
     << "enable_rtk_vertical_drift_reference="
     << (config.enable_rtk_vertical_drift_reference ? "true" : "false") << '\n'
     << "rtk_vertical_drift_correlation_time_s="

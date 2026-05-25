@@ -219,6 +219,11 @@ void ResultWriter::WriteOutputs(
       output_path / "stage2_vehicle_nhc_state_diagnostics.csv",
       result.stage2_vehicle_nhc_state_diagnostics);
   }
+  if (!result.stage2_lowfreq_vertical_reference_diagnostics.empty()) {
+    WriteStage3VerticalReferenceDiagnosticsCsv(
+      output_path / "stage2_lowfreq_vertical_reference_diagnostics.csv",
+      result.stage2_lowfreq_vertical_reference_diagnostics);
+  }
   if (!result.stage3_vertical_reference_diagnostics.empty()) {
     WriteStage3VerticalReferenceDiagnosticsCsv(
       output_path / "stage3_vertical_reference_diagnostics.csv",
@@ -312,7 +317,9 @@ void ResultWriter::WriteOutputs(
       << "sample_index,raw_time_s,corrected_time_s,sync_status,factor_used,vertical_direct_position_factor_used,"
          "fix_type,trajectory_row_index_i,state_time_i_s,"
          "trajectory_row_index_j,state_time_j_s,synchronized_trajectory_row_index,graph_state_index_i,graph_state_index_j,"
-         "graph_synchronized_state_index,duration_from_state_i_s,meas_east_m,meas_north_m,meas_up_m,residual_m\n";
+         "graph_synchronized_state_index,duration_from_state_i_s,meas_east_m,meas_north_m,meas_up_m,"
+         "vertical_reference_source,raw_rtk_up_m,vertical_reference_up_m,"
+         "vertical_reference_highfreq_residual_m,vertical_reference_skip_reason,residual_m\n";
     for (const auto &record : result.gnss_factor_records) {
       const long long graph_state_index_i = std::isfinite(record.state_time_i_s)
                                               ? static_cast<long long>(record.state_index_i)
@@ -345,6 +352,11 @@ void ResultWriter::WriteOutputs(
                        << record.measurement_enu_m.x() << ','
                        << record.measurement_enu_m.y() << ','
                        << record.measurement_enu_m.z() << ','
+                       << record.vertical_reference_source << ','
+                       << record.raw_rtk_up_m << ','
+                       << record.vertical_reference_up_m << ','
+                       << record.vertical_reference_highfreq_residual_m << ','
+                       << record.vertical_reference_skip_reason << ','
                        << record.residual_m << '\n';
     }
 

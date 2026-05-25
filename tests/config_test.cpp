@@ -919,6 +919,17 @@ void TestDefaultOfflineConfigUsesV14SegmentedStage2() {
   ExpectTrue(
     !config.enable_stage3_vertical_reference_optimization,
     "default config should keep Stage3 vertical reference optimization disabled");
+  ExpectTrue(
+    !config.enable_stage2_lowfreq_vertical_reference_optimization,
+    "default config should keep Stage2 lowfreq vertical reference optimization disabled");
+  ExpectTrue(
+    config.stage2_lowfreq_vertical_reference_source ==
+      offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass,
+    "default Stage2 lowfreq final source should be Stage2 lowpass");
+  ExpectTrue(
+    config.gnss_vertical_reference_source ==
+      offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk,
+    "default GNSS vertical reference should use raw RTK");
   ExpectTrue(config.enable_rtk_vertical_drift_reference, "default config should use RTK drift reference");
   ExpectTrue(
     config.enable_rtk_vertical_drift_gate_weighting,
@@ -1826,6 +1837,153 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(threw, "Stage3 should require Stage2 to be enabled");
 }
 
+void TestStage2LowfreqVerticalReferenceConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  ExpectTrue(
+    !config.enable_stage2_lowfreq_vertical_reference_optimization,
+    "Stage2 lowfreq vertical reference optimization should default off");
+  ExpectTrue(
+    std::abs(config.stage2_lowfreq_vertical_reference_cutoff_hz - 0.05) < 1e-15,
+    "Stage2 lowfreq default cutoff should be 0.05 Hz");
+  ExpectTrue(
+    config.stage2_lowfreq_vertical_reference_source ==
+      offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass,
+    "Stage2 lowfreq default final source should be Stage2 lowpass");
+  ExpectTrue(
+    config.gnss_vertical_reference_source ==
+      offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk,
+    "GNSS vertical reference should default to raw RTK");
+
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_stage2_lowfreq_vertical_reference_optimization",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_stage2_velocity_optimization",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage2_lowfreq_vertical_reference_cutoff_hz",
+    "0.03");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage2_lowfreq_vertical_reference_source",
+    "stage2_lowpass");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "gnss_vertical_reference_source",
+    "stage2_lowpass");
+  ExpectTrue(
+    config.enable_stage2_lowfreq_vertical_reference_optimization,
+    "Stage2 lowfreq enable flag should parse");
+  ExpectTrue(
+    std::abs(config.stage2_lowfreq_vertical_reference_cutoff_hz - 0.03) < 1e-15,
+    "Stage2 lowfreq cutoff should parse");
+  ExpectTrue(
+    config.stage2_lowfreq_vertical_reference_source ==
+      offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass,
+    "Stage2 lowfreq source should parse");
+  ExpectTrue(
+    config.gnss_vertical_reference_source ==
+      offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass,
+    "GNSS vertical reference source should parse");
+  const std::string serialized = offline_lc_minimal::ConfigToString(config);
+  ExpectTrue(
+    serialized.find("enable_stage2_lowfreq_vertical_reference_optimization=true") != std::string::npos,
+    "Stage2 lowfreq enable flag should serialize");
+  ExpectTrue(
+    serialized.find("stage2_lowfreq_vertical_reference_cutoff_hz=0.03") != std::string::npos,
+    "Stage2 lowfreq cutoff should serialize");
+  ExpectTrue(
+    serialized.find("stage2_lowfreq_vertical_reference_source=stage2_lowpass") != std::string::npos,
+    "Stage2 lowfreq source should serialize");
+  ExpectTrue(
+    serialized.find("gnss_vertical_reference_source=stage2_lowpass") != std::string::npos,
+    "GNSS vertical reference source should serialize");
+  offline_lc_minimal::ValidateConfig(config);
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage2_lowfreq_vertical_reference_cutoff_hz = 0.0;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("stage2 lowfreq vertical reference settings") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive Stage2 lowfreq cutoff should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_stage2_lowfreq_vertical_reference_optimization = true;
+  config.stage2_lowfreq_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("requires a non-raw final reference source") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "Stage2 lowfreq optimization should reject raw final source");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_stage2_lowfreq_vertical_reference_optimization = true;
+  config.enable_stage3_vertical_reference_optimization = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("incompatible with Stage3") != std::string::npos;
+  }
+  ExpectTrue(threw, "Stage2 lowfreq optimization should reject simultaneous Stage3");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.gnss_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("requires stage2 lowfreq vertical reference optimization") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "Stage2 lowpass GNSS source should require the wrapper flow");
+
+  config = offline_lc_minimal::DefaultConfig();
+  threw = false;
+  try {
+    offline_lc_minimal::OverrideConfigField(
+      config,
+      "stage2_lowfreq_vertical_reference_source",
+      "bad_source");
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("GNSS vertical reference source") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "invalid Stage2 lowfreq source should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage2_lowfreq_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kRtkDriftLowpass;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("RTK drift lowpass GNSS vertical reference") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "RTK drift lowpass source should require lowpass reference settings");
+}
+
 void TestStage3ExperimentConfigLoads() {
   const auto config = offline_lc_minimal::LoadConfigFile(
     std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
@@ -1865,6 +2023,34 @@ void TestStage3ExperimentConfigLoads() {
   ExpectTrue(
     envelope_config.enable_stage3_vertical_envelope_center_pull,
     "Stage3 envelope-gate config should enable bounded center-pull");
+}
+
+void TestStage2LowfreqExperimentConfigLoads() {
+  const auto config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1rtkjumpcut1_stage2_lowfreq_vertical_reference.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.enable_stage2_lowfreq_vertical_reference_optimization,
+    "Stage2 lowfreq experiment should enable the wrapper");
+  ExpectTrue(config.enable_stage2_velocity_optimization, "Stage2 lowfreq experiment should keep Stage2 enabled");
+  ExpectTrue(
+    config.enable_rtk_outage_segmented_batch,
+    "Stage2 lowfreq experiment should keep segmented batch enabled");
+  ExpectTrue(
+    !config.enable_stage3_vertical_reference_optimization,
+    "Stage2 lowfreq experiment should keep Stage3 disabled");
+  ExpectTrue(
+    config.stage2_lowfreq_vertical_reference_source ==
+      offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass,
+    "Stage2 lowfreq experiment should use Stage2 lowpass as final vertical reference");
+  ExpectTrue(
+    config.gnss_vertical_reference_source ==
+      offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk,
+    "outer experiment config should start from raw RTK GNSS vertical reference");
+  ExpectTrue(
+    std::abs(config.stage2_lowfreq_vertical_reference_cutoff_hz - 0.05) < 1e-15,
+    "Stage2 lowfreq experiment cutoff should be 0.05 Hz");
 }
 
 void TestAccelerometerBiasUgConfigParsing() {
@@ -2923,8 +3109,14 @@ int main() {
       "TestStage3VerticalReferenceConfigValidation",
       TestStage3VerticalReferenceConfigValidation);
     RunTest(
+      "TestStage2LowfreqVerticalReferenceConfigValidation",
+      TestStage2LowfreqVerticalReferenceConfigValidation);
+    RunTest(
       "TestStage3ExperimentConfigLoads",
       TestStage3ExperimentConfigLoads);
+    RunTest(
+      "TestStage2LowfreqExperimentConfigLoads",
+      TestStage2LowfreqExperimentConfigLoads);
     RunTest("TestOldCompatibilityKeysAreRejected", TestOldCompatibilityKeysAreRejected);
     RunTest("TestBodyZJumpDetectionFlagLoads", TestBodyZJumpDetectionFlagLoads);
     RunTest("TestBodyZRequiresGnssAfterOverrides", TestBodyZRequiresGnssAfterOverrides);
