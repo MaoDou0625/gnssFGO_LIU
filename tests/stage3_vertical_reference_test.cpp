@@ -15,12 +15,14 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/core/Stage2LowfreqVerticalReferenceOptimizationRunner.h"
+#include "offline_lc_minimal/core/Stage3JumpRegularizerConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceProfilePlanner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceTimelineAligner.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
 #include "offline_lc_minimal/factor/VerticalRtkFactors.h"
+#include "offline_lc_minimal/factor/VerticalVelocityDeltaDeadbandFactor.h"
 
 namespace {
 
@@ -383,6 +385,119 @@ void TestConstraintBuilderEnvelopeModeUsesGateAndCenterPull() {
     0.004,
     1.0e-12,
     "summary should track max overflow residual");
+}
+
+void TestVerticalVelocityDeltaDeadbandFactor() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
+  offline_lc_minimal::factor::VerticalVelocityDeltaDeadbandFactor factor(
+    gtsam::symbol_shorthand::V(0),
+    gtsam::symbol_shorthand::V(1),
+    0.02,
+    noise);
+
+  gtsam::Matrix h_i;
+  gtsam::Matrix h_j;
+  const gtsam::Vector3 velocity_i(0.0, 0.0, 0.0);
+  const gtsam::Vector3 inside_velocity_j(0.0, 0.0, 0.01);
+  const auto inside_residual =
+    factor.evaluateError(velocity_i, inside_velocity_j, h_i, h_j);
+  ExpectNear(inside_residual[0], 0.0, 1.0e-12, "inside deadband residual should be zero");
+  ExpectNear(h_i(0, 2), 0.0, 1.0e-12, "inside deadband H_i should be zero");
+  ExpectNear(h_j(0, 2), 0.0, 1.0e-12, "inside deadband H_j should be zero");
+
+  const gtsam::Vector3 outside_velocity_j(0.0, 0.0, 0.05);
+  const auto outside_residual =
+    factor.evaluateError(velocity_i, outside_velocity_j, h_i, h_j);
+  ExpectNear(outside_residual[0], 0.03, 1.0e-12, "outside deadband residual should be overflow");
+  ExpectNear(h_i(0, 2), -1.0, 1.0e-12, "outside deadband H_i should match delta-v Jacobian");
+  ExpectNear(h_j(0, 2), 1.0, 1.0e-12, "outside deadband H_j should match delta-v Jacobian");
+
+  const gtsam::Vector3 negative_velocity_j(0.0, 0.0, -0.05);
+  const auto negative_residual =
+    factor.evaluateError(velocity_i, negative_velocity_j, h_i, h_j);
+  ExpectNear(negative_residual[0], -0.03, 1.0e-12, "negative overflow should keep sign");
+  ExpectNear(h_i(0, 2), -1.0, 1.0e-12, "negative overflow H_i should match delta-v Jacobian");
+  ExpectNear(h_j(0, 2), 1.0, 1.0e-12, "negative overflow H_j should match delta-v Jacobian");
+}
+
+void TestStage3JumpRegularizerAddsOnlyJumpWindowFactors() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_nhc_constraint = false;
+  config.vertical_velocity_delta_jump_padding_s = 0.0;
+  config.enable_stage3_jump_velocity_smoothness_regularizer = true;
+  config.stage3_jump_velocity_smoothness_deadband_mps = 0.02;
+  config.stage3_jump_velocity_smoothness_sigma_mps = 0.03;
+  config.enable_stage3_jump_height_highfreq_deadband = true;
+  config.stage3_jump_height_highfreq_deadband_m = 0.002;
+  config.stage3_jump_height_highfreq_sigma_m = 0.004;
+
+  const std::vector<double> state_timestamps{0.0, 2.01, 2.06, 2.20};
+  offline_lc_minimal::Stage3VerticalReference reference;
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    offline_lc_minimal::Stage3VerticalReferenceDiagnosticRow row;
+    row.state_index = index;
+    row.time_s = state_timestamps[index];
+    row.stage2_up_m = 10.0;
+    row.stage2_lowpass_up_m = 10.0;
+    row.lowpass_delta_m = 0.0;
+    row.skip_reason = "PLANNED";
+    reference.rows.push_back(row);
+  }
+  std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows(1U);
+  jump_windows.front().start_time_s = 2.0;
+  jump_windows.front().end_time_s = 2.1;
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::Stage3JumpRegularizerDiagnosticRow> diagnostics;
+  offline_lc_minimal::Stage3JumpRegularizerConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.reference = &reference;
+  request.jump_windows = &jump_windows;
+  request.dynamic_start_index = 1U;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::Stage3JumpRegularizerConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 4U, "regularizer should add two velocity and two height factors");
+  ExpectTrue(diagnostics.size() == 4U, "regularizer diagnostics should track all added factors");
+  ExpectTrue(
+    summary.stage3_jump_velocity_smoothness_factor_count == 2U,
+    "velocity smoothness factor count should be tracked");
+  ExpectTrue(
+    summary.stage3_jump_height_highfreq_deadband_factor_count == 2U,
+    "height highfreq factor count should be tracked");
+
+  gtsam::Values optimized_values;
+  optimized_values.insert(gtsam::symbol_shorthand::V(1), gtsam::Vector3(0.0, 0.0, 0.0));
+  optimized_values.insert(gtsam::symbol_shorthand::V(2), gtsam::Vector3(0.0, 0.0, 0.05));
+  optimized_values.insert(gtsam::symbol_shorthand::V(3), gtsam::Vector3(0.0, 0.0, 0.055));
+  optimized_values.insert(gtsam::symbol_shorthand::X(1), MakePose(10.004));
+  optimized_values.insert(gtsam::symbol_shorthand::X(2), MakePose(10.001));
+  optimized_values.insert(gtsam::symbol_shorthand::X(3), MakePose(10.000));
+
+  offline_lc_minimal::PopulateStage3JumpRegularizerDiagnostics(
+    optimized_values,
+    diagnostics,
+    summary);
+
+  ExpectNear(
+    summary.stage3_jump_velocity_smoothness_max_abs_residual_mps,
+    0.03,
+    1.0e-12,
+    "velocity smoothness summary should report max overflow residual");
+  ExpectNear(
+    summary.stage3_jump_height_highfreq_deadband_max_abs_raw_residual_m,
+    0.004,
+    1.0e-12,
+    "height regularizer should report max raw residual");
+  ExpectNear(
+    summary.stage3_jump_height_highfreq_deadband_max_abs_overflow_residual_m,
+    0.002,
+    1.0e-12,
+    "height regularizer should report deadband overflow residual");
 }
 
 void TestTimelineAlignerResamplesSegmentedStage2Reference() {
@@ -943,6 +1058,12 @@ int main() {
     RunTest(
       "TestConstraintBuilderEnvelopeModeUsesGateAndCenterPull",
       TestConstraintBuilderEnvelopeModeUsesGateAndCenterPull);
+    RunTest(
+      "TestVerticalVelocityDeltaDeadbandFactor",
+      TestVerticalVelocityDeltaDeadbandFactor);
+    RunTest(
+      "TestStage3JumpRegularizerAddsOnlyJumpWindowFactors",
+      TestStage3JumpRegularizerAddsOnlyJumpWindowFactors);
     RunTest(
       "TestTimelineAlignerResamplesSegmentedStage2Reference",
       TestTimelineAlignerResamplesSegmentedStage2Reference);

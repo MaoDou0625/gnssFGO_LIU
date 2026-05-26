@@ -1542,6 +1542,40 @@ void WriteStage3VerticalReferenceDiagnosticsCsv(
   }
 }
 
+void WriteStage3JumpRegularizerDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage3JumpRegularizerDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "constraint_type,window_index,source_window_count,state_index_i,state_index_j,"
+       "start_time_s,end_time_s,dt_s,reference_up_m,deadband,sigma,"
+       "factor_added,skip_reason,optimized_delta_vz_mps,optimized_up_m,"
+       "raw_residual,residual\n";
+  for (const auto &row : rows) {
+    stream << row.constraint_type << ','
+           << row.window_index << ','
+           << row.source_window_count << ','
+           << row.state_index_i << ','
+           << row.state_index_j << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.dt_s << ','
+           << row.reference_up_m << ','
+           << row.deadband << ','
+           << row.sigma << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << ','
+           << row.optimized_delta_vz_mps << ','
+           << row.optimized_up_m << ','
+           << row.raw_residual << ','
+           << row.residual << '\n';
+  }
+}
+
 void WriteVerticalJumpMaskedImuDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpMaskedImuDiagnosticRow> &rows) {

@@ -458,6 +458,28 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
     throw std::runtime_error(
       "stage3_disable_stage2_vehicle_nhc_constraint requires Stage3 vertical reference optimization");
   }
+  const bool enable_stage3_jump_regularizer =
+    config.enable_stage3_jump_velocity_smoothness_regularizer ||
+    config.enable_stage3_jump_height_highfreq_deadband;
+  if (enable_stage3_jump_regularizer &&
+      !config.enable_stage3_vertical_reference_optimization) {
+    throw std::runtime_error(
+      "Stage3 jump regularizers require Stage3 vertical reference optimization");
+  }
+  if (!std::isfinite(config.stage3_jump_velocity_smoothness_deadband_mps) ||
+      !std::isfinite(config.stage3_jump_velocity_smoothness_sigma_mps) ||
+      config.stage3_jump_velocity_smoothness_deadband_mps < 0.0 ||
+      config.stage3_jump_velocity_smoothness_sigma_mps <= 0.0) {
+    throw std::runtime_error(
+      "Stage3 jump velocity smoothness settings must be finite with positive sigma");
+  }
+  if (!std::isfinite(config.stage3_jump_height_highfreq_deadband_m) ||
+      !std::isfinite(config.stage3_jump_height_highfreq_sigma_m) ||
+      config.stage3_jump_height_highfreq_deadband_m < 0.0 ||
+      config.stage3_jump_height_highfreq_sigma_m <= 0.0) {
+    throw std::runtime_error(
+      "Stage3 jump height highfreq deadband settings must be finite with positive sigma");
+  }
   if (config.initial_static_zupt_velocity_sigma_mps <= 0.0 ||
       config.initial_static_zaru_sigma_radps <= 0.0 ||
       config.initial_static_specific_force_sigma_mps2 <= 0.0 ||
@@ -1181,6 +1203,24 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.stage3_disable_rtk_outage_segmented_batch = ParseBool(normalized_value);
   } else if (normalized_key == "stage3_disable_stage2_vehicle_nhc_constraint") {
     config.stage3_disable_stage2_vehicle_nhc_constraint = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_stage3_jump_velocity_smoothness_regularizer") {
+    config.enable_stage3_jump_velocity_smoothness_regularizer =
+      ParseBool(normalized_value);
+  } else if (normalized_key == "stage3_jump_velocity_smoothness_deadband_mps") {
+    config.stage3_jump_velocity_smoothness_deadband_mps =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_jump_velocity_smoothness_sigma_mps") {
+    config.stage3_jump_velocity_smoothness_sigma_mps =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_stage3_jump_height_highfreq_deadband") {
+    config.enable_stage3_jump_height_highfreq_deadband =
+      ParseBool(normalized_value);
+  } else if (normalized_key == "stage3_jump_height_highfreq_deadband_m") {
+    config.stage3_jump_height_highfreq_deadband_m =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_jump_height_highfreq_sigma_m") {
+    config.stage3_jump_height_highfreq_sigma_m =
+      ParseDouble(normalized_value);
   } else if (normalized_key == "static_alignment_duration_s") {
     config.static_alignment_duration_s = ParseDouble(normalized_value);
   } else if (normalized_key == "imu_dual_vector_window_s") {
@@ -1875,6 +1915,18 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.stage3_disable_rtk_outage_segmented_batch ? "true" : "false") << '\n'
     << "stage3_disable_stage2_vehicle_nhc_constraint="
     << (config.stage3_disable_stage2_vehicle_nhc_constraint ? "true" : "false") << '\n'
+    << "enable_stage3_jump_velocity_smoothness_regularizer="
+    << (config.enable_stage3_jump_velocity_smoothness_regularizer ? "true" : "false") << '\n'
+    << "stage3_jump_velocity_smoothness_deadband_mps="
+    << config.stage3_jump_velocity_smoothness_deadband_mps << '\n'
+    << "stage3_jump_velocity_smoothness_sigma_mps="
+    << config.stage3_jump_velocity_smoothness_sigma_mps << '\n'
+    << "enable_stage3_jump_height_highfreq_deadband="
+    << (config.enable_stage3_jump_height_highfreq_deadband ? "true" : "false") << '\n'
+    << "stage3_jump_height_highfreq_deadband_m="
+    << config.stage3_jump_height_highfreq_deadband_m << '\n'
+    << "stage3_jump_height_highfreq_sigma_m="
+    << config.stage3_jump_height_highfreq_sigma_m << '\n'
     << "static_alignment_duration_s=" << config.static_alignment_duration_s << '\n'
     << "imu_dual_vector_window_s=" << config.imu_dual_vector_window_s << '\n'
     << "imu_dual_vector_min_sample_count=" << config.imu_dual_vector_min_sample_count << '\n'

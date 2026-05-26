@@ -56,6 +56,7 @@
 #include "offline_lc_minimal/core/Stage2VehicleNHCConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage2VelocityOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage2VelocityReference.h"
+#include "offline_lc_minimal/core/Stage3JumpRegularizerConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceTimelineAligner.h"
@@ -1597,6 +1598,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.stage3_vertical_envelope_max_abs_center_pull_residual_m =
     std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_jump_velocity_smoothness_regularizer_enabled =
+    config_.enable_stage3_jump_velocity_smoothness_regularizer;
+  run_result.run_summary.stage3_jump_velocity_smoothness_factor_count = 0;
+  run_result.run_summary.stage3_jump_velocity_smoothness_skipped_count = 0;
+  run_result.run_summary.stage3_jump_velocity_smoothness_max_abs_residual_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_jump_height_highfreq_deadband_enabled =
+    config_.enable_stage3_jump_height_highfreq_deadband;
+  run_result.run_summary.stage3_jump_height_highfreq_deadband_factor_count = 0;
+  run_result.run_summary.stage3_jump_height_highfreq_deadband_skipped_count = 0;
+  run_result.run_summary.stage3_jump_height_highfreq_deadband_max_abs_raw_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_jump_height_highfreq_deadband_max_abs_overflow_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
   populate_initial_dynamic_static_summary();
   run_result.run_summary.vertical_jump_combined_imu_factor_count = 0;
   run_result.run_summary.vertical_jump_masked_imu_factor_count = 0;
@@ -1655,6 +1670,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.stage2_mount_leakage_diagnostics.clear();
   run_result.stage2_vehicle_nhc_state_diagnostics.clear();
   run_result.stage3_vertical_reference_diagnostics.clear();
+  run_result.stage3_jump_regularizer_diagnostics.clear();
   run_result.vertical_jump_masked_imu_diagnostics.clear();
   run_result.vertical_jump_impulse_diagnostics.clear();
   run_result.vertical_jump_bias_diagnostics.clear();
@@ -1793,6 +1809,19 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     stage3_request.run_summary = &run_result.run_summary;
     stage3_request.diagnostics = &run_result.stage3_vertical_reference_diagnostics;
     Stage3VerticalReferenceConstraintBuilder(std::move(stage3_request)).Build();
+
+    Stage3JumpRegularizerConstraintBuildRequest jump_regularizer_request;
+    jump_regularizer_request.config = &config_;
+    jump_regularizer_request.reference = active_stage3_vertical_reference;
+    jump_regularizer_request.state_timestamps = &state_timestamps;
+    jump_regularizer_request.jump_windows = &run_result.body_z_seed_jump_windows;
+    jump_regularizer_request.dynamic_start_index = graph_timeline.dynamic_start_index;
+    jump_regularizer_request.graph = &graph_with_gnss;
+    jump_regularizer_request.run_summary = &run_result.run_summary;
+    jump_regularizer_request.diagnostics =
+      &run_result.stage3_jump_regularizer_diagnostics;
+    Stage3JumpRegularizerConstraintBuilder(
+      std::move(jump_regularizer_request)).Build();
   }
 
   if (!run_result.initial_dynamic_static_windows.empty()) {
@@ -2019,6 +2048,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateStage3VerticalReferenceDiagnostics(
     optimized_values,
     run_result.stage3_vertical_reference_diagnostics,
+    run_result.run_summary);
+  PopulateStage3JumpRegularizerDiagnostics(
+    optimized_values,
+    run_result.stage3_jump_regularizer_diagnostics,
     run_result.run_summary);
   PopulateInitialDynamicStaticDiagnostics(
     optimized_values,

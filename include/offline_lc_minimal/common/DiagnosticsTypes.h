@@ -260,6 +260,26 @@ struct Stage3VerticalReferenceDiagnosticRow {
   std::string skip_reason = "UNSET";
 };
 
+struct Stage3JumpRegularizerDiagnosticRow {
+  std::string constraint_type = "UNSET";
+  std::size_t window_index = 0;
+  std::size_t source_window_count = 0;
+  std::size_t state_index_i = 0;
+  std::size_t state_index_j = 0;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double dt_s = std::numeric_limits<double>::quiet_NaN();
+  double reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double deadband = std::numeric_limits<double>::quiet_NaN();
+  double sigma = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+  double optimized_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_up_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_residual = std::numeric_limits<double>::quiet_NaN();
+  double residual = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct LateStaticFeatureDiagnosticRow {
   std::size_t window_index = 0;
   double window_start_time_s = std::numeric_limits<double>::quiet_NaN();

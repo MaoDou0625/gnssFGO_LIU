@@ -12,6 +12,8 @@ namespace {
 OfflineRunnerConfig MakeStage2SourceConfig(OfflineRunnerConfig config) {
   config.enable_stage3_vertical_reference_optimization = false;
   config.stage3_disable_stage2_vehicle_nhc_constraint = false;
+  config.enable_stage3_jump_velocity_smoothness_regularizer = false;
+  config.enable_stage3_jump_height_highfreq_deadband = false;
   return config;
 }
 

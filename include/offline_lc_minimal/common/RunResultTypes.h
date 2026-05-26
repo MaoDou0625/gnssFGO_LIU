@@ -289,6 +289,18 @@ struct RunSummary {
     std::numeric_limits<double>::quiet_NaN();
   double stage3_vertical_envelope_max_abs_center_pull_residual_m =
     std::numeric_limits<double>::quiet_NaN();
+  bool stage3_jump_velocity_smoothness_regularizer_enabled = false;
+  std::size_t stage3_jump_velocity_smoothness_factor_count = 0;
+  std::size_t stage3_jump_velocity_smoothness_skipped_count = 0;
+  double stage3_jump_velocity_smoothness_max_abs_residual_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  bool stage3_jump_height_highfreq_deadband_enabled = false;
+  std::size_t stage3_jump_height_highfreq_deadband_factor_count = 0;
+  std::size_t stage3_jump_height_highfreq_deadband_skipped_count = 0;
+  double stage3_jump_height_highfreq_deadband_max_abs_raw_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_jump_height_highfreq_deadband_max_abs_overflow_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_jump_combined_imu_factor_count = 0;
   std::size_t vertical_jump_masked_imu_factor_count = 0;
   std::size_t vertical_jump_impulse_factor_count = 0;
@@ -781,6 +793,24 @@ struct RunSummary {
         << stage3_vertical_envelope_max_abs_overflow_residual_m << '\n'
         << "stage3_vertical_envelope_max_abs_center_pull_residual_m="
         << stage3_vertical_envelope_max_abs_center_pull_residual_m << '\n'
+        << "stage3_jump_velocity_smoothness_regularizer_enabled="
+        << (stage3_jump_velocity_smoothness_regularizer_enabled ? "true" : "false") << '\n'
+        << "stage3_jump_velocity_smoothness_factor_count="
+        << stage3_jump_velocity_smoothness_factor_count << '\n'
+        << "stage3_jump_velocity_smoothness_skipped_count="
+        << stage3_jump_velocity_smoothness_skipped_count << '\n'
+        << "stage3_jump_velocity_smoothness_max_abs_residual_mps="
+        << stage3_jump_velocity_smoothness_max_abs_residual_mps << '\n'
+        << "stage3_jump_height_highfreq_deadband_enabled="
+        << (stage3_jump_height_highfreq_deadband_enabled ? "true" : "false") << '\n'
+        << "stage3_jump_height_highfreq_deadband_factor_count="
+        << stage3_jump_height_highfreq_deadband_factor_count << '\n'
+        << "stage3_jump_height_highfreq_deadband_skipped_count="
+        << stage3_jump_height_highfreq_deadband_skipped_count << '\n'
+        << "stage3_jump_height_highfreq_deadband_max_abs_raw_residual_m="
+        << stage3_jump_height_highfreq_deadband_max_abs_raw_residual_m << '\n'
+        << "stage3_jump_height_highfreq_deadband_max_abs_overflow_residual_m="
+        << stage3_jump_height_highfreq_deadband_max_abs_overflow_residual_m << '\n'
         << "vertical_jump_combined_imu_factor_count=" << vertical_jump_combined_imu_factor_count << '\n'
         << "vertical_jump_masked_imu_factor_count=" << vertical_jump_masked_imu_factor_count << '\n'
         << "vertical_jump_impulse_factor_count=" << vertical_jump_impulse_factor_count << '\n'
@@ -976,6 +1006,7 @@ struct OfflineRunResult {
   std::vector<Stage2VehicleNHCStateDiagnosticRow> stage2_vehicle_nhc_state_diagnostics;
   std::vector<Stage3VerticalReferenceDiagnosticRow> stage2_lowfreq_vertical_reference_diagnostics;
   std::vector<Stage3VerticalReferenceDiagnosticRow> stage3_vertical_reference_diagnostics;
+  std::vector<Stage3JumpRegularizerDiagnosticRow> stage3_jump_regularizer_diagnostics;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;
   std::vector<VerticalJumpImpulseDiagnosticRow> vertical_jump_impulse_diagnostics;
   std::vector<VerticalJumpBiasDiagnosticRow> vertical_jump_bias_diagnostics;

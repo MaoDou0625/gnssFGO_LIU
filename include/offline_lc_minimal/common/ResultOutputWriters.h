@@ -162,6 +162,10 @@ void WriteStage3VerticalReferenceDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<Stage3VerticalReferenceDiagnosticRow> &rows);
 
+void WriteStage3JumpRegularizerDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage3JumpRegularizerDiagnosticRow> &rows);
+
 void WriteVerticalJumpMaskedImuDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpMaskedImuDiagnosticRow> &rows);

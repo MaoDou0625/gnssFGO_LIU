@@ -107,6 +107,7 @@ add_library(offline_lc_minimal_lib
   src/core/Stage2VehicleNHCConstraintBuilder.cpp
   src/core/Stage2VelocityOptimizationRunner.cpp
   src/core/Stage2VelocityReference.cpp
+  src/core/Stage3JumpRegularizerConstraintBuilder.cpp
   src/core/Stage3VerticalReferenceConstraintBuilder.cpp
   src/core/Stage3VerticalReferenceOptimizationRunner.cpp
   src/core/Stage3VerticalReferenceProfilePlanner.cpp

@@ -1697,6 +1697,24 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     !config.stage3_disable_stage2_vehicle_nhc_constraint,
     "Stage3 should keep final-pass vehicle NHC enabled by default");
+  ExpectTrue(
+    !config.enable_stage3_jump_velocity_smoothness_regularizer,
+    "Stage3 jump velocity smoothness regularizer should default off");
+  ExpectTrue(
+    std::abs(config.stage3_jump_velocity_smoothness_deadband_mps - 0.02) < 1e-15,
+    "Stage3 jump velocity smoothness deadband should default to 0.02 m/s");
+  ExpectTrue(
+    std::abs(config.stage3_jump_velocity_smoothness_sigma_mps - 0.02) < 1e-15,
+    "Stage3 jump velocity smoothness sigma should default to 0.02 m/s");
+  ExpectTrue(
+    !config.enable_stage3_jump_height_highfreq_deadband,
+    "Stage3 jump height highfreq deadband should default off");
+  ExpectTrue(
+    std::abs(config.stage3_jump_height_highfreq_deadband_m - 0.002) < 1e-15,
+    "Stage3 jump height highfreq deadband should default to 0.002 m");
+  ExpectTrue(
+    std::abs(config.stage3_jump_height_highfreq_sigma_m - 0.004) < 1e-15,
+    "Stage3 jump height highfreq sigma should default to 0.004 m");
 
   offline_lc_minimal::OverrideConfigField(
     config,
@@ -1794,6 +1812,30 @@ void TestStage3VerticalReferenceConfigValidation() {
     config,
     "stage3_disable_stage2_vehicle_nhc_constraint",
     "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_stage3_jump_velocity_smoothness_regularizer",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_velocity_smoothness_deadband_mps",
+    "0.03");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_velocity_smoothness_sigma_mps",
+    "0.04");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_stage3_jump_height_highfreq_deadband",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_height_highfreq_deadband_m",
+    "0.005");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_height_highfreq_sigma_m",
+    "0.006");
   ExpectTrue(config.enable_stage3_vertical_reference_optimization, "Stage3 enable flag should parse");
   ExpectTrue(
     std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.03) < 1e-15,
@@ -1860,6 +1902,24 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     config.stage3_disable_stage2_vehicle_nhc_constraint,
     "Stage3 final vehicle NHC disable flag should parse");
+  ExpectTrue(
+    config.enable_stage3_jump_velocity_smoothness_regularizer,
+    "Stage3 jump velocity smoothness flag should parse");
+  ExpectTrue(
+    std::abs(config.stage3_jump_velocity_smoothness_deadband_mps - 0.03) < 1e-15,
+    "Stage3 jump velocity smoothness deadband should parse");
+  ExpectTrue(
+    std::abs(config.stage3_jump_velocity_smoothness_sigma_mps - 0.04) < 1e-15,
+    "Stage3 jump velocity smoothness sigma should parse");
+  ExpectTrue(
+    config.enable_stage3_jump_height_highfreq_deadband,
+    "Stage3 jump height highfreq deadband flag should parse");
+  ExpectTrue(
+    std::abs(config.stage3_jump_height_highfreq_deadband_m - 0.005) < 1e-15,
+    "Stage3 jump height highfreq deadband should parse");
+  ExpectTrue(
+    std::abs(config.stage3_jump_height_highfreq_sigma_m - 0.006) < 1e-15,
+    "Stage3 jump height highfreq sigma should parse");
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
   ExpectTrue(
     serialized.find("enable_stage3_vertical_reference_optimization=true") != std::string::npos,
@@ -1930,6 +1990,24 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("stage3_disable_stage2_vehicle_nhc_constraint=true") != std::string::npos,
     "Stage3 final vehicle NHC disable flag should be serialized");
+  ExpectTrue(
+    serialized.find("enable_stage3_jump_velocity_smoothness_regularizer=true") != std::string::npos,
+    "Stage3 jump velocity smoothness flag should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_velocity_smoothness_deadband_mps=0.03") != std::string::npos,
+    "Stage3 jump velocity smoothness deadband should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_velocity_smoothness_sigma_mps=0.04") != std::string::npos,
+    "Stage3 jump velocity smoothness sigma should be serialized");
+  ExpectTrue(
+    serialized.find("enable_stage3_jump_height_highfreq_deadband=true") != std::string::npos,
+    "Stage3 jump height highfreq flag should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_height_highfreq_deadband_m=0.005") != std::string::npos,
+    "Stage3 jump height highfreq deadband should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_height_highfreq_sigma_m=0.006") != std::string::npos,
+    "Stage3 jump height highfreq sigma should be serialized");
   offline_lc_minimal::ValidateConfig(config);
 
   config = offline_lc_minimal::DefaultConfig();
@@ -2091,6 +2169,36 @@ void TestStage3VerticalReferenceConfigValidation() {
             std::string::npos;
   }
   ExpectTrue(threw, "Stage3 final vehicle NHC disable should require Stage3");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage3_jump_velocity_smoothness_regularizer = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("Stage3 jump regularizers") != std::string::npos;
+  }
+  ExpectTrue(threw, "Stage3 jump regularizer should require Stage3");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_jump_velocity_smoothness_sigma_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("jump velocity smoothness") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive Stage3 jump velocity sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_jump_height_highfreq_deadband_m = -1.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("height highfreq deadband") != std::string::npos;
+  }
+  ExpectTrue(threw, "negative Stage3 jump height deadband should be rejected");
 }
 
 void TestStage2LowfreqVerticalReferenceConfigValidation() {
@@ -2629,6 +2737,38 @@ void TestStage3ExperimentConfigLoads() {
   ExpectTrue(
     std::abs(jump_dvz_bias_config.vertical_velocity_delta_context_outage_sigma_scale - 100.0) < 1e-15,
     "Stage3 5mm jump-DVZ-bias config should not make outage an extra-wide DVZ context");
+
+  const auto jump_regularized_config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1rtkjumpcut1_stage3_anchor_5mm_jump_regularized.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    jump_regularized_config.enable_stage3_vertical_reference_optimization,
+    "Stage3 jump-regularized config should enable Stage3");
+  ExpectTrue(
+    !jump_regularized_config.vertical_velocity_delta_skip_jump_padding,
+    "Stage3 jump-regularized config should keep IMU-DVZ inside jumps");
+  ExpectTrue(
+    jump_regularized_config.enable_vertical_jump_bias,
+    "Stage3 jump-regularized config should keep vertical jump bias enabled");
+  ExpectTrue(
+    jump_regularized_config.enable_stage3_jump_velocity_smoothness_regularizer,
+    "Stage3 jump-regularized config should enable velocity smoothness regularizer");
+  ExpectTrue(
+    std::abs(jump_regularized_config.stage3_jump_velocity_smoothness_deadband_mps - 0.02) < 1e-15,
+    "Stage3 jump-regularized config should use 0.02 m/s velocity deadband");
+  ExpectTrue(
+    std::abs(jump_regularized_config.stage3_jump_velocity_smoothness_sigma_mps - 0.02) < 1e-15,
+    "Stage3 jump-regularized config should use 0.02 m/s velocity sigma");
+  ExpectTrue(
+    jump_regularized_config.enable_stage3_jump_height_highfreq_deadband,
+    "Stage3 jump-regularized config should enable height highfreq deadband");
+  ExpectTrue(
+    std::abs(jump_regularized_config.stage3_jump_height_highfreq_deadband_m - 0.002) < 1e-15,
+    "Stage3 jump-regularized config should use 2 mm height deadband");
+  ExpectTrue(
+    std::abs(jump_regularized_config.stage3_jump_height_highfreq_sigma_m - 0.004) < 1e-15,
+    "Stage3 jump-regularized config should use 4 mm height sigma");
 }
 
 void TestStage2LowfreqExperimentConfigLoads() {

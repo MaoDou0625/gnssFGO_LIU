@@ -244,6 +244,11 @@ void ResultWriter::WriteOutputs(
       output_path / "stage3_vertical_reference_diagnostics.csv",
       result.stage3_vertical_reference_diagnostics);
   }
+  if (!result.stage3_jump_regularizer_diagnostics.empty()) {
+    WriteStage3JumpRegularizerDiagnosticsCsv(
+      output_path / "stage3_jump_regularizer_diagnostics.csv",
+      result.stage3_jump_regularizer_diagnostics);
+  }
   if (!result.vertical_jump_masked_imu_diagnostics.empty()) {
     WriteVerticalJumpMaskedImuDiagnosticsCsv(
       output_path / "vertical_jump_masked_imu_diagnostics.csv",
