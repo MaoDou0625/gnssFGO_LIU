@@ -194,16 +194,19 @@ void TestProfilePlannerUsesDetectedInitialDynamicStaticWindows() {
   const auto baseline_reference =
     offline_lc_minimal::Stage3VerticalReferenceProfilePlanner(std::move(baseline_request)).Plan();
 
-  const double protected_error =
-    std::abs(reference.rows[3].stage2_lowpass_up_m - 4.0);
-  const double baseline_error =
-    std::abs(baseline_reference.rows[3].stage2_lowpass_up_m - 4.0);
+  ExpectNear(
+    reference.rows[3].stage2_lowpass_up_m,
+    4.0,
+    1.0e-12,
+    "detected initial dynamic static window should keep its first reference row static");
+  ExpectNear(
+    reference.rows[5].stage2_lowpass_up_m,
+    4.0,
+    1.0e-12,
+    "detected initial dynamic static window should keep its last reference row static");
   ExpectTrue(
-    protected_error < baseline_error,
-    "detected initial dynamic static window should protect lowpass input");
-  ExpectTrue(
-    std::abs(reference.rows[3].stage2_lowpass_up_m - 4.0) > 1.0e-6,
-    "detected initial dynamic static window should not directly overwrite lowpass output");
+    std::abs(baseline_reference.rows[3].stage2_lowpass_up_m - 4.0) > 1.0e-3,
+    "unprotected lowpass should still be dragged by the surrounding motion");
 }
 
 void TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics() {

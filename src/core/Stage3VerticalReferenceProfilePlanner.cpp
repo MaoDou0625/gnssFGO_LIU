@@ -174,7 +174,8 @@ bool ApplyInitialDynamicStaticWindowsToProfile(
   const OfflineRunnerConfig &config,
   const std::vector<LateStaticWindowRow> *windows,
   const std::vector<TrajectoryRow> &trajectory,
-  std::vector<double> &up_profile_m) {
+  std::vector<double> &up_profile_m,
+  const bool protect_output) {
   if (!config.enable_initial_dynamic_static_lowpass_protection ||
       windows == nullptr || windows->empty()) {
     return false;
@@ -209,6 +210,9 @@ bool ApplyInitialDynamicStaticWindowsToProfile(
       if (TimeInWindow(row.time_s, window)) {
         up_profile_m[index] = reference_up_m;
         applied_any = true;
+        continue;
+      }
+      if (!protect_output) {
         continue;
       }
       if (blend_duration_s > 0.0 &&
@@ -305,7 +309,8 @@ Stage3VerticalReference Stage3VerticalReferenceProfilePlanner::Plan() const {
       *request_.config,
       request_.initial_dynamic_static_windows,
       *request_.stage2_trajectory,
-      filter_input_up_m);
+      filter_input_up_m,
+      false);
   if (!applied_detected_static_windows_to_input) {
     ApplyInitialDynamicStaticHoldToProfile(
       *request_.config,
@@ -319,7 +324,15 @@ Stage3VerticalReference Stage3VerticalReferenceProfilePlanner::Plan() const {
       *request_.config,
       *request_.stage2_trajectory,
       filter_input_up_m);
-  if (!applied_detected_static_windows_to_input) {
+  const bool applied_detected_static_windows_to_output =
+    ApplyInitialDynamicStaticWindowsToProfile(
+      *request_.config,
+      request_.initial_dynamic_static_windows,
+      *request_.stage2_trajectory,
+      lowpass_up_m,
+      true);
+  if (!applied_detected_static_windows_to_input &&
+      !applied_detected_static_windows_to_output) {
     ApplyInitialDynamicStaticHoldToProfile(
       *request_.config,
       request_.dynamic_start_index,
