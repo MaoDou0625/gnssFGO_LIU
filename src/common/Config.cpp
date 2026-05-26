@@ -480,6 +480,36 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
     throw std::runtime_error(
       "Stage3 jump height highfreq deadband settings must be finite with positive sigma");
   }
+  if (config.enable_stage3_jump_adaptive_context_envelope &&
+      !enable_stage3_jump_regularizer) {
+    throw std::runtime_error(
+      "Stage3 jump adaptive context envelope requires at least one Stage3 jump regularizer");
+  }
+  if (!std::isfinite(config.stage3_jump_context_window_s) ||
+      !std::isfinite(config.stage3_jump_context_quantile) ||
+      !std::isfinite(config.stage3_jump_context_velocity_multiplier) ||
+      !std::isfinite(config.stage3_jump_context_height_multiplier) ||
+      !std::isfinite(config.stage3_jump_context_velocity_floor_mps) ||
+      !std::isfinite(config.stage3_jump_context_height_floor_m) ||
+      !std::isfinite(config.stage3_jump_context_velocity_cap_mps) ||
+      !std::isfinite(config.stage3_jump_context_height_cap_m) ||
+      config.stage3_jump_context_window_s <= 0.0 ||
+      config.stage3_jump_context_min_sample_count <= 0 ||
+      config.stage3_jump_context_quantile <= 0.0 ||
+      config.stage3_jump_context_quantile > 1.0 ||
+      config.stage3_jump_context_velocity_multiplier <= 0.0 ||
+      config.stage3_jump_context_height_multiplier <= 0.0 ||
+      config.stage3_jump_context_velocity_floor_mps < 0.0 ||
+      config.stage3_jump_context_height_floor_m < 0.0 ||
+      config.stage3_jump_context_velocity_cap_mps <= 0.0 ||
+      config.stage3_jump_context_height_cap_m <= 0.0 ||
+      config.stage3_jump_context_velocity_floor_mps >
+        config.stage3_jump_context_velocity_cap_mps ||
+      config.stage3_jump_context_height_floor_m >
+        config.stage3_jump_context_height_cap_m) {
+    throw std::runtime_error(
+      "Stage3 jump adaptive context envelope settings are invalid");
+  }
   if (config.initial_static_zupt_velocity_sigma_mps <= 0.0 ||
       config.initial_static_zaru_sigma_radps <= 0.0 ||
       config.initial_static_specific_force_sigma_mps2 <= 0.0 ||
@@ -1221,6 +1251,39 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
   } else if (normalized_key == "stage3_jump_height_highfreq_sigma_m") {
     config.stage3_jump_height_highfreq_sigma_m =
       ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_stage3_jump_adaptive_context_envelope") {
+    config.enable_stage3_jump_adaptive_context_envelope =
+      ParseBool(normalized_value);
+  } else if (normalized_key == "stage3_jump_context_window_s") {
+    config.stage3_jump_context_window_s =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_jump_context_min_sample_count") {
+    config.stage3_jump_context_min_sample_count =
+      ParseInt(normalized_value);
+  } else if (normalized_key == "stage3_jump_context_quantile") {
+    config.stage3_jump_context_quantile =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_jump_context_velocity_multiplier") {
+    config.stage3_jump_context_velocity_multiplier =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_jump_context_height_multiplier") {
+    config.stage3_jump_context_height_multiplier =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_jump_context_preserve_local_center") {
+    config.stage3_jump_context_preserve_local_center =
+      ParseBool(normalized_value);
+  } else if (normalized_key == "stage3_jump_context_velocity_floor_mps") {
+    config.stage3_jump_context_velocity_floor_mps =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_jump_context_height_floor_m") {
+    config.stage3_jump_context_height_floor_m =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_jump_context_velocity_cap_mps") {
+    config.stage3_jump_context_velocity_cap_mps =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_jump_context_height_cap_m") {
+    config.stage3_jump_context_height_cap_m =
+      ParseDouble(normalized_value);
   } else if (normalized_key == "static_alignment_duration_s") {
     config.static_alignment_duration_s = ParseDouble(normalized_value);
   } else if (normalized_key == "imu_dual_vector_window_s") {
@@ -1927,6 +1990,28 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.stage3_jump_height_highfreq_deadband_m << '\n'
     << "stage3_jump_height_highfreq_sigma_m="
     << config.stage3_jump_height_highfreq_sigma_m << '\n'
+    << "enable_stage3_jump_adaptive_context_envelope="
+    << (config.enable_stage3_jump_adaptive_context_envelope ? "true" : "false") << '\n'
+    << "stage3_jump_context_window_s="
+    << config.stage3_jump_context_window_s << '\n'
+    << "stage3_jump_context_min_sample_count="
+    << config.stage3_jump_context_min_sample_count << '\n'
+    << "stage3_jump_context_quantile="
+    << config.stage3_jump_context_quantile << '\n'
+    << "stage3_jump_context_velocity_multiplier="
+    << config.stage3_jump_context_velocity_multiplier << '\n'
+    << "stage3_jump_context_height_multiplier="
+    << config.stage3_jump_context_height_multiplier << '\n'
+    << "stage3_jump_context_preserve_local_center="
+    << (config.stage3_jump_context_preserve_local_center ? "true" : "false") << '\n'
+    << "stage3_jump_context_velocity_floor_mps="
+    << config.stage3_jump_context_velocity_floor_mps << '\n'
+    << "stage3_jump_context_height_floor_m="
+    << config.stage3_jump_context_height_floor_m << '\n'
+    << "stage3_jump_context_velocity_cap_mps="
+    << config.stage3_jump_context_velocity_cap_mps << '\n'
+    << "stage3_jump_context_height_cap_m="
+    << config.stage3_jump_context_height_cap_m << '\n'
     << "static_alignment_duration_s=" << config.static_alignment_duration_s << '\n'
     << "imu_dual_vector_window_s=" << config.imu_dual_vector_window_s << '\n'
     << "imu_dual_vector_min_sample_count=" << config.imu_dual_vector_min_sample_count << '\n'

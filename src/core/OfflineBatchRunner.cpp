@@ -1612,6 +1612,26 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.stage3_jump_height_highfreq_deadband_max_abs_overflow_residual_m =
     std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_jump_adaptive_context_envelope_enabled =
+    config_.enable_stage3_jump_adaptive_context_envelope;
+  run_result.run_summary.stage3_jump_context_envelope_profile_count = 0;
+  run_result.run_summary.stage3_jump_context_envelope_fallback_count = 0;
+  run_result.run_summary.stage3_jump_velocity_context_envelope_factor_count = 0;
+  run_result.run_summary.stage3_jump_velocity_context_envelope_skipped_count = 0;
+  run_result.run_summary.stage3_jump_velocity_context_envelope_max_abs_overflow_residual_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_jump_context_velocity_deadband_min_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_jump_context_velocity_deadband_max_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_jump_context_velocity_delta_deadband_min_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_jump_context_velocity_delta_deadband_max_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_jump_context_height_deadband_min_m =
+    std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_jump_context_height_deadband_max_m =
+    std::numeric_limits<double>::quiet_NaN();
   populate_initial_dynamic_static_summary();
   run_result.run_summary.vertical_jump_combined_imu_factor_count = 0;
   run_result.run_summary.vertical_jump_masked_imu_factor_count = 0;
@@ -1671,6 +1691,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.stage2_vehicle_nhc_state_diagnostics.clear();
   run_result.stage3_vertical_reference_diagnostics.clear();
   run_result.stage3_jump_regularizer_diagnostics.clear();
+  run_result.stage3_jump_context_envelope_profiles.clear();
   run_result.vertical_jump_masked_imu_diagnostics.clear();
   run_result.vertical_jump_impulse_diagnostics.clear();
   run_result.vertical_jump_bias_diagnostics.clear();
@@ -1815,11 +1836,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     jump_regularizer_request.reference = active_stage3_vertical_reference;
     jump_regularizer_request.state_timestamps = &state_timestamps;
     jump_regularizer_request.jump_windows = &run_result.body_z_seed_jump_windows;
+    jump_regularizer_request.initial_values = &optimization_initial_values;
     jump_regularizer_request.dynamic_start_index = graph_timeline.dynamic_start_index;
     jump_regularizer_request.graph = &graph_with_gnss;
     jump_regularizer_request.run_summary = &run_result.run_summary;
     jump_regularizer_request.diagnostics =
       &run_result.stage3_jump_regularizer_diagnostics;
+    jump_regularizer_request.context_profiles =
+      &run_result.stage3_jump_context_envelope_profiles;
     Stage3JumpRegularizerConstraintBuilder(
       std::move(jump_regularizer_request)).Build();
   }

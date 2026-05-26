@@ -1715,6 +1715,39 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     std::abs(config.stage3_jump_height_highfreq_sigma_m - 0.004) < 1e-15,
     "Stage3 jump height highfreq sigma should default to 0.004 m");
+  ExpectTrue(
+    !config.enable_stage3_jump_adaptive_context_envelope,
+    "Stage3 jump adaptive context envelope should default off");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_window_s - 2.0) < 1e-15,
+    "Stage3 jump context window should default to 2s");
+  ExpectTrue(
+    config.stage3_jump_context_min_sample_count == 20,
+    "Stage3 jump context min sample count should default to 20");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_quantile - 0.95) < 1e-15,
+    "Stage3 jump context quantile should default to p95");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_velocity_multiplier - 1.5) < 1e-15,
+    "Stage3 jump context velocity multiplier should default to 1.5");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_height_multiplier - 1.5) < 1e-15,
+    "Stage3 jump context height multiplier should default to 1.5");
+  ExpectTrue(
+    !config.stage3_jump_context_preserve_local_center,
+    "Stage3 jump context should default to lowpass-centered references");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_velocity_floor_mps - 0.005) < 1e-15,
+    "Stage3 jump context velocity floor should default to 0.005 m/s");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_height_floor_m - 0.001) < 1e-15,
+    "Stage3 jump context height floor should default to 1 mm");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_velocity_cap_mps - 0.05) < 1e-15,
+    "Stage3 jump context velocity cap should default to 0.05 m/s");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_height_cap_m - 0.006) < 1e-15,
+    "Stage3 jump context height cap should default to 6 mm");
 
   offline_lc_minimal::OverrideConfigField(
     config,
@@ -1836,6 +1869,50 @@ void TestStage3VerticalReferenceConfigValidation() {
     config,
     "stage3_jump_height_highfreq_sigma_m",
     "0.006");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_stage3_jump_adaptive_context_envelope",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_context_window_s",
+    "3.5");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_context_min_sample_count",
+    "12");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_context_quantile",
+    "0.9");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_context_velocity_multiplier",
+    "2.0");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_context_height_multiplier",
+    "1.25");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_context_preserve_local_center",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_context_velocity_floor_mps",
+    "0.006");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_context_height_floor_m",
+    "0.0015");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_context_velocity_cap_mps",
+    "0.07");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_jump_context_height_cap_m",
+    "0.007");
   ExpectTrue(config.enable_stage3_vertical_reference_optimization, "Stage3 enable flag should parse");
   ExpectTrue(
     std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.03) < 1e-15,
@@ -1920,6 +1997,39 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     std::abs(config.stage3_jump_height_highfreq_sigma_m - 0.006) < 1e-15,
     "Stage3 jump height highfreq sigma should parse");
+  ExpectTrue(
+    config.enable_stage3_jump_adaptive_context_envelope,
+    "Stage3 jump adaptive context envelope flag should parse");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_window_s - 3.5) < 1e-15,
+    "Stage3 jump context window should parse");
+  ExpectTrue(
+    config.stage3_jump_context_min_sample_count == 12,
+    "Stage3 jump context sample count should parse");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_quantile - 0.9) < 1e-15,
+    "Stage3 jump context quantile should parse");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_velocity_multiplier - 2.0) < 1e-15,
+    "Stage3 jump context velocity multiplier should parse");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_height_multiplier - 1.25) < 1e-15,
+    "Stage3 jump context height multiplier should parse");
+  ExpectTrue(
+    config.stage3_jump_context_preserve_local_center,
+    "Stage3 jump context local center flag should parse");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_velocity_floor_mps - 0.006) < 1e-15,
+    "Stage3 jump context velocity floor should parse");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_height_floor_m - 0.0015) < 1e-15,
+    "Stage3 jump context height floor should parse");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_velocity_cap_mps - 0.07) < 1e-15,
+    "Stage3 jump context velocity cap should parse");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_height_cap_m - 0.007) < 1e-15,
+    "Stage3 jump context height cap should parse");
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
   ExpectTrue(
     serialized.find("enable_stage3_vertical_reference_optimization=true") != std::string::npos,
@@ -2008,6 +2118,39 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("stage3_jump_height_highfreq_sigma_m=0.006") != std::string::npos,
     "Stage3 jump height highfreq sigma should be serialized");
+  ExpectTrue(
+    serialized.find("enable_stage3_jump_adaptive_context_envelope=true") != std::string::npos,
+    "Stage3 jump adaptive context flag should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_context_window_s=3.5") != std::string::npos,
+    "Stage3 jump context window should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_context_min_sample_count=12") != std::string::npos,
+    "Stage3 jump context sample count should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_context_quantile=0.9") != std::string::npos,
+    "Stage3 jump context quantile should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_context_velocity_multiplier=2") != std::string::npos,
+    "Stage3 jump context velocity multiplier should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_context_height_multiplier=1.25") != std::string::npos,
+    "Stage3 jump context height multiplier should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_context_preserve_local_center=true") != std::string::npos,
+    "Stage3 jump context local center flag should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_context_velocity_floor_mps=0.006") != std::string::npos,
+    "Stage3 jump context velocity floor should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_context_height_floor_m=0.0015") != std::string::npos,
+    "Stage3 jump context height floor should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_context_velocity_cap_mps=0.07") != std::string::npos,
+    "Stage3 jump context velocity cap should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_jump_context_height_cap_m=0.007") != std::string::npos,
+    "Stage3 jump context height cap should be serialized");
   offline_lc_minimal::ValidateConfig(config);
 
   config = offline_lc_minimal::DefaultConfig();
@@ -2199,6 +2342,30 @@ void TestStage3VerticalReferenceConfigValidation() {
     threw = std::string(exception.what()).find("height highfreq deadband") != std::string::npos;
   }
   ExpectTrue(threw, "negative Stage3 jump height deadband should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage3_jump_adaptive_context_envelope = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("adaptive context envelope") != std::string::npos;
+  }
+  ExpectTrue(threw, "adaptive Stage3 jump context should require a regularizer");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage3_vertical_reference_optimization = true;
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_stage3_jump_velocity_smoothness_regularizer = true;
+  config.enable_stage3_jump_adaptive_context_envelope = true;
+  config.stage3_jump_context_quantile = 1.5;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("adaptive context envelope settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "invalid Stage3 jump context quantile should be rejected");
 }
 
 void TestStage2LowfreqVerticalReferenceConfigValidation() {
@@ -2769,6 +2936,32 @@ void TestStage3ExperimentConfigLoads() {
   ExpectTrue(
     std::abs(jump_regularized_config.stage3_jump_height_highfreq_sigma_m - 0.004) < 1e-15,
     "Stage3 jump-regularized config should use 4 mm height sigma");
+
+  const auto jump_context_config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1rtkjumpcut1_stage3_anchor_5mm_jump_context_envelope.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    jump_context_config.enable_stage3_vertical_reference_optimization,
+    "Stage3 jump context config should enable Stage3");
+  ExpectTrue(
+    jump_context_config.enable_stage3_jump_velocity_smoothness_regularizer,
+    "Stage3 jump context config should keep velocity regularization enabled");
+  ExpectTrue(
+    jump_context_config.enable_stage3_jump_height_highfreq_deadband,
+    "Stage3 jump context config should keep height deadband enabled");
+  ExpectTrue(
+    jump_context_config.enable_stage3_jump_adaptive_context_envelope,
+    "Stage3 jump context config should enable adaptive context envelopes");
+  ExpectTrue(
+    !jump_context_config.stage3_jump_context_preserve_local_center,
+    "Stage3 jump context config should keep lowpass-centered references");
+  ExpectTrue(
+    std::abs(jump_context_config.stage3_jump_context_velocity_floor_mps - 0.005) < 1e-15,
+    "Stage3 jump context config should use 5 mm/s velocity floor");
+  ExpectTrue(
+    std::abs(jump_context_config.stage3_jump_context_height_cap_m - 0.006) < 1e-15,
+    "Stage3 jump context config should use 6 mm height cap");
 }
 
 void TestStage2LowfreqExperimentConfigLoads() {

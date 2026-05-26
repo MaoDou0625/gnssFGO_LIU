@@ -1552,8 +1552,8 @@ void WriteStage3JumpRegularizerDiagnosticsCsv(
   stream << std::setprecision(17);
   stream
     << "constraint_type,window_index,source_window_count,state_index_i,state_index_j,"
-       "start_time_s,end_time_s,dt_s,reference_up_m,deadband,sigma,"
-       "factor_added,skip_reason,optimized_delta_vz_mps,optimized_up_m,"
+       "start_time_s,end_time_s,dt_s,reference_up_m,reference_vz_mps,deadband,sigma,"
+       "factor_added,skip_reason,optimized_delta_vz_mps,optimized_vz_mps,optimized_up_m,"
        "raw_residual,residual\n";
   for (const auto &row : rows) {
     stream << row.constraint_type << ','
@@ -1565,14 +1565,65 @@ void WriteStage3JumpRegularizerDiagnosticsCsv(
            << row.end_time_s << ','
            << row.dt_s << ','
            << row.reference_up_m << ','
+           << row.reference_vz_mps << ','
            << row.deadband << ','
            << row.sigma << ','
            << (row.factor_added ? 1 : 0) << ','
            << row.skip_reason << ','
            << row.optimized_delta_vz_mps << ','
+           << row.optimized_vz_mps << ','
            << row.optimized_up_m << ','
            << row.raw_residual << ','
            << row.residual << '\n';
+  }
+}
+
+void WriteStage3JumpContextEnvelopeProfilesCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage3JumpContextEnvelopeProfileRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "profile_index,window_index,source_window_count,window_start_time_s,window_end_time_s,"
+       "pre_context_start_time_s,pre_context_end_time_s,post_context_start_time_s,"
+       "post_context_end_time_s,velocity_sample_count,velocity_delta_sample_count,"
+       "height_sample_count,context_vz_median_mps,context_vz_residual_median_mps,"
+       "velocity_reference_offset_mps,context_vz_p95_abs_centered_mps,"
+       "context_delta_vz_p95_abs_mps,context_height_median_residual_m,"
+       "height_reference_offset_m,context_height_p95_abs_centered_m,velocity_deadband_mps,"
+       "velocity_delta_deadband_mps,height_deadband_m,velocity_fallback,"
+       "velocity_delta_fallback,height_fallback,fallback_reason\n";
+  for (const auto &row : rows) {
+    stream << row.profile_index << ','
+           << row.window_index << ','
+           << row.source_window_count << ','
+           << row.window_start_time_s << ','
+           << row.window_end_time_s << ','
+           << row.pre_context_start_time_s << ','
+           << row.pre_context_end_time_s << ','
+           << row.post_context_start_time_s << ','
+           << row.post_context_end_time_s << ','
+           << row.velocity_sample_count << ','
+           << row.velocity_delta_sample_count << ','
+           << row.height_sample_count << ','
+           << row.context_vz_median_mps << ','
+           << row.context_vz_residual_median_mps << ','
+           << row.velocity_reference_offset_mps << ','
+           << row.context_vz_p95_abs_centered_mps << ','
+           << row.context_delta_vz_p95_abs_mps << ','
+           << row.context_height_median_residual_m << ','
+           << row.height_reference_offset_m << ','
+           << row.context_height_p95_abs_centered_m << ','
+           << row.velocity_deadband_mps << ','
+           << row.velocity_delta_deadband_mps << ','
+           << row.height_deadband_m << ','
+           << (row.velocity_fallback ? 1 : 0) << ','
+           << (row.velocity_delta_fallback ? 1 : 0) << ','
+           << (row.height_fallback ? 1 : 0) << ','
+           << row.fallback_reason << '\n';
   }
 }
 

@@ -270,14 +270,46 @@ struct Stage3JumpRegularizerDiagnosticRow {
   double end_time_s = std::numeric_limits<double>::quiet_NaN();
   double dt_s = std::numeric_limits<double>::quiet_NaN();
   double reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  double reference_vz_mps = std::numeric_limits<double>::quiet_NaN();
   double deadband = std::numeric_limits<double>::quiet_NaN();
   double sigma = std::numeric_limits<double>::quiet_NaN();
   bool factor_added = false;
   std::string skip_reason = "UNSET";
   double optimized_delta_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  double optimized_vz_mps = std::numeric_limits<double>::quiet_NaN();
   double optimized_up_m = std::numeric_limits<double>::quiet_NaN();
   double raw_residual = std::numeric_limits<double>::quiet_NaN();
   double residual = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct Stage3JumpContextEnvelopeProfileRow {
+  std::size_t profile_index = 0;
+  std::size_t window_index = 0;
+  std::size_t source_window_count = 0;
+  double window_start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double window_end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double pre_context_start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double pre_context_end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double post_context_start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double post_context_end_time_s = std::numeric_limits<double>::quiet_NaN();
+  std::size_t velocity_sample_count = 0;
+  std::size_t velocity_delta_sample_count = 0;
+  std::size_t height_sample_count = 0;
+  double context_vz_median_mps = std::numeric_limits<double>::quiet_NaN();
+  double context_vz_residual_median_mps = std::numeric_limits<double>::quiet_NaN();
+  double velocity_reference_offset_mps = std::numeric_limits<double>::quiet_NaN();
+  double context_vz_p95_abs_centered_mps = std::numeric_limits<double>::quiet_NaN();
+  double context_delta_vz_p95_abs_mps = std::numeric_limits<double>::quiet_NaN();
+  double context_height_median_residual_m = std::numeric_limits<double>::quiet_NaN();
+  double height_reference_offset_m = std::numeric_limits<double>::quiet_NaN();
+  double context_height_p95_abs_centered_m = std::numeric_limits<double>::quiet_NaN();
+  double velocity_deadband_mps = std::numeric_limits<double>::quiet_NaN();
+  double velocity_delta_deadband_mps = std::numeric_limits<double>::quiet_NaN();
+  double height_deadband_m = std::numeric_limits<double>::quiet_NaN();
+  bool velocity_fallback = false;
+  bool velocity_delta_fallback = false;
+  bool height_fallback = false;
+  std::string fallback_reason = "NONE";
 };
 
 struct LateStaticFeatureDiagnosticRow {

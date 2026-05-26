@@ -301,6 +301,25 @@ struct RunSummary {
     std::numeric_limits<double>::quiet_NaN();
   double stage3_jump_height_highfreq_deadband_max_abs_overflow_residual_m =
     std::numeric_limits<double>::quiet_NaN();
+  bool stage3_jump_adaptive_context_envelope_enabled = false;
+  std::size_t stage3_jump_context_envelope_profile_count = 0;
+  std::size_t stage3_jump_context_envelope_fallback_count = 0;
+  std::size_t stage3_jump_velocity_context_envelope_factor_count = 0;
+  std::size_t stage3_jump_velocity_context_envelope_skipped_count = 0;
+  double stage3_jump_velocity_context_envelope_max_abs_overflow_residual_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_jump_context_velocity_deadband_min_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_jump_context_velocity_deadband_max_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_jump_context_velocity_delta_deadband_min_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_jump_context_velocity_delta_deadband_max_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_jump_context_height_deadband_min_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_jump_context_height_deadband_max_m =
+    std::numeric_limits<double>::quiet_NaN();
   std::size_t vertical_jump_combined_imu_factor_count = 0;
   std::size_t vertical_jump_masked_imu_factor_count = 0;
   std::size_t vertical_jump_impulse_factor_count = 0;
@@ -811,6 +830,30 @@ struct RunSummary {
         << stage3_jump_height_highfreq_deadband_max_abs_raw_residual_m << '\n'
         << "stage3_jump_height_highfreq_deadband_max_abs_overflow_residual_m="
         << stage3_jump_height_highfreq_deadband_max_abs_overflow_residual_m << '\n'
+        << "stage3_jump_adaptive_context_envelope_enabled="
+        << (stage3_jump_adaptive_context_envelope_enabled ? "true" : "false") << '\n'
+        << "stage3_jump_context_envelope_profile_count="
+        << stage3_jump_context_envelope_profile_count << '\n'
+        << "stage3_jump_context_envelope_fallback_count="
+        << stage3_jump_context_envelope_fallback_count << '\n'
+        << "stage3_jump_velocity_context_envelope_factor_count="
+        << stage3_jump_velocity_context_envelope_factor_count << '\n'
+        << "stage3_jump_velocity_context_envelope_skipped_count="
+        << stage3_jump_velocity_context_envelope_skipped_count << '\n'
+        << "stage3_jump_velocity_context_envelope_max_abs_overflow_residual_mps="
+        << stage3_jump_velocity_context_envelope_max_abs_overflow_residual_mps << '\n'
+        << "stage3_jump_context_velocity_deadband_min_mps="
+        << stage3_jump_context_velocity_deadband_min_mps << '\n'
+        << "stage3_jump_context_velocity_deadband_max_mps="
+        << stage3_jump_context_velocity_deadband_max_mps << '\n'
+        << "stage3_jump_context_velocity_delta_deadband_min_mps="
+        << stage3_jump_context_velocity_delta_deadband_min_mps << '\n'
+        << "stage3_jump_context_velocity_delta_deadband_max_mps="
+        << stage3_jump_context_velocity_delta_deadband_max_mps << '\n'
+        << "stage3_jump_context_height_deadband_min_m="
+        << stage3_jump_context_height_deadband_min_m << '\n'
+        << "stage3_jump_context_height_deadband_max_m="
+        << stage3_jump_context_height_deadband_max_m << '\n'
         << "vertical_jump_combined_imu_factor_count=" << vertical_jump_combined_imu_factor_count << '\n'
         << "vertical_jump_masked_imu_factor_count=" << vertical_jump_masked_imu_factor_count << '\n'
         << "vertical_jump_impulse_factor_count=" << vertical_jump_impulse_factor_count << '\n'
@@ -1007,6 +1050,7 @@ struct OfflineRunResult {
   std::vector<Stage3VerticalReferenceDiagnosticRow> stage2_lowfreq_vertical_reference_diagnostics;
   std::vector<Stage3VerticalReferenceDiagnosticRow> stage3_vertical_reference_diagnostics;
   std::vector<Stage3JumpRegularizerDiagnosticRow> stage3_jump_regularizer_diagnostics;
+  std::vector<Stage3JumpContextEnvelopeProfileRow> stage3_jump_context_envelope_profiles;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;
   std::vector<VerticalJumpImpulseDiagnosticRow> vertical_jump_impulse_diagnostics;
   std::vector<VerticalJumpBiasDiagnosticRow> vertical_jump_bias_diagnostics;

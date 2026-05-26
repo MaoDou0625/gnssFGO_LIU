@@ -166,6 +166,10 @@ void WriteStage3JumpRegularizerDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<Stage3JumpRegularizerDiagnosticRow> &rows);
 
+void WriteStage3JumpContextEnvelopeProfilesCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage3JumpContextEnvelopeProfileRow> &rows);
+
 void WriteVerticalJumpMaskedImuDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<VerticalJumpMaskedImuDiagnosticRow> &rows);

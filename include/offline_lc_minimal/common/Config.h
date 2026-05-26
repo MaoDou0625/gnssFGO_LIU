@@ -164,6 +164,17 @@ struct OfflineRunnerConfig {
   bool enable_stage3_jump_height_highfreq_deadband = false;
   double stage3_jump_height_highfreq_deadband_m = 0.002;
   double stage3_jump_height_highfreq_sigma_m = 0.004;
+  bool enable_stage3_jump_adaptive_context_envelope = false;
+  double stage3_jump_context_window_s = 2.0;
+  int stage3_jump_context_min_sample_count = 20;
+  double stage3_jump_context_quantile = 0.95;
+  double stage3_jump_context_velocity_multiplier = 1.5;
+  double stage3_jump_context_height_multiplier = 1.5;
+  bool stage3_jump_context_preserve_local_center = false;
+  double stage3_jump_context_velocity_floor_mps = 0.005;
+  double stage3_jump_context_height_floor_m = 0.001;
+  double stage3_jump_context_velocity_cap_mps = 0.05;
+  double stage3_jump_context_height_cap_m = 0.006;
   double static_alignment_duration_s = 0.0;
   double imu_dual_vector_window_s = 100.0;
   int imu_dual_vector_min_sample_count = 1000;

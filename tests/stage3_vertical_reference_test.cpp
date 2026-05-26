@@ -418,6 +418,26 @@ void TestVerticalVelocityDeltaDeadbandFactor() {
   ExpectNear(negative_residual[0], -0.03, 1.0e-12, "negative overflow should keep sign");
   ExpectNear(h_i(0, 2), -1.0, 1.0e-12, "negative overflow H_i should match delta-v Jacobian");
   ExpectNear(h_j(0, 2), 1.0, 1.0e-12, "negative overflow H_j should match delta-v Jacobian");
+
+  offline_lc_minimal::factor::VerticalVelocityDeadbandFactor velocity_factor(
+    gtsam::symbol_shorthand::V(2),
+    0.10,
+    0.02,
+    noise);
+  gtsam::Matrix h;
+  const auto velocity_inside =
+    velocity_factor.evaluateError(gtsam::Vector3(0.0, 0.0, 0.115), h);
+  ExpectNear(velocity_inside[0], 0.0, 1.0e-12, "inside velocity envelope residual should be zero");
+  ExpectNear(h(0, 2), 0.0, 1.0e-12, "inside velocity envelope Jacobian should be zero");
+
+  const auto velocity_outside =
+    velocity_factor.evaluateError(gtsam::Vector3(0.0, 0.0, 0.15), h);
+  ExpectNear(
+    velocity_outside[0],
+    0.03,
+    1.0e-12,
+    "outside velocity envelope residual should be overflow from target");
+  ExpectNear(h(0, 2), 1.0, 1.0e-12, "outside velocity envelope Jacobian should be active");
 }
 
 void TestStage3JumpRegularizerAddsOnlyJumpWindowFactors() {
@@ -498,6 +518,196 @@ void TestStage3JumpRegularizerAddsOnlyJumpWindowFactors() {
     0.002,
     1.0e-12,
     "height regularizer should report deadband overflow residual");
+}
+
+void TestStage3JumpAdaptiveContextEnvelopeUsesNearbyFluctuation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_nhc_constraint = false;
+  config.vertical_velocity_delta_jump_padding_s = 0.0;
+  config.enable_stage3_jump_velocity_smoothness_regularizer = true;
+  config.stage3_jump_velocity_smoothness_deadband_mps = 0.02;
+  config.stage3_jump_velocity_smoothness_sigma_mps = 0.03;
+  config.enable_stage3_jump_height_highfreq_deadband = true;
+  config.stage3_jump_height_highfreq_deadband_m = 0.010;
+  config.stage3_jump_height_highfreq_sigma_m = 0.004;
+  config.enable_stage3_jump_adaptive_context_envelope = true;
+  config.stage3_jump_context_window_s = 2.0;
+  config.stage3_jump_context_min_sample_count = 2;
+  config.stage3_jump_context_quantile = 0.95;
+  config.stage3_jump_context_velocity_multiplier = 1.0;
+  config.stage3_jump_context_height_multiplier = 1.0;
+  config.stage3_jump_context_preserve_local_center = true;
+  config.stage3_jump_context_velocity_floor_mps = 0.0;
+  config.stage3_jump_context_height_floor_m = 0.0;
+  config.stage3_jump_context_velocity_cap_mps = 0.20;
+  config.stage3_jump_context_height_cap_m = 0.006;
+
+  const std::vector<double> state_timestamps{0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0};
+  offline_lc_minimal::Stage3VerticalReference reference;
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    offline_lc_minimal::Stage3VerticalReferenceDiagnosticRow row;
+    row.state_index = index;
+    row.time_s = state_timestamps[index];
+    row.stage2_lowpass_up_m = 10.0;
+    row.stage2_up_m = 10.0;
+    row.skip_reason = "PLANNED";
+    reference.rows.push_back(row);
+  }
+  reference.rows[1].stage2_up_m = 10.001;
+  reference.rows[2].stage2_up_m = 9.999;
+  reference.rows[5].stage2_up_m = 10.002;
+  reference.rows[6].stage2_up_m = 9.998;
+
+  std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows(1U);
+  jump_windows.front().start_time_s = 3.0;
+  jump_windows.front().end_time_s = 4.0;
+
+  gtsam::Values initial_values;
+  const std::vector<double> initial_vz{0.0, 0.10, 0.11, 0.50, -0.40, 0.09, 0.105};
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    initial_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(0.0, 0.0, initial_vz[index]));
+  }
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::Stage3JumpRegularizerDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::Stage3JumpContextEnvelopeProfileRow> profiles;
+  offline_lc_minimal::Stage3JumpRegularizerConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.reference = &reference;
+  request.jump_windows = &jump_windows;
+  request.initial_values = &initial_values;
+  request.dynamic_start_index = 0U;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  request.context_profiles = &profiles;
+  offline_lc_minimal::Stage3JumpRegularizerConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(profiles.size() == 1U, "adaptive context envelope should output one profile");
+  ExpectTrue(
+    !profiles.front().velocity_fallback &&
+      !profiles.front().velocity_delta_fallback &&
+      !profiles.front().height_fallback,
+    "profile should use nearby samples without fallback");
+  ExpectTrue(
+    profiles.front().height_deadband_m < config.stage3_jump_height_highfreq_deadband_m,
+    "adaptive height deadband should tighten to local fluctuation");
+  ExpectNear(
+    profiles.front().context_vz_median_mps,
+    0.1025,
+    1.0e-12,
+    "adaptive velocity envelope should center on nearby lowpass velocity plus residual median");
+  ExpectNear(
+    profiles.front().context_vz_residual_median_mps,
+    0.1025,
+    1.0e-12,
+    "profile should expose the local velocity residual median");
+  ExpectTrue(
+    summary.stage3_jump_velocity_context_envelope_factor_count == 2U,
+    "adaptive context should add per-state velocity envelope factors in jump window");
+  ExpectTrue(
+    std::any_of(
+      diagnostics.begin(),
+      diagnostics.end(),
+      [](const offline_lc_minimal::Stage3JumpRegularizerDiagnosticRow &row) {
+        return row.constraint_type == "velocity_context_envelope" &&
+               row.factor_added &&
+               std::abs(row.reference_vz_mps - 0.1025) < 1.0e-12;
+      }),
+    "diagnostics should expose the adaptive velocity context envelope target");
+
+  gtsam::Values optimized_values;
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    optimized_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(0.0, 0.0, initial_vz[index]));
+    optimized_values.insert(gtsam::symbol_shorthand::X(index), MakePose(10.0));
+  }
+  optimized_values.update(gtsam::symbol_shorthand::V(3), gtsam::Vector3(0.0, 0.0, 0.16));
+  offline_lc_minimal::PopulateStage3JumpRegularizerDiagnostics(
+    optimized_values,
+    diagnostics,
+    summary);
+  ExpectTrue(
+    summary.stage3_jump_velocity_context_envelope_max_abs_overflow_residual_mps > 0.0,
+    "optimized velocity above the local context envelope should report overflow");
+}
+
+void TestStage3JumpAdaptiveContextEnvelopeSkipsVelocityWhenContextInsufficient() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_nhc_constraint = false;
+  config.vertical_velocity_delta_jump_padding_s = 0.0;
+  config.enable_stage3_jump_velocity_smoothness_regularizer = true;
+  config.stage3_jump_velocity_smoothness_deadband_mps = 0.02;
+  config.stage3_jump_velocity_smoothness_sigma_mps = 0.03;
+  config.enable_stage3_jump_adaptive_context_envelope = true;
+  config.stage3_jump_context_window_s = 0.25;
+  config.stage3_jump_context_min_sample_count = 10;
+
+  const std::vector<double> state_timestamps{0.0, 1.0, 2.0, 3.0, 4.0};
+  offline_lc_minimal::Stage3VerticalReference reference;
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    offline_lc_minimal::Stage3VerticalReferenceDiagnosticRow row;
+    row.state_index = index;
+    row.time_s = state_timestamps[index];
+    row.stage2_up_m = 10.0;
+    row.stage2_lowpass_up_m = 10.0;
+    row.skip_reason = "PLANNED";
+    reference.rows.push_back(row);
+  }
+
+  std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows(1U);
+  jump_windows.front().start_time_s = 2.0;
+  jump_windows.front().end_time_s = 3.0;
+
+  gtsam::Values initial_values;
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    initial_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(0.0, 0.0, 0.0));
+  }
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::Stage3JumpRegularizerDiagnosticRow> diagnostics;
+  std::vector<offline_lc_minimal::Stage3JumpContextEnvelopeProfileRow> profiles;
+  offline_lc_minimal::Stage3JumpRegularizerConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.reference = &reference;
+  request.jump_windows = &jump_windows;
+  request.initial_values = &initial_values;
+  request.dynamic_start_index = 0U;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  request.context_profiles = &profiles;
+  offline_lc_minimal::Stage3JumpRegularizerConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(profiles.size() == 1U, "fallback test should still output one profile");
+  ExpectTrue(
+    profiles.front().velocity_fallback,
+    "insufficient nearby velocity samples should mark velocity fallback");
+  ExpectTrue(
+    summary.stage3_jump_velocity_context_envelope_factor_count == 0U,
+    "insufficient context should not add the new absolute velocity envelope");
+  ExpectTrue(
+    summary.stage3_jump_velocity_context_envelope_skipped_count > 0U,
+    "insufficient context should be visible in diagnostics");
+  ExpectTrue(
+    std::any_of(
+      diagnostics.begin(),
+      diagnostics.end(),
+      [](const offline_lc_minimal::Stage3JumpRegularizerDiagnosticRow &row) {
+        return row.constraint_type == "velocity_context_envelope" &&
+               !row.factor_added &&
+               row.skip_reason == "INSUFFICIENT_CONTEXT";
+      }),
+    "diagnostics should label skipped velocity context envelope rows");
 }
 
 void TestTimelineAlignerResamplesSegmentedStage2Reference() {
@@ -1064,6 +1274,12 @@ int main() {
     RunTest(
       "TestStage3JumpRegularizerAddsOnlyJumpWindowFactors",
       TestStage3JumpRegularizerAddsOnlyJumpWindowFactors);
+    RunTest(
+      "TestStage3JumpAdaptiveContextEnvelopeUsesNearbyFluctuation",
+      TestStage3JumpAdaptiveContextEnvelopeUsesNearbyFluctuation);
+    RunTest(
+      "TestStage3JumpAdaptiveContextEnvelopeSkipsVelocityWhenContextInsufficient",
+      TestStage3JumpAdaptiveContextEnvelopeSkipsVelocityWhenContextInsufficient);
     RunTest(
       "TestTimelineAlignerResamplesSegmentedStage2Reference",
       TestTimelineAlignerResamplesSegmentedStage2Reference);
