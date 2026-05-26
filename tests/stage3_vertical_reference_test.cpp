@@ -121,6 +121,17 @@ void TestProfilePlannerCanHoldInitialDynamicStaticReference() {
   const auto reference =
     offline_lc_minimal::Stage3VerticalReferenceProfilePlanner(std::move(request)).Plan();
 
+  auto baseline_config = config;
+  baseline_config.enable_stage3_initial_dynamic_static_reference_hold = false;
+  offline_lc_minimal::Stage3VerticalReferenceProfilePlanRequest baseline_request;
+  baseline_request.config = &baseline_config;
+  baseline_request.stage2_trajectory = &trajectory;
+  baseline_request.dynamic_start_index = 3U;
+  baseline_request.dynamic_start_time_s = 3.0;
+  const auto baseline_reference =
+    offline_lc_minimal::Stage3VerticalReferenceProfilePlanner(
+      std::move(baseline_request)).Plan();
+
   ExpectNear(
     reference.rows[3].stage2_lowpass_up_m,
     10.0,
@@ -134,6 +145,10 @@ void TestProfilePlannerCanHoldInitialDynamicStaticReference() {
   ExpectTrue(
     std::abs(reference.rows[6].stage2_lowpass_up_m - 10.0) > 1.0e-3,
     "rows after the hold window should return to the lowpass profile");
+  ExpectTrue(
+    std::abs(reference.rows[6].stage2_lowpass_up_m - 10.0) <
+      std::abs(baseline_reference.rows[6].stage2_lowpass_up_m - 10.0),
+    "static hold should feed the lowpass input and keep the post-hold transition closer to static height");
   ExpectNear(
     reference.rows[3].lowpass_delta_m,
     10.0 - trajectory[3].enu_position_m.z(),

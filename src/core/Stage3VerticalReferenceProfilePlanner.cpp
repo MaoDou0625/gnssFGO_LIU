@@ -16,6 +16,19 @@ bool CanFilterRow(const TrajectoryRow &row) {
   return std::isfinite(row.time_s) && std::isfinite(row.enu_position_m.z());
 }
 
+std::vector<double> BuildRawFilterInputUp(
+  const std::vector<TrajectoryRow> &trajectory) {
+  std::vector<double> input_up_m(
+    trajectory.size(),
+    std::numeric_limits<double>::quiet_NaN());
+  for (std::size_t index = 0; index < trajectory.size(); ++index) {
+    if (CanFilterRow(trajectory[index])) {
+      input_up_m[index] = trajectory[index].enu_position_m.z();
+    }
+  }
+  return input_up_m;
+}
+
 double LowpassAlpha(const double dt_s, const double tau_s) {
   if (dt_s <= 0.0 || !std::isfinite(dt_s)) {
     return 0.0;
@@ -27,6 +40,7 @@ void FilterSegment(
   const OfflineRunnerConfig &config,
   const std::vector<std::size_t> &indices,
   const std::vector<TrajectoryRow> &trajectory,
+  const std::vector<double> &input_up_m,
   std::vector<double> &lowpass_up_m) {
   if (indices.empty()) {
     return;
@@ -34,13 +48,13 @@ void FilterSegment(
 
   const double tau_s = 1.0 / (kTwoPi * config.stage3_vertical_reference_lowpass_cutoff_hz);
   std::vector<double> forward(indices.size(), 0.0);
-  forward.front() = trajectory[indices.front()].enu_position_m.z();
+  forward.front() = input_up_m[indices.front()];
 
   for (std::size_t i = 1; i < indices.size(); ++i) {
     const auto &prev_row = trajectory[indices[i - 1U]];
     const auto &row = trajectory[indices[i]];
     const double alpha = LowpassAlpha(row.time_s - prev_row.time_s, tau_s);
-    forward[i] = forward[i - 1U] + alpha * (row.enu_position_m.z() - forward[i - 1U]);
+    forward[i] = forward[i - 1U] + alpha * (input_up_m[indices[i]] - forward[i - 1U]);
   }
 
   std::vector<double> zero_phase = forward;
@@ -59,15 +73,16 @@ void FilterSegment(
 
 std::vector<double> BuildLowpassProfile(
   const OfflineRunnerConfig &config,
-  const std::vector<TrajectoryRow> &trajectory) {
+  const std::vector<TrajectoryRow> &trajectory,
+  const std::vector<double> &input_up_m) {
   std::vector<double> lowpass_up_m(
     trajectory.size(),
     std::numeric_limits<double>::quiet_NaN());
   std::vector<std::size_t> segment;
   segment.reserve(trajectory.size());
   for (std::size_t index = 0; index < trajectory.size(); ++index) {
-    if (!CanFilterRow(trajectory[index])) {
-      FilterSegment(config, segment, trajectory, lowpass_up_m);
+    if (!CanFilterRow(trajectory[index]) || !std::isfinite(input_up_m[index])) {
+      FilterSegment(config, segment, trajectory, input_up_m, lowpass_up_m);
       segment.clear();
       continue;
     }
@@ -75,13 +90,13 @@ std::vector<double> BuildLowpassProfile(
       const auto &prev_row = trajectory[segment.back()];
       const auto &row = trajectory[index];
       if (row.time_s <= prev_row.time_s) {
-        FilterSegment(config, segment, trajectory, lowpass_up_m);
+        FilterSegment(config, segment, trajectory, input_up_m, lowpass_up_m);
         segment.clear();
       }
     }
     segment.push_back(index);
   }
-  FilterSegment(config, segment, trajectory, lowpass_up_m);
+  FilterSegment(config, segment, trajectory, input_up_m, lowpass_up_m);
   return lowpass_up_m;
 }
 
@@ -134,12 +149,12 @@ bool FindInitialDynamicStaticReferenceUp(
   return false;
 }
 
-void ApplyInitialDynamicStaticReferenceHold(
+void ApplyInitialDynamicStaticHoldToProfile(
   const OfflineRunnerConfig &config,
   const std::size_t dynamic_start_index,
   const double dynamic_start_time_s,
   const std::vector<TrajectoryRow> &trajectory,
-  std::vector<double> &lowpass_up_m) {
+  std::vector<double> &up_profile_m) {
   if (!config.enable_stage3_initial_dynamic_static_reference_hold ||
       config.stage3_initial_dynamic_static_reference_hold_duration_s <= 0.0) {
     return;
@@ -171,22 +186,22 @@ void ApplyInitialDynamicStaticReferenceHold(
 
   for (std::size_t index = 0; index < trajectory.size(); ++index) {
     const auto &row = trajectory[index];
-    if (!std::isfinite(row.time_s) || !std::isfinite(lowpass_up_m[index]) ||
+    if (!std::isfinite(row.time_s) || !std::isfinite(up_profile_m[index]) ||
         (has_dynamic_start_index
            ? index < dynamic_start_index
            : row.time_s < hold_start_time_s)) {
       continue;
     }
     if (row.time_s <= hold_end_time_s) {
-      lowpass_up_m[index] = static_reference_up_m;
+      up_profile_m[index] = static_reference_up_m;
       continue;
     }
     if (blend_duration_s > 0.0 && row.time_s < blend_end_time_s) {
       const double blend_fraction =
         (row.time_s - hold_end_time_s) / blend_duration_s;
-      lowpass_up_m[index] =
+      up_profile_m[index] =
         (1.0 - blend_fraction) * static_reference_up_m +
-        blend_fraction * lowpass_up_m[index];
+        blend_fraction * up_profile_m[index];
     }
   }
 }
@@ -206,9 +221,20 @@ Stage3VerticalReference Stage3VerticalReferenceProfilePlanner::Plan() const {
     throw std::runtime_error("Stage3 vertical reference requires a non-empty Stage2 trajectory");
   }
 
+  std::vector<double> filter_input_up_m =
+    BuildRawFilterInputUp(*request_.stage2_trajectory);
+  ApplyInitialDynamicStaticHoldToProfile(
+    *request_.config,
+    request_.dynamic_start_index,
+    request_.dynamic_start_time_s,
+    *request_.stage2_trajectory,
+    filter_input_up_m);
   std::vector<double> lowpass_up_m =
-    BuildLowpassProfile(*request_.config, *request_.stage2_trajectory);
-  ApplyInitialDynamicStaticReferenceHold(
+    BuildLowpassProfile(
+      *request_.config,
+      *request_.stage2_trajectory,
+      filter_input_up_m);
+  ApplyInitialDynamicStaticHoldToProfile(
     *request_.config,
     request_.dynamic_start_index,
     request_.dynamic_start_time_s,
