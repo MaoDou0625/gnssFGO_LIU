@@ -493,6 +493,47 @@ void TestStage3RunnerAlwaysDisablesSegmentedBatch() {
     "Stage3 pass should always disable segmented batch even if the compatibility flag is false");
 }
 
+void TestStage3RunnerCanDisableFinalVehicleNHCOnly() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage3_vertical_reference_optimization = true;
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_stage2_vehicle_nhc_constraint = true;
+  config.stage3_disable_stage2_vehicle_nhc_constraint = true;
+
+  std::vector<bool> vehicle_nhc_flags;
+  std::vector<bool> child_disable_flags;
+  offline_lc_minimal::Stage3VerticalReferenceOptimizationRequest request;
+  request.config = config;
+  request.dataset = offline_lc_minimal::DataSet{};
+  request.run_once = [&](const offline_lc_minimal::OfflineRunnerConfig &run_config,
+                         std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> stage2_reference,
+                         std::shared_ptr<const offline_lc_minimal::Stage3VerticalReference> stage3_reference,
+                         offline_lc_minimal::DataSet) {
+    offline_lc_minimal::ValidateConfig(run_config);
+    vehicle_nhc_flags.push_back(run_config.enable_stage2_vehicle_nhc_constraint);
+    child_disable_flags.push_back(run_config.stage3_disable_stage2_vehicle_nhc_constraint);
+    offline_lc_minimal::OfflineRunResult result;
+    if (!stage2_reference && !stage3_reference) {
+      result.trajectory = MakeTrajectory(5U, 0.01);
+      return result;
+    }
+    result.trajectory = stage2_reference->trajectory;
+    return result;
+  };
+
+  (void)offline_lc_minimal::Stage3VerticalReferenceOptimizationRunner(std::move(request)).Run();
+  ExpectTrue(vehicle_nhc_flags.size() == 2U, "Stage3 runner should run two passes");
+  ExpectTrue(
+    vehicle_nhc_flags[0],
+    "Stage2 source pass should keep vehicle NHC enabled for the lowpass source");
+  ExpectTrue(
+    !vehicle_nhc_flags[1],
+    "Stage3 final pass should disable vehicle NHC when requested");
+  ExpectTrue(
+    !child_disable_flags[0] && !child_disable_flags[1],
+    "Stage3 child configs should clear the wrapper-only vehicle NHC disable flag");
+}
+
 void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_stage2_lowfreq_vertical_reference_optimization = true;
@@ -704,6 +745,9 @@ int main() {
     RunTest(
       "TestStage3RunnerAlwaysDisablesSegmentedBatch",
       TestStage3RunnerAlwaysDisablesSegmentedBatch);
+    RunTest(
+      "TestStage3RunnerCanDisableFinalVehicleNHCOnly",
+      TestStage3RunnerCanDisableFinalVehicleNHCOnly);
     RunTest(
       "TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2",
       TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2);

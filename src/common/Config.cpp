@@ -424,6 +424,11 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
     throw std::runtime_error(
       "enable_stage3_vertical_reference_optimization requires enable_stage2_velocity_optimization");
   }
+  if (config.stage3_disable_stage2_vehicle_nhc_constraint &&
+      !config.enable_stage3_vertical_reference_optimization) {
+    throw std::runtime_error(
+      "stage3_disable_stage2_vehicle_nhc_constraint requires Stage3 vertical reference optimization");
+  }
   if (config.initial_static_zupt_velocity_sigma_mps <= 0.0 ||
       config.initial_static_zaru_sigma_radps <= 0.0 ||
       config.initial_static_specific_force_sigma_mps2 <= 0.0 ||
@@ -1108,6 +1113,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.stage3_vertical_envelope_center_deadband_m = ParseDouble(normalized_value);
   } else if (normalized_key == "stage3_disable_rtk_outage_segmented_batch") {
     config.stage3_disable_rtk_outage_segmented_batch = ParseBool(normalized_value);
+  } else if (normalized_key == "stage3_disable_stage2_vehicle_nhc_constraint") {
+    config.stage3_disable_stage2_vehicle_nhc_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "static_alignment_duration_s") {
     config.static_alignment_duration_s = ParseDouble(normalized_value);
   } else if (normalized_key == "imu_dual_vector_window_s") {
@@ -1762,6 +1769,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.stage3_vertical_envelope_center_deadband_m << '\n'
     << "stage3_disable_rtk_outage_segmented_batch="
     << (config.stage3_disable_rtk_outage_segmented_batch ? "true" : "false") << '\n'
+    << "stage3_disable_stage2_vehicle_nhc_constraint="
+    << (config.stage3_disable_stage2_vehicle_nhc_constraint ? "true" : "false") << '\n'
     << "static_alignment_duration_s=" << config.static_alignment_duration_s << '\n'
     << "imu_dual_vector_window_s=" << config.imu_dual_vector_window_s << '\n'
     << "imu_dual_vector_min_sample_count=" << config.imu_dual_vector_min_sample_count << '\n'

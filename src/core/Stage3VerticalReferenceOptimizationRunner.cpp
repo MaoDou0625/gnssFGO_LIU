@@ -11,6 +11,7 @@ namespace {
 
 OfflineRunnerConfig MakeStage2SourceConfig(OfflineRunnerConfig config) {
   config.enable_stage3_vertical_reference_optimization = false;
+  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
   return config;
 }
 
@@ -23,6 +24,10 @@ OfflineRunnerConfig MakeStage3Config(OfflineRunnerConfig config) {
   config.enable_rtk_outage_causal_drift_reference = false;
   config.enable_rtk_outage_preoutage_vertical_fence = false;
   config.enable_late_static_detection = false;
+  if (config.stage3_disable_stage2_vehicle_nhc_constraint) {
+    config.enable_stage2_vehicle_nhc_constraint = false;
+  }
+  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
   return config;
 }
 

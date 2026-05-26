@@ -1644,6 +1644,9 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     config.stage3_disable_rtk_outage_segmented_batch,
     "Stage3 segmented-batch compatibility flag should default to true");
+  ExpectTrue(
+    !config.stage3_disable_stage2_vehicle_nhc_constraint,
+    "Stage3 should keep final-pass vehicle NHC enabled by default");
 
   offline_lc_minimal::OverrideConfigField(
     config,
@@ -1689,6 +1692,10 @@ void TestStage3VerticalReferenceConfigValidation() {
     config,
     "stage3_disable_rtk_outage_segmented_batch",
     "false");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_disable_stage2_vehicle_nhc_constraint",
+    "true");
   ExpectTrue(config.enable_stage3_vertical_reference_optimization, "Stage3 enable flag should parse");
   ExpectTrue(
     std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.03) < 1e-15,
@@ -1716,6 +1723,9 @@ void TestStage3VerticalReferenceConfigValidation() {
     std::abs(config.stage3_vertical_envelope_center_deadband_m - 0.003) < 1e-15,
     "Stage3 envelope center deadband should parse");
   ExpectTrue(!config.stage3_disable_rtk_outage_segmented_batch, "Stage3 segmented flag should parse");
+  ExpectTrue(
+    config.stage3_disable_stage2_vehicle_nhc_constraint,
+    "Stage3 final vehicle NHC disable flag should parse");
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
   ExpectTrue(
     serialized.find("enable_stage3_vertical_reference_optimization=true") != std::string::npos,
@@ -1747,6 +1757,9 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("stage3_disable_rtk_outage_segmented_batch=false") != std::string::npos,
     "Stage3 segmented flag should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_disable_stage2_vehicle_nhc_constraint=true") != std::string::npos,
+    "Stage3 final vehicle NHC disable flag should be serialized");
   offline_lc_minimal::ValidateConfig(config);
 
   config = offline_lc_minimal::DefaultConfig();
@@ -1847,6 +1860,18 @@ void TestStage3VerticalReferenceConfigValidation() {
       std::string::npos;
   }
   ExpectTrue(threw, "Stage3 should require Stage2 to be enabled");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_disable_stage2_vehicle_nhc_constraint = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find(
+              "stage3_disable_stage2_vehicle_nhc_constraint") !=
+            std::string::npos;
+  }
+  ExpectTrue(threw, "Stage3 final vehicle NHC disable should require Stage3");
 }
 
 void TestStage2LowfreqVerticalReferenceConfigValidation() {
@@ -2202,6 +2227,23 @@ void TestStage3ExperimentConfigLoads() {
   ExpectTrue(
     envelope_config.enable_stage3_vertical_envelope_center_pull,
     "Stage3 envelope-gate config should enable bounded center-pull");
+
+  const auto no_vehicle_nhc_config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1rtkjumpcut1_stage3_lowpass_global_anchor_no_vehicle_nhc.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    no_vehicle_nhc_config.enable_stage3_vertical_reference_optimization,
+    "Stage3 no-vehicle-NHC config should enable Stage3");
+  ExpectTrue(
+    no_vehicle_nhc_config.stage3_disable_stage2_vehicle_nhc_constraint,
+    "Stage3 no-vehicle-NHC config should disable vehicle NHC only in the final pass");
+  ExpectTrue(
+    std::abs(no_vehicle_nhc_config.stage3_vertical_reference_lowpass_cutoff_hz - 0.01) < 1e-15,
+    "Stage3 no-vehicle-NHC config should use the current 0.01 Hz lowpass setting");
+  ExpectTrue(
+    std::abs(no_vehicle_nhc_config.vertical_velocity_delta_sigma_scale - 1000.0) < 1e-15,
+    "Stage3 no-vehicle-NHC config should use the current relaxed DVZ sigma scale");
 }
 
 void TestStage2LowfreqExperimentConfigLoads() {

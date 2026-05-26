@@ -145,6 +145,7 @@ struct OfflineRunnerConfig {
   double stage3_vertical_envelope_center_sigma_m = 0.006;
   double stage3_vertical_envelope_center_deadband_m = 0.002;
   bool stage3_disable_rtk_outage_segmented_batch = true;
+  bool stage3_disable_stage2_vehicle_nhc_constraint = false;
   double static_alignment_duration_s = 0.0;
   double imu_dual_vector_window_s = 100.0;
   int imu_dual_vector_min_sample_count = 1000;
