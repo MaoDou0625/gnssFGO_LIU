@@ -149,6 +149,83 @@ bool FindInitialDynamicStaticReferenceUp(
   return false;
 }
 
+bool TimeInWindow(const double time_s, const LateStaticWindowRow &window) {
+  return std::isfinite(time_s) &&
+         time_s + 1.0e-9 >= window.start_time_s &&
+         time_s <= window.end_time_s + 1.0e-9;
+}
+
+double Median(std::vector<double> values) {
+  if (values.empty()) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  const std::size_t mid = values.size() / 2U;
+  std::nth_element(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(mid), values.end());
+  double median = values[mid];
+  if ((values.size() % 2U) == 0U) {
+    const auto lower_max =
+      std::max_element(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(mid));
+    median = 0.5 * (median + *lower_max);
+  }
+  return median;
+}
+
+bool ApplyInitialDynamicStaticWindowsToProfile(
+  const OfflineRunnerConfig &config,
+  const std::vector<LateStaticWindowRow> *windows,
+  const std::vector<TrajectoryRow> &trajectory,
+  std::vector<double> &up_profile_m) {
+  if (!config.enable_initial_dynamic_static_lowpass_protection ||
+      windows == nullptr || windows->empty()) {
+    return false;
+  }
+
+  bool applied_any = false;
+  for (const auto &window : *windows) {
+    if (!window.valid) {
+      continue;
+    }
+    std::vector<double> source_up_values;
+    source_up_values.reserve(trajectory.size());
+    for (std::size_t index = 0; index < trajectory.size(); ++index) {
+      if (TimeInWindow(trajectory[index].time_s, window) &&
+          CanFilterRow(trajectory[index])) {
+        source_up_values.push_back(trajectory[index].enu_position_m.z());
+      }
+    }
+    const double reference_up_m = Median(std::move(source_up_values));
+    if (!std::isfinite(reference_up_m)) {
+      continue;
+    }
+
+    const double blend_duration_s =
+      std::max(0.0, config.initial_dynamic_static_lowpass_blend_s);
+    const double blend_end_time_s = window.end_time_s + blend_duration_s;
+    for (std::size_t index = 0; index < trajectory.size(); ++index) {
+      const auto &row = trajectory[index];
+      if (!std::isfinite(row.time_s) || !std::isfinite(up_profile_m[index])) {
+        continue;
+      }
+      if (TimeInWindow(row.time_s, window)) {
+        up_profile_m[index] = reference_up_m;
+        applied_any = true;
+        continue;
+      }
+      if (blend_duration_s > 0.0 &&
+          row.time_s > window.end_time_s &&
+          row.time_s < blend_end_time_s) {
+        const double blend_fraction =
+          (row.time_s - window.end_time_s) / blend_duration_s;
+        up_profile_m[index] =
+          (1.0 - blend_fraction) * reference_up_m +
+          blend_fraction * up_profile_m[index];
+        applied_any = true;
+      }
+    }
+  }
+  return applied_any;
+}
+
 void ApplyInitialDynamicStaticHoldToProfile(
   const OfflineRunnerConfig &config,
   const std::size_t dynamic_start_index,
@@ -223,23 +300,33 @@ Stage3VerticalReference Stage3VerticalReferenceProfilePlanner::Plan() const {
 
   std::vector<double> filter_input_up_m =
     BuildRawFilterInputUp(*request_.stage2_trajectory);
-  ApplyInitialDynamicStaticHoldToProfile(
-    *request_.config,
-    request_.dynamic_start_index,
-    request_.dynamic_start_time_s,
-    *request_.stage2_trajectory,
-    filter_input_up_m);
+  const bool applied_detected_static_windows_to_input =
+    ApplyInitialDynamicStaticWindowsToProfile(
+      *request_.config,
+      request_.initial_dynamic_static_windows,
+      *request_.stage2_trajectory,
+      filter_input_up_m);
+  if (!applied_detected_static_windows_to_input) {
+    ApplyInitialDynamicStaticHoldToProfile(
+      *request_.config,
+      request_.dynamic_start_index,
+      request_.dynamic_start_time_s,
+      *request_.stage2_trajectory,
+      filter_input_up_m);
+  }
   std::vector<double> lowpass_up_m =
     BuildLowpassProfile(
       *request_.config,
       *request_.stage2_trajectory,
       filter_input_up_m);
-  ApplyInitialDynamicStaticHoldToProfile(
-    *request_.config,
-    request_.dynamic_start_index,
-    request_.dynamic_start_time_s,
-    *request_.stage2_trajectory,
-    lowpass_up_m);
+  if (!applied_detected_static_windows_to_input) {
+    ApplyInitialDynamicStaticHoldToProfile(
+      *request_.config,
+      request_.dynamic_start_index,
+      request_.dynamic_start_time_s,
+      *request_.stage2_trajectory,
+      lowpass_up_m);
+  }
 
   Stage3VerticalReference reference;
   reference.source_config =

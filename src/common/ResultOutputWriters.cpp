@@ -504,7 +504,7 @@ void WriteLateStaticFeatureDiagnosticsCsv(
        "imu_acc_norm_mean_mps2,imu_acc_norm_std_mps2,"
        "log_rtk_horizontal_speed_rms,log_rtk_horizontal_range,"
        "log_imu_gyro_norm_rms,log_imu_gyro_norm_p95,"
-       "pass_rtk_speed_rms,pass_rtk_range,pass_gyro_rms,pass_gyro_p95,"
+       "pass_rtk_speed_rms,pass_rtk_range,pass_gyro_rms,pass_gyro_p95,pass_acc_std,"
        "pass_all,skip_reason\n";
   for (const auto &row : rows) {
     stream << row.window_index << ','
@@ -533,6 +533,7 @@ void WriteLateStaticFeatureDiagnosticsCsv(
            << (row.pass_rtk_range ? 1 : 0) << ','
            << (row.pass_gyro_rms ? 1 : 0) << ','
            << (row.pass_gyro_p95 ? 1 : 0) << ','
+           << (row.pass_acc_std ? 1 : 0) << ','
            << (row.pass_all ? 1 : 0) << ','
            << row.skip_reason << '\n';
   }

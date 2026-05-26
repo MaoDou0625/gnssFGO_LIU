@@ -156,6 +156,56 @@ void TestProfilePlannerCanHoldInitialDynamicStaticReference() {
     "lowpass delta should be recomputed from the held reference");
 }
 
+void TestProfilePlannerUsesDetectedInitialDynamicStaticWindows() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
+  config.enable_stage3_initial_dynamic_static_reference_hold = false;
+  config.enable_initial_dynamic_static_detection = true;
+  config.enable_initial_dynamic_static_lowpass_protection = true;
+  config.initial_dynamic_static_lowpass_blend_s = 0.0;
+
+  auto trajectory = MakeTrajectory(8U, 0.0);
+  for (std::size_t index = 0; index < trajectory.size(); ++index) {
+    trajectory[index].enu_position_m.z() = 0.2 * static_cast<double>(index);
+  }
+  trajectory[3].enu_position_m.z() = 2.0;
+  trajectory[4].enu_position_m.z() = 4.0;
+  trajectory[5].enu_position_m.z() = 6.0;
+
+  std::vector<offline_lc_minimal::LateStaticWindowRow> windows(1U);
+  windows.front().start_time_s = 3.0;
+  windows.front().end_time_s = 5.0;
+  windows.front().duration_s = 2.0;
+  windows.front().valid = true;
+  windows.front().skip_reason = "OK";
+
+  offline_lc_minimal::Stage3VerticalReferenceProfilePlanRequest request;
+  request.config = &config;
+  request.stage2_trajectory = &trajectory;
+  request.initial_dynamic_static_windows = &windows;
+  const auto reference =
+    offline_lc_minimal::Stage3VerticalReferenceProfilePlanner(std::move(request)).Plan();
+
+  auto baseline_config = config;
+  baseline_config.enable_initial_dynamic_static_lowpass_protection = false;
+  offline_lc_minimal::Stage3VerticalReferenceProfilePlanRequest baseline_request;
+  baseline_request.config = &baseline_config;
+  baseline_request.stage2_trajectory = &trajectory;
+  const auto baseline_reference =
+    offline_lc_minimal::Stage3VerticalReferenceProfilePlanner(std::move(baseline_request)).Plan();
+
+  const double protected_error =
+    std::abs(reference.rows[3].stage2_lowpass_up_m - 4.0);
+  const double baseline_error =
+    std::abs(baseline_reference.rows[3].stage2_lowpass_up_m - 4.0);
+  ExpectTrue(
+    protected_error < baseline_error,
+    "detected initial dynamic static window should protect lowpass input");
+  ExpectTrue(
+    std::abs(reference.rows[3].stage2_lowpass_up_m - 4.0) > 1.0e-6,
+    "detected initial dynamic static window should not directly overwrite lowpass output");
+}
+
 void TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
@@ -799,6 +849,9 @@ int main() {
     RunTest(
       "TestProfilePlannerCanHoldInitialDynamicStaticReference",
       TestProfilePlannerCanHoldInitialDynamicStaticReference);
+    RunTest(
+      "TestProfilePlannerUsesDetectedInitialDynamicStaticWindows",
+      TestProfilePlannerUsesDetectedInitialDynamicStaticWindows);
     RunTest(
       "TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics",
       TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics);

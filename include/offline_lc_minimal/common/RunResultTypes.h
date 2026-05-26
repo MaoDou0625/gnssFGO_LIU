@@ -121,6 +121,19 @@ struct RunSummary {
   std::size_t late_static_height_hold_factor_count = 0;
   double late_static_rtk_speed_threshold_mps = std::numeric_limits<double>::quiet_NaN();
   double late_static_gyro_rms_threshold_radps = std::numeric_limits<double>::quiet_NaN();
+  bool initial_dynamic_static_detection_enabled = false;
+  bool initial_dynamic_static_lowpass_protection_enabled = false;
+  bool initial_dynamic_static_vz_constraint_enabled = false;
+  std::size_t initial_dynamic_static_feature_window_count = 0;
+  std::size_t initial_dynamic_static_valid_feature_window_count = 0;
+  std::size_t initial_dynamic_static_window_count = 0;
+  std::size_t initial_dynamic_static_vz_factor_count = 0;
+  double initial_dynamic_static_rtk_speed_threshold_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  double initial_dynamic_static_gyro_rms_threshold_radps =
+    std::numeric_limits<double>::quiet_NaN();
+  double initial_dynamic_static_acc_std_threshold_mps2 =
+    std::numeric_limits<double>::quiet_NaN();
   std::size_t rtk_outage_causal_reference_prefix_run_count = 0;
   double rtk_outage_causal_reference_boundary_time_s =
     std::numeric_limits<double>::quiet_NaN();
@@ -515,6 +528,26 @@ struct RunSummary {
         << late_static_rtk_speed_threshold_mps << '\n'
         << "late_static_gyro_rms_threshold_radps="
         << late_static_gyro_rms_threshold_radps << '\n'
+        << "initial_dynamic_static_detection_enabled="
+        << (initial_dynamic_static_detection_enabled ? "true" : "false") << '\n'
+        << "initial_dynamic_static_lowpass_protection_enabled="
+        << (initial_dynamic_static_lowpass_protection_enabled ? "true" : "false") << '\n'
+        << "initial_dynamic_static_vz_constraint_enabled="
+        << (initial_dynamic_static_vz_constraint_enabled ? "true" : "false") << '\n'
+        << "initial_dynamic_static_feature_window_count="
+        << initial_dynamic_static_feature_window_count << '\n'
+        << "initial_dynamic_static_valid_feature_window_count="
+        << initial_dynamic_static_valid_feature_window_count << '\n'
+        << "initial_dynamic_static_window_count="
+        << initial_dynamic_static_window_count << '\n'
+        << "initial_dynamic_static_vz_factor_count="
+        << initial_dynamic_static_vz_factor_count << '\n'
+        << "initial_dynamic_static_rtk_speed_threshold_mps="
+        << initial_dynamic_static_rtk_speed_threshold_mps << '\n'
+        << "initial_dynamic_static_gyro_rms_threshold_radps="
+        << initial_dynamic_static_gyro_rms_threshold_radps << '\n'
+        << "initial_dynamic_static_acc_std_threshold_mps2="
+        << initial_dynamic_static_acc_std_threshold_mps2 << '\n'
         << "rtk_outage_causal_reference_prefix_run_count="
         << rtk_outage_causal_reference_prefix_run_count << '\n'
         << "rtk_outage_causal_reference_boundary_time_s="
@@ -914,6 +947,9 @@ struct OfflineRunResult {
   std::vector<LateStaticFeatureDiagnosticRow> late_static_feature_diagnostics;
   std::vector<LateStaticThresholdDiagnosticRow> late_static_threshold_diagnostics;
   std::vector<LateStaticWindowRow> late_static_windows;
+  std::vector<LateStaticFeatureDiagnosticRow> initial_dynamic_static_feature_diagnostics;
+  std::vector<LateStaticThresholdDiagnosticRow> initial_dynamic_static_threshold_diagnostics;
+  std::vector<LateStaticWindowRow> initial_dynamic_static_windows;
   std::vector<RtkOutageCausalNavReferenceRow> rtk_outage_causal_nav_reference_diagnostics;
   std::vector<RtkOutageWindowRow> rtk_outage_windows;
   std::vector<RtkOutageBatchSegmentRow> rtk_outage_batch_segments;

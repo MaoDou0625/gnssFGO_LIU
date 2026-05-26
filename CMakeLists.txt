@@ -73,6 +73,8 @@ add_library(offline_lc_minimal_lib
   src/core/ImuIntegrationUtils.cpp
   src/core/ImuRateAvpReconstructor.cpp
   src/core/InitialStaticBiasConstraintBuilder.cpp
+  src/core/InitialDynamicStaticConstraintBuilder.cpp
+  src/core/InitialDynamicStaticDetector.cpp
   src/core/InitialStaticPositionConstraintBuilder.cpp
   src/core/InitialStaticRtkHeightConstraintBuilder.cpp
   src/core/LateStaticDetector.cpp

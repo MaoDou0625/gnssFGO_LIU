@@ -161,6 +161,9 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.late_static_feature_diagnostics.clear();
   assembled.late_static_threshold_diagnostics.clear();
   assembled.late_static_windows.clear();
+  assembled.initial_dynamic_static_feature_diagnostics.clear();
+  assembled.initial_dynamic_static_threshold_diagnostics.clear();
+  assembled.initial_dynamic_static_windows.clear();
   assembled.rtk_outage_causal_nav_reference_diagnostics.clear();
   assembled.rtk_outage_recovery_references.clear();
   assembled.rtk_outage_bias_continuity_policy.clear();
@@ -274,6 +277,21 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
         [](const LateStaticFeatureDiagnosticRow &row) { return row.window_center_time_s; });
       AppendAll(assembled.late_static_threshold_diagnostics, piece.result.late_static_threshold_diagnostics);
       AppendAll(assembled.late_static_windows, piece.result.late_static_windows);
+      if (piece.segment.segment_role == "PRE_RTK_VALID") {
+        AppendRowsInSegment(
+          assembled.initial_dynamic_static_feature_diagnostics,
+          piece.result.initial_dynamic_static_feature_diagnostics,
+          splice_segment,
+          include_start,
+          include_end,
+          [](const LateStaticFeatureDiagnosticRow &row) { return row.window_center_time_s; });
+        AppendAll(
+          assembled.initial_dynamic_static_threshold_diagnostics,
+          piece.result.initial_dynamic_static_threshold_diagnostics);
+        AppendAll(
+          assembled.initial_dynamic_static_windows,
+          piece.result.initial_dynamic_static_windows);
+      }
     }
     AppendRowsInSegment(
       assembled.rtk_outage_causal_nav_reference_diagnostics,
@@ -377,6 +395,37 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.run_summary.late_static_vz_factor_count = 0;
   assembled.run_summary.late_static_up_factor_count = 0;
   assembled.run_summary.late_static_height_hold_factor_count = 0;
+  assembled.run_summary.initial_dynamic_static_detection_enabled =
+    std::any_of(
+      request_.pieces.begin(),
+      request_.pieces.end(),
+      [](const SegmentedBatchResultPiece &piece) {
+        return piece.result.run_summary.initial_dynamic_static_detection_enabled;
+      });
+  assembled.run_summary.initial_dynamic_static_lowpass_protection_enabled =
+    std::any_of(
+      request_.pieces.begin(),
+      request_.pieces.end(),
+      [](const SegmentedBatchResultPiece &piece) {
+        return piece.result.run_summary.initial_dynamic_static_lowpass_protection_enabled;
+      });
+  assembled.run_summary.initial_dynamic_static_vz_constraint_enabled =
+    std::any_of(
+      request_.pieces.begin(),
+      request_.pieces.end(),
+      [](const SegmentedBatchResultPiece &piece) {
+        return piece.result.run_summary.initial_dynamic_static_vz_constraint_enabled;
+      });
+  assembled.run_summary.initial_dynamic_static_feature_window_count =
+    assembled.initial_dynamic_static_feature_diagnostics.size();
+  assembled.run_summary.initial_dynamic_static_valid_feature_window_count =
+    static_cast<std::size_t>(
+      std::count_if(
+        assembled.initial_dynamic_static_feature_diagnostics.begin(),
+        assembled.initial_dynamic_static_feature_diagnostics.end(),
+        [](const LateStaticFeatureDiagnosticRow &row) { return row.valid_features; }));
+  assembled.run_summary.initial_dynamic_static_window_count = 0;
+  assembled.run_summary.initial_dynamic_static_vz_factor_count = 0;
   assembled.run_summary.stage2_velocity_optimization_enabled =
     std::any_of(
       request_.pieces.begin(),
@@ -424,6 +473,27 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
           std::isfinite(piece.result.run_summary.late_static_gyro_rms_threshold_radps)) {
         assembled.run_summary.late_static_gyro_rms_threshold_radps =
           piece.result.run_summary.late_static_gyro_rms_threshold_radps;
+      }
+      if (piece.segment.segment_role == "PRE_RTK_VALID") {
+        assembled.run_summary.initial_dynamic_static_window_count +=
+          piece.result.run_summary.initial_dynamic_static_window_count;
+        assembled.run_summary.initial_dynamic_static_vz_factor_count +=
+          piece.result.run_summary.initial_dynamic_static_vz_factor_count;
+        if (!std::isfinite(assembled.run_summary.initial_dynamic_static_rtk_speed_threshold_mps) &&
+            std::isfinite(piece.result.run_summary.initial_dynamic_static_rtk_speed_threshold_mps)) {
+          assembled.run_summary.initial_dynamic_static_rtk_speed_threshold_mps =
+            piece.result.run_summary.initial_dynamic_static_rtk_speed_threshold_mps;
+        }
+        if (!std::isfinite(assembled.run_summary.initial_dynamic_static_gyro_rms_threshold_radps) &&
+            std::isfinite(piece.result.run_summary.initial_dynamic_static_gyro_rms_threshold_radps)) {
+          assembled.run_summary.initial_dynamic_static_gyro_rms_threshold_radps =
+            piece.result.run_summary.initial_dynamic_static_gyro_rms_threshold_radps;
+        }
+        if (!std::isfinite(assembled.run_summary.initial_dynamic_static_acc_std_threshold_mps2) &&
+            std::isfinite(piece.result.run_summary.initial_dynamic_static_acc_std_threshold_mps2)) {
+          assembled.run_summary.initial_dynamic_static_acc_std_threshold_mps2 =
+            piece.result.run_summary.initial_dynamic_static_acc_std_threshold_mps2;
+        }
       }
     }
     assembled.run_summary.stage2_attitude_hold_factor_count +=

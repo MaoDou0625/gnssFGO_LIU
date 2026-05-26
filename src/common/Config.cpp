@@ -313,6 +313,26 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (Lowercase(config.late_static_threshold_method) != "log_otsu") {
     throw std::runtime_error("late_static_threshold_method must be log_otsu");
   }
+  if (!std::isfinite(config.initial_dynamic_static_search_duration_s) ||
+      !std::isfinite(config.initial_dynamic_static_threshold_multiplier) ||
+      !std::isfinite(config.initial_dynamic_static_min_duration_s) ||
+      !std::isfinite(config.initial_dynamic_static_merge_gap_s) ||
+      !std::isfinite(config.initial_dynamic_static_lowpass_blend_s) ||
+      !std::isfinite(config.initial_dynamic_static_vz_sigma_mps) ||
+      config.initial_dynamic_static_search_duration_s <= 0.0 ||
+      config.initial_dynamic_static_threshold_multiplier <= 0.0 ||
+      config.initial_dynamic_static_min_duration_s <= 0.0 ||
+      config.initial_dynamic_static_merge_gap_s < 0.0 ||
+      config.initial_dynamic_static_lowpass_blend_s < 0.0 ||
+      config.initial_dynamic_static_vz_sigma_mps <= 0.0) {
+    throw std::runtime_error("initial dynamic static detector settings are invalid");
+  }
+  if ((config.enable_initial_dynamic_static_lowpass_protection ||
+       config.enable_initial_dynamic_static_vz_constraint) &&
+      !config.enable_initial_dynamic_static_detection) {
+    throw std::runtime_error(
+      "initial dynamic static lowpass/constraint requires detection to be enabled");
+  }
   if (!std::isfinite(config.stage2_attitude_hold_sigma_rad) ||
       !std::isfinite(config.stage2_horizontal_position_hold_sigma_m) ||
       !std::isfinite(config.stage2_horizontal_velocity_hold_sigma_mps) ||
@@ -1058,6 +1078,24 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.late_static_up_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "late_static_height_hold_sigma_m") {
     config.late_static_height_hold_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_initial_dynamic_static_detection") {
+    config.enable_initial_dynamic_static_detection = ParseBool(normalized_value);
+  } else if (normalized_key == "initial_dynamic_static_search_duration_s") {
+    config.initial_dynamic_static_search_duration_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "initial_dynamic_static_threshold_multiplier") {
+    config.initial_dynamic_static_threshold_multiplier = ParseDouble(normalized_value);
+  } else if (normalized_key == "initial_dynamic_static_min_duration_s") {
+    config.initial_dynamic_static_min_duration_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "initial_dynamic_static_merge_gap_s") {
+    config.initial_dynamic_static_merge_gap_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_initial_dynamic_static_lowpass_protection") {
+    config.enable_initial_dynamic_static_lowpass_protection = ParseBool(normalized_value);
+  } else if (normalized_key == "initial_dynamic_static_lowpass_blend_s") {
+    config.initial_dynamic_static_lowpass_blend_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_initial_dynamic_static_vz_constraint") {
+    config.enable_initial_dynamic_static_vz_constraint = ParseBool(normalized_value);
+  } else if (normalized_key == "initial_dynamic_static_vz_sigma_mps") {
+    config.initial_dynamic_static_vz_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_stage2_velocity_optimization") {
     config.enable_stage2_velocity_optimization = ParseBool(normalized_value);
   } else if (normalized_key == "enable_stage2_vehicle_nhc_constraint") {
@@ -1734,6 +1772,24 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "late_static_vz_sigma_mps=" << config.late_static_vz_sigma_mps << '\n'
     << "late_static_up_sigma_m=" << config.late_static_up_sigma_m << '\n'
     << "late_static_height_hold_sigma_m=" << config.late_static_height_hold_sigma_m << '\n'
+    << "enable_initial_dynamic_static_detection="
+    << (config.enable_initial_dynamic_static_detection ? "true" : "false") << '\n'
+    << "initial_dynamic_static_search_duration_s="
+    << config.initial_dynamic_static_search_duration_s << '\n'
+    << "initial_dynamic_static_threshold_multiplier="
+    << config.initial_dynamic_static_threshold_multiplier << '\n'
+    << "initial_dynamic_static_min_duration_s="
+    << config.initial_dynamic_static_min_duration_s << '\n'
+    << "initial_dynamic_static_merge_gap_s="
+    << config.initial_dynamic_static_merge_gap_s << '\n'
+    << "enable_initial_dynamic_static_lowpass_protection="
+    << (config.enable_initial_dynamic_static_lowpass_protection ? "true" : "false") << '\n'
+    << "initial_dynamic_static_lowpass_blend_s="
+    << config.initial_dynamic_static_lowpass_blend_s << '\n'
+    << "enable_initial_dynamic_static_vz_constraint="
+    << (config.enable_initial_dynamic_static_vz_constraint ? "true" : "false") << '\n'
+    << "initial_dynamic_static_vz_sigma_mps="
+    << config.initial_dynamic_static_vz_sigma_mps << '\n'
     << "enable_stage2_velocity_optimization="
     << (config.enable_stage2_velocity_optimization ? "true" : "false") << '\n'
     << "enable_stage2_vehicle_nhc_constraint="

@@ -105,6 +105,8 @@ OfflineRunResult Stage3VerticalReferenceOptimizationRunner::Run() const {
   Stage3VerticalReferenceProfilePlanRequest plan_request;
   plan_request.config = &request_.config;
   plan_request.stage2_trajectory = &stage2_result.trajectory;
+  plan_request.initial_dynamic_static_windows =
+    &stage2_result.initial_dynamic_static_windows;
   plan_request.dynamic_start_index =
     stage2_result.run_summary.initial_static_state_count;
   plan_request.dynamic_start_time_s =

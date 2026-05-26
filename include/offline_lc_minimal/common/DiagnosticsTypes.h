@@ -287,6 +287,7 @@ struct LateStaticFeatureDiagnosticRow {
   bool pass_rtk_range = false;
   bool pass_gyro_rms = false;
   bool pass_gyro_p95 = false;
+  bool pass_acc_std = false;
   bool pass_all = false;
   std::string skip_reason = "UNSET";
 };

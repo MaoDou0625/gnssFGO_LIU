@@ -528,6 +528,7 @@ std::vector<LateStaticWindowRow> LateStaticWindowDetector::Detect(
       row.imu_gyro_norm_rms_radps <= thresholds.gyro_rms_threshold_radps;
     row.pass_gyro_p95 =
       row.imu_gyro_norm_p95_radps <= thresholds.gyro_p95_threshold_radps;
+    row.pass_acc_std = true;
     row.pass_all =
       row.pass_rtk_speed_rms && row.pass_rtk_range &&
       row.pass_gyro_rms && row.pass_gyro_p95;

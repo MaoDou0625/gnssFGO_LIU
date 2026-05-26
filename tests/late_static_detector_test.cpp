@@ -10,6 +10,8 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
 #include "offline_lc_minimal/common/Config.h"
+#include "offline_lc_minimal/core/InitialDynamicStaticConstraintBuilder.h"
+#include "offline_lc_minimal/core/InitialDynamicStaticDetector.h"
 #include "offline_lc_minimal/core/LateStaticDetector.h"
 #include "offline_lc_minimal/core/LateStaticVerticalConstraintBuilder.h"
 #include "offline_lc_minimal/factor/StaticVerticalPositionHoldFactor.h"
@@ -108,6 +110,36 @@ std::vector<offline_lc_minimal::ImuSample> MakeInitialPrefixImu() {
   return samples;
 }
 
+std::vector<offline_lc_minimal::GnssSolutionSample> MakeInitialDynamicStaticGnss() {
+  std::vector<offline_lc_minimal::GnssSolutionSample> samples;
+  for (int t = 0; t <= 130; ++t) {
+    const double time_s = static_cast<double>(t);
+    const double east_m =
+      time_s <= 110.0
+        ? 0.001 * std::sin(0.2 * time_s)
+        : 0.001 * std::sin(0.2 * 110.0) + 0.8 * (time_s - 110.0);
+    samples.push_back(
+      MakeGnssSample(time_s, east_m, 2.0 + 0.001 * std::sin(0.5 * time_s)));
+  }
+  return samples;
+}
+
+std::vector<offline_lc_minimal::ImuSample> MakeInitialDynamicStaticImu() {
+  std::vector<offline_lc_minimal::ImuSample> samples;
+  for (int i = 0; i <= 260; ++i) {
+    const double time_s = 0.5 * static_cast<double>(i);
+    offline_lc_minimal::ImuSample sample;
+    sample.time_s = time_s;
+    const double gyro = time_s <= 110.0 ? 0.0001 : 0.08;
+    sample.gyro_radps = Eigen::Vector3d(gyro, 0.0, 0.0);
+    const double accel_noise = time_s <= 110.0 ? 0.001 * std::sin(time_s)
+                                               : 0.08 * std::sin(3.0 * time_s);
+    sample.accel_mps2 = Eigen::Vector3d(0.0, 0.0, 9.81 + accel_noise);
+    samples.push_back(sample);
+  }
+  return samples;
+}
+
 offline_lc_minimal::OfflineRunnerConfig MakeLateStaticConfig() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_late_static_detection = true;
@@ -121,6 +153,15 @@ offline_lc_minimal::OfflineRunnerConfig MakeLateStaticConfig() {
   config.late_static_vz_sigma_mps = 0.0005;
   config.late_static_up_sigma_m = 0.02;
   config.late_static_height_hold_sigma_m = 0.001;
+  config.enable_initial_dynamic_static_detection = true;
+  config.initial_dynamic_static_search_duration_s = 20.0;
+  config.initial_dynamic_static_threshold_multiplier = 3.0;
+  config.initial_dynamic_static_min_duration_s = 5.0;
+  config.initial_dynamic_static_merge_gap_s = 2.0;
+  config.enable_initial_dynamic_static_lowpass_protection = true;
+  config.initial_dynamic_static_lowpass_blend_s = 1.0;
+  config.enable_initial_dynamic_static_vz_constraint = true;
+  config.initial_dynamic_static_vz_sigma_mps = 0.0005;
   return config;
 }
 
@@ -295,6 +336,85 @@ void TestLateStaticVerticalBuilderAddsOnlyUpAndVzFactors() {
              "summary should count height hold factors");
 }
 
+void TestInitialDynamicStaticDetectorUsesBaselineImuAndRtkEvidence() {
+  auto config = MakeLateStaticConfig();
+  config.late_static_window_s = 2.0;
+  config.late_static_stride_s = 1.0;
+  config.late_static_min_rtkfix_samples = 2;
+  const auto gnss = MakeInitialDynamicStaticGnss();
+  const auto imu = MakeInitialDynamicStaticImu();
+
+  offline_lc_minimal::InitialDynamicStaticDetectionRequest request;
+  request.config = &config;
+  request.gnss_samples = &gnss;
+  request.imu_samples = &imu;
+  request.alignment_start_time_s = 0.0;
+  request.alignment_end_time_s = 100.0;
+  request.dynamic_start_time_s = 100.0;
+  request.processing_end_time_s = 130.0;
+  request.should_use_rtkfix_sample =
+    [](const offline_lc_minimal::GnssSolutionSample &) { return true; };
+  request.corrected_time_s =
+    [](const offline_lc_minimal::GnssSolutionSample &sample) {
+      return sample.time_s;
+    };
+
+  const auto result =
+    offline_lc_minimal::InitialDynamicStaticDetector(std::move(request)).Detect();
+  ExpectTrue(!result.threshold_diagnostics.empty(),
+             "initial dynamic static detector should produce thresholds");
+  ExpectTrue(!result.windows.empty(),
+             "detector should accept the static tail after dynamic start");
+  ExpectTrue(result.windows.front().start_time_s <= 101.0,
+             "static window should start near dynamic start");
+  ExpectTrue(result.windows.front().end_time_s <= 112.0,
+             "static window should stop when RTK/IMU show motion");
+  bool saw_dynamic_rejection = false;
+  for (const auto &row : result.feature_diagnostics) {
+    if (row.window_center_time_s > 112.0 && !row.pass_all) {
+      saw_dynamic_rejection = true;
+    }
+  }
+  ExpectTrue(saw_dynamic_rejection,
+             "moving candidate windows should be rejected by the combined gates");
+}
+
+void TestInitialDynamicStaticConstraintAddsOnlyVzPriors() {
+  auto config = MakeLateStaticConfig();
+  std::vector<double> timestamps{99.0, 100.0, 101.0, 102.0, 103.0, 104.0, 105.0};
+  std::vector<offline_lc_minimal::LateStaticWindowRow> windows(1U);
+  windows.front().start_time_s = 100.0;
+  windows.front().end_time_s = 104.0;
+  windows.front().duration_s = 4.0;
+  windows.front().valid = true;
+  windows.front().skip_reason = "OK";
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  offline_lc_minimal::InitialDynamicStaticConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.dynamic_start_index = 1U;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.windows = &windows;
+  offline_lc_minimal::InitialDynamicStaticConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(windows.front().vz_factor_count == 5U,
+             "initial dynamic static constraint should add one vz prior per static state");
+  ExpectTrue(windows.front().up_factor_count == 0U,
+             "initial dynamic static constraint should not add up priors");
+  ExpectTrue(windows.front().height_hold_factor_count == 0U,
+             "initial dynamic static constraint should not add height-hold priors");
+  ExpectTrue(graph.size() == 5U,
+             "graph should contain only the vertical velocity priors");
+  const auto first_vz =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalVelocityPriorFactor>(graph.at(0));
+  ExpectTrue(first_vz.get() != nullptr, "first factor should be a vertical velocity prior");
+  ExpectTrue(summary.initial_dynamic_static_vz_factor_count == 5U,
+             "summary should count initial dynamic static vz priors");
+}
+
 }  // namespace
 
 int main() {
@@ -311,6 +431,12 @@ int main() {
     RunTest(
       "TestLateStaticVerticalBuilderAddsOnlyUpAndVzFactors",
       TestLateStaticVerticalBuilderAddsOnlyUpAndVzFactors);
+    RunTest(
+      "TestInitialDynamicStaticDetectorUsesBaselineImuAndRtkEvidence",
+      TestInitialDynamicStaticDetectorUsesBaselineImuAndRtkEvidence);
+    RunTest(
+      "TestInitialDynamicStaticConstraintAddsOnlyVzPriors",
+      TestInitialDynamicStaticConstraintAddsOnlyVzPriors);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

@@ -56,6 +56,9 @@ OfflineRunnerConfig MakeChildConfig(
   config.enable_rtk_outage_segmented_batch = false;
   config.enable_rtk_outage_causal_drift_reference = false;
   config.enable_rtk_outage_preoutage_vertical_fence = false;
+  config.enable_initial_dynamic_static_detection = false;
+  config.enable_initial_dynamic_static_lowpass_protection = false;
+  config.enable_initial_dynamic_static_vz_constraint = false;
   if (config.gnss_vertical_reference_source !=
       GnssVerticalReferenceSource::kRtkDriftLowpass) {
     config.enable_rtk_vertical_lowpass_reference = false;

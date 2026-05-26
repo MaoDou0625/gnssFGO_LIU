@@ -31,6 +31,8 @@
 #include "offline_lc_minimal/core/ImuIntegrationUtils.h"
 #include "offline_lc_minimal/core/InitialStaticBiasConstraintBuilder.h"
 #include "offline_lc_minimal/core/InitialStaticConstraintBuilder.h"
+#include "offline_lc_minimal/core/InitialDynamicStaticConstraintBuilder.h"
+#include "offline_lc_minimal/core/InitialDynamicStaticDetector.h"
 #include "offline_lc_minimal/core/InitialStaticPositionConstraintBuilder.h"
 #include "offline_lc_minimal/core/InitialStaticRtkHeightConstraintBuilder.h"
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
@@ -1147,6 +1149,78 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     }
   }
 
+  auto populate_initial_dynamic_static_summary = [&]() {
+    run_result.run_summary.initial_dynamic_static_detection_enabled =
+      config_.enable_initial_dynamic_static_detection;
+    run_result.run_summary.initial_dynamic_static_lowpass_protection_enabled =
+      config_.enable_initial_dynamic_static_lowpass_protection;
+    run_result.run_summary.initial_dynamic_static_vz_constraint_enabled =
+      config_.enable_initial_dynamic_static_vz_constraint;
+    run_result.run_summary.initial_dynamic_static_feature_window_count =
+      run_result.initial_dynamic_static_feature_diagnostics.size();
+    run_result.run_summary.initial_dynamic_static_valid_feature_window_count =
+      static_cast<std::size_t>(
+        std::count_if(
+          run_result.initial_dynamic_static_feature_diagnostics.begin(),
+          run_result.initial_dynamic_static_feature_diagnostics.end(),
+          [](const LateStaticFeatureDiagnosticRow &row) {
+            return row.valid_features;
+          }));
+    run_result.run_summary.initial_dynamic_static_window_count =
+      run_result.initial_dynamic_static_windows.size();
+    run_result.run_summary.initial_dynamic_static_vz_factor_count = 0U;
+    run_result.run_summary.initial_dynamic_static_rtk_speed_threshold_mps =
+      std::numeric_limits<double>::quiet_NaN();
+    run_result.run_summary.initial_dynamic_static_gyro_rms_threshold_radps =
+      std::numeric_limits<double>::quiet_NaN();
+    run_result.run_summary.initial_dynamic_static_acc_std_threshold_mps2 =
+      std::numeric_limits<double>::quiet_NaN();
+    for (const auto &row : run_result.initial_dynamic_static_threshold_diagnostics) {
+      if (!row.valid || !std::isfinite(row.threshold_value)) {
+        continue;
+      }
+      if (row.feature_name == "rtk_horizontal_speed_rms_mps") {
+        run_result.run_summary.initial_dynamic_static_rtk_speed_threshold_mps =
+          row.threshold_value;
+      } else if (row.feature_name == "imu_gyro_norm_rms_radps") {
+        run_result.run_summary.initial_dynamic_static_gyro_rms_threshold_radps =
+          row.threshold_value;
+      } else if (row.feature_name == "imu_acc_norm_std_mps2") {
+        run_result.run_summary.initial_dynamic_static_acc_std_threshold_mps2 =
+          row.threshold_value;
+      }
+    }
+  };
+
+  if (config_.enable_initial_dynamic_static_detection) {
+    InitialDynamicStaticDetectionRequest initial_dynamic_static_request;
+    initial_dynamic_static_request.config = &config_;
+    initial_dynamic_static_request.imu_samples = &dataset.imu_samples;
+    initial_dynamic_static_request.gnss_samples = &dataset.gnss_samples;
+    initial_dynamic_static_request.rtk_outage_windows = &planned_rtk_outage_windows;
+    initial_dynamic_static_request.alignment_start_time_s = alignment_start_time_s;
+    initial_dynamic_static_request.alignment_end_time_s = alignment_end_time_s;
+    initial_dynamic_static_request.dynamic_start_time_s = dynamic_start_time_s;
+    initial_dynamic_static_request.processing_end_time_s = end_time_s;
+    initial_dynamic_static_request.should_use_rtkfix_sample =
+      [&](const GnssSolutionSample &sample) {
+        return sample.has_enu_position && PassesGnssQualityFilters(sample);
+      };
+    initial_dynamic_static_request.corrected_time_s =
+      [&](const GnssSolutionSample &sample) {
+        return CorrectedGnssTime(sample);
+      };
+    InitialDynamicStaticDetectionResult initial_dynamic_static_result =
+      InitialDynamicStaticDetector(std::move(initial_dynamic_static_request)).Detect();
+    run_result.initial_dynamic_static_feature_diagnostics =
+      std::move(initial_dynamic_static_result.feature_diagnostics);
+    run_result.initial_dynamic_static_threshold_diagnostics =
+      std::move(initial_dynamic_static_result.threshold_diagnostics);
+    run_result.initial_dynamic_static_windows =
+      std::move(initial_dynamic_static_result.windows);
+  }
+  populate_initial_dynamic_static_summary();
+
   if (config_.enable_rtk_outage_segmented_batch &&
       config_.enable_rtk_outage_smoothing &&
       !planned_rtk_outage_windows.empty()) {
@@ -1523,6 +1597,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.stage3_vertical_envelope_max_abs_center_pull_residual_m =
     std::numeric_limits<double>::quiet_NaN();
+  populate_initial_dynamic_static_summary();
   run_result.run_summary.vertical_jump_combined_imu_factor_count = 0;
   run_result.run_summary.vertical_jump_masked_imu_factor_count = 0;
   run_result.run_summary.vertical_jump_impulse_factor_count = 0;
@@ -1718,6 +1793,20 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     stage3_request.run_summary = &run_result.run_summary;
     stage3_request.diagnostics = &run_result.stage3_vertical_reference_diagnostics;
     Stage3VerticalReferenceConstraintBuilder(std::move(stage3_request)).Build();
+  }
+
+  if (!run_result.initial_dynamic_static_windows.empty()) {
+    InitialDynamicStaticConstraintBuildRequest initial_dynamic_static_constraint_request;
+    initial_dynamic_static_constraint_request.config = &config_;
+    initial_dynamic_static_constraint_request.state_timestamps = &state_timestamps;
+    initial_dynamic_static_constraint_request.dynamic_start_index =
+      graph_timeline.dynamic_start_index;
+    initial_dynamic_static_constraint_request.graph = &graph_with_gnss;
+    initial_dynamic_static_constraint_request.run_summary = &run_result.run_summary;
+    initial_dynamic_static_constraint_request.windows =
+      &run_result.initial_dynamic_static_windows;
+    InitialDynamicStaticConstraintBuilder(
+      std::move(initial_dynamic_static_constraint_request)).Build();
   }
 
   RtkVelocityConstraintBuildRequest rtk_velocity_request;
@@ -1928,6 +2017,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateStage3VerticalReferenceDiagnostics(
     optimized_values,
     run_result.stage3_vertical_reference_diagnostics,
+    run_result.run_summary);
+  PopulateInitialDynamicStaticDiagnostics(
+    optimized_values,
+    run_result.initial_dynamic_static_windows,
     run_result.run_summary);
   PopulateStage1OutageBodyYEnvelopeDiagnostics(
     optimized_values,

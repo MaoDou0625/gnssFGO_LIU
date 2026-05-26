@@ -1632,6 +1632,21 @@ void TestStage3VerticalReferenceConfigValidation() {
     std::abs(config.stage3_initial_dynamic_static_reference_hold_blend_s - 2.0) < 1e-15,
     "Stage3 initial dynamic static hold blend should default to 2 s");
   ExpectTrue(
+    !config.enable_initial_dynamic_static_detection,
+    "initial dynamic static detector should default off");
+  ExpectTrue(
+    std::abs(config.initial_dynamic_static_search_duration_s - 20.0) < 1e-15,
+    "initial dynamic static search duration should default to 20 s");
+  ExpectTrue(
+    std::abs(config.initial_dynamic_static_threshold_multiplier - 3.0) < 1e-15,
+    "initial dynamic static threshold multiplier should default to 3");
+  ExpectTrue(
+    !config.enable_initial_dynamic_static_lowpass_protection,
+    "initial dynamic static lowpass protection should default off");
+  ExpectTrue(
+    !config.enable_initial_dynamic_static_vz_constraint,
+    "initial dynamic static vz constraint should default off");
+  ExpectTrue(
     config.stage3_vertical_reference_constraint_mode ==
       offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kGaussian,
     "Stage3 default constraint mode should be gaussian");
@@ -1687,6 +1702,42 @@ void TestStage3VerticalReferenceConfigValidation() {
     "1.5");
   offline_lc_minimal::OverrideConfigField(
     config,
+    "enable_initial_dynamic_static_detection",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "initial_dynamic_static_search_duration_s",
+    "18");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "initial_dynamic_static_threshold_multiplier",
+    "4");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "initial_dynamic_static_min_duration_s",
+    "6");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "initial_dynamic_static_merge_gap_s",
+    "1.25");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_initial_dynamic_static_lowpass_protection",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "initial_dynamic_static_lowpass_blend_s",
+    "0.75");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_initial_dynamic_static_vz_constraint",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "initial_dynamic_static_vz_sigma_mps",
+    "0.0007");
+  offline_lc_minimal::OverrideConfigField(
+    config,
     "stage3_vertical_reference_constraint_mode",
     "envelope");
   offline_lc_minimal::OverrideConfigField(
@@ -1734,6 +1785,33 @@ void TestStage3VerticalReferenceConfigValidation() {
     std::abs(config.stage3_initial_dynamic_static_reference_hold_blend_s - 1.5) < 1e-15,
     "Stage3 initial dynamic static hold blend should parse");
   ExpectTrue(
+    config.enable_initial_dynamic_static_detection,
+    "initial dynamic static detector flag should parse");
+  ExpectTrue(
+    std::abs(config.initial_dynamic_static_search_duration_s - 18.0) < 1e-15,
+    "initial dynamic static search duration should parse");
+  ExpectTrue(
+    std::abs(config.initial_dynamic_static_threshold_multiplier - 4.0) < 1e-15,
+    "initial dynamic static threshold multiplier should parse");
+  ExpectTrue(
+    std::abs(config.initial_dynamic_static_min_duration_s - 6.0) < 1e-15,
+    "initial dynamic static min duration should parse");
+  ExpectTrue(
+    std::abs(config.initial_dynamic_static_merge_gap_s - 1.25) < 1e-15,
+    "initial dynamic static merge gap should parse");
+  ExpectTrue(
+    config.enable_initial_dynamic_static_lowpass_protection,
+    "initial dynamic static lowpass protection flag should parse");
+  ExpectTrue(
+    std::abs(config.initial_dynamic_static_lowpass_blend_s - 0.75) < 1e-15,
+    "initial dynamic static lowpass blend should parse");
+  ExpectTrue(
+    config.enable_initial_dynamic_static_vz_constraint,
+    "initial dynamic static vz constraint flag should parse");
+  ExpectTrue(
+    std::abs(config.initial_dynamic_static_vz_sigma_mps - 0.0007) < 1e-15,
+    "initial dynamic static vz sigma should parse");
+  ExpectTrue(
     config.stage3_vertical_reference_constraint_mode ==
       offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope,
     "Stage3 envelope mode should parse");
@@ -1775,6 +1853,33 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("stage3_initial_dynamic_static_reference_hold_blend_s=1.5") != std::string::npos,
     "Stage3 initial dynamic static hold blend should be serialized");
+  ExpectTrue(
+    serialized.find("enable_initial_dynamic_static_detection=true") != std::string::npos,
+    "initial dynamic static detector flag should be serialized");
+  ExpectTrue(
+    serialized.find("initial_dynamic_static_search_duration_s=18") != std::string::npos,
+    "initial dynamic static search duration should be serialized");
+  ExpectTrue(
+    serialized.find("initial_dynamic_static_threshold_multiplier=4") != std::string::npos,
+    "initial dynamic static threshold multiplier should be serialized");
+  ExpectTrue(
+    serialized.find("initial_dynamic_static_min_duration_s=6") != std::string::npos,
+    "initial dynamic static min duration should be serialized");
+  ExpectTrue(
+    serialized.find("initial_dynamic_static_merge_gap_s=1.25") != std::string::npos,
+    "initial dynamic static merge gap should be serialized");
+  ExpectTrue(
+    serialized.find("enable_initial_dynamic_static_lowpass_protection=true") != std::string::npos,
+    "initial dynamic static lowpass protection flag should be serialized");
+  ExpectTrue(
+    serialized.find("initial_dynamic_static_lowpass_blend_s=0.75") != std::string::npos,
+    "initial dynamic static lowpass blend should be serialized");
+  ExpectTrue(
+    serialized.find("enable_initial_dynamic_static_vz_constraint=true") != std::string::npos,
+    "initial dynamic static vz constraint flag should be serialized");
+  ExpectTrue(
+    serialized.find("initial_dynamic_static_vz_sigma_mps=0.0007") != std::string::npos,
+    "initial dynamic static vz sigma should be serialized");
   ExpectTrue(
     serialized.find("stage3_vertical_reference_constraint_mode=envelope") != std::string::npos,
     "Stage3 envelope mode should be serialized");
@@ -1845,6 +1950,30 @@ void TestStage3VerticalReferenceConfigValidation() {
       std::string::npos;
   }
   ExpectTrue(threw, "negative Stage3 initial dynamic static hold blend should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_initial_dynamic_static_lowpass_protection = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("initial dynamic static lowpass/constraint") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "initial dynamic static lowpass protection should require detection");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.initial_dynamic_static_threshold_multiplier = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("initial dynamic static detector settings") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive initial dynamic static threshold multiplier should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   threw = false;
@@ -2323,11 +2452,17 @@ void TestStage3ExperimentConfigLoads() {
     static_hold_config.stage3_disable_stage2_vehicle_nhc_constraint,
     "Stage3 no-jump-bias static-hold config should keep final vehicle NHC disabled");
   ExpectTrue(
-    static_hold_config.enable_stage3_initial_dynamic_static_reference_hold,
-    "Stage3 no-jump-bias static-hold config should enable the initial dynamic static hold");
+    !static_hold_config.enable_stage3_initial_dynamic_static_reference_hold,
+    "Stage3 no-jump-bias static-hold config should disable the fixed first-10s hold");
   ExpectTrue(
-    std::abs(static_hold_config.stage3_initial_dynamic_static_reference_hold_duration_s - 10.0) < 1e-15,
-    "Stage3 no-jump-bias static-hold config should hold the first 10 s");
+    static_hold_config.enable_initial_dynamic_static_detection,
+    "Stage3 no-jump-bias static-hold config should enable detected initial dynamic static windows");
+  ExpectTrue(
+    static_hold_config.enable_initial_dynamic_static_lowpass_protection,
+    "Stage3 no-jump-bias static-hold config should protect lowpass with detected static windows");
+  ExpectTrue(
+    static_hold_config.enable_initial_dynamic_static_vz_constraint,
+    "Stage3 no-jump-bias static-hold config should add detected static Vz constraints");
   ExpectTrue(
     !static_hold_config.enable_vertical_jump_bias &&
       !static_hold_config.enable_vertical_jump_segmented_bias &&

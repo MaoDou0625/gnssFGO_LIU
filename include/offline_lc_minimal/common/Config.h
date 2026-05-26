@@ -116,6 +116,15 @@ struct OfflineRunnerConfig {
   double late_static_vz_sigma_mps = 0.0005;
   double late_static_up_sigma_m = 0.02;
   double late_static_height_hold_sigma_m = 0.001;
+  bool enable_initial_dynamic_static_detection = false;
+  double initial_dynamic_static_search_duration_s = 20.0;
+  double initial_dynamic_static_threshold_multiplier = 3.0;
+  double initial_dynamic_static_min_duration_s = 8.0;
+  double initial_dynamic_static_merge_gap_s = 2.0;
+  bool enable_initial_dynamic_static_lowpass_protection = false;
+  double initial_dynamic_static_lowpass_blend_s = 2.0;
+  bool enable_initial_dynamic_static_vz_constraint = false;
+  double initial_dynamic_static_vz_sigma_mps = 0.0005;
   bool enable_stage2_velocity_optimization = false;
   bool enable_stage2_vehicle_nhc_constraint = true;
   double stage2_attitude_hold_sigma_rad = 1e-5;

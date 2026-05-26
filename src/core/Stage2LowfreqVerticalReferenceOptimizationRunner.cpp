@@ -59,6 +59,12 @@ Stage3VerticalReference PlanLowpassReference(
   Stage3VerticalReferenceProfilePlanRequest plan_request;
   plan_request.config = &planner_config;
   plan_request.stage2_trajectory = &source_result.trajectory;
+  plan_request.initial_dynamic_static_windows =
+    &source_result.initial_dynamic_static_windows;
+  plan_request.dynamic_start_index =
+    source_result.run_summary.initial_static_state_count;
+  plan_request.dynamic_start_time_s =
+    source_result.run_summary.dynamic_start_time_s;
   Stage3VerticalReference reference =
     Stage3VerticalReferenceProfilePlanner(std::move(plan_request)).Plan();
   reference.source_config =

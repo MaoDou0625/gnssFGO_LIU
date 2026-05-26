@@ -407,6 +407,9 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
   config.enable_rtk_outage_smoothing = true;
   config.enable_rtk_outage_segmented_batch = true;
   config.enable_rtk_outage_boundary_constraints = false;
+  config.enable_initial_dynamic_static_detection = true;
+  config.enable_initial_dynamic_static_lowpass_protection = true;
+  config.enable_initial_dynamic_static_vz_constraint = true;
 
   auto stage_config = config;
   stage_config.stage2_attitude_hold_sigma_rad *=
@@ -442,6 +445,9 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
     double horizontal_velocity_hold_sigma_mps = 0.0;
     double processing_start_time_s = 0.0;
     double processing_end_time_s = 0.0;
+    bool initial_dynamic_static_detection_enabled = false;
+    bool initial_dynamic_static_lowpass_protection_enabled = false;
+    bool initial_dynamic_static_vz_constraint_enabled = false;
   };
   std::vector<Call> calls;
 
@@ -467,7 +473,10 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
       child_config.stage2_horizontal_position_hold_sigma_m,
       child_config.stage2_horizontal_velocity_hold_sigma_mps,
       child_config.processing_start_time_s,
-      child_config.processing_end_time_s});
+      child_config.processing_end_time_s,
+      child_config.enable_initial_dynamic_static_detection,
+      child_config.enable_initial_dynamic_static_lowpass_protection,
+      child_config.enable_initial_dynamic_static_vz_constraint});
     offline_lc_minimal::OfflineRunResult result;
     result.trajectory = {
       MakeTrajectoryRow(child_config.processing_start_time_s, 0.0),
@@ -486,6 +495,11 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
   ExpectTrue(
     !calls[0].final_hold_relaxation_enabled,
     "standalone prefix child should clear final hold relaxation");
+  ExpectTrue(
+    calls[0].initial_dynamic_static_detection_enabled &&
+      calls[0].initial_dynamic_static_lowpass_protection_enabled &&
+      calls[0].initial_dynamic_static_vz_constraint_enabled,
+    "standalone prefix child should preserve initial dynamic static settings");
   ExpectTrue(
     std::abs(calls[0].dvz_sigma_scale - 10.0) < 1e-15,
     "standalone prefix child should preserve already-applied DVZ output sigma scale");
@@ -506,6 +520,11 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
       calls[1].final_hold_relaxation_enabled,
     "outage child should keep Stage2 lowfreq final relaxations");
   ExpectTrue(
+    !calls[1].initial_dynamic_static_detection_enabled &&
+      !calls[1].initial_dynamic_static_lowpass_protection_enabled &&
+      !calls[1].initial_dynamic_static_vz_constraint_enabled,
+    "outage child should disable initial dynamic static settings");
+  ExpectTrue(
     std::abs(calls[1].dvz_sigma_scale - 10.0) < 1e-15,
     "outage child should keep relaxed DVZ output sigma scale");
   ExpectTrue(
@@ -524,6 +543,11 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
     calls[2].stage2_lowfreq_enabled && calls[2].final_dvz_relaxation_enabled &&
       calls[2].final_hold_relaxation_enabled,
     "post child should keep Stage2 lowfreq final relaxations");
+  ExpectTrue(
+    !calls[2].initial_dynamic_static_detection_enabled &&
+      !calls[2].initial_dynamic_static_lowpass_protection_enabled &&
+      !calls[2].initial_dynamic_static_vz_constraint_enabled,
+    "post child should disable initial dynamic static settings");
   ExpectTrue(
     std::abs(calls[2].dvz_sigma_scale - 10.0) < 1e-15,
     "post child should keep relaxed DVZ output sigma scale");
@@ -559,6 +583,15 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   pre_result.gnss_factor_records = {
     MakeGnssFactorRecord(5.0, "raw_rtk", "OK")};
   pre_result.run_summary.gnss_vertical_reference_source = "raw_rtk";
+  offline_lc_minimal::LateStaticWindowRow pre_initial_dynamic_window;
+  pre_initial_dynamic_window.window_index = 0U;
+  pre_initial_dynamic_window.start_time_s = 1.0;
+  pre_initial_dynamic_window.end_time_s = 3.0;
+  pre_initial_dynamic_window.valid = true;
+  pre_result.initial_dynamic_static_windows = {pre_initial_dynamic_window};
+  pre_result.run_summary.initial_dynamic_static_detection_enabled = true;
+  pre_result.run_summary.initial_dynamic_static_window_count = 1U;
+  pre_result.run_summary.initial_dynamic_static_vz_factor_count = 3U;
   offline_lc_minimal::OfflineRunResult outage_result;
   outage_result.trajectory = {
     MakeTrajectoryRow(10.0, 100.0),
@@ -574,6 +607,15 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   post_result.gnss_factor_records = {
     MakeGnssFactorRecord(25.0, "stage2_lowpass", "STAGE2_LOWPASS_REFERENCE_UNAVAILABLE")};
   post_result.run_summary.gnss_vertical_reference_source = "stage2_lowpass";
+  offline_lc_minimal::LateStaticWindowRow post_initial_dynamic_window;
+  post_initial_dynamic_window.window_index = 1U;
+  post_initial_dynamic_window.start_time_s = 21.0;
+  post_initial_dynamic_window.end_time_s = 23.0;
+  post_initial_dynamic_window.valid = true;
+  post_result.initial_dynamic_static_windows = {post_initial_dynamic_window};
+  post_result.run_summary.initial_dynamic_static_detection_enabled = true;
+  post_result.run_summary.initial_dynamic_static_window_count = 1U;
+  post_result.run_summary.initial_dynamic_static_vz_factor_count = 4U;
 
   offline_lc_minimal::SegmentedBatchResultAssemblerRequest request;
   request.pieces = {
@@ -605,6 +647,14 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
              "assembled summary should count selected vertical references");
   ExpectTrue(assembled.run_summary.gnss_vertical_reference_skipped_count == 1U,
              "assembled summary should count skipped vertical references");
+  ExpectTrue(assembled.initial_dynamic_static_windows.size() == 1U,
+             "assembler should keep only prefix initial dynamic static windows");
+  ExpectTrue(assembled.initial_dynamic_static_windows.front().start_time_s == 1.0,
+             "assembler should not keep post-segment initial dynamic static windows");
+  ExpectTrue(assembled.run_summary.initial_dynamic_static_window_count == 1U,
+             "assembled summary should count only prefix initial dynamic static windows");
+  ExpectTrue(assembled.run_summary.initial_dynamic_static_vz_factor_count == 3U,
+             "assembled summary should count only prefix initial dynamic static factors");
 }
 
 }  // namespace
