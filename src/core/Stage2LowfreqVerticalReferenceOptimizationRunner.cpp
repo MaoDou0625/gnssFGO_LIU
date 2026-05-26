@@ -10,6 +10,7 @@ namespace {
 OfflineRunnerConfig MakeSourceConfig(OfflineRunnerConfig config) {
   config.enable_stage2_lowfreq_vertical_reference_optimization = false;
   config.enable_stage2_lowfreq_final_dvz_relaxation = false;
+  config.enable_stage2_lowfreq_final_hold_relaxation = false;
   config.enable_stage3_vertical_reference_optimization = false;
   config.gnss_vertical_reference_source = GnssVerticalReferenceSource::kRawRtk;
   config.enable_rtk_vertical_lowpass_reference = false;
@@ -24,11 +25,24 @@ void ApplyFinalDvzRelaxation(OfflineRunnerConfig &config) {
   config.vertical_velocity_delta_sigma_scale *= scale;
 }
 
+void ApplyFinalHoldRelaxation(OfflineRunnerConfig &config) {
+  if (!config.enable_stage2_lowfreq_final_hold_relaxation) {
+    return;
+  }
+  config.stage2_attitude_hold_sigma_rad *=
+    config.stage2_lowfreq_final_attitude_hold_sigma_scale;
+  config.stage2_horizontal_position_hold_sigma_m *=
+    config.stage2_lowfreq_final_horizontal_position_hold_sigma_scale;
+  config.stage2_horizontal_velocity_hold_sigma_mps *=
+    config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale;
+}
+
 OfflineRunnerConfig MakeFinalConfig(OfflineRunnerConfig config) {
   config.enable_stage3_vertical_reference_optimization = false;
   config.gnss_vertical_reference_source =
     config.stage2_lowfreq_vertical_reference_source;
   ApplyFinalDvzRelaxation(config);
+  ApplyFinalHoldRelaxation(config);
   return config;
 }
 
@@ -85,6 +99,14 @@ OfflineRunResult Stage2LowfreqVerticalReferenceOptimizationRunner::Run() const {
     request_.config.enable_stage2_lowfreq_final_dvz_relaxation;
   final_result.run_summary.stage2_lowfreq_final_dvz_sigma_scale =
     request_.config.stage2_lowfreq_final_dvz_sigma_scale;
+  final_result.run_summary.stage2_lowfreq_final_hold_relaxation_enabled =
+    request_.config.enable_stage2_lowfreq_final_hold_relaxation;
+  final_result.run_summary.stage2_lowfreq_final_attitude_hold_sigma_scale =
+    request_.config.stage2_lowfreq_final_attitude_hold_sigma_scale;
+  final_result.run_summary.stage2_lowfreq_final_horizontal_position_hold_sigma_scale =
+    request_.config.stage2_lowfreq_final_horizontal_position_hold_sigma_scale;
+  final_result.run_summary.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale =
+    request_.config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale;
   final_result.stage2_lowfreq_vertical_reference_diagnostics =
     lowpass_reference->rows;
   return final_result;

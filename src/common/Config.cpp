@@ -357,6 +357,15 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
     throw std::runtime_error(
       "stage2 lowfreq final DVZ relaxation scale must be finite and positive");
   }
+  if (!std::isfinite(config.stage2_lowfreq_final_attitude_hold_sigma_scale) ||
+      !std::isfinite(config.stage2_lowfreq_final_horizontal_position_hold_sigma_scale) ||
+      !std::isfinite(config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale) ||
+      config.stage2_lowfreq_final_attitude_hold_sigma_scale <= 0.0 ||
+      config.stage2_lowfreq_final_horizontal_position_hold_sigma_scale <= 0.0 ||
+      config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale <= 0.0) {
+    throw std::runtime_error(
+      "stage2 lowfreq final hold relaxation scales must be finite and positive");
+  }
   if (config.enable_stage2_lowfreq_final_dvz_relaxation &&
       !config.enable_stage2_lowfreq_vertical_reference_optimization) {
     throw std::runtime_error(
@@ -366,6 +375,18 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.stage2_lowfreq_final_dvz_sigma_scale < 1.0) {
     throw std::runtime_error(
       "stage2 lowfreq final DVZ relaxation requires a sigma scale >= 1");
+  }
+  if (config.enable_stage2_lowfreq_final_hold_relaxation &&
+      !config.enable_stage2_lowfreq_vertical_reference_optimization) {
+    throw std::runtime_error(
+      "stage2 lowfreq final hold relaxation requires stage2 lowfreq vertical reference optimization");
+  }
+  if (config.enable_stage2_lowfreq_final_hold_relaxation &&
+      (config.stage2_lowfreq_final_attitude_hold_sigma_scale < 1.0 ||
+       config.stage2_lowfreq_final_horizontal_position_hold_sigma_scale < 1.0 ||
+       config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale < 1.0)) {
+    throw std::runtime_error(
+      "stage2 lowfreq final hold relaxation requires sigma scales >= 1");
   }
   if (!std::isfinite(config.stage3_vertical_reference_lowpass_cutoff_hz) ||
       !std::isfinite(config.stage3_vertical_anchor_sigma_m) ||
@@ -1054,6 +1075,18 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
   } else if (normalized_key == "stage2_lowfreq_final_dvz_sigma_scale") {
     config.stage2_lowfreq_final_dvz_sigma_scale =
       ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_stage2_lowfreq_final_hold_relaxation") {
+    config.enable_stage2_lowfreq_final_hold_relaxation =
+      ParseBool(normalized_value);
+  } else if (normalized_key == "stage2_lowfreq_final_attitude_hold_sigma_scale") {
+    config.stage2_lowfreq_final_attitude_hold_sigma_scale =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage2_lowfreq_final_horizontal_position_hold_sigma_scale") {
+    config.stage2_lowfreq_final_horizontal_position_hold_sigma_scale =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale") {
+    config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale =
+      ParseDouble(normalized_value);
   } else if (normalized_key == "enable_stage3_vertical_reference_optimization") {
     config.enable_stage3_vertical_reference_optimization = ParseBool(normalized_value);
   } else if (normalized_key == "stage3_vertical_reference_lowpass_cutoff_hz") {
@@ -1701,6 +1734,14 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.enable_stage2_lowfreq_final_dvz_relaxation ? "true" : "false") << '\n'
     << "stage2_lowfreq_final_dvz_sigma_scale="
     << config.stage2_lowfreq_final_dvz_sigma_scale << '\n'
+    << "enable_stage2_lowfreq_final_hold_relaxation="
+    << (config.enable_stage2_lowfreq_final_hold_relaxation ? "true" : "false") << '\n'
+    << "stage2_lowfreq_final_attitude_hold_sigma_scale="
+    << config.stage2_lowfreq_final_attitude_hold_sigma_scale << '\n'
+    << "stage2_lowfreq_final_horizontal_position_hold_sigma_scale="
+    << config.stage2_lowfreq_final_horizontal_position_hold_sigma_scale << '\n'
+    << "stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale="
+    << config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale << '\n'
     << "enable_stage3_vertical_reference_optimization="
     << (config.enable_stage3_vertical_reference_optimization ? "true" : "false") << '\n'
     << "stage3_vertical_reference_lowpass_cutoff_hz="

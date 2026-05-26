@@ -1868,6 +1868,18 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
     std::abs(config.stage2_lowfreq_final_dvz_sigma_scale - 1.0) < 1e-15,
     "Stage2 lowfreq final DVZ relaxation scale should default to 1");
   ExpectTrue(
+    !config.enable_stage2_lowfreq_final_hold_relaxation,
+    "Stage2 lowfreq final hold relaxation should default off");
+  ExpectTrue(
+    std::abs(config.stage2_lowfreq_final_attitude_hold_sigma_scale - 1.0) < 1e-15,
+    "Stage2 lowfreq final attitude hold scale should default to 1");
+  ExpectTrue(
+    std::abs(config.stage2_lowfreq_final_horizontal_position_hold_sigma_scale - 1.0) < 1e-15,
+    "Stage2 lowfreq final horizontal position hold scale should default to 1");
+  ExpectTrue(
+    std::abs(config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale - 1.0) < 1e-15,
+    "Stage2 lowfreq final horizontal velocity hold scale should default to 1");
+  ExpectTrue(
     std::abs(config.vertical_velocity_delta_sigma_scale - 1.0) < 1e-15,
     "vertical velocity delta output sigma scale should default to 1");
   ExpectTrue(
@@ -1905,6 +1917,22 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
     "10");
   offline_lc_minimal::OverrideConfigField(
     config,
+    "enable_stage2_lowfreq_final_hold_relaxation",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage2_lowfreq_final_attitude_hold_sigma_scale",
+    "20");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage2_lowfreq_final_horizontal_position_hold_sigma_scale",
+    "50");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale",
+    "80");
+  offline_lc_minimal::OverrideConfigField(
+    config,
     "vertical_velocity_delta_sigma_scale",
     "2.5");
   ExpectTrue(
@@ -1928,6 +1956,18 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
     std::abs(config.stage2_lowfreq_final_dvz_sigma_scale - 10.0) < 1e-15,
     "Stage2 lowfreq final DVZ relaxation scale should parse");
   ExpectTrue(
+    config.enable_stage2_lowfreq_final_hold_relaxation,
+    "Stage2 lowfreq final hold relaxation flag should parse");
+  ExpectTrue(
+    std::abs(config.stage2_lowfreq_final_attitude_hold_sigma_scale - 20.0) < 1e-15,
+    "Stage2 lowfreq final attitude hold scale should parse");
+  ExpectTrue(
+    std::abs(config.stage2_lowfreq_final_horizontal_position_hold_sigma_scale - 50.0) < 1e-15,
+    "Stage2 lowfreq final horizontal position hold scale should parse");
+  ExpectTrue(
+    std::abs(config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale - 80.0) < 1e-15,
+    "Stage2 lowfreq final horizontal velocity hold scale should parse");
+  ExpectTrue(
     std::abs(config.vertical_velocity_delta_sigma_scale - 2.5) < 1e-15,
     "vertical velocity delta output sigma scale should parse");
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
@@ -1946,6 +1986,18 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("stage2_lowfreq_final_dvz_sigma_scale=10") != std::string::npos,
     "Stage2 lowfreq final DVZ relaxation scale should serialize");
+  ExpectTrue(
+    serialized.find("enable_stage2_lowfreq_final_hold_relaxation=true") != std::string::npos,
+    "Stage2 lowfreq final hold relaxation flag should serialize");
+  ExpectTrue(
+    serialized.find("stage2_lowfreq_final_attitude_hold_sigma_scale=20") != std::string::npos,
+    "Stage2 lowfreq final attitude hold scale should serialize");
+  ExpectTrue(
+    serialized.find("stage2_lowfreq_final_horizontal_position_hold_sigma_scale=50") != std::string::npos,
+    "Stage2 lowfreq final horizontal position hold scale should serialize");
+  ExpectTrue(
+    serialized.find("stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale=80") != std::string::npos,
+    "Stage2 lowfreq final horizontal velocity hold scale should serialize");
   ExpectTrue(
     serialized.find("vertical_velocity_delta_sigma_scale=2.5") != std::string::npos,
     "vertical velocity delta output sigma scale should serialize");
@@ -2046,6 +2098,44 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
   ExpectTrue(threw, "enabled Stage2 lowfreq final DVZ relaxation should require scale >= 1");
 
   config = offline_lc_minimal::DefaultConfig();
+  config.stage2_lowfreq_final_attitude_hold_sigma_scale = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("hold relaxation scales") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive Stage2 lowfreq final hold relaxation scale should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_lowfreq_final_hold_relaxation = true;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("requires stage2 lowfreq vertical reference optimization") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "Stage2 lowfreq final hold relaxation should require the wrapper flow");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_stage2_lowfreq_vertical_reference_optimization = true;
+  config.enable_stage2_lowfreq_final_hold_relaxation = true;
+  config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale = 0.5;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("sigma scales >= 1") != std::string::npos;
+  }
+  ExpectTrue(threw, "enabled Stage2 lowfreq final hold relaxation should require scales >= 1");
+
+  config = offline_lc_minimal::DefaultConfig();
   threw = false;
   try {
     offline_lc_minimal::OverrideConfigField(
@@ -2144,6 +2234,9 @@ void TestStage2LowfreqExperimentConfigLoads() {
     !config.enable_stage2_lowfreq_final_dvz_relaxation,
     "Stage2 lowfreq base experiment should not relax final DVZ");
   ExpectTrue(
+    !config.enable_stage2_lowfreq_final_hold_relaxation,
+    "Stage2 lowfreq base experiment should not relax final holds");
+  ExpectTrue(
     std::abs(config.vertical_velocity_delta_sigma_scale - 1.0) < 1e-15,
     "Stage2 lowfreq base experiment should keep DVZ output sigma scale neutral");
 
@@ -2160,6 +2253,9 @@ void TestStage2LowfreqExperimentConfigLoads() {
   ExpectTrue(
     std::abs(relaxed_config.stage2_lowfreq_final_dvz_sigma_scale - 10.0) < 1e-15,
     "Stage2 lowfreq relaxed experiment should use 10x final DVZ sigma scale");
+  ExpectTrue(
+    !relaxed_config.enable_stage2_lowfreq_final_hold_relaxation,
+    "Stage2 lowfreq relaxed experiment should leave final holds unchanged");
   ExpectTrue(
     std::abs(relaxed_config.vertical_velocity_delta_sigma_scale - 1.0) < 1e-15,
     "Stage2 lowfreq relaxed experiment should keep base DVZ output sigma scale neutral");

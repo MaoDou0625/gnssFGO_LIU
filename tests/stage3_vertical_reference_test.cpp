@@ -505,6 +505,13 @@ void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
   config.stage2_lowfreq_vertical_reference_cutoff_hz = 0.05;
   config.enable_stage2_lowfreq_final_dvz_relaxation = true;
   config.stage2_lowfreq_final_dvz_sigma_scale = 10.0;
+  config.enable_stage2_lowfreq_final_hold_relaxation = true;
+  config.stage2_lowfreq_final_attitude_hold_sigma_scale = 20.0;
+  config.stage2_lowfreq_final_horizontal_position_hold_sigma_scale = 50.0;
+  config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale = 80.0;
+  config.stage2_attitude_hold_sigma_rad = 1.0e-5;
+  config.stage2_horizontal_position_hold_sigma_m = 1.0e-4;
+  config.stage2_horizontal_velocity_hold_sigma_mps = 1.0e-4;
   config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
   config.vertical_velocity_delta_acc_sigma_mps2 = 0.10;
   config.vertical_velocity_delta_min_sigma_mps = 0.003;
@@ -527,6 +534,10 @@ void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
     double dvz_attitude_sigma_rad = 0.0;
     double dvz_sigma_scale = 0.0;
     double computed_dvz_sigma_mps = 0.0;
+    bool final_hold_relaxation_enabled = false;
+    double attitude_hold_sigma_rad = 0.0;
+    double horizontal_position_hold_sigma_m = 0.0;
+    double horizontal_velocity_hold_sigma_mps = 0.0;
   };
   std::vector<Call> calls;
 
@@ -550,7 +561,11 @@ void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
       run_config.vertical_velocity_delta_sigma_scale,
       offline_lc_minimal::VerticalVelocityDeltaSigmaModel(run_config)
         .Compute(0.05)
-        .sigma_mps});
+        .sigma_mps,
+      run_config.enable_stage2_lowfreq_final_hold_relaxation,
+      run_config.stage2_attitude_hold_sigma_rad,
+      run_config.stage2_horizontal_position_hold_sigma_m,
+      run_config.stage2_horizontal_velocity_hold_sigma_mps});
 
     offline_lc_minimal::OfflineRunResult result;
     if (!lowpass_reference) {
@@ -582,6 +597,18 @@ void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
     1e-15,
     "source pass should not relax DVZ attitude sigma");
   ExpectNear(calls[0].dvz_sigma_scale, 1.0, 1e-15, "source pass should not relax DVZ output sigma");
+  ExpectTrue(!calls[0].final_hold_relaxation_enabled, "source pass should clear final hold relaxation");
+  ExpectNear(calls[0].attitude_hold_sigma_rad, 1.0e-5, 1e-15, "source pass should not relax attitude hold");
+  ExpectNear(
+    calls[0].horizontal_position_hold_sigma_m,
+    1.0e-4,
+    1e-15,
+    "source pass should not relax horizontal position hold");
+  ExpectNear(
+    calls[0].horizontal_velocity_hold_sigma_mps,
+    1.0e-4,
+    1e-15,
+    "source pass should not relax horizontal velocity hold");
   ExpectTrue(calls[1].enable_stage2_lowfreq, "final pass should keep the wrapper flag valid");
   ExpectTrue(!calls[1].enable_stage3, "final pass should keep Stage3 disabled");
   ExpectTrue(
@@ -598,6 +625,18 @@ void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
     1e-15,
     "final pass should preserve DVZ attitude sigma");
   ExpectNear(calls[1].dvz_sigma_scale, 10.0, 1e-15, "final pass should relax DVZ output sigma");
+  ExpectTrue(calls[1].final_hold_relaxation_enabled, "final pass should keep final hold relaxation enabled");
+  ExpectNear(calls[1].attitude_hold_sigma_rad, 2.0e-4, 1e-15, "final pass should relax attitude hold");
+  ExpectNear(
+    calls[1].horizontal_position_hold_sigma_m,
+    5.0e-3,
+    1e-15,
+    "final pass should relax horizontal position hold");
+  ExpectNear(
+    calls[1].horizontal_velocity_hold_sigma_mps,
+    8.0e-3,
+    1e-15,
+    "final pass should relax horizontal velocity hold");
   ExpectNear(
     calls[1].computed_dvz_sigma_mps,
     calls[0].computed_dvz_sigma_mps * 10.0,
@@ -614,6 +653,24 @@ void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
     10.0,
     1e-15,
     "runner summary should report final DVZ relaxation scale");
+  ExpectTrue(
+    result.run_summary.stage2_lowfreq_final_hold_relaxation_enabled,
+    "runner summary should mark final hold relaxation enabled");
+  ExpectNear(
+    result.run_summary.stage2_lowfreq_final_attitude_hold_sigma_scale,
+    20.0,
+    1e-15,
+    "runner summary should report final attitude hold relaxation scale");
+  ExpectNear(
+    result.run_summary.stage2_lowfreq_final_horizontal_position_hold_sigma_scale,
+    50.0,
+    1e-15,
+    "runner summary should report final horizontal position hold relaxation scale");
+  ExpectNear(
+    result.run_summary.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale,
+    80.0,
+    1e-15,
+    "runner summary should report final horizontal velocity hold relaxation scale");
   ExpectTrue(
     !result.stage2_lowfreq_vertical_reference_diagnostics.empty(),
     "runner should store lowfreq diagnostics in the Stage2-lowfreq container");

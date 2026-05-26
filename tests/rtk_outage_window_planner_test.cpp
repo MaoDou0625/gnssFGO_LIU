@@ -389,7 +389,7 @@ offline_lc_minimal::GnssFactorRecord MakeGnssFactorRecord(
   return row;
 }
 
-void TestSegmentedBatchRunnerSanitizesStandalonePrefixLowfreqDvzRelaxation() {
+void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_stage2_velocity_optimization = true;
   config.enable_stage2_lowfreq_vertical_reference_optimization = true;
@@ -399,15 +399,28 @@ void TestSegmentedBatchRunnerSanitizesStandalonePrefixLowfreqDvzRelaxation() {
     offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass;
   config.enable_stage2_lowfreq_final_dvz_relaxation = true;
   config.stage2_lowfreq_final_dvz_sigma_scale = 10.0;
+  config.enable_stage2_lowfreq_final_hold_relaxation = true;
+  config.stage2_lowfreq_final_attitude_hold_sigma_scale = 20.0;
+  config.stage2_lowfreq_final_horizontal_position_hold_sigma_scale = 50.0;
+  config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale = 80.0;
   config.vertical_velocity_delta_sigma_scale = 10.0;
   config.enable_rtk_outage_smoothing = true;
   config.enable_rtk_outage_segmented_batch = true;
   config.enable_rtk_outage_boundary_constraints = false;
 
-  auto base_config = config;
+  auto stage_config = config;
+  stage_config.stage2_attitude_hold_sigma_rad *=
+    stage_config.stage2_lowfreq_final_attitude_hold_sigma_scale;
+  stage_config.stage2_horizontal_position_hold_sigma_m *=
+    stage_config.stage2_lowfreq_final_horizontal_position_hold_sigma_scale;
+  stage_config.stage2_horizontal_velocity_hold_sigma_mps *=
+    stage_config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale;
+
+  auto base_config = stage_config;
   base_config.enable_stage2_lowfreq_vertical_reference_optimization = false;
   base_config.enable_stage2_lowfreq_final_dvz_relaxation = true;
-  base_config.vertical_velocity_delta_sigma_scale = 1.0;
+  base_config.enable_stage2_lowfreq_final_hold_relaxation = true;
+  base_config.vertical_velocity_delta_sigma_scale = 10.0;
   base_config.gnss_vertical_reference_source =
     offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk;
 
@@ -422,7 +435,11 @@ void TestSegmentedBatchRunnerSanitizesStandalonePrefixLowfreqDvzRelaxation() {
   struct Call {
     bool stage2_lowfreq_enabled = false;
     bool final_dvz_relaxation_enabled = false;
+    bool final_hold_relaxation_enabled = false;
     double dvz_sigma_scale = 0.0;
+    double attitude_hold_sigma_rad = 0.0;
+    double horizontal_position_hold_sigma_m = 0.0;
+    double horizontal_velocity_hold_sigma_mps = 0.0;
     double processing_start_time_s = 0.0;
     double processing_end_time_s = 0.0;
   };
@@ -430,7 +447,7 @@ void TestSegmentedBatchRunnerSanitizesStandalonePrefixLowfreqDvzRelaxation() {
 
   offline_lc_minimal::RtkOutageSegmentedBatchRunRequest request;
   request.base_config = base_config;
-  request.config = config;
+  request.config = stage_config;
   request.dataset = offline_lc_minimal::DataSet{};
   request.outage_windows = {outage};
   request.state_timestamps = {0.0, 2.0, 8.0, 10.1, 15.0, 20.2, 30.0};
@@ -444,7 +461,11 @@ void TestSegmentedBatchRunnerSanitizesStandalonePrefixLowfreqDvzRelaxation() {
     calls.push_back(Call{
       child_config.enable_stage2_lowfreq_vertical_reference_optimization,
       child_config.enable_stage2_lowfreq_final_dvz_relaxation,
+      child_config.enable_stage2_lowfreq_final_hold_relaxation,
       child_config.vertical_velocity_delta_sigma_scale,
+      child_config.stage2_attitude_hold_sigma_rad,
+      child_config.stage2_horizontal_position_hold_sigma_m,
+      child_config.stage2_horizontal_velocity_hold_sigma_mps,
       child_config.processing_start_time_s,
       child_config.processing_end_time_s});
     offline_lc_minimal::OfflineRunResult result;
@@ -463,17 +484,46 @@ void TestSegmentedBatchRunnerSanitizesStandalonePrefixLowfreqDvzRelaxation() {
     !calls[0].final_dvz_relaxation_enabled,
     "standalone prefix child should clear final DVZ relaxation");
   ExpectTrue(
-    std::abs(calls[0].dvz_sigma_scale - 1.0) < 1e-15,
-    "standalone prefix child should keep neutral DVZ output sigma scale");
+    !calls[0].final_hold_relaxation_enabled,
+    "standalone prefix child should clear final hold relaxation");
   ExpectTrue(
-    calls[1].stage2_lowfreq_enabled && calls[1].final_dvz_relaxation_enabled,
-    "outage child should keep Stage2 lowfreq final DVZ relaxation");
+    std::abs(calls[0].dvz_sigma_scale - 10.0) < 1e-15,
+    "standalone prefix child should preserve already-applied DVZ output sigma scale");
+  ExpectTrue(
+    std::abs(calls[0].attitude_hold_sigma_rad -
+             config.stage2_attitude_hold_sigma_rad * 20.0) < 1e-15,
+    "standalone prefix child should preserve already-applied attitude hold sigma");
+  ExpectTrue(
+    std::abs(calls[0].horizontal_position_hold_sigma_m -
+             config.stage2_horizontal_position_hold_sigma_m * 50.0) < 1e-15,
+    "standalone prefix child should preserve already-applied horizontal position hold sigma");
+  ExpectTrue(
+    std::abs(calls[0].horizontal_velocity_hold_sigma_mps -
+             config.stage2_horizontal_velocity_hold_sigma_mps * 80.0) < 1e-15,
+    "standalone prefix child should preserve already-applied horizontal velocity hold sigma");
+  ExpectTrue(
+    calls[1].stage2_lowfreq_enabled && calls[1].final_dvz_relaxation_enabled &&
+      calls[1].final_hold_relaxation_enabled,
+    "outage child should keep Stage2 lowfreq final relaxations");
   ExpectTrue(
     std::abs(calls[1].dvz_sigma_scale - 10.0) < 1e-15,
     "outage child should keep relaxed DVZ output sigma scale");
   ExpectTrue(
-    calls[2].stage2_lowfreq_enabled && calls[2].final_dvz_relaxation_enabled,
-    "post child should keep Stage2 lowfreq final DVZ relaxation");
+    std::abs(calls[1].attitude_hold_sigma_rad -
+             config.stage2_attitude_hold_sigma_rad * 20.0) < 1e-15,
+    "outage child should use relaxed attitude hold sigma");
+  ExpectTrue(
+    std::abs(calls[1].horizontal_position_hold_sigma_m -
+             config.stage2_horizontal_position_hold_sigma_m * 50.0) < 1e-15,
+    "outage child should use relaxed horizontal position hold sigma");
+  ExpectTrue(
+    std::abs(calls[1].horizontal_velocity_hold_sigma_mps -
+             config.stage2_horizontal_velocity_hold_sigma_mps * 80.0) < 1e-15,
+    "outage child should use relaxed horizontal velocity hold sigma");
+  ExpectTrue(
+    calls[2].stage2_lowfreq_enabled && calls[2].final_dvz_relaxation_enabled &&
+      calls[2].final_hold_relaxation_enabled,
+    "post child should keep Stage2 lowfreq final relaxations");
   ExpectTrue(
     std::abs(calls[2].dvz_sigma_scale - 10.0) < 1e-15,
     "post child should keep relaxed DVZ output sigma scale");
@@ -583,8 +633,8 @@ int main() {
       "TestBatchSegmentPlannerSplitsFirstPlannedOutage",
       TestBatchSegmentPlannerSplitsFirstPlannedOutage);
     RunTest(
-      "TestSegmentedBatchRunnerSanitizesStandalonePrefixLowfreqDvzRelaxation",
-      TestSegmentedBatchRunnerSanitizesStandalonePrefixLowfreqDvzRelaxation);
+      "TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales",
+      TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales);
     RunTest(
       "TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates",
       TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates);

@@ -247,6 +247,10 @@ struct RunSummary {
     std::numeric_limits<double>::quiet_NaN();
   bool stage2_lowfreq_final_dvz_relaxation_enabled = false;
   double stage2_lowfreq_final_dvz_sigma_scale = 1.0;
+  bool stage2_lowfreq_final_hold_relaxation_enabled = false;
+  double stage2_lowfreq_final_attitude_hold_sigma_scale = 1.0;
+  double stage2_lowfreq_final_horizontal_position_hold_sigma_scale = 1.0;
+  double stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale = 1.0;
   bool stage3_vertical_reference_optimization_enabled = false;
   double stage3_vertical_reference_lowpass_cutoff_hz =
     std::numeric_limits<double>::quiet_NaN();
@@ -702,6 +706,14 @@ struct RunSummary {
         << (stage2_lowfreq_final_dvz_relaxation_enabled ? "true" : "false") << '\n'
         << "stage2_lowfreq_final_dvz_sigma_scale="
         << stage2_lowfreq_final_dvz_sigma_scale << '\n'
+        << "stage2_lowfreq_final_hold_relaxation_enabled="
+        << (stage2_lowfreq_final_hold_relaxation_enabled ? "true" : "false") << '\n'
+        << "stage2_lowfreq_final_attitude_hold_sigma_scale="
+        << stage2_lowfreq_final_attitude_hold_sigma_scale << '\n'
+        << "stage2_lowfreq_final_horizontal_position_hold_sigma_scale="
+        << stage2_lowfreq_final_horizontal_position_hold_sigma_scale << '\n'
+        << "stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale="
+        << stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale << '\n'
         << "stage3_vertical_reference_optimization_enabled="
         << (stage3_vertical_reference_optimization_enabled ? "true" : "false") << '\n'
         << "stage3_vertical_reference_lowpass_cutoff_hz="
