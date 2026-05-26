@@ -2145,6 +2145,9 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
     std::abs(config.vertical_velocity_delta_context_jump_extra_padding_s) < 1e-15,
     "vertical velocity delta jump context extra padding should default to 0");
   ExpectTrue(
+    config.vertical_velocity_delta_skip_jump_padding,
+    "vertical velocity delta should skip jump padding by default");
+  ExpectTrue(
     config.gnss_vertical_reference_source ==
       offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk,
     "GNSS vertical reference should default to raw RTK");
@@ -2221,6 +2224,10 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
     config,
     "vertical_velocity_delta_context_jump_extra_padding_s",
     "0.75");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "vertical_velocity_delta_skip_jump_padding",
+    "false");
   ExpectTrue(
     config.enable_stage2_lowfreq_vertical_reference_optimization,
     "Stage2 lowfreq enable flag should parse");
@@ -2274,6 +2281,9 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
   ExpectTrue(
     std::abs(config.vertical_velocity_delta_context_jump_extra_padding_s - 0.75) < 1e-15,
     "vertical velocity delta jump context extra padding should parse");
+  ExpectTrue(
+    !config.vertical_velocity_delta_skip_jump_padding,
+    "vertical velocity delta jump padding skip flag should parse");
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
   ExpectTrue(
     serialized.find("enable_stage2_lowfreq_vertical_reference_optimization=true") != std::string::npos,
@@ -2323,6 +2333,9 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("vertical_velocity_delta_context_jump_extra_padding_s=0.75") != std::string::npos,
     "vertical velocity delta jump context extra padding should serialize");
+  ExpectTrue(
+    serialized.find("vertical_velocity_delta_skip_jump_padding=false") != std::string::npos,
+    "vertical velocity delta jump padding skip flag should serialize");
   ExpectTrue(
     serialized.find("gnss_vertical_reference_source=stage2_lowpass") != std::string::npos,
     "GNSS vertical reference source should serialize");
@@ -2590,6 +2603,32 @@ void TestStage3ExperimentConfigLoads() {
   ExpectTrue(
     std::abs(static_hold_config.vertical_velocity_delta_context_jump_extra_padding_s - 0.6) < 1e-15,
     "Stage3 no-jump-bias static-hold config should widen DVZ in a jump-adjacent ring");
+  ExpectTrue(
+    static_hold_config.vertical_velocity_delta_skip_jump_padding,
+    "Stage3 no-jump-bias static-hold config should keep the legacy jump DVZ skip");
+
+  const auto jump_dvz_bias_config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1rtkjumpcut1_stage3_anchor_5mm_jump_dvz_bias.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    jump_dvz_bias_config.enable_stage3_vertical_reference_optimization,
+    "Stage3 5mm jump-DVZ-bias config should enable Stage3");
+  ExpectTrue(
+    std::abs(jump_dvz_bias_config.stage3_vertical_anchor_sigma_m - 0.005) < 1e-15,
+    "Stage3 5mm jump-DVZ-bias config should use 5 mm anchor sigma");
+  ExpectTrue(
+    !jump_dvz_bias_config.vertical_velocity_delta_skip_jump_padding,
+    "Stage3 5mm jump-DVZ-bias config should keep DVZ factors inside jump padding");
+  ExpectTrue(
+    jump_dvz_bias_config.enable_vertical_jump_bias,
+    "Stage3 5mm jump-DVZ-bias config should restore vertical jump bias");
+  ExpectTrue(
+    std::abs(jump_dvz_bias_config.vertical_velocity_delta_context_jump_sigma_scale - 1000.0) < 1e-15,
+    "Stage3 5mm jump-DVZ-bias config should use a wide DVZ sigma scale near jumps");
+  ExpectTrue(
+    std::abs(jump_dvz_bias_config.vertical_velocity_delta_context_outage_sigma_scale - 100.0) < 1e-15,
+    "Stage3 5mm jump-DVZ-bias config should not make outage an extra-wide DVZ context");
 }
 
 void TestStage2LowfreqExperimentConfigLoads() {

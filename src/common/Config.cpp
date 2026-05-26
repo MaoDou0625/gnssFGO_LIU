@@ -1387,6 +1387,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_velocity_delta_min_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_jump_padding_s") {
     config.vertical_velocity_delta_jump_padding_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_skip_jump_padding") {
+    config.vertical_velocity_delta_skip_jump_padding = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_target_acc_limit_mps2") {
     config.vertical_velocity_delta_target_acc_limit_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_velocity_delta_initial_static_constraint") {
@@ -2022,6 +2024,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "vertical_velocity_delta_acc_sigma_mps2=" << config.vertical_velocity_delta_acc_sigma_mps2 << '\n'
     << "vertical_velocity_delta_min_sigma_mps=" << config.vertical_velocity_delta_min_sigma_mps << '\n'
     << "vertical_velocity_delta_jump_padding_s=" << config.vertical_velocity_delta_jump_padding_s << '\n'
+    << "vertical_velocity_delta_skip_jump_padding="
+    << (config.vertical_velocity_delta_skip_jump_padding ? "true" : "false") << '\n'
     << "vertical_velocity_delta_target_acc_limit_mps2="
     << config.vertical_velocity_delta_target_acc_limit_mps2 << '\n'
     << "enable_vertical_velocity_delta_initial_static_constraint="

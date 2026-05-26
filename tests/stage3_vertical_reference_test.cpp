@@ -496,6 +496,7 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
   config.enable_rtk_outage_causal_drift_reference = true;
   config.enable_rtk_outage_preoutage_vertical_fence = true;
   config.enable_late_static_detection = true;
+  config.enable_vertical_jump_bias = true;
 
   struct Call {
     bool enable_stage3 = false;
@@ -507,6 +508,7 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
     bool enable_causal_reference = false;
     bool enable_preoutage_fence = false;
     bool enable_late_static = false;
+    bool enable_vertical_jump_bias = false;
     bool enable_body_z_nhc = false;
     bool enable_stage2_vehicle_nhc = false;
     bool has_stage2_reference = false;
@@ -531,6 +533,7 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
       run_config.enable_rtk_outage_causal_drift_reference,
       run_config.enable_rtk_outage_preoutage_vertical_fence,
       run_config.enable_late_static_detection,
+      run_config.enable_vertical_jump_bias,
       run_config.enable_body_z_nhc_constraint,
       run_config.enable_stage2_vehicle_nhc_constraint,
       static_cast<bool>(stage2_reference),
@@ -573,6 +576,8 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
   ExpectTrue(!calls[1].enable_causal_reference, "Stage3 pass should disable causal RTK drift reference");
   ExpectTrue(!calls[1].enable_preoutage_fence, "Stage3 pass should disable pre-outage vertical fence");
   ExpectTrue(!calls[1].enable_late_static, "Stage3 pass should disable late-static raw RTK height anchors");
+  ExpectTrue(calls[0].enable_vertical_jump_bias, "Stage2 source pass should keep requested jump bias");
+  ExpectTrue(calls[1].enable_vertical_jump_bias, "Stage3 pass should keep requested jump bias");
   ExpectTrue(!calls[1].enable_body_z_nhc, "Stage3 pass should keep Stage2 policy's Body-Z NHC disabled");
   ExpectTrue(calls[1].enable_stage2_vehicle_nhc, "Stage3 pass should keep Stage2 vehicle NHC enabled");
   ExpectTrue(calls[1].has_stage2_reference, "Stage3 pass should receive Stage2 reference");

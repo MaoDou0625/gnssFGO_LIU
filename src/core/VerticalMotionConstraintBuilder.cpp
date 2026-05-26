@@ -173,8 +173,11 @@ void VerticalMotionConstraintBuilder::Build() const {
       request_.diagnostics->push_back(row);
       continue;
     }
-    if (OverlapsJumpPadding(record.start_time_s, record.end_time_s, jump_constraint_windows)) {
-      row.in_jump_padding = true;
+    const bool overlaps_jump_padding =
+      OverlapsJumpPadding(record.start_time_s, record.end_time_s, jump_constraint_windows);
+    row.in_jump_padding = overlaps_jump_padding;
+    if (overlaps_jump_padding &&
+        request_.config->vertical_velocity_delta_skip_jump_padding) {
       row.skip_reason = "JUMP_PADDING";
       ++request_.run_summary->vertical_velocity_delta_skipped_jump_count;
       request_.diagnostics->push_back(row);
