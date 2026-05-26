@@ -643,6 +643,16 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_velocity_delta_sigma_ceiling_mps <= 0.0 ||
       !std::isfinite(config.vertical_velocity_delta_sigma_scale) ||
       config.vertical_velocity_delta_sigma_scale <= 0.0 ||
+      !std::isfinite(config.vertical_velocity_delta_context_normal_sigma_scale) ||
+      !std::isfinite(config.vertical_velocity_delta_context_rough_sigma_scale) ||
+      !std::isfinite(config.vertical_velocity_delta_context_outage_sigma_scale) ||
+      !std::isfinite(config.vertical_velocity_delta_context_jump_sigma_scale) ||
+      !std::isfinite(config.vertical_velocity_delta_context_jump_extra_padding_s) ||
+      config.vertical_velocity_delta_context_normal_sigma_scale <= 0.0 ||
+      config.vertical_velocity_delta_context_rough_sigma_scale <= 0.0 ||
+      config.vertical_velocity_delta_context_outage_sigma_scale <= 0.0 ||
+      config.vertical_velocity_delta_context_jump_sigma_scale <= 0.0 ||
+      config.vertical_velocity_delta_context_jump_extra_padding_s < 0.0 ||
       config.vertical_motion_adaptive_outer_iterations < 0 ||
       config.vertical_motion_adaptive_convergence_score_epsilon <= 0.0 ||
       config.vertical_motion_adaptive_stability_window_s <= 0.0 ||
@@ -1397,6 +1407,18 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_velocity_delta_sigma_ceiling_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_sigma_scale") {
     config.vertical_velocity_delta_sigma_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_velocity_delta_context_sigma_scale") {
+    config.enable_vertical_velocity_delta_context_sigma_scale = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_context_normal_sigma_scale") {
+    config.vertical_velocity_delta_context_normal_sigma_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_context_rough_sigma_scale") {
+    config.vertical_velocity_delta_context_rough_sigma_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_context_outage_sigma_scale") {
+    config.vertical_velocity_delta_context_outage_sigma_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_context_jump_sigma_scale") {
+    config.vertical_velocity_delta_context_jump_sigma_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_context_jump_extra_padding_s") {
+    config.vertical_velocity_delta_context_jump_extra_padding_s = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_motion_adaptive_reweighting") {
     config.enable_vertical_motion_adaptive_reweighting = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_motion_adaptive_outer_iterations") {
@@ -2018,6 +2040,18 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.vertical_velocity_delta_sigma_ceiling_mps << '\n'
     << "vertical_velocity_delta_sigma_scale="
     << config.vertical_velocity_delta_sigma_scale << '\n'
+    << "enable_vertical_velocity_delta_context_sigma_scale="
+    << (config.enable_vertical_velocity_delta_context_sigma_scale ? "true" : "false") << '\n'
+    << "vertical_velocity_delta_context_normal_sigma_scale="
+    << config.vertical_velocity_delta_context_normal_sigma_scale << '\n'
+    << "vertical_velocity_delta_context_rough_sigma_scale="
+    << config.vertical_velocity_delta_context_rough_sigma_scale << '\n'
+    << "vertical_velocity_delta_context_outage_sigma_scale="
+    << config.vertical_velocity_delta_context_outage_sigma_scale << '\n'
+    << "vertical_velocity_delta_context_jump_sigma_scale="
+    << config.vertical_velocity_delta_context_jump_sigma_scale << '\n'
+    << "vertical_velocity_delta_context_jump_extra_padding_s="
+    << config.vertical_velocity_delta_context_jump_extra_padding_s << '\n'
     << "enable_vertical_motion_adaptive_reweighting="
     << (config.enable_vertical_motion_adaptive_reweighting ? "true" : "false") << '\n'
     << "vertical_motion_adaptive_outer_iterations="

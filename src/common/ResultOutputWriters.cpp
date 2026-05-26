@@ -1067,6 +1067,7 @@ void WriteVerticalVelocityDeltaDiagnosticsCsv(
     << "state_i,state_j,outer_pass,start_time_s,end_time_s,dt_s,factor_added,skip_reason,in_jump_padding,"
        "target_clamped,raw_target_delta_vz_mps,"
        "target_delta_vz_mps,optimized_delta_vz_mps,residual_mps,sigma_mps,sigma_model,"
+       "sigma_context,sigma_output_scale,"
        "legacy_sigma_mps,bias_sigma_mps,attitude_sigma_mps,sigma_floor_mps,sigma_ceiling_mps,"
        "adaptive_motion_score,adaptive_sigma_mps,adaptive_sigma_ratio,"
        "local_horizontal_speed_rms_mps,local_vz_rms_mps,local_vz_range_mps,"
@@ -1090,6 +1091,8 @@ void WriteVerticalVelocityDeltaDiagnosticsCsv(
            << row.residual_mps << ','
            << row.sigma_mps << ','
            << row.sigma_model << ','
+           << row.sigma_context << ','
+           << row.sigma_output_scale << ','
            << row.legacy_sigma_mps << ','
            << row.bias_sigma_mps << ','
            << row.attitude_sigma_mps << ','

@@ -1141,6 +1141,32 @@ void TestVerticalVelocityDeltaConfigValidation() {
   config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
   config.enable_vertical_velocity_delta_constraint = true;
+  config.enable_vertical_velocity_delta_context_sigma_scale = true;
+  config.vertical_velocity_delta_context_rough_sigma_scale = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical velocity delta settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive velocity delta rough context scale should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.enable_vertical_velocity_delta_context_sigma_scale = true;
+  config.vertical_velocity_delta_context_jump_extra_padding_s = -0.1;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("vertical velocity delta settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "negative velocity delta jump context extra padding should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
   config.vertical_velocity_delta_sigma_ceiling_mps = config.vertical_velocity_delta_sigma_floor_mps * 0.5;
   threw = false;
   try {
@@ -2101,6 +2127,24 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
     std::abs(config.vertical_velocity_delta_sigma_scale - 1.0) < 1e-15,
     "vertical velocity delta output sigma scale should default to 1");
   ExpectTrue(
+    !config.enable_vertical_velocity_delta_context_sigma_scale,
+    "vertical velocity delta context sigma scaling should default off");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_context_normal_sigma_scale - 1.0) < 1e-15,
+    "vertical velocity delta normal context scale should default to 1");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_context_rough_sigma_scale - 1.0) < 1e-15,
+    "vertical velocity delta rough context scale should default to 1");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_context_outage_sigma_scale - 1.0) < 1e-15,
+    "vertical velocity delta outage context scale should default to 1");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_context_jump_sigma_scale - 1.0) < 1e-15,
+    "vertical velocity delta jump context scale should default to 1");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_context_jump_extra_padding_s) < 1e-15,
+    "vertical velocity delta jump context extra padding should default to 0");
+  ExpectTrue(
     config.gnss_vertical_reference_source ==
       offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk,
     "GNSS vertical reference should default to raw RTK");
@@ -2153,6 +2197,30 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
     config,
     "vertical_velocity_delta_sigma_scale",
     "2.5");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_vertical_velocity_delta_context_sigma_scale",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "vertical_velocity_delta_context_normal_sigma_scale",
+    "100");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "vertical_velocity_delta_context_rough_sigma_scale",
+    "1000");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "vertical_velocity_delta_context_outage_sigma_scale",
+    "800");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "vertical_velocity_delta_context_jump_sigma_scale",
+    "500");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "vertical_velocity_delta_context_jump_extra_padding_s",
+    "0.75");
   ExpectTrue(
     config.enable_stage2_lowfreq_vertical_reference_optimization,
     "Stage2 lowfreq enable flag should parse");
@@ -2188,6 +2256,24 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
   ExpectTrue(
     std::abs(config.vertical_velocity_delta_sigma_scale - 2.5) < 1e-15,
     "vertical velocity delta output sigma scale should parse");
+  ExpectTrue(
+    config.enable_vertical_velocity_delta_context_sigma_scale,
+    "vertical velocity delta context sigma scale flag should parse");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_context_normal_sigma_scale - 100.0) < 1e-15,
+    "vertical velocity delta normal context scale should parse");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_context_rough_sigma_scale - 1000.0) < 1e-15,
+    "vertical velocity delta rough context scale should parse");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_context_outage_sigma_scale - 800.0) < 1e-15,
+    "vertical velocity delta outage context scale should parse");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_context_jump_sigma_scale - 500.0) < 1e-15,
+    "vertical velocity delta jump context scale should parse");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_context_jump_extra_padding_s - 0.75) < 1e-15,
+    "vertical velocity delta jump context extra padding should parse");
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
   ExpectTrue(
     serialized.find("enable_stage2_lowfreq_vertical_reference_optimization=true") != std::string::npos,
@@ -2219,6 +2305,24 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("vertical_velocity_delta_sigma_scale=2.5") != std::string::npos,
     "vertical velocity delta output sigma scale should serialize");
+  ExpectTrue(
+    serialized.find("enable_vertical_velocity_delta_context_sigma_scale=true") != std::string::npos,
+    "vertical velocity delta context sigma scale flag should serialize");
+  ExpectTrue(
+    serialized.find("vertical_velocity_delta_context_normal_sigma_scale=100") != std::string::npos,
+    "vertical velocity delta normal context scale should serialize");
+  ExpectTrue(
+    serialized.find("vertical_velocity_delta_context_rough_sigma_scale=1000") != std::string::npos,
+    "vertical velocity delta rough context scale should serialize");
+  ExpectTrue(
+    serialized.find("vertical_velocity_delta_context_outage_sigma_scale=800") != std::string::npos,
+    "vertical velocity delta outage context scale should serialize");
+  ExpectTrue(
+    serialized.find("vertical_velocity_delta_context_jump_sigma_scale=500") != std::string::npos,
+    "vertical velocity delta jump context scale should serialize");
+  ExpectTrue(
+    serialized.find("vertical_velocity_delta_context_jump_extra_padding_s=0.75") != std::string::npos,
+    "vertical velocity delta jump context extra padding should serialize");
   ExpectTrue(
     serialized.find("gnss_vertical_reference_source=stage2_lowpass") != std::string::npos,
     "GNSS vertical reference source should serialize");
@@ -2468,6 +2572,24 @@ void TestStage3ExperimentConfigLoads() {
       !static_hold_config.enable_vertical_jump_segmented_bias &&
       !static_hold_config.enable_vertical_jump_spectral_bias_relaxation,
     "Stage3 no-jump-bias static-hold config should disable jump-bias mechanisms");
+  ExpectTrue(
+    static_hold_config.enable_vertical_velocity_delta_context_sigma_scale,
+    "Stage3 no-jump-bias static-hold config should enable context DVZ sigma scaling");
+  ExpectTrue(
+    std::abs(static_hold_config.vertical_velocity_delta_context_normal_sigma_scale - 100.0) < 1e-15,
+    "Stage3 no-jump-bias static-hold config should use 100x DVZ scale on normal road");
+  ExpectTrue(
+    std::abs(static_hold_config.vertical_velocity_delta_context_rough_sigma_scale - 1000.0) < 1e-15,
+    "Stage3 no-jump-bias static-hold config should keep wider DVZ scale on rough road");
+  ExpectTrue(
+    std::abs(static_hold_config.vertical_velocity_delta_context_outage_sigma_scale - 1000.0) < 1e-15,
+    "Stage3 no-jump-bias static-hold config should keep wider DVZ scale in RTK outage");
+  ExpectTrue(
+    std::abs(static_hold_config.vertical_velocity_delta_context_jump_sigma_scale - 1000.0) < 1e-15,
+    "Stage3 no-jump-bias static-hold config should keep wider DVZ scale near jumps");
+  ExpectTrue(
+    std::abs(static_hold_config.vertical_velocity_delta_context_jump_extra_padding_s - 0.6) < 1e-15,
+    "Stage3 no-jump-bias static-hold config should widen DVZ in a jump-adjacent ring");
 }
 
 void TestStage2LowfreqExperimentConfigLoads() {

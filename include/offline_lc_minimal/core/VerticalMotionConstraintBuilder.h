@@ -27,6 +27,8 @@ struct VerticalMotionConstraintBuildRequest {
   const OfflineRunnerConfig *config = nullptr;
   const std::vector<VerticalVelocityDeltaPropagationRecord> *propagation_records = nullptr;
   const std::vector<BodyZSeedJumpWindowRow> *jump_windows = nullptr;
+  const std::vector<RtkOutageWindowRow> *rtk_outage_windows = nullptr;
+  const std::vector<BodyZBiasReestimateSegmentRow> *bias_reestimate_segments = nullptr;
   const VerticalMotionStabilityProfile *stability_profile = nullptr;
   std::optional<double> gnss_support_end_time_s;
   std::size_t dynamic_start_index = 0;

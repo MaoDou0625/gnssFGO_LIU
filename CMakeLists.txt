@@ -128,6 +128,7 @@ add_library(offline_lc_minimal_lib
   src/core/VerticalMotionStabilityProfile.cpp
   src/core/VerticalMotionConstraintBuilder.cpp
   src/core/VerticalPositionVelocityConsistencyConstraintBuilder.cpp
+  src/core/VerticalVelocityDeltaContextScalePlanner.cpp
   src/core/VerticalVelocityDeltaSigmaModel.cpp
   src/core/OfflineBatchRunner.cpp
 )

@@ -22,8 +22,14 @@ VerticalVelocityDeltaSigmaModel::VerticalVelocityDeltaSigmaModel(const OfflineRu
     : config_(config) {}
 
 VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::Compute(const double dt_s) const {
+  return Compute(dt_s, config_.vertical_velocity_delta_sigma_scale);
+}
+
+VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::Compute(
+  const double dt_s,
+  const double output_scale) const {
   VerticalVelocityDeltaSigmaResult result = ComputeWithoutOutputScale(dt_s);
-  ApplyOutputScale(result, config_.vertical_velocity_delta_sigma_scale);
+  ApplyOutputScale(result, output_scale);
   return result;
 }
 
@@ -57,13 +63,20 @@ VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::ComputeWithout
 VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::Compute(
   const double dt_s,
   const VerticalMotionAdaptiveReweightingDiagnosticRow *stability_entry) const {
+  return Compute(dt_s, stability_entry, config_.vertical_velocity_delta_sigma_scale);
+}
+
+VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::Compute(
+  const double dt_s,
+  const VerticalMotionAdaptiveReweightingDiagnosticRow *stability_entry,
+  const double output_scale) const {
   VerticalVelocityDeltaSigmaResult base = ComputeWithoutOutputScale(dt_s);
   if (!config_.enable_vertical_motion_adaptive_reweighting ||
       stability_entry == nullptr ||
       !std::isfinite(stability_entry->motion_score) ||
       stability_entry->in_jump_padding ||
       !config_.enable_vertical_velocity_delta_bias_consistent_sigma) {
-    ApplyOutputScale(base, config_.vertical_velocity_delta_sigma_scale);
+    ApplyOutputScale(base, output_scale);
     return base;
   }
 
@@ -97,7 +110,7 @@ VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::Compute(
   result.clamped_ceiling =
     result.sigma_mps >= result.sigma_ceiling_mps &&
     blended_sigma > result.sigma_ceiling_mps;
-  ApplyOutputScale(result, config_.vertical_velocity_delta_sigma_scale);
+  ApplyOutputScale(result, output_scale);
   return result;
 }
 

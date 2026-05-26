@@ -22,6 +22,13 @@ void ApplyFinalDvzRelaxation(OfflineRunnerConfig &config) {
     return;
   }
   const double scale = config.stage2_lowfreq_final_dvz_sigma_scale;
+  if (config.enable_vertical_velocity_delta_context_sigma_scale) {
+    config.vertical_velocity_delta_context_normal_sigma_scale *= scale;
+    config.vertical_velocity_delta_context_rough_sigma_scale *= scale;
+    config.vertical_velocity_delta_context_outage_sigma_scale *= scale;
+    config.vertical_velocity_delta_context_jump_sigma_scale *= scale;
+    return;
+  }
   config.vertical_velocity_delta_sigma_scale *= scale;
 }
 

@@ -24,9 +24,14 @@ class VerticalVelocityDeltaSigmaModel {
   explicit VerticalVelocityDeltaSigmaModel(const OfflineRunnerConfig &config);
 
   [[nodiscard]] VerticalVelocityDeltaSigmaResult Compute(double dt_s) const;
+  [[nodiscard]] VerticalVelocityDeltaSigmaResult Compute(double dt_s, double output_scale) const;
   [[nodiscard]] VerticalVelocityDeltaSigmaResult Compute(
     double dt_s,
     const VerticalMotionAdaptiveReweightingDiagnosticRow *stability_entry) const;
+  [[nodiscard]] VerticalVelocityDeltaSigmaResult Compute(
+    double dt_s,
+    const VerticalMotionAdaptiveReweightingDiagnosticRow *stability_entry,
+    double output_scale) const;
 
  private:
   [[nodiscard]] VerticalVelocityDeltaSigmaResult ComputeWithoutOutputScale(double dt_s) const;

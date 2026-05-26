@@ -1845,6 +1845,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   vertical_motion_request.config = &config_;
   vertical_motion_request.propagation_records = &vertical_velocity_delta_records;
   vertical_motion_request.jump_windows = &run_result.body_z_seed_jump_windows;
+  vertical_motion_request.rtk_outage_windows = &run_result.rtk_outage_windows;
+  vertical_motion_request.bias_reestimate_segments = &run_result.body_z_bias_reestimate_segments;
   vertical_motion_request.stability_profile = active_stability_profile_ptr;
   vertical_motion_request.gnss_support_end_time_s = vertical_velocity_delta_support_end_time_s;
   vertical_motion_request.dynamic_start_index = graph_timeline.dynamic_start_index;

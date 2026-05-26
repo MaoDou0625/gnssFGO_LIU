@@ -534,6 +534,8 @@ struct VerticalVelocityDeltaDiagnosticRow {
   double residual_mps = std::numeric_limits<double>::quiet_NaN();
   double sigma_mps = std::numeric_limits<double>::quiet_NaN();
   std::string sigma_model = "legacy";
+  std::string sigma_context = "GLOBAL";
+  double sigma_output_scale = std::numeric_limits<double>::quiet_NaN();
   double legacy_sigma_mps = std::numeric_limits<double>::quiet_NaN();
   double bias_sigma_mps = std::numeric_limits<double>::quiet_NaN();
   double attitude_sigma_mps = std::numeric_limits<double>::quiet_NaN();

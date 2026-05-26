@@ -14,6 +14,7 @@
 #include "offline_lc_minimal/core/VerticalAccelBiasGmConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalMotionConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalMotionStabilityEstimator.h"
+#include "offline_lc_minimal/core/VerticalVelocityDeltaContextScalePlanner.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaBiasFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaFactor.h"
@@ -115,6 +116,26 @@ std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> MakeJumpWindows() {
   window.start_time_s = 2.2;
   window.end_time_s = 2.4;
   return {window};
+}
+
+offline_lc_minimal::RtkOutageWindowRow MakeRtkOutageWindow(
+  const double start_time_s,
+  const double end_time_s) {
+  offline_lc_minimal::RtkOutageWindowRow window;
+  window.start_time_s = start_time_s;
+  window.end_time_s = end_time_s;
+  return window;
+}
+
+offline_lc_minimal::BodyZBiasReestimateSegmentRow MakeBiasSegment(
+  const std::string &source_type,
+  const double start_time_s,
+  const double end_time_s) {
+  offline_lc_minimal::BodyZBiasReestimateSegmentRow segment;
+  segment.source_type = source_type;
+  segment.start_time_s = start_time_s;
+  segment.end_time_s = end_time_s;
+  return segment;
 }
 
 void TestBuilderAddsDynamicBoundaryAndDynamicNonJumpIntervals() {
@@ -223,6 +244,72 @@ void TestSigmaModelOutputScalePreservesPhysicalComponents() {
     1e-15,
     "output scale should scale ceiling");
   ExpectNear(scaled.sigma_mps, base.sigma_mps * 10.0, 1e-15, "output scale should scale sigma");
+}
+
+void TestContextScalePlannerUsesGlobalWhenDisabled() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_velocity_delta_sigma_scale = 7.0;
+  config.enable_vertical_velocity_delta_context_sigma_scale = false;
+  const std::vector<offline_lc_minimal::BodyZJumpConstraintWindow> jump_windows;
+  const std::vector<offline_lc_minimal::RtkOutageWindowRow> outage_windows{
+    MakeRtkOutageWindow(10.0, 20.0),
+  };
+  const std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> bias_segments{
+    MakeBiasSegment("BODY_Z_BIAS", 10.0, 20.0),
+  };
+
+  const offline_lc_minimal::VerticalVelocityDeltaContextScalePlanner planner({
+    &config,
+    &jump_windows,
+    &outage_windows,
+    &bias_segments,
+  });
+  const auto decision = planner.Evaluate(12.0, 12.5);
+
+  ExpectTrue(decision.context == "GLOBAL", "disabled context scaling should report GLOBAL");
+  ExpectNear(decision.output_sigma_scale, 7.0, 1e-12, "disabled context scaling should use global scale");
+}
+
+void TestContextScalePlannerClassifiesRoughOutageAndJump() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_vertical_velocity_delta_context_sigma_scale = true;
+  config.vertical_velocity_delta_context_normal_sigma_scale = 100.0;
+  config.vertical_velocity_delta_context_rough_sigma_scale = 1000.0;
+  config.vertical_velocity_delta_context_outage_sigma_scale = 800.0;
+  config.vertical_velocity_delta_context_jump_sigma_scale = 500.0;
+  config.vertical_velocity_delta_context_jump_extra_padding_s = 0.5;
+
+  const std::vector<offline_lc_minimal::BodyZJumpConstraintWindow> jump_windows{
+    {0U, 1U, 2.0, 2.2},
+  };
+  const std::vector<offline_lc_minimal::RtkOutageWindowRow> outage_windows{
+    MakeRtkOutageWindow(3.0, 3.5),
+  };
+  const std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> bias_segments{
+    MakeBiasSegment("BODY_Z_BIAS", 4.0, 5.0),
+  };
+  const offline_lc_minimal::VerticalVelocityDeltaContextScalePlanner planner({
+    &config,
+    &jump_windows,
+    &outage_windows,
+    &bias_segments,
+  });
+
+  const auto normal = planner.Evaluate(0.0, 0.1);
+  ExpectTrue(normal.context == "NORMAL", "non-overlap interval should be normal");
+  ExpectNear(normal.output_sigma_scale, 100.0, 1e-12, "normal context scale is wrong");
+
+  const auto jump = planner.Evaluate(1.6, 1.7);
+  ExpectTrue(jump.context == "JUMP", "jump interval should be classified");
+  ExpectNear(jump.output_sigma_scale, 500.0, 1e-12, "jump context scale is wrong");
+
+  const auto outage = planner.Evaluate(3.2, 3.25);
+  ExpectTrue(outage.context == "RTK_OUTAGE", "outage interval should be classified");
+  ExpectNear(outage.output_sigma_scale, 800.0, 1e-12, "outage context scale is wrong");
+
+  const auto rough = planner.Evaluate(4.2, 4.25);
+  ExpectTrue(rough.context == "ROUGH_BIAS", "rough bias interval should be classified");
+  ExpectNear(rough.output_sigma_scale, 1000.0, 1e-12, "rough context scale is wrong");
 }
 
 void TestSigmaModelClampFlags() {
@@ -513,6 +600,86 @@ void TestBuilderUsesAdaptiveMotionProfileSigma() {
     "adaptive sigma diagnostic should match factor sigma");
 }
 
+void TestBuilderUsesContextScaleForRoughBiasIntervals() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.5;
+  config.vertical_velocity_delta_min_sigma_mps = 0.02;
+  config.enable_vertical_velocity_delta_context_sigma_scale = true;
+  config.vertical_velocity_delta_context_normal_sigma_scale = 2.0;
+  config.vertical_velocity_delta_context_rough_sigma_scale = 10.0;
+  config.vertical_velocity_delta_context_outage_sigma_scale = 3.0;
+  config.vertical_velocity_delta_context_jump_sigma_scale = 4.0;
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {1, 2, 10.0, 10.5, 0.01, 0.0},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  const std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> bias_segments{
+    MakeBiasSegment("BODY_Z_BIAS", 9.0, 11.0),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.bias_reestimate_segments = &bias_segments;
+  request.dynamic_start_index = 1;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "rough interval should add a factor");
+  ExpectTrue(diagnostics.front().sigma_context == "ROUGH_BIAS", "rough interval context is wrong");
+  ExpectNear(diagnostics.front().sigma_output_scale, 10.0, 1e-12, "rough interval output scale is wrong");
+  ExpectNear(diagnostics.front().sigma_mps, 2.5, 1e-12, "rough interval sigma should use context scale");
+}
+
+void TestBuilderUsesContextScaleForJumpAdjacentRing() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.5;
+  config.vertical_velocity_delta_min_sigma_mps = 0.02;
+  config.vertical_velocity_delta_jump_padding_s = 0.1;
+  config.enable_vertical_velocity_delta_context_sigma_scale = true;
+  config.vertical_velocity_delta_context_normal_sigma_scale = 2.0;
+  config.vertical_velocity_delta_context_rough_sigma_scale = 10.0;
+  config.vertical_velocity_delta_context_outage_sigma_scale = 3.0;
+  config.vertical_velocity_delta_context_jump_sigma_scale = 4.0;
+  config.vertical_velocity_delta_context_jump_extra_padding_s = 0.5;
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {1, 2, 1.6, 1.7, 0.01, 0.0},
+  };
+  offline_lc_minimal::BodyZSeedJumpWindowRow window;
+  window.start_time_s = 2.0;
+  window.end_time_s = 2.2;
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows{window};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.dynamic_start_index = 1;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "jump-adjacent interval should add a factor");
+  ExpectTrue(diagnostics.front().sigma_context == "JUMP", "jump-adjacent interval context is wrong");
+  ExpectTrue(!diagnostics.front().in_jump_padding, "jump-adjacent interval should not be hard-skipped padding");
+  ExpectNear(diagnostics.front().sigma_output_scale, 4.0, 1e-12, "jump context output scale is wrong");
+  ExpectNear(diagnostics.front().sigma_mps, 0.2, 1e-12, "jump context sigma should use extra-ring scale");
+}
+
 void TestBuilderKeepsLegacySigmaForClampedAdaptiveTarget() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -566,6 +733,56 @@ void TestBuilderKeepsLegacySigmaForClampedAdaptiveTarget() {
     "clamped adaptive target should fall back to legacy sigma");
   ExpectNear(diagnostics.front().target_delta_vz_mps, 0.05, 1e-12, "clamped target value is wrong");
   ExpectNear(diagnostics.front().sigma_mps, 0.25, 1e-12, "clamped adaptive target should use legacy sigma");
+}
+
+void TestBuilderUsesContextScaleForClampedTargetFallback() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.5;
+  config.vertical_velocity_delta_min_sigma_mps = 0.02;
+  config.vertical_velocity_delta_target_acc_limit_mps2 = 0.1;
+  config.vertical_velocity_delta_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(10.0);
+  config.vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
+  config.vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
+  config.vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+  config.enable_vertical_velocity_delta_context_sigma_scale = true;
+  config.vertical_velocity_delta_context_normal_sigma_scale = 2.0;
+  config.vertical_velocity_delta_context_rough_sigma_scale = 10.0;
+  config.vertical_velocity_delta_context_outage_sigma_scale = 3.0;
+  config.vertical_velocity_delta_context_jump_sigma_scale = 4.0;
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {1, 2, 10.0, 10.5, 1.0, 0.0},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  const std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> bias_segments{
+    MakeBiasSegment("BODY_Z_BIAS", 9.0, 11.0),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.bias_reestimate_segments = &bias_segments;
+  request.dynamic_start_index = 1;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "clamped rough interval should add a factor");
+  ExpectTrue(diagnostics.front().target_clamped, "target should be clamped");
+  ExpectTrue(
+    diagnostics.front().sigma_model == "legacy_clamped_target",
+    "clamped target should use legacy fallback model");
+  ExpectTrue(diagnostics.front().sigma_context == "ROUGH_BIAS", "rough context should be preserved");
+  ExpectNear(diagnostics.front().sigma_output_scale, 10.0, 1e-12, "rough output scale is wrong");
+  ExpectNear(diagnostics.front().legacy_sigma_mps, 0.25, 1e-12, "legacy sigma is wrong");
+  ExpectNear(diagnostics.front().sigma_mps, 2.5, 1e-12, "fallback sigma should use context scale");
 }
 
 void TestBuilderAddsStaticInteriorWhenConfigured() {
@@ -964,6 +1181,12 @@ int main() {
     RunTest(
       "TestSigmaModelOutputScalePreservesPhysicalComponents",
       TestSigmaModelOutputScalePreservesPhysicalComponents);
+    RunTest(
+      "TestContextScalePlannerUsesGlobalWhenDisabled",
+      TestContextScalePlannerUsesGlobalWhenDisabled);
+    RunTest(
+      "TestContextScalePlannerClassifiesRoughOutageAndJump",
+      TestContextScalePlannerClassifiesRoughOutageAndJump);
     RunTest("TestSigmaModelClampFlags", TestSigmaModelClampFlags);
     RunTest("TestAdaptiveSigmaUsesStaticAndDynamicLimits", TestAdaptiveSigmaUsesStaticAndDynamicLimits);
     RunTest("TestAdaptiveSigmaIntermediateScoreRespectsFloor", TestAdaptiveSigmaIntermediateScoreRespectsFloor);
@@ -981,8 +1204,17 @@ int main() {
       TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary);
     RunTest("TestBuilderUsesAdaptiveMotionProfileSigma", TestBuilderUsesAdaptiveMotionProfileSigma);
     RunTest(
+      "TestBuilderUsesContextScaleForRoughBiasIntervals",
+      TestBuilderUsesContextScaleForRoughBiasIntervals);
+    RunTest(
+      "TestBuilderUsesContextScaleForJumpAdjacentRing",
+      TestBuilderUsesContextScaleForJumpAdjacentRing);
+    RunTest(
       "TestBuilderKeepsLegacySigmaForClampedAdaptiveTarget",
       TestBuilderKeepsLegacySigmaForClampedAdaptiveTarget);
+    RunTest(
+      "TestBuilderUsesContextScaleForClampedTargetFallback",
+      TestBuilderUsesContextScaleForClampedTargetFallback);
     RunTest("TestBuilderAddsStaticInteriorWhenConfigured", TestBuilderAddsStaticInteriorWhenConfigured);
     RunTest(
       "TestBuilderSkipsStaticDynamicBoundaryInsideJumpPadding",

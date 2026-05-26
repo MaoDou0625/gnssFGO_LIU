@@ -265,6 +265,12 @@ struct OfflineRunnerConfig {
   double vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
   double vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
   double vertical_velocity_delta_sigma_scale = 1.0;
+  bool enable_vertical_velocity_delta_context_sigma_scale = false;
+  double vertical_velocity_delta_context_normal_sigma_scale = 1.0;
+  double vertical_velocity_delta_context_rough_sigma_scale = 1.0;
+  double vertical_velocity_delta_context_outage_sigma_scale = 1.0;
+  double vertical_velocity_delta_context_jump_sigma_scale = 1.0;
+  double vertical_velocity_delta_context_jump_extra_padding_s = 0.0;
   bool enable_vertical_motion_adaptive_reweighting = false;
   int vertical_motion_adaptive_outer_iterations = 2;
   double vertical_motion_adaptive_convergence_score_epsilon = 1.0e-3;

@@ -10,6 +10,7 @@
 #include <gtsam/linear/NoiseModel.h>
 
 #include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
+#include "offline_lc_minimal/core/VerticalVelocityDeltaContextScalePlanner.h"
 #include "offline_lc_minimal/common/Units.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaBiasFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaFactor.h"
@@ -32,6 +33,7 @@ bool IntervalsOverlap(
 VerticalVelocityDeltaDiagnosticRow MakeDiagnosticRow(
   const VerticalVelocityDeltaPropagationRecord &record,
   const VerticalVelocityDeltaSigmaResult &sigma,
+  const VerticalVelocityDeltaContextScaleDecision &scale_decision,
   const double target_delta_vz_mps,
   const int outer_pass,
   const VerticalMotionAdaptiveReweightingDiagnosticRow *stability_entry) {
@@ -50,6 +52,8 @@ VerticalVelocityDeltaDiagnosticRow MakeDiagnosticRow(
     std::abs(row.raw_target_delta_vz_mps - row.target_delta_vz_mps) > 1.0e-12;
   row.sigma_mps = sigma.sigma_mps;
   row.sigma_model = sigma.model;
+  row.sigma_context = scale_decision.context;
+  row.sigma_output_scale = scale_decision.output_sigma_scale;
   row.legacy_sigma_mps = sigma.legacy_sigma_mps;
   row.bias_sigma_mps = sigma.bias_sigma_mps;
   row.attitude_sigma_mps = sigma.attitude_sigma_mps;
@@ -114,6 +118,12 @@ void VerticalMotionConstraintBuilder::Build() const {
     BuildBodyZJumpConstraintWindows(
       *request_.jump_windows,
       VerticalVelocityDeltaJumpConstraintWindowOptions(*request_.config));
+  const VerticalVelocityDeltaContextScalePlanner context_scale_planner({
+    request_.config,
+    &jump_constraint_windows,
+    request_.rtk_outage_windows,
+    request_.bias_reestimate_segments,
+  });
 
   request_.diagnostics->reserve(request_.diagnostics->size() + request_.propagation_records->size());
   for (const auto &record : *request_.propagation_records) {
@@ -122,11 +132,20 @@ void VerticalMotionConstraintBuilder::Build() const {
       request_.stability_profile,
       record.state_index_i,
       record.state_index_j);
-    const VerticalVelocityDeltaSigmaResult sigma = sigma_model.Compute(dt_s, stability_entry);
+    const VerticalVelocityDeltaContextScaleDecision scale_decision =
+      context_scale_planner.Evaluate(record.start_time_s, record.end_time_s);
+    const VerticalVelocityDeltaSigmaResult sigma =
+      sigma_model.Compute(dt_s, stability_entry, scale_decision.output_sigma_scale);
     VerticalVelocityDeltaDiagnosticRow row =
-      MakeDiagnosticRow(record, sigma, TargetDeltaVzMps(record, dt_s), request_.outer_pass, stability_entry);
+      MakeDiagnosticRow(
+        record,
+        sigma,
+        scale_decision,
+        TargetDeltaVzMps(record, dt_s),
+        request_.outer_pass,
+        stability_entry);
     const bool used_clamped_target_fallback =
-      ApplyClampedTargetSigmaFallback(row, request_.config->vertical_velocity_delta_sigma_scale);
+      ApplyClampedTargetSigmaFallback(row, scale_decision.output_sigma_scale);
 
     if (!request_.config->enable_vertical_velocity_delta_constraint) {
       row.skip_reason = "DISABLED";

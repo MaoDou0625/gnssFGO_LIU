@@ -842,6 +842,83 @@ void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
     "Stage2 lowfreq runner should not populate Stage3 diagnostics");
 }
 
+void TestStage2LowfreqRunnerRelaxesContextDvzScalesOnce() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_lowfreq_vertical_reference_optimization = true;
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_stage3_vertical_reference_optimization = false;
+  config.stage2_lowfreq_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass;
+  config.gnss_vertical_reference_source =
+    offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk;
+  config.enable_stage2_lowfreq_final_dvz_relaxation = true;
+  config.stage2_lowfreq_final_dvz_sigma_scale = 10.0;
+  config.vertical_velocity_delta_sigma_scale = 2.0;
+  config.enable_vertical_velocity_delta_context_sigma_scale = true;
+  config.vertical_velocity_delta_context_normal_sigma_scale = 100.0;
+  config.vertical_velocity_delta_context_rough_sigma_scale = 1000.0;
+  config.vertical_velocity_delta_context_outage_sigma_scale = 800.0;
+  config.vertical_velocity_delta_context_jump_sigma_scale = 500.0;
+  config.vertical_velocity_delta_context_jump_extra_padding_s = 0.75;
+
+  struct Call {
+    double global_scale = 0.0;
+    bool context_enabled = false;
+    double normal_scale = 0.0;
+    double rough_scale = 0.0;
+    double outage_scale = 0.0;
+    double jump_scale = 0.0;
+    double jump_extra_padding_s = 0.0;
+    bool has_lowpass_reference = false;
+  };
+  std::vector<Call> calls;
+
+  offline_lc_minimal::Stage2LowfreqVerticalReferenceOptimizationRequest request;
+  request.config = config;
+  request.dataset = offline_lc_minimal::DataSet{};
+  request.run_once = [&](const offline_lc_minimal::OfflineRunnerConfig &run_config,
+                         std::shared_ptr<const offline_lc_minimal::Stage3VerticalReference> lowpass_reference,
+                         offline_lc_minimal::DataSet) {
+    offline_lc_minimal::ValidateConfig(run_config);
+    calls.push_back(Call{
+      run_config.vertical_velocity_delta_sigma_scale,
+      run_config.enable_vertical_velocity_delta_context_sigma_scale,
+      run_config.vertical_velocity_delta_context_normal_sigma_scale,
+      run_config.vertical_velocity_delta_context_rough_sigma_scale,
+      run_config.vertical_velocity_delta_context_outage_sigma_scale,
+      run_config.vertical_velocity_delta_context_jump_sigma_scale,
+      run_config.vertical_velocity_delta_context_jump_extra_padding_s,
+      static_cast<bool>(lowpass_reference)});
+
+    offline_lc_minimal::OfflineRunResult result;
+    result.trajectory = MakeTrajectory(11U, lowpass_reference ? 0.0 : 0.02);
+    return result;
+  };
+
+  (void)offline_lc_minimal::Stage2LowfreqVerticalReferenceOptimizationRunner(
+    std::move(request)).Run();
+
+  ExpectTrue(calls.size() == 2U, "Stage2 lowfreq context test should run source then final pass");
+  ExpectTrue(!calls[0].has_lowpass_reference, "source pass should not receive lowpass reference");
+  ExpectTrue(calls[1].has_lowpass_reference, "final pass should receive lowpass reference");
+  ExpectNear(calls[0].global_scale, 2.0, 1e-15, "source pass should preserve global scale");
+  ExpectNear(calls[1].global_scale, 2.0, 1e-15, "context final relaxation should not multiply global scale");
+  ExpectTrue(calls[0].context_enabled && calls[1].context_enabled, "context scaling should remain enabled");
+  ExpectNear(calls[0].normal_scale, 100.0, 1e-15, "source normal context scale is wrong");
+  ExpectNear(calls[0].rough_scale, 1000.0, 1e-15, "source rough context scale is wrong");
+  ExpectNear(calls[0].outage_scale, 800.0, 1e-15, "source outage context scale is wrong");
+  ExpectNear(calls[0].jump_scale, 500.0, 1e-15, "source jump context scale is wrong");
+  ExpectNear(calls[1].normal_scale, 1000.0, 1e-15, "final normal context scale should relax once");
+  ExpectNear(calls[1].rough_scale, 10000.0, 1e-15, "final rough context scale should relax once");
+  ExpectNear(calls[1].outage_scale, 8000.0, 1e-15, "final outage context scale should relax once");
+  ExpectNear(calls[1].jump_scale, 5000.0, 1e-15, "final jump context scale should relax once");
+  ExpectNear(
+    calls[1].jump_extra_padding_s,
+    0.75,
+    1e-15,
+    "final context relaxation should preserve jump extra padding");
+}
+
 }  // namespace
 
 int main() {
@@ -879,6 +956,9 @@ int main() {
     RunTest(
       "TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2",
       TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2);
+    RunTest(
+      "TestStage2LowfreqRunnerRelaxesContextDvzScalesOnce",
+      TestStage2LowfreqRunnerRelaxesContextDvzScalesOnce);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;
