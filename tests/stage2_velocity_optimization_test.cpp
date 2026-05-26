@@ -510,8 +510,8 @@ void TestStage2PolicyDisablesRtkVelocityAndAttitudeReference() {
              "stage2 should disable old body-z NHC");
   ExpectTrue(!stage2_config.enable_body_z_nhc_horizontal_leakage_correction,
              "stage2 should disable fixed body-z leakage correction");
-  ExpectTrue(stage2_config.enable_stage2_vehicle_nhc_constraint,
-             "stage2 should enable graph-internal vehicle NHC");
+  ExpectTrue(!stage2_config.enable_stage2_vehicle_nhc_constraint,
+             "stage2 should respect the vehicle NHC experiment flag");
 }
 
 void TestFixedAxisBodyYVelocityEnvelopeFactorDeadband() {

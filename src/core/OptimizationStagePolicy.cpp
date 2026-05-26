@@ -46,7 +46,8 @@ OfflineRunnerConfig MakeStage2VelocityOptimizationConfig(const OfflineRunnerConf
 
   stage_config.enable_body_z_nhc_constraint = false;
   stage_config.enable_body_z_nhc_horizontal_leakage_correction = false;
-  stage_config.enable_stage2_vehicle_nhc_constraint = true;
+  stage_config.enable_stage2_vehicle_nhc_constraint =
+    config.enable_stage2_vehicle_nhc_constraint;
 
   return stage_config;
 }
