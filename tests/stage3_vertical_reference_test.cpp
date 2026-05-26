@@ -100,6 +100,47 @@ void TestProfilePlannerBuildsFiniteZeroPhaseLowpass() {
   ExpectTrue(max_abs_delta_m > 0.005, "lowpass should remove visible high-frequency content");
 }
 
+void TestProfilePlannerCanHoldInitialDynamicStaticReference() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
+  config.enable_stage3_initial_dynamic_static_reference_hold = true;
+  config.stage3_initial_dynamic_static_reference_hold_duration_s = 2.0;
+  config.stage3_initial_dynamic_static_reference_hold_blend_s = 0.0;
+
+  auto trajectory = MakeTrajectory(7U, 0.0);
+  for (std::size_t index = 0; index < trajectory.size(); ++index) {
+    trajectory[index].enu_position_m.z() = index <= 2U ? 10.0 : 0.0;
+  }
+  trajectory[3].time_s = 2.997;
+
+  offline_lc_minimal::Stage3VerticalReferenceProfilePlanRequest request;
+  request.config = &config;
+  request.stage2_trajectory = &trajectory;
+  request.dynamic_start_index = 3U;
+  request.dynamic_start_time_s = 3.0;
+  const auto reference =
+    offline_lc_minimal::Stage3VerticalReferenceProfilePlanner(std::move(request)).Plan();
+
+  ExpectNear(
+    reference.rows[3].stage2_lowpass_up_m,
+    10.0,
+    1.0e-12,
+    "initial dynamic static interval should keep the static height");
+  ExpectNear(
+    reference.rows[4].stage2_lowpass_up_m,
+    10.0,
+    1.0e-12,
+    "hold should include the configured duration end");
+  ExpectTrue(
+    std::abs(reference.rows[6].stage2_lowpass_up_m - 10.0) > 1.0e-3,
+    "rows after the hold window should return to the lowpass profile");
+  ExpectNear(
+    reference.rows[3].lowpass_delta_m,
+    10.0 - trajectory[3].enu_position_m.z(),
+    1.0e-12,
+    "lowpass delta should be recomputed from the held reference");
+}
+
 void TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
@@ -376,6 +417,9 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_stage3_vertical_reference_optimization = true;
   config.enable_stage2_velocity_optimization = true;
+  config.enable_stage3_initial_dynamic_static_reference_hold = true;
+  config.stage3_initial_dynamic_static_reference_hold_duration_s = 2.0;
+  config.stage3_initial_dynamic_static_reference_hold_blend_s = 0.0;
   config.enable_stage1_yaw_refinement = true;
   config.enable_rtk_outage_segmented_batch = true;
   config.stage3_disable_rtk_outage_segmented_batch = true;
@@ -427,10 +471,20 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
     offline_lc_minimal::OfflineRunResult result;
     if (!stage2_reference && !stage3_reference) {
       result.trajectory = MakeTrajectory(11U, 0.02);
+      result.trajectory[3].enu_position_m.z() =
+        result.trajectory[2].enu_position_m.z() + 1.0;
+      result.trajectory[3].time_s = 2.997;
+      result.run_summary.initial_static_state_count = 3U;
+      result.run_summary.dynamic_start_time_s = 3.0;
       return result;
     }
     ExpectTrue(static_cast<bool>(stage2_reference), "Stage3 pass should receive Stage2 reference");
     ExpectTrue(static_cast<bool>(stage3_reference), "Stage3 pass should receive lowpass reference");
+    ExpectNear(
+      stage3_reference->rows[3].stage2_lowpass_up_m,
+      stage2_reference->trajectory[2].enu_position_m.z(),
+      1.0e-12,
+      "Stage3 runner should hold the first dynamic state to the last static height");
     result.trajectory = stage2_reference->trajectory;
     result.stage3_vertical_reference_diagnostics = stage3_reference->rows;
     return result;
@@ -727,6 +781,9 @@ int main() {
     RunTest(
       "TestProfilePlannerBuildsFiniteZeroPhaseLowpass",
       TestProfilePlannerBuildsFiniteZeroPhaseLowpass);
+    RunTest(
+      "TestProfilePlannerCanHoldInitialDynamicStaticReference",
+      TestProfilePlannerCanHoldInitialDynamicStaticReference);
     RunTest(
       "TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics",
       TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics);

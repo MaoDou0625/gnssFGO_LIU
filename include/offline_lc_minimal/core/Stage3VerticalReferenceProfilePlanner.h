@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -17,6 +18,8 @@ struct Stage3VerticalReference {
 struct Stage3VerticalReferenceProfilePlanRequest {
   const OfflineRunnerConfig *config = nullptr;
   const std::vector<TrajectoryRow> *stage2_trajectory = nullptr;
+  std::size_t dynamic_start_index = std::numeric_limits<std::size_t>::max();
+  double dynamic_start_time_s = std::numeric_limits<double>::quiet_NaN();
 };
 
 class Stage3VerticalReferenceProfilePlanner {

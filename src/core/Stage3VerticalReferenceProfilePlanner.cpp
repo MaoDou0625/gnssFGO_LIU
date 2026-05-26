@@ -85,6 +85,112 @@ std::vector<double> BuildLowpassProfile(
   return lowpass_up_m;
 }
 
+bool FindInitialDynamicStaticReferenceUp(
+  const std::vector<TrajectoryRow> &trajectory,
+  const std::size_t dynamic_start_index,
+  const double dynamic_start_time_s,
+  double &reference_up_m) {
+  if (dynamic_start_index < trajectory.size()) {
+    const std::size_t first_candidate =
+      dynamic_start_index > 0U ? dynamic_start_index - 1U : dynamic_start_index;
+    for (std::size_t reverse = first_candidate + 1U; reverse > 0U; --reverse) {
+      const std::size_t index = reverse - 1U;
+      if (CanFilterRow(trajectory[index])) {
+        reference_up_m = trajectory[index].enu_position_m.z();
+        return true;
+      }
+    }
+    for (std::size_t index = dynamic_start_index; index < trajectory.size(); ++index) {
+      if (CanFilterRow(trajectory[index])) {
+        reference_up_m = trajectory[index].enu_position_m.z();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool found = false;
+  double best_time_s = -std::numeric_limits<double>::infinity();
+  for (const auto &row : trajectory) {
+    if (!CanFilterRow(row) || row.time_s > dynamic_start_time_s) {
+      continue;
+    }
+    if (row.time_s >= best_time_s) {
+      best_time_s = row.time_s;
+      reference_up_m = row.enu_position_m.z();
+      found = true;
+    }
+  }
+  if (found) {
+    return true;
+  }
+  for (const auto &row : trajectory) {
+    if (!CanFilterRow(row) || row.time_s < dynamic_start_time_s) {
+      continue;
+    }
+    reference_up_m = row.enu_position_m.z();
+    return true;
+  }
+  return false;
+}
+
+void ApplyInitialDynamicStaticReferenceHold(
+  const OfflineRunnerConfig &config,
+  const std::size_t dynamic_start_index,
+  const double dynamic_start_time_s,
+  const std::vector<TrajectoryRow> &trajectory,
+  std::vector<double> &lowpass_up_m) {
+  if (!config.enable_stage3_initial_dynamic_static_reference_hold ||
+      config.stage3_initial_dynamic_static_reference_hold_duration_s <= 0.0) {
+    return;
+  }
+  const bool has_dynamic_start_index = dynamic_start_index < trajectory.size();
+  if (!has_dynamic_start_index && !std::isfinite(dynamic_start_time_s)) {
+    return;
+  }
+
+  double static_reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  if (!FindInitialDynamicStaticReferenceUp(
+        trajectory,
+        dynamic_start_index,
+        dynamic_start_time_s,
+        static_reference_up_m)) {
+    return;
+  }
+
+  const double hold_start_time_s =
+    std::isfinite(dynamic_start_time_s)
+      ? dynamic_start_time_s
+      : trajectory[dynamic_start_index].time_s;
+  const double hold_end_time_s =
+    hold_start_time_s +
+    config.stage3_initial_dynamic_static_reference_hold_duration_s;
+  const double blend_duration_s =
+    std::max(0.0, config.stage3_initial_dynamic_static_reference_hold_blend_s);
+  const double blend_end_time_s = hold_end_time_s + blend_duration_s;
+
+  for (std::size_t index = 0; index < trajectory.size(); ++index) {
+    const auto &row = trajectory[index];
+    if (!std::isfinite(row.time_s) || !std::isfinite(lowpass_up_m[index]) ||
+        (has_dynamic_start_index
+           ? index < dynamic_start_index
+           : row.time_s < hold_start_time_s)) {
+      continue;
+    }
+    if (row.time_s <= hold_end_time_s) {
+      lowpass_up_m[index] = static_reference_up_m;
+      continue;
+    }
+    if (blend_duration_s > 0.0 && row.time_s < blend_end_time_s) {
+      const double blend_fraction =
+        (row.time_s - hold_end_time_s) / blend_duration_s;
+      lowpass_up_m[index] =
+        (1.0 - blend_fraction) * static_reference_up_m +
+        blend_fraction * lowpass_up_m[index];
+    }
+  }
+}
+
 }  // namespace
 
 Stage3VerticalReferenceProfilePlanner::Stage3VerticalReferenceProfilePlanner(
@@ -100,8 +206,14 @@ Stage3VerticalReference Stage3VerticalReferenceProfilePlanner::Plan() const {
     throw std::runtime_error("Stage3 vertical reference requires a non-empty Stage2 trajectory");
   }
 
-  const std::vector<double> lowpass_up_m =
+  std::vector<double> lowpass_up_m =
     BuildLowpassProfile(*request_.config, *request_.stage2_trajectory);
+  ApplyInitialDynamicStaticReferenceHold(
+    *request_.config,
+    request_.dynamic_start_index,
+    request_.dynamic_start_time_s,
+    *request_.stage2_trajectory,
+    lowpass_up_m);
 
   Stage3VerticalReference reference;
   reference.source_config =

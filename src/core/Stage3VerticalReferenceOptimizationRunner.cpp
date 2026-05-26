@@ -105,6 +105,10 @@ OfflineRunResult Stage3VerticalReferenceOptimizationRunner::Run() const {
   Stage3VerticalReferenceProfilePlanRequest plan_request;
   plan_request.config = &request_.config;
   plan_request.stage2_trajectory = &stage2_result.trajectory;
+  plan_request.dynamic_start_index =
+    stage2_result.run_summary.initial_static_state_count;
+  plan_request.dynamic_start_time_s =
+    stage2_result.run_summary.dynamic_start_time_s;
   auto stage3_reference =
     std::make_shared<Stage3VerticalReference>(
       Stage3VerticalReferenceProfilePlanner(std::move(plan_request)).Plan());

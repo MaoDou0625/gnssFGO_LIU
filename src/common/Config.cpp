@@ -395,6 +395,15 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
     throw std::runtime_error(
       "stage3 vertical reference settings must be finite and positive");
   }
+  if (!std::isfinite(config.stage3_initial_dynamic_static_reference_hold_duration_s) ||
+      !std::isfinite(config.stage3_initial_dynamic_static_reference_hold_blend_s) ||
+      config.stage3_initial_dynamic_static_reference_hold_duration_s < 0.0 ||
+      config.stage3_initial_dynamic_static_reference_hold_blend_s < 0.0 ||
+      (config.enable_stage3_initial_dynamic_static_reference_hold &&
+       config.stage3_initial_dynamic_static_reference_hold_duration_s <= 0.0)) {
+    throw std::runtime_error(
+      "stage3 initial dynamic static reference hold settings are invalid");
+  }
   if (config.stage3_vertical_reference_constraint_mode ==
       Stage3VerticalReferenceConstraintMode::kEnvelope) {
     if (!std::isfinite(config.stage3_vertical_envelope_half_width_m) ||
@@ -1098,6 +1107,15 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.stage3_vertical_reference_lowpass_cutoff_hz = ParseDouble(normalized_value);
   } else if (normalized_key == "stage3_vertical_anchor_sigma_m") {
     config.stage3_vertical_anchor_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_stage3_initial_dynamic_static_reference_hold") {
+    config.enable_stage3_initial_dynamic_static_reference_hold =
+      ParseBool(normalized_value);
+  } else if (normalized_key == "stage3_initial_dynamic_static_reference_hold_duration_s") {
+    config.stage3_initial_dynamic_static_reference_hold_duration_s =
+      ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_initial_dynamic_static_reference_hold_blend_s") {
+    config.stage3_initial_dynamic_static_reference_hold_blend_s =
+      ParseDouble(normalized_value);
   } else if (normalized_key == "stage3_vertical_reference_constraint_mode") {
     config.stage3_vertical_reference_constraint_mode =
       ParseStage3VerticalReferenceConstraintMode(normalized_value);
@@ -1755,6 +1773,12 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.stage3_vertical_reference_lowpass_cutoff_hz << '\n'
     << "stage3_vertical_anchor_sigma_m="
     << config.stage3_vertical_anchor_sigma_m << '\n'
+    << "enable_stage3_initial_dynamic_static_reference_hold="
+    << (config.enable_stage3_initial_dynamic_static_reference_hold ? "true" : "false") << '\n'
+    << "stage3_initial_dynamic_static_reference_hold_duration_s="
+    << config.stage3_initial_dynamic_static_reference_hold_duration_s << '\n'
+    << "stage3_initial_dynamic_static_reference_hold_blend_s="
+    << config.stage3_initial_dynamic_static_reference_hold_blend_s << '\n'
     << "stage3_vertical_reference_constraint_mode="
     << ToString(config.stage3_vertical_reference_constraint_mode) << '\n'
     << "stage3_vertical_envelope_half_width_m="

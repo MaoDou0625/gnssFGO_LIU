@@ -1623,6 +1623,15 @@ void TestStage3VerticalReferenceConfigValidation() {
     std::abs(config.stage3_vertical_anchor_sigma_m - 0.015) < 1e-15,
     "Stage3 default anchor sigma should be 0.015 m");
   ExpectTrue(
+    !config.enable_stage3_initial_dynamic_static_reference_hold,
+    "Stage3 initial dynamic static reference hold should default off");
+  ExpectTrue(
+    std::abs(config.stage3_initial_dynamic_static_reference_hold_duration_s - 10.0) < 1e-15,
+    "Stage3 initial dynamic static hold duration should default to 10 s");
+  ExpectTrue(
+    std::abs(config.stage3_initial_dynamic_static_reference_hold_blend_s - 2.0) < 1e-15,
+    "Stage3 initial dynamic static hold blend should default to 2 s");
+  ExpectTrue(
     config.stage3_vertical_reference_constraint_mode ==
       offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kGaussian,
     "Stage3 default constraint mode should be gaussian");
@@ -1666,6 +1675,18 @@ void TestStage3VerticalReferenceConfigValidation() {
     "0.02");
   offline_lc_minimal::OverrideConfigField(
     config,
+    "enable_stage3_initial_dynamic_static_reference_hold",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_initial_dynamic_static_reference_hold_duration_s",
+    "12.5");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_initial_dynamic_static_reference_hold_blend_s",
+    "1.5");
+  offline_lc_minimal::OverrideConfigField(
+    config,
     "stage3_vertical_reference_constraint_mode",
     "envelope");
   offline_lc_minimal::OverrideConfigField(
@@ -1704,6 +1725,15 @@ void TestStage3VerticalReferenceConfigValidation() {
     std::abs(config.stage3_vertical_anchor_sigma_m - 0.02) < 1e-15,
     "Stage3 anchor sigma should parse");
   ExpectTrue(
+    config.enable_stage3_initial_dynamic_static_reference_hold,
+    "Stage3 initial dynamic static hold flag should parse");
+  ExpectTrue(
+    std::abs(config.stage3_initial_dynamic_static_reference_hold_duration_s - 12.5) < 1e-15,
+    "Stage3 initial dynamic static hold duration should parse");
+  ExpectTrue(
+    std::abs(config.stage3_initial_dynamic_static_reference_hold_blend_s - 1.5) < 1e-15,
+    "Stage3 initial dynamic static hold blend should parse");
+  ExpectTrue(
     config.stage3_vertical_reference_constraint_mode ==
       offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope,
     "Stage3 envelope mode should parse");
@@ -1736,6 +1766,15 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("stage3_vertical_anchor_sigma_m=0.02") != std::string::npos,
     "Stage3 anchor sigma should be serialized");
+  ExpectTrue(
+    serialized.find("enable_stage3_initial_dynamic_static_reference_hold=true") != std::string::npos,
+    "Stage3 initial dynamic static hold flag should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_initial_dynamic_static_reference_hold_duration_s=12.5") != std::string::npos,
+    "Stage3 initial dynamic static hold duration should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_initial_dynamic_static_reference_hold_blend_s=1.5") != std::string::npos,
+    "Stage3 initial dynamic static hold blend should be serialized");
   ExpectTrue(
     serialized.find("stage3_vertical_reference_constraint_mode=envelope") != std::string::npos,
     "Stage3 envelope mode should be serialized");
@@ -1781,6 +1820,31 @@ void TestStage3VerticalReferenceConfigValidation() {
     threw = std::string(exception.what()).find("stage3 vertical reference settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive Stage3 anchor sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage3_initial_dynamic_static_reference_hold = true;
+  config.stage3_initial_dynamic_static_reference_hold_duration_s = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("initial dynamic static reference hold") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "enabled Stage3 initial dynamic static hold should require positive duration");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_initial_dynamic_static_reference_hold_blend_s = -1.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("initial dynamic static reference hold") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "negative Stage3 initial dynamic static hold blend should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   threw = false;
@@ -2244,6 +2308,31 @@ void TestStage3ExperimentConfigLoads() {
   ExpectTrue(
     std::abs(no_vehicle_nhc_config.vertical_velocity_delta_sigma_scale - 1000.0) < 1e-15,
     "Stage3 no-vehicle-NHC config should use the current relaxed DVZ sigma scale");
+  ExpectTrue(
+    !no_vehicle_nhc_config.enable_stage3_initial_dynamic_static_reference_hold,
+    "Stage3 no-vehicle-NHC base config should not enable the initial static hold");
+
+  const auto static_hold_config = offline_lc_minimal::LoadConfigFile(
+    std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) +
+      "/config/transformed1rtkjumpcut1_stage3_lowpass_global_anchor_no_vehicle_nhc_no_jump_bias_static_hold.cfg",
+    offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    static_hold_config.enable_stage3_vertical_reference_optimization,
+    "Stage3 no-jump-bias static-hold config should enable Stage3");
+  ExpectTrue(
+    static_hold_config.stage3_disable_stage2_vehicle_nhc_constraint,
+    "Stage3 no-jump-bias static-hold config should keep final vehicle NHC disabled");
+  ExpectTrue(
+    static_hold_config.enable_stage3_initial_dynamic_static_reference_hold,
+    "Stage3 no-jump-bias static-hold config should enable the initial dynamic static hold");
+  ExpectTrue(
+    std::abs(static_hold_config.stage3_initial_dynamic_static_reference_hold_duration_s - 10.0) < 1e-15,
+    "Stage3 no-jump-bias static-hold config should hold the first 10 s");
+  ExpectTrue(
+    !static_hold_config.enable_vertical_jump_bias &&
+      !static_hold_config.enable_vertical_jump_segmented_bias &&
+      !static_hold_config.enable_vertical_jump_spectral_bias_relaxation,
+    "Stage3 no-jump-bias static-hold config should disable jump-bias mechanisms");
 }
 
 void TestStage2LowfreqExperimentConfigLoads() {
