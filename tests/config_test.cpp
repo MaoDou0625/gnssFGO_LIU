@@ -907,7 +907,7 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
     "phase32 relative yaw reference sigma should load");
 }
 
-void TestDefaultOfflineConfigUsesV14SegmentedStage2() {
+void TestDefaultOfflineConfigUsesV20Stage3LowpassAnchor() {
   const auto config = offline_lc_minimal::LoadConfigFile(
     std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) + "/config/default_offline.cfg",
     offline_lc_minimal::DefaultConfig());
@@ -917,8 +917,80 @@ void TestDefaultOfflineConfigUsesV14SegmentedStage2() {
     config.enable_stage2_vehicle_nhc_constraint,
     "default config should enable Stage2 vehicle NHC constraints");
   ExpectTrue(
-    !config.enable_stage3_vertical_reference_optimization,
-    "default config should keep Stage3 vertical reference optimization disabled");
+    config.enable_initial_dynamic_static_detection,
+    "default config should enable initial dynamic static detection");
+  ExpectTrue(
+    config.enable_initial_dynamic_static_lowpass_protection,
+    "default config should protect lowpass reference during initial dynamic static windows");
+  ExpectTrue(
+    config.enable_initial_dynamic_static_vz_constraint,
+    "default config should constrain initial dynamic static vertical velocity");
+  ExpectTrue(
+    config.enable_stage3_vertical_reference_optimization,
+    "default config should enable Stage3 vertical reference optimization");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.01) < 1e-15,
+    "default Stage3 lowpass cutoff should match the v2.0 release setting");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_anchor_sigma_m - 0.005) < 1e-15,
+    "default Stage3 vertical anchor sigma should match the v2.0 release setting");
+  ExpectTrue(
+    config.stage3_disable_stage2_vehicle_nhc_constraint,
+    "default Stage3 pass should disable vehicle NHC to keep the lowpass anchor dominant");
+  ExpectTrue(
+    config.enable_stage3_jump_velocity_smoothness_regularizer,
+    "default config should enable Stage3 jump velocity regularization");
+  ExpectTrue(
+    std::abs(config.stage3_jump_velocity_smoothness_deadband_mps - 0.008) < 1e-15,
+    "default Stage3 jump velocity deadband should be 8 mm/s");
+  ExpectTrue(
+    std::abs(config.stage3_jump_velocity_smoothness_sigma_mps - 0.005) < 1e-15,
+    "default Stage3 jump velocity sigma should be 5 mm/s");
+  ExpectTrue(
+    config.enable_stage3_jump_height_highfreq_deadband,
+    "default config should enable Stage3 jump height high-frequency deadband");
+  ExpectTrue(
+    std::abs(config.stage3_jump_height_highfreq_deadband_m - 0.00085) < 1e-15,
+    "default Stage3 jump height deadband should be 0.85 mm");
+  ExpectTrue(
+    std::abs(config.stage3_jump_height_highfreq_sigma_m - 0.0012) < 1e-15,
+    "default Stage3 jump height sigma should be 1.2 mm");
+  ExpectTrue(
+    config.enable_stage3_jump_adaptive_context_envelope,
+    "default config should enable Stage3 jump context envelopes");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_velocity_floor_mps) < 1e-15,
+    "default Stage3 jump context velocity floor should be zero");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_height_floor_m) < 1e-15,
+    "default Stage3 jump context height floor should be zero");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_velocity_cap_mps - 0.008) < 1e-15,
+    "default Stage3 jump context velocity cap should be 8 mm/s");
+  ExpectTrue(
+    std::abs(config.stage3_jump_context_height_cap_m - 0.00085) < 1e-15,
+    "default Stage3 jump context height cap should be 0.85 mm");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_sigma_scale - 100.0) < 1e-15,
+    "default vertical velocity delta output sigma scale should be 100");
+  ExpectTrue(
+    config.enable_vertical_velocity_delta_context_sigma_scale,
+    "default config should enable context-aware vertical velocity delta sigma scaling");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_context_jump_sigma_scale - 1000.0) < 1e-15,
+    "default jump-context vertical velocity delta sigma scale should be 1000");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_context_jump_extra_padding_s - 0.6) < 1e-15,
+    "default jump-context vertical velocity delta padding should be 0.6 s");
+  ExpectTrue(
+    !config.vertical_velocity_delta_skip_jump_padding,
+    "default config should retain DVZ inside jump padding for v2.0");
+  ExpectTrue(
+    !config.enable_vertical_jump_segmented_bias,
+    "default config should keep segmented jump bias disabled for v2.0");
+  ExpectTrue(
+    !config.enable_vertical_jump_spectral_bias_relaxation,
+    "default config should keep spectral jump-bias relaxation disabled for v2.0");
   ExpectTrue(
     !config.enable_stage2_lowfreq_vertical_reference_optimization,
     "default config should keep Stage2 lowfreq vertical reference optimization disabled");
@@ -4071,8 +4143,8 @@ int main() {
       "TestPhase32RtkOutageSmootherConfigLoads",
       TestPhase32RtkOutageSmootherConfigLoads);
     RunTest(
-      "TestDefaultOfflineConfigUsesV14SegmentedStage2",
-      TestDefaultOfflineConfigUsesV14SegmentedStage2);
+      "TestDefaultOfflineConfigUsesV20Stage3LowpassAnchor",
+      TestDefaultOfflineConfigUsesV20Stage3LowpassAnchor);
     RunTest(
       "TestStage3VerticalReferenceConfigValidation",
       TestStage3VerticalReferenceConfigValidation);
