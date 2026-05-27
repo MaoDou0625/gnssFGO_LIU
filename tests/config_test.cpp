@@ -911,6 +911,10 @@ void TestDefaultOfflineConfigUsesV20Stage3LowpassAnchor() {
   const auto config = offline_lc_minimal::LoadConfigFile(
     std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) + "/config/default_offline.cfg",
     offline_lc_minimal::DefaultConfig());
+  ExpectTrue(
+    config.gnss_path.find("transformed1rtkjumpcut1/gnss_solution_gnss_fgo.txt") !=
+      std::string::npos,
+    "default config should use the original GNSS source file");
   ExpectTrue(config.enable_stage1_yaw_refinement, "default config should refine Stage1 yaw");
   ExpectTrue(config.enable_stage2_velocity_optimization, "default config should enable segmented Stage2");
   ExpectTrue(
@@ -1030,6 +1034,18 @@ void TestDefaultOfflineConfigUsesV20Stage3LowpassAnchor() {
   ExpectTrue(
     std::abs(config.body_z_nhc_global_stride_s - config.body_z_nhc_global_window_s) < 1e-15,
     "default global NHC windows should be non-overlapping");
+  ExpectTrue(
+    config.enable_gnss_preoutage_quality_override,
+    "default config should derive the pre-outage pseudofloat window at load time");
+  ExpectTrue(
+    std::abs(config.gnss_preoutage_quality_override_duration_s - 20.0) < 1e-15,
+    "default pre-outage pseudofloat duration should be 20 s");
+  ExpectTrue(
+    std::abs(config.gnss_preoutage_quality_override_min_gap_s - 2.0) < 1e-15,
+    "default pre-outage pseudofloat gap threshold should be 2 s");
+  ExpectTrue(
+    config.gnss_preoutage_quality_override_mark_outage_nonfix_no_solution,
+    "default config should mark outage non-fix samples as no-solution");
   ExpectTrue(config.drop_non_rtkfix, "default config should remove non-fixed GNSS factors");
   ExpectTrue(config.enable_rtk_outage_smoothing, "default config should enable RTK outage smoothing");
   ExpectTrue(
@@ -1707,6 +1723,81 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
     threw = std::string(exception.what()).find("RTK vertical drift reference settings") != std::string::npos;
   }
   ExpectTrue(threw, "negative causal prefix run count should be rejected");
+}
+
+void TestGnssPreOutageQualityOverrideConfigValidation() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  ExpectTrue(
+    !config.enable_gnss_preoutage_quality_override,
+    "GNSS pre-outage quality override should default off");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_gnss_preoutage_quality_override",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "gnss_preoutage_quality_override_duration_s",
+    "12.5");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "gnss_preoutage_quality_override_min_gap_s",
+    "3.5");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "gnss_preoutage_quality_override_mark_outage_nonfix_no_solution",
+    "true");
+  ExpectTrue(
+    config.enable_gnss_preoutage_quality_override,
+    "GNSS pre-outage quality override flag should parse");
+  ExpectTrue(
+    std::abs(config.gnss_preoutage_quality_override_duration_s - 12.5) < 1e-15,
+    "GNSS pre-outage quality override duration should parse");
+  ExpectTrue(
+    std::abs(config.gnss_preoutage_quality_override_min_gap_s - 3.5) < 1e-15,
+    "GNSS pre-outage quality override gap threshold should parse");
+  ExpectTrue(
+    config.gnss_preoutage_quality_override_mark_outage_nonfix_no_solution,
+    "GNSS pre-outage nonfix no-solution flag should parse");
+  offline_lc_minimal::ValidateConfig(config);
+
+  const std::string serialized = offline_lc_minimal::ConfigToString(config);
+  ExpectTrue(
+    serialized.find("enable_gnss_preoutage_quality_override=true") != std::string::npos,
+    "GNSS pre-outage quality override flag should serialize");
+  ExpectTrue(
+    serialized.find("gnss_preoutage_quality_override_duration_s=12.5") !=
+      std::string::npos,
+    "GNSS pre-outage quality override duration should serialize");
+  ExpectTrue(
+    serialized.find("gnss_preoutage_quality_override_min_gap_s=3.5") !=
+      std::string::npos,
+    "GNSS pre-outage quality override gap threshold should serialize");
+  ExpectTrue(
+    serialized.find(
+      "gnss_preoutage_quality_override_mark_outage_nonfix_no_solution=true") !=
+      std::string::npos,
+    "GNSS pre-outage nonfix no-solution flag should serialize");
+
+  config.gnss_preoutage_quality_override_duration_s = 0.0;
+  bool threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("pre-outage quality override") !=
+            std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive pre-outage quality override duration should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.gnss_preoutage_quality_override_min_gap_s = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("pre-outage quality override") !=
+            std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive pre-outage quality override gap should be rejected");
 }
 
 void TestStage3VerticalReferenceConfigValidation() {
@@ -4171,6 +4262,9 @@ int main() {
     RunTest(
       "TestRtkVerticalDriftGateWeightingConfigValidation",
       TestRtkVerticalDriftGateWeightingConfigValidation);
+    RunTest(
+      "TestGnssPreOutageQualityOverrideConfigValidation",
+      TestGnssPreOutageQualityOverrideConfigValidation);
     RunTest("TestAccelerometerBiasUgConfigParsing", TestAccelerometerBiasUgConfigParsing);
     RunTest("TestVerticalVelocityDeltaConfigValidation", TestVerticalVelocityDeltaConfigValidation);
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);

@@ -68,6 +68,7 @@ add_library(offline_lc_minimal_lib
   src/core/BodyZNHCWeightPlanner.cpp
   src/core/BodyZWindowPipeline.cpp
   src/core/GnssFactorBuilder.cpp
+  src/core/GnssPreOutageQualityOverride.cpp
   src/core/GnssVerticalReferenceSelector.cpp
   src/core/GraphTimelineBuilder.cpp
   src/core/ImuIntegrationUtils.cpp
@@ -190,6 +191,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     tests/gnss_factor_builder_test.cpp
   )
 
+  add_executable(gnss_preoutage_quality_override_test
+    tests/gnss_preoutage_quality_override_test.cpp
+  )
+
   add_executable(body_z_bidirectional_jump_detector_test
     tests/body_z_bidirectional_jump_detector_test.cpp
   )
@@ -269,6 +274,11 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(gnss_factor_builder_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(gnss_preoutage_quality_override_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -367,6 +377,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       gnss_factor_builder_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      gnss_preoutage_quality_override_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -498,6 +514,13 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         $<TARGET_FILE:gnss_factor_builder_test>
     )
     add_test(
+      NAME gnss_preoutage_quality_override_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:gnss_preoutage_quality_override_test>
+    )
+    add_test(
       NAME config_test
       COMMAND
         ${CMAKE_COMMAND} -E env
@@ -621,6 +644,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     add_test(
       NAME gnss_factor_builder_test
       COMMAND $<TARGET_FILE:gnss_factor_builder_test>
+    )
+    add_test(
+      NAME gnss_preoutage_quality_override_test
+      COMMAND $<TARGET_FILE:gnss_preoutage_quality_override_test>
     )
     add_test(
       NAME config_test

@@ -376,6 +376,10 @@ struct OfflineRunnerConfig {
   double rtkfix_scale = 1.0;
   double rtkfloat_scale = 2.0;
   double single_scale = 5.0;
+  bool enable_gnss_preoutage_quality_override = false;
+  double gnss_preoutage_quality_override_duration_s = 20.0;
+  double gnss_preoutage_quality_override_min_gap_s = 2.0;
+  bool gnss_preoutage_quality_override_mark_outage_nonfix_no_solution = false;
   bool drop_non_rtkfix = false;
   int required_best_sol_status_code = 1;
   bool drop_no_solution = true;

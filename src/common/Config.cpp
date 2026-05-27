@@ -577,6 +577,12 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (config.vertical_envelope_center_deadband_m >= config.vertical_envelope_min_half_width_m) {
     throw std::runtime_error("vertical envelope center deadband must be smaller than the minimum half-width");
   }
+  if (!std::isfinite(config.gnss_preoutage_quality_override_duration_s) ||
+      !std::isfinite(config.gnss_preoutage_quality_override_min_gap_s) ||
+      config.gnss_preoutage_quality_override_duration_s <= 0.0 ||
+      config.gnss_preoutage_quality_override_min_gap_s <= 0.0) {
+    throw std::runtime_error("GNSS pre-outage quality override settings must be positive");
+  }
   if (!std::isfinite(config.rtk_vertical_drift_correlation_time_s) ||
       !std::isfinite(config.rtk_vertical_drift_sigma_m) ||
       !std::isfinite(config.rtk_vertical_white_noise_sigma_m) ||
@@ -1704,6 +1710,17 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.rtkfloat_scale = ParseDouble(normalized_value);
   } else if (normalized_key == "single_scale") {
     config.single_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_gnss_preoutage_quality_override") {
+    config.enable_gnss_preoutage_quality_override = ParseBool(normalized_value);
+  } else if (normalized_key == "gnss_preoutage_quality_override_duration_s") {
+    config.gnss_preoutage_quality_override_duration_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "gnss_preoutage_quality_override_min_gap_s") {
+    config.gnss_preoutage_quality_override_min_gap_s = ParseDouble(normalized_value);
+  } else if (
+    normalized_key ==
+    "gnss_preoutage_quality_override_mark_outage_nonfix_no_solution") {
+    config.gnss_preoutage_quality_override_mark_outage_nonfix_no_solution =
+      ParseBool(normalized_value);
   } else if (normalized_key == "drop_non_rtkfix") {
     config.drop_non_rtkfix = ParseBool(normalized_value);
   } else if (normalized_key == "required_best_sol_status_code") {
@@ -2335,6 +2352,16 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "rtkfix_scale=" << config.rtkfix_scale << '\n'
     << "rtkfloat_scale=" << config.rtkfloat_scale << '\n'
     << "single_scale=" << config.single_scale << '\n'
+    << "enable_gnss_preoutage_quality_override="
+    << (config.enable_gnss_preoutage_quality_override ? "true" : "false") << '\n'
+    << "gnss_preoutage_quality_override_duration_s="
+    << config.gnss_preoutage_quality_override_duration_s << '\n'
+    << "gnss_preoutage_quality_override_min_gap_s="
+    << config.gnss_preoutage_quality_override_min_gap_s << '\n'
+    << "gnss_preoutage_quality_override_mark_outage_nonfix_no_solution="
+    << (config.gnss_preoutage_quality_override_mark_outage_nonfix_no_solution
+          ? "true"
+          : "false") << '\n'
     << "drop_non_rtkfix=" << (config.drop_non_rtkfix ? "true" : "false") << '\n'
     << "required_best_sol_status_code=" << config.required_best_sol_status_code << '\n'
     << "drop_no_solution=" << (config.drop_no_solution ? "true" : "false") << '\n'

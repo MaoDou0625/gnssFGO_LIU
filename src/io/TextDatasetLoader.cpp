@@ -7,6 +7,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "offline_lc_minimal/core/GnssPreOutageQualityOverride.h"
+
 namespace offline_lc_minimal {
 
 namespace {
@@ -197,6 +199,7 @@ DataSet TextDatasetLoader::Load(const OfflineRunnerConfig &config) {
   DataSet dataset;
   dataset.imu_samples = LoadImuSamples(config.imu_path);
   dataset.gnss_samples = LoadGnssSamples(config.gnss_path);
+  ApplyGnssPreOutageQualityOverride(config, dataset.gnss_samples);
   dataset.summary = BuildSummary(dataset.imu_samples, dataset.gnss_samples);
   return dataset;
 }
