@@ -21,6 +21,9 @@ state.rangeMaxHz = options.MaxCutoffHz;
 state.cutoffHz = min(max(options.InitialCutoffHz, state.rangeMinHz), state.rangeMaxHz);
 state.excludeStatic = true;
 state.protectInitialDynamicStatic = true;
+state.showRtkScatter = false;
+state.showStage2Up = true;
+state.showTunedReference = true;
 state.showSolverReference = true;
 
 fig = figure( ...
@@ -30,10 +33,10 @@ fig = figure( ...
   'Visible', options.Visible, ...
   'Position', [60 60 1500 900]);
 
-axFull = axes('Parent', fig, 'Position', [0.06 0.60 0.88 0.27]);
-axDelta = axes('Parent', fig, 'Position', [0.06 0.37 0.88 0.16]);
-axStart = axes('Parent', fig, 'Position', [0.06 0.08 0.42 0.21]);
-axEnd = axes('Parent', fig, 'Position', [0.52 0.08 0.42 0.21]);
+axFull = axes('Parent', fig, 'Position', [0.06 0.57 0.88 0.26]);
+axDelta = axes('Parent', fig, 'Position', [0.06 0.34 0.88 0.15]);
+axStart = axes('Parent', fig, 'Position', [0.06 0.07 0.42 0.20]);
+axEnd = axes('Parent', fig, 'Position', [0.52 0.07 0.42 0.20]);
 
 uicontrol(fig, 'Style', 'text', 'String', 'Cutoff Hz', ...
   'Units', 'normalized', 'Position', [0.06 0.945 0.06 0.025], ...
@@ -95,8 +98,26 @@ uicontrol(fig, 'Style', 'pushbutton', 'String', 'Save FIG', ...
 uicontrol(fig, 'Style', 'pushbutton', 'String', 'Export CSV', ...
   'Units', 'normalized', 'Position', [0.45 0.904 0.08 0.032], ...
   'Callback', @onExportCsv);
+rtkScatterCheckbox = uicontrol(fig, 'Style', 'checkbox', ...
+  'Units', 'normalized', 'Position', [0.55 0.910 0.09 0.025], ...
+  'String', 'RTK scatter', ...
+  'Value', state.showRtkScatter, ...
+  'BackgroundColor', 'w', ...
+  'Callback', @onRtkScatterCheckbox);
+stage2UpCheckbox = uicontrol(fig, 'Style', 'checkbox', ...
+  'Units', 'normalized', 'Position', [0.64 0.910 0.09 0.025], ...
+  'String', 'Stage2 up', ...
+  'Value', state.showStage2Up, ...
+  'BackgroundColor', 'w', ...
+  'Callback', @onStage2UpCheckbox);
+tunedReferenceCheckbox = uicontrol(fig, 'Style', 'checkbox', ...
+  'Units', 'normalized', 'Position', [0.73 0.910 0.11 0.025], ...
+  'String', 'tuned smooth', ...
+  'Value', state.showTunedReference, ...
+  'BackgroundColor', 'w', ...
+  'Callback', @onTunedReferenceCheckbox);
 statusText = uicontrol(fig, 'Style', 'text', ...
-  'Units', 'normalized', 'Position', [0.55 0.902 0.40 0.04], ...
+  'Units', 'normalized', 'Position', [0.06 0.855 0.88 0.04], ...
   'String', '', ...
   'BackgroundColor', 'w', ...
   'HorizontalAlignment', 'left');
@@ -163,6 +184,21 @@ end
 
   function onSolverReferenceCheckbox(~, ~)
     state.showSolverReference = logical(get(solverReferenceCheckbox, 'Value'));
+    current = recomputeAndPlot();
+  end
+
+  function onRtkScatterCheckbox(~, ~)
+    state.showRtkScatter = logical(get(rtkScatterCheckbox, 'Value'));
+    current = recomputeAndPlot();
+  end
+
+  function onStage2UpCheckbox(~, ~)
+    state.showStage2Up = logical(get(stage2UpCheckbox, 'Value'));
+    current = recomputeAndPlot();
+  end
+
+  function onTunedReferenceCheckbox(~, ~)
+    state.showTunedReference = logical(get(tunedReferenceCheckbox, 'Value'));
     current = recomputeAndPlot();
   end
 
@@ -278,6 +314,7 @@ data.dynamicStartTimeS = firstNonInitialTime(data);
 data.dynamicStartRelS = data.dynamicStartTimeS - data.timeS(1);
 data.configBlendS = readConfigValue(resultDir, 'initial_dynamic_static_lowpass_blend_s', 2.0);
 data.initialDynamicStaticWindows = readInitialDynamicStaticWindows(resultDir);
+data.rtkScatter = readRtkScatter(resultDir, data.timeS(1));
 end
 
 function values = optionalColumn(T, name, defaultValue)
@@ -321,6 +358,29 @@ windowPath = fullfile(resultDir, 'initial_dynamic_static_windows.csv');
 if isfile(windowPath)
   windows = readtable(windowPath, 'TextType', 'string');
 end
+end
+
+function rtkScatter = readRtkScatter(resultDir, referenceTimeS)
+rtkScatter = struct('timeS', [], 'relativeTimeS', [], 'upM', []);
+alignmentPath = fullfile(resultDir, 'gnss_alignment.csv');
+if ~isfile(alignmentPath)
+  return;
+end
+T = readtable(alignmentPath, 'TextType', 'string');
+requiredColumns = {'corrected_time_s','raw_rtk_up_m'};
+if ~all(ismember(requiredColumns, T.Properties.VariableNames))
+  return;
+end
+valid = isfinite(T.corrected_time_s) & isfinite(T.raw_rtk_up_m);
+if ismember('factor_used', T.Properties.VariableNames)
+  valid = valid & T.factor_used ~= 0;
+end
+if ismember('fix_type', T.Properties.VariableNames)
+  valid = valid & T.fix_type == "RTKFIX";
+end
+rtkScatter.timeS = T.corrected_time_s(valid);
+rtkScatter.relativeTimeS = rtkScatter.timeS - referenceTimeS;
+rtkScatter.upM = T.raw_rtk_up_m(valid);
 end
 
 function result = computeTunedReference(data, cutoffHz, excludeStatic, protectInitialDynamicStatic)
@@ -459,12 +519,27 @@ end
 function drawReferenceAxes(ax, data, result, state, titleText)
 cla(ax);
 hold(ax, 'on');
-hStage2 = plot(ax, data.relativeTimeS, data.stage2UpM, ...
-  'Color', [0.10 0.55 0.42], 'LineWidth', 0.9);
-hTuned = plot(ax, data.relativeTimeS, result.referenceUpM, ...
-  'Color', [0.12 0.34 0.80], 'LineWidth', 1.3);
-legendHandles = [hStage2, hTuned];
-legendItems = {'Stage2 up', 'tuned lowpass'};
+legendHandles = gobjects(0);
+legendItems = {};
+if state.showRtkScatter && ~isempty(data.rtkScatter.relativeTimeS)
+  hRtk = scatter(ax, data.rtkScatter.relativeTimeS, data.rtkScatter.upM, ...
+    10, [0.95 0.55 0.10], 'filled', 'MarkerFaceAlpha', 0.35, ...
+    'MarkerEdgeAlpha', 0.15);
+  legendHandles(end + 1) = hRtk;
+  legendItems{end + 1} = 'RTK up';
+end
+if state.showStage2Up
+  hStage2 = plot(ax, data.relativeTimeS, data.stage2UpM, ...
+    'Color', [0.10 0.55 0.42], 'LineWidth', 0.9);
+  legendHandles(end + 1) = hStage2;
+  legendItems{end + 1} = 'Stage2 up';
+end
+if state.showTunedReference
+  hTuned = plot(ax, data.relativeTimeS, result.referenceUpM, ...
+    'Color', [0.12 0.34 0.80], 'LineWidth', 1.3);
+  legendHandles(end + 1) = hTuned;
+  legendItems{end + 1} = 'tuned lowpass';
+end
 if state.showSolverReference
   hSolver = plot(ax, data.relativeTimeS, data.solverReferenceUpM, '--', ...
     'Color', [0.75 0.20 0.15], 'LineWidth', 0.9);
@@ -475,16 +550,22 @@ decorateAxes(ax, data);
 grid(ax, 'on');
 title(ax, titleText);
 ylabel(ax, 'Up (m)');
-legend(ax, legendHandles, legendItems, 'Location', 'best');
+if ~isempty(legendHandles)
+  legend(ax, legendHandles, legendItems, 'Location', 'best');
+end
 end
 
 function drawDeltaAxes(ax, data, result, state, titleText)
 cla(ax);
 hold(ax, 'on');
-hTuned = plot(ax, data.relativeTimeS, result.deltaM, ...
-  'Color', [0.15 0.15 0.15], 'LineWidth', 1.0);
-legendHandles = hTuned;
-legendItems = {'tuned delta'};
+legendHandles = gobjects(0);
+legendItems = {};
+if state.showTunedReference
+  hTuned = plot(ax, data.relativeTimeS, result.deltaM, ...
+    'Color', [0.15 0.15 0.15], 'LineWidth', 1.0);
+  legendHandles(end + 1) = hTuned;
+  legendItems{end + 1} = 'tuned delta';
+end
 if state.showSolverReference
   hSolver = plot(ax, data.relativeTimeS, data.solverReferenceUpM - data.stage2UpM, '--', ...
     'Color', [0.75 0.20 0.15], 'LineWidth', 0.8);
@@ -497,7 +578,9 @@ grid(ax, 'on');
 title(ax, titleText);
 ylabel(ax, 'Delta (m)');
 xlabel(ax, 'Time since start (s)');
-legend(ax, legendHandles, legendItems, 'Location', 'best');
+if ~isempty(legendHandles)
+  legend(ax, legendHandles, legendItems, 'Location', 'best');
+end
 end
 
 function decorateAxes(ax, data)
@@ -520,6 +603,7 @@ for i = 1:size(runs, 1)
     'FaceAlpha', alphaValue, 'EdgeColor', 'none', 'HandleVisibility', 'off');
 end
 uistack(findobj(ax, 'Type', 'line'), 'top');
+uistack(findobj(ax, 'Type', 'scatter'), 'top');
 ylim(ax, yl);
 end
 
