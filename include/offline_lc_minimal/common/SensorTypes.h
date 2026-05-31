@@ -64,6 +64,11 @@ enum class Stage3VerticalReferenceConstraintMode : int {
   kEnvelope = 1,
 };
 
+enum class Stage3VerticalReferenceSmoothingMethod : int {
+  kLowpass = 0,
+  kSplineBaseline = 1,
+};
+
 enum class StateMeasSyncStatus : int {
   kDropped = 0,
   kSynchronizedI = 1,
@@ -166,6 +171,16 @@ inline std::string ToString(const Stage3VerticalReferenceConstraintMode mode) {
     case Stage3VerticalReferenceConstraintMode::kGaussian:
     default:
       return "gaussian";
+  }
+}
+
+inline std::string ToString(const Stage3VerticalReferenceSmoothingMethod method) {
+  switch (method) {
+    case Stage3VerticalReferenceSmoothingMethod::kSplineBaseline:
+      return "spline_baseline";
+    case Stage3VerticalReferenceSmoothingMethod::kLowpass:
+    default:
+      return "lowpass";
   }
 }
 

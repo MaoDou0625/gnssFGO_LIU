@@ -267,7 +267,10 @@ struct RunSummary {
   double stage2_lowfreq_final_horizontal_position_hold_sigma_scale = 1.0;
   double stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale = 1.0;
   bool stage3_vertical_reference_optimization_enabled = false;
+  std::string stage3_vertical_reference_smoothing_method = "lowpass";
   double stage3_vertical_reference_lowpass_cutoff_hz =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_vertical_reference_spline_knot_spacing_m =
     std::numeric_limits<double>::quiet_NaN();
   double stage3_vertical_anchor_sigma_m = std::numeric_limits<double>::quiet_NaN();
   std::string stage3_vertical_reference_constraint_mode = "gaussian";
@@ -786,8 +789,12 @@ struct RunSummary {
         << stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale << '\n'
         << "stage3_vertical_reference_optimization_enabled="
         << (stage3_vertical_reference_optimization_enabled ? "true" : "false") << '\n'
+        << "stage3_vertical_reference_smoothing_method="
+        << stage3_vertical_reference_smoothing_method << '\n'
         << "stage3_vertical_reference_lowpass_cutoff_hz="
         << stage3_vertical_reference_lowpass_cutoff_hz << '\n'
+        << "stage3_vertical_reference_spline_knot_spacing_m="
+        << stage3_vertical_reference_spline_knot_spacing_m << '\n'
         << "stage3_vertical_anchor_sigma_m=" << stage3_vertical_anchor_sigma_m << '\n'
         << "stage3_vertical_reference_constraint_mode="
         << stage3_vertical_reference_constraint_mode << '\n'

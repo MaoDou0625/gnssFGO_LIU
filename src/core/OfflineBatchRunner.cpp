@@ -1553,9 +1553,17 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     config_.stage2_lowfreq_vertical_reference_cutoff_hz;
   run_result.run_summary.stage3_vertical_reference_optimization_enabled =
     active_stage3_vertical_reference != nullptr;
+  run_result.run_summary.stage3_vertical_reference_smoothing_method =
+    active_stage3_vertical_reference != nullptr
+      ? ToString(config_.stage3_vertical_reference_smoothing_method)
+      : "disabled";
   run_result.run_summary.stage3_vertical_reference_lowpass_cutoff_hz =
     active_stage3_vertical_reference != nullptr
       ? config_.stage3_vertical_reference_lowpass_cutoff_hz
+      : std::numeric_limits<double>::quiet_NaN();
+  run_result.run_summary.stage3_vertical_reference_spline_knot_spacing_m =
+    active_stage3_vertical_reference != nullptr
+      ? config_.stage3_vertical_reference_spline_knot_spacing_m
       : std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.stage3_vertical_anchor_sigma_m =
     active_stage3_vertical_reference != nullptr

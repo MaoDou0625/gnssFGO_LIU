@@ -151,6 +151,18 @@ Stage3VerticalReferenceConstraintMode ParseStage3VerticalReferenceConstraintMode
   throw std::runtime_error("invalid Stage3 vertical reference constraint mode: " + value);
 }
 
+Stage3VerticalReferenceSmoothingMethod ParseStage3VerticalReferenceSmoothingMethod(
+  const std::string &value) {
+  const std::string lowered = Lowercase(value);
+  if (lowered == "lowpass" || lowered == "time_lowpass") {
+    return Stage3VerticalReferenceSmoothingMethod::kLowpass;
+  }
+  if (lowered == "spline_baseline" || lowered == "spline") {
+    return Stage3VerticalReferenceSmoothingMethod::kSplineBaseline;
+  }
+  throw std::runtime_error("invalid Stage3 vertical reference smoothing method: " + value);
+}
+
 }  // namespace
 
 void ValidateConfig(const OfflineRunnerConfig &config) {
@@ -413,11 +425,19 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       "stage2 lowfreq final hold relaxation requires sigma scales >= 1");
   }
   if (!std::isfinite(config.stage3_vertical_reference_lowpass_cutoff_hz) ||
+      !std::isfinite(config.stage3_vertical_reference_spline_knot_spacing_m) ||
+      !std::isfinite(config.stage3_vertical_reference_spline_smooth_lambda) ||
+      !std::isfinite(config.stage3_vertical_reference_spline_anchor_weight) ||
+      !std::isfinite(config.stage3_vertical_reference_spline_slope_weight) ||
       !std::isfinite(config.stage3_vertical_reference_terminal_static_min_duration_s) ||
       !std::isfinite(config.stage3_vertical_reference_terminal_static_speed_threshold_mps) ||
       !std::isfinite(config.stage3_vertical_reference_terminal_static_vz_threshold_mps) ||
       !std::isfinite(config.stage3_vertical_anchor_sigma_m) ||
       config.stage3_vertical_reference_lowpass_cutoff_hz <= 0.0 ||
+      config.stage3_vertical_reference_spline_knot_spacing_m <= 0.0 ||
+      config.stage3_vertical_reference_spline_smooth_lambda < 0.0 ||
+      config.stage3_vertical_reference_spline_anchor_weight < 0.0 ||
+      config.stage3_vertical_reference_spline_slope_weight < 0.0 ||
       config.stage3_vertical_reference_terminal_static_min_duration_s <= 0.0 ||
       config.stage3_vertical_reference_terminal_static_speed_threshold_mps <= 0.0 ||
       config.stage3_vertical_reference_terminal_static_vz_threshold_mps <= 0.0 ||
@@ -1223,8 +1243,19 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
       ParseDouble(normalized_value);
   } else if (normalized_key == "enable_stage3_vertical_reference_optimization") {
     config.enable_stage3_vertical_reference_optimization = ParseBool(normalized_value);
+  } else if (normalized_key == "stage3_vertical_reference_smoothing_method") {
+    config.stage3_vertical_reference_smoothing_method =
+      ParseStage3VerticalReferenceSmoothingMethod(normalized_value);
   } else if (normalized_key == "stage3_vertical_reference_lowpass_cutoff_hz") {
     config.stage3_vertical_reference_lowpass_cutoff_hz = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_vertical_reference_spline_knot_spacing_m") {
+    config.stage3_vertical_reference_spline_knot_spacing_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_vertical_reference_spline_smooth_lambda") {
+    config.stage3_vertical_reference_spline_smooth_lambda = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_vertical_reference_spline_anchor_weight") {
+    config.stage3_vertical_reference_spline_anchor_weight = ParseDouble(normalized_value);
+  } else if (normalized_key == "stage3_vertical_reference_spline_slope_weight") {
+    config.stage3_vertical_reference_spline_slope_weight = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_stage3_vertical_reference_terminal_static_exclusion") {
     config.enable_stage3_vertical_reference_terminal_static_exclusion =
       ParseBool(normalized_value);
@@ -2002,8 +2033,18 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale << '\n'
     << "enable_stage3_vertical_reference_optimization="
     << (config.enable_stage3_vertical_reference_optimization ? "true" : "false") << '\n'
+    << "stage3_vertical_reference_smoothing_method="
+    << ToString(config.stage3_vertical_reference_smoothing_method) << '\n'
     << "stage3_vertical_reference_lowpass_cutoff_hz="
     << config.stage3_vertical_reference_lowpass_cutoff_hz << '\n'
+    << "stage3_vertical_reference_spline_knot_spacing_m="
+    << config.stage3_vertical_reference_spline_knot_spacing_m << '\n'
+    << "stage3_vertical_reference_spline_smooth_lambda="
+    << config.stage3_vertical_reference_spline_smooth_lambda << '\n'
+    << "stage3_vertical_reference_spline_anchor_weight="
+    << config.stage3_vertical_reference_spline_anchor_weight << '\n'
+    << "stage3_vertical_reference_spline_slope_weight="
+    << config.stage3_vertical_reference_spline_slope_weight << '\n'
     << "enable_stage3_vertical_reference_terminal_static_exclusion="
     << (config.enable_stage3_vertical_reference_terminal_static_exclusion
           ? "true"

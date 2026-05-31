@@ -126,8 +126,12 @@ OfflineRunResult Stage3VerticalReferenceOptimizationRunner::Run() const {
       request_.dataset);
   CopySourceDiagnostics(stage2_result, stage3_result);
   stage3_result.run_summary.stage3_vertical_reference_optimization_enabled = true;
+  stage3_result.run_summary.stage3_vertical_reference_smoothing_method =
+    ToString(request_.config.stage3_vertical_reference_smoothing_method);
   stage3_result.run_summary.stage3_vertical_reference_lowpass_cutoff_hz =
     request_.config.stage3_vertical_reference_lowpass_cutoff_hz;
+  stage3_result.run_summary.stage3_vertical_reference_spline_knot_spacing_m =
+    request_.config.stage3_vertical_reference_spline_knot_spacing_m;
   stage3_result.run_summary.stage3_vertical_anchor_sigma_m =
     request_.config.stage3_vertical_anchor_sigma_m;
   stage3_result.run_summary.stage3_vertical_reference_constraint_mode =

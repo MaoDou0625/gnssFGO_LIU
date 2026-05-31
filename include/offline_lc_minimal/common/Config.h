@@ -146,7 +146,13 @@ struct OfflineRunnerConfig {
   double stage2_lowfreq_final_horizontal_position_hold_sigma_scale = 1.0;
   double stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale = 1.0;
   bool enable_stage3_vertical_reference_optimization = false;
+  Stage3VerticalReferenceSmoothingMethod stage3_vertical_reference_smoothing_method =
+    Stage3VerticalReferenceSmoothingMethod::kLowpass;
   double stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
+  double stage3_vertical_reference_spline_knot_spacing_m = 1.0;
+  double stage3_vertical_reference_spline_smooth_lambda = 1.0e4;
+  double stage3_vertical_reference_spline_anchor_weight = 1.0e5;
+  double stage3_vertical_reference_spline_slope_weight = 1.0e3;
   bool enable_stage3_vertical_reference_terminal_static_exclusion = true;
   double stage3_vertical_reference_terminal_static_min_duration_s = 8.0;
   double stage3_vertical_reference_terminal_static_speed_threshold_mps = 0.05;

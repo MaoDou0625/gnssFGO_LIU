@@ -102,6 +102,58 @@ void TestProfilePlannerBuildsFiniteZeroPhaseLowpass() {
   ExpectTrue(max_abs_delta_m > 0.005, "lowpass should remove visible high-frequency content");
 }
 
+void TestProfilePlannerBuildsSplineBaselineReference() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_smoothing_method =
+    offline_lc_minimal::Stage3VerticalReferenceSmoothingMethod::kSplineBaseline;
+  config.stage3_vertical_reference_spline_knot_spacing_m = 1.0;
+  config.stage3_vertical_reference_spline_smooth_lambda = 10000.0;
+  config.stage3_vertical_reference_spline_anchor_weight = 100000.0;
+  config.stage3_vertical_reference_spline_slope_weight = 1000.0;
+
+  auto trajectory = MakeTrajectory(41U, 0.05);
+  for (std::size_t index = 0; index < trajectory.size(); ++index) {
+    trajectory[index].enu_position_m.x() = static_cast<double>(index);
+  }
+
+  offline_lc_minimal::Stage3VerticalReferenceProfilePlanRequest request;
+  request.config = &config;
+  request.stage2_trajectory = &trajectory;
+  const auto reference =
+    offline_lc_minimal::Stage3VerticalReferenceProfilePlanner(std::move(request)).Plan();
+
+  ExpectTrue(
+    reference.rows.size() == trajectory.size(),
+    "spline baseline should keep one row per Stage2 trajectory state");
+  double max_abs_delta_m = 0.0;
+  for (std::size_t index = 0; index < reference.rows.size(); ++index) {
+    const auto &row = reference.rows[index];
+    ExpectTrue(row.state_index == index, "spline row should stay state-aligned");
+    ExpectTrue(std::isfinite(row.stage2_lowpass_up_m), "spline reference should be finite");
+    ExpectTrue(row.skip_reason == "PLANNED", "finite spline rows should be planned");
+    max_abs_delta_m = std::max(max_abs_delta_m, std::abs(row.lowpass_delta_m));
+  }
+
+  double raw_second_difference_sum = 0.0;
+  double spline_second_difference_sum = 0.0;
+  for (std::size_t index = 1; index + 1U < trajectory.size(); ++index) {
+    raw_second_difference_sum += std::abs(
+      trajectory[index + 1U].enu_position_m.z() -
+      2.0 * trajectory[index].enu_position_m.z() +
+      trajectory[index - 1U].enu_position_m.z());
+    spline_second_difference_sum += std::abs(
+      reference.rows[index + 1U].stage2_lowpass_up_m -
+      2.0 * reference.rows[index].stage2_lowpass_up_m +
+      reference.rows[index - 1U].stage2_lowpass_up_m);
+  }
+  ExpectTrue(
+    max_abs_delta_m > 0.005,
+    "spline baseline should remove visible high-frequency content");
+  ExpectTrue(
+    spline_second_difference_sum < raw_second_difference_sum * 0.5,
+    "spline baseline should reduce vertical roughness before Stage3 uses it");
+}
+
 void TestProfilePlannerCanHoldInitialDynamicStaticReference() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
@@ -1371,6 +1423,9 @@ int main() {
     RunTest(
       "TestProfilePlannerBuildsFiniteZeroPhaseLowpass",
       TestProfilePlannerBuildsFiniteZeroPhaseLowpass);
+    RunTest(
+      "TestProfilePlannerBuildsSplineBaselineReference",
+      TestProfilePlannerBuildsSplineBaselineReference);
     RunTest(
       "TestProfilePlannerCanHoldInitialDynamicStaticReference",
       TestProfilePlannerCanHoldInitialDynamicStaticReference);

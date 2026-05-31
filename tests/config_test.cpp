@@ -907,7 +907,7 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
     "phase32 relative yaw reference sigma should load");
 }
 
-void TestDefaultOfflineConfigUsesV20Stage3LowpassAnchor() {
+void TestDefaultOfflineConfigUsesSplineStage3Reference() {
   const auto config = offline_lc_minimal::LoadConfigFile(
     std::string(OFFLINE_LC_MINIMAL_SOURCE_DIR) + "/config/default_offline.cfg",
     offline_lc_minimal::DefaultConfig());
@@ -933,14 +933,24 @@ void TestDefaultOfflineConfigUsesV20Stage3LowpassAnchor() {
     config.enable_stage3_vertical_reference_optimization,
     "default config should enable Stage3 vertical reference optimization");
   ExpectTrue(
+    config.stage3_vertical_reference_smoothing_method ==
+      offline_lc_minimal::Stage3VerticalReferenceSmoothingMethod::kSplineBaseline,
+    "default Stage3 vertical reference should use the spline baseline smoother");
+  ExpectTrue(
     std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.01) < 1e-15,
-    "default Stage3 lowpass cutoff should match the v2.0 release setting");
+    "default Stage3 lowpass cutoff should remain available for lowpass fallback");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_spline_knot_spacing_m - 1.0) < 1e-15,
+    "default Stage3 spline knot spacing should be 1 m");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_spline_smooth_lambda - 10000.0) < 1e-12,
+    "default Stage3 spline smoothness lambda should match the tuned value");
   ExpectTrue(
     std::abs(config.stage3_vertical_anchor_sigma_m - 0.005) < 1e-15,
     "default Stage3 vertical anchor sigma should match the v2.0 release setting");
   ExpectTrue(
     config.stage3_disable_stage2_vehicle_nhc_constraint,
-    "default Stage3 pass should disable vehicle NHC to keep the lowpass anchor dominant");
+    "default Stage3 pass should disable vehicle NHC to keep the vertical reference dominant");
   ExpectTrue(
     config.enable_stage3_jump_velocity_smoothness_regularizer,
     "default config should enable Stage3 jump velocity regularization");
@@ -1809,6 +1819,22 @@ void TestStage3VerticalReferenceConfigValidation() {
     std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.05) < 1e-15,
     "Stage3 default cutoff should be 0.05 Hz");
   ExpectTrue(
+    config.stage3_vertical_reference_smoothing_method ==
+      offline_lc_minimal::Stage3VerticalReferenceSmoothingMethod::kLowpass,
+    "Stage3 default smoothing method should preserve lowpass behavior");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_spline_knot_spacing_m - 1.0) < 1e-15,
+    "Stage3 default spline knot spacing should be 1 m");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_spline_smooth_lambda - 10000.0) < 1e-12,
+    "Stage3 default spline smoothness lambda should be 10000");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_spline_anchor_weight - 100000.0) < 1e-9,
+    "Stage3 default spline anchor weight should be 100000");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_spline_slope_weight - 1000.0) < 1e-12,
+    "Stage3 default spline slope weight should be 1000");
+  ExpectTrue(
     config.enable_stage3_vertical_reference_terminal_static_exclusion,
     "Stage3 lowpass should exclude terminal static suffixes by default");
   ExpectTrue(
@@ -1945,6 +1971,26 @@ void TestStage3VerticalReferenceConfigValidation() {
     config,
     "stage3_vertical_reference_lowpass_cutoff_hz",
     "0.03");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_reference_smoothing_method",
+    "spline_baseline");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_reference_spline_knot_spacing_m",
+    "1.25");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_reference_spline_smooth_lambda",
+    "20000");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_reference_spline_anchor_weight",
+    "300000");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_reference_spline_slope_weight",
+    "4000");
   offline_lc_minimal::OverrideConfigField(
     config,
     "enable_stage3_vertical_reference_terminal_static_exclusion",
@@ -2126,6 +2172,22 @@ void TestStage3VerticalReferenceConfigValidation() {
     std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.03) < 1e-15,
     "Stage3 cutoff should parse");
   ExpectTrue(
+    config.stage3_vertical_reference_smoothing_method ==
+      offline_lc_minimal::Stage3VerticalReferenceSmoothingMethod::kSplineBaseline,
+    "Stage3 spline smoothing method should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_spline_knot_spacing_m - 1.25) < 1e-15,
+    "Stage3 spline knot spacing should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_spline_smooth_lambda - 20000.0) < 1e-12,
+    "Stage3 spline smoothness lambda should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_spline_anchor_weight - 300000.0) < 1e-9,
+    "Stage3 spline anchor weight should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_spline_slope_weight - 4000.0) < 1e-12,
+    "Stage3 spline slope weight should parse");
+  ExpectTrue(
     !config.enable_stage3_vertical_reference_terminal_static_exclusion,
     "Stage3 terminal static exclusion flag should parse");
   ExpectTrue(
@@ -2266,6 +2328,26 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("stage3_vertical_reference_lowpass_cutoff_hz=0.03") != std::string::npos,
     "Stage3 cutoff should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_reference_smoothing_method=spline_baseline") !=
+      std::string::npos,
+    "Stage3 smoothing method should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_reference_spline_knot_spacing_m=1.25") !=
+      std::string::npos,
+    "Stage3 spline knot spacing should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_reference_spline_smooth_lambda=20000") !=
+      std::string::npos,
+    "Stage3 spline smoothness lambda should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_reference_spline_anchor_weight=300000") !=
+      std::string::npos,
+    "Stage3 spline anchor weight should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_reference_spline_slope_weight=4000") !=
+      std::string::npos,
+    "Stage3 spline slope weight should be serialized");
   ExpectTrue(
     serialized.find("enable_stage3_vertical_reference_terminal_static_exclusion=false") !=
       std::string::npos,
@@ -2415,6 +2497,28 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(threw, "non-positive Stage3 cutoff should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_spline_knot_spacing_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("stage3 vertical reference settings") !=
+            std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive Stage3 spline knot spacing should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_spline_anchor_weight = -1.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("stage3 vertical reference settings") !=
+            std::string::npos;
+  }
+  ExpectTrue(threw, "negative Stage3 spline anchor weight should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
   config.stage3_vertical_reference_terminal_static_speed_threshold_mps = 0.0;
   threw = false;
   try {
@@ -2496,6 +2600,20 @@ void TestStage3VerticalReferenceConfigValidation() {
       std::string::npos;
   }
   ExpectTrue(threw, "initial dynamic static height hold sigma should be positive");
+
+  config = offline_lc_minimal::DefaultConfig();
+  threw = false;
+  try {
+    offline_lc_minimal::OverrideConfigField(
+      config,
+      "stage3_vertical_reference_smoothing_method",
+      "invalid_method");
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("Stage3 vertical reference smoothing method") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "invalid Stage3 smoothing method should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   threw = false;
@@ -4345,9 +4463,9 @@ int main() {
     RunTest(
       "TestPhase32RtkOutageSmootherConfigLoads",
       TestPhase32RtkOutageSmootherConfigLoads);
-    RunTest(
-      "TestDefaultOfflineConfigUsesV20Stage3LowpassAnchor",
-      TestDefaultOfflineConfigUsesV20Stage3LowpassAnchor);
+  RunTest(
+      "TestDefaultOfflineConfigUsesSplineStage3Reference",
+      TestDefaultOfflineConfigUsesSplineStage3Reference);
     RunTest(
       "TestStage3VerticalReferenceConfigValidation",
       TestStage3VerticalReferenceConfigValidation);

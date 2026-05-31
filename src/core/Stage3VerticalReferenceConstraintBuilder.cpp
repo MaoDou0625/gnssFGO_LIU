@@ -41,8 +41,12 @@ gtsam::SharedNoiseModel MakeCenterPullNoiseModel(const OfflineRunnerConfig &conf
 
 void InitializeStage3Summary(const OfflineRunnerConfig &config, RunSummary &summary) {
   summary.stage3_vertical_reference_optimization_enabled = true;
+  summary.stage3_vertical_reference_smoothing_method =
+    ToString(config.stage3_vertical_reference_smoothing_method);
   summary.stage3_vertical_reference_lowpass_cutoff_hz =
     config.stage3_vertical_reference_lowpass_cutoff_hz;
+  summary.stage3_vertical_reference_spline_knot_spacing_m =
+    config.stage3_vertical_reference_spline_knot_spacing_m;
   summary.stage3_vertical_anchor_sigma_m = config.stage3_vertical_anchor_sigma_m;
   summary.stage3_vertical_reference_constraint_mode =
     ToString(config.stage3_vertical_reference_constraint_mode);

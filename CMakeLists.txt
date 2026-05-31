@@ -113,6 +113,7 @@ add_library(offline_lc_minimal_lib
   src/core/Stage3VerticalReferenceConstraintBuilder.cpp
   src/core/Stage3VerticalReferenceOptimizationRunner.cpp
   src/core/Stage3VerticalReferenceProfilePlanner.cpp
+  src/core/Stage3VerticalReferenceSmoother.cpp
   src/core/Stage3VerticalReferenceTimelineAligner.cpp
   src/core/SegmentedBatchResultAssembler.cpp
   src/core/StaticImuAlignment.cpp
