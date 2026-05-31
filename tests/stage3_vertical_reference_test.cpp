@@ -330,7 +330,7 @@ void TestProfilePlannerExcludesTerminalStaticFromLowpass() {
     "terminal static rows should retain unfiltered diagnostic height");
   ExpectTrue(
     reference.rows[6].skip_reason == "TERMINAL_STATIC",
-    "terminal static rows should be marked so constraint building can skip them");
+    "terminal static rows should stay marked while remaining outside the smoother");
 }
 
 void TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics() {
@@ -405,7 +405,7 @@ void TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics() {
       "max absolute Stage3 residual should be summarized");
 }
 
-void TestConstraintBuilderSkipsTerminalStaticReferences() {
+void TestConstraintBuilderAnchorsTerminalStaticReferences() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
   config.stage3_vertical_reference_terminal_static_min_duration_s = 2.0;
@@ -441,13 +441,18 @@ void TestConstraintBuilderSkipsTerminalStaticReferences() {
   build_request.diagnostics = &diagnostics;
   offline_lc_minimal::Stage3VerticalReferenceConstraintBuilder(std::move(build_request)).Build();
 
-  ExpectTrue(summary.stage3_vertical_reference_factor_count == 6U,
-             "terminal static rows should not receive Stage3 vertical anchors");
-  ExpectTrue(summary.stage3_vertical_reference_skipped_count == 4U,
-             "terminal static rows should be counted as skipped references");
-  ExpectTrue(!diagnostics[6].factor_added, "first terminal static row should be skipped");
-  ExpectTrue(diagnostics[6].skip_reason == "TERMINAL_STATIC",
-             "terminal static skip reason should survive constraint building");
+  ExpectTrue(summary.stage3_vertical_reference_factor_count == 10U,
+             "terminal static rows should still receive Stage3 vertical anchors");
+  ExpectTrue(summary.stage3_vertical_reference_skipped_count == 0U,
+             "terminal static rows should not be counted as skipped references");
+  ExpectTrue(diagnostics[6].factor_added, "first terminal static row should be anchored");
+  ExpectTrue(diagnostics[6].skip_reason == "ADDED",
+             "terminal static row should become an added vertical reference factor");
+  ExpectNear(
+    diagnostics[6].reference_up_m,
+    10.0,
+    1.0e-12,
+    "terminal static anchor should use the unfiltered terminal static reference height");
 }
 
 void TestConstraintBuilderEnvelopeModeUsesGateAndCenterPull() {
@@ -1442,8 +1447,8 @@ int main() {
       "TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics",
       TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics);
     RunTest(
-      "TestConstraintBuilderSkipsTerminalStaticReferences",
-      TestConstraintBuilderSkipsTerminalStaticReferences);
+      "TestConstraintBuilderAnchorsTerminalStaticReferences",
+      TestConstraintBuilderAnchorsTerminalStaticReferences);
     RunTest(
       "TestConstraintBuilderEnvelopeModeUsesGateAndCenterPull",
       TestConstraintBuilderEnvelopeModeUsesGateAndCenterPull);

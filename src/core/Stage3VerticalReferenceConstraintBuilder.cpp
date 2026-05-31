@@ -186,12 +186,6 @@ void Stage3VerticalReferenceConstraintBuilder::Build() const {
       request_.diagnostics->push_back(row);
       continue;
     }
-    if (row.skip_reason == "TERMINAL_STATIC") {
-      row.factor_added = false;
-      ++request_.run_summary->stage3_vertical_reference_skipped_count;
-      request_.diagnostics->push_back(row);
-      continue;
-    }
     if (!std::isfinite(row.stage2_lowpass_up_m)) {
       row.factor_added = false;
       row.skip_reason = "LOWPASS_UNAVAILABLE";
