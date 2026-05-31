@@ -27,8 +27,18 @@ void CopyStage1Summary(
     stage1_result.run_summary.stage1_yaw_refinement_iteration_count;
   stage2_result.run_summary.stage1_yaw_refinement_converged =
     stage1_result.run_summary.stage1_yaw_refinement_converged;
+  stage2_result.run_summary.stage1_yaw_refinement_cycle_detected =
+    stage1_result.run_summary.stage1_yaw_refinement_cycle_detected;
+  stage2_result.run_summary.stage1_yaw_refinement_reference_valid =
+    stage1_result.run_summary.stage1_yaw_refinement_reference_valid;
   stage2_result.run_summary.stage1_yaw_refinement_stop_reason =
     stage1_result.run_summary.stage1_yaw_refinement_stop_reason;
+  stage2_result.run_summary.stage1_yaw_refinement_selected_iteration =
+    stage1_result.run_summary.stage1_yaw_refinement_selected_iteration;
+  stage2_result.run_summary.stage1_yaw_refinement_selection_reason =
+    stage1_result.run_summary.stage1_yaw_refinement_selection_reason;
+  stage2_result.run_summary.stage1_yaw_refinement_selected_branch_score =
+    stage1_result.run_summary.stage1_yaw_refinement_selected_branch_score;
   stage2_result.run_summary.stage1_yaw_refinement_final_yaw_rad =
     stage1_result.run_summary.stage1_yaw_refinement_final_yaw_rad;
   stage2_result.run_summary.stage1_yaw_refinement_final_median_error_rad =
@@ -189,8 +199,18 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
     }
   }
 
+  if (stage1_result.run_summary.stage1_yaw_refinement_enabled &&
+      !stage1_result.run_summary.stage1_yaw_refinement_reference_valid) {
+    stage1_result.run_summary.stage2_velocity_optimization_enabled = false;
+    return stage1_result;
+  }
+
   auto reference = std::make_shared<Stage2VelocityReference>();
   reference->trajectory = stage1_result.trajectory;
+  reference->reference_states =
+    !stage1_result.optimized_reference_states.empty()
+      ? stage1_result.optimized_reference_states
+      : BuildStage2ReferenceStatesFromTrajectory(stage1_result.trajectory);
   reference->source_config =
     std::make_shared<OfflineRunnerConfig>(request_.config);
 

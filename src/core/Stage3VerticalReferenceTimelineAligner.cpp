@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "offline_lc_minimal/core/RtkHeadingAlignmentEstimator.h"
+#include "offline_lc_minimal/core/StageAttitudeReference.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -84,20 +84,6 @@ template <typename Row>
   return rows[lower_index + 1U].time_s - rows[lower_index].time_s <= kMaxBridgeGapS;
 }
 
-[[nodiscard]] double BlendAngleRad(
-  const double lhs_rad,
-  const double rhs_rad,
-  const double alpha) {
-  return lhs_rad + alpha * NormalizeHeadingAngleRad(rhs_rad - lhs_rad);
-}
-
-[[nodiscard]] Eigen::Vector3d BlendVector(
-  const Eigen::Vector3d &lhs,
-  const Eigen::Vector3d &rhs,
-  const double alpha) {
-  return lhs + alpha * (rhs - lhs);
-}
-
 [[nodiscard]] double BlendScalar(
   const double lhs,
   const double rhs,
@@ -145,42 +131,6 @@ template <typename Row>
     return 0.0;
   }
   return std::clamp((time_s - lhs_time_s) / dt_s, 0.0, 1.0);
-}
-
-[[nodiscard]] TrajectoryRow InterpolateTrajectoryRow(
-  const std::vector<TrajectoryRow> &rows,
-  const double target_time_s) {
-  if (rows.empty()) {
-    throw std::runtime_error("cannot align an empty Stage2 trajectory");
-  }
-  if (!HasReferenceCoverage(rows, target_time_s)) {
-    throw std::runtime_error("Stage2 trajectory does not cover the Stage3 graph timeline");
-  }
-  if (rows.size() == 1U) {
-    TrajectoryRow row = rows.front();
-    row.time_s = target_time_s;
-    return row;
-  }
-
-  const std::size_t lower_index = LowerBracketIndex(rows, target_time_s);
-  const auto &lhs = rows[lower_index];
-  const auto &rhs = rows[lower_index + 1U];
-  const double alpha = InterpolationAlpha(target_time_s, lhs.time_s, rhs.time_s);
-
-  TrajectoryRow row;
-  row.time_s = target_time_s;
-  row.enu_position_m = BlendVector(lhs.enu_position_m, rhs.enu_position_m, alpha);
-  row.enu_velocity_mps = BlendVector(lhs.enu_velocity_mps, rhs.enu_velocity_mps, alpha);
-  row.ypr_rad = Eigen::Vector3d(
-    BlendAngleRad(lhs.ypr_rad.x(), rhs.ypr_rad.x(), alpha),
-    BlendAngleRad(lhs.ypr_rad.y(), rhs.ypr_rad.y(), alpha),
-    BlendAngleRad(lhs.ypr_rad.z(), rhs.ypr_rad.z(), alpha));
-  row.omega_radps = BlendVector(lhs.omega_radps, rhs.omega_radps, alpha);
-  row.bias_acc = BlendVector(lhs.bias_acc, rhs.bias_acc, alpha);
-  row.bias_gyro = BlendVector(lhs.bias_gyro, rhs.bias_gyro, alpha);
-  row.gnss_factor_used = alpha < 0.5 ? lhs.gnss_factor_used : rhs.gnss_factor_used;
-  row.gnss_fix_type = alpha < 0.5 ? lhs.gnss_fix_type : rhs.gnss_fix_type;
-  return row;
 }
 
 [[nodiscard]] Stage3VerticalReferenceDiagnosticRow InterpolateStage3Row(
@@ -235,11 +185,11 @@ Stage3VerticalReferenceTimelineAlignResult AlignStage3VerticalReferencesToTimeli
   const Stage2VelocityReference &stage2_reference,
   const Stage3VerticalReference &stage3_reference,
   const std::vector<double> &target_timestamps_s) {
-  const std::vector<TrajectoryRow> stage2_rows =
-    SortedFiniteRows(stage2_reference.trajectory);
+  const std::vector<ReferenceNodeState> stage2_reference_states =
+    SortedFiniteReferenceStates(BuildStage2ReferenceStates(stage2_reference));
   const std::vector<Stage3VerticalReferenceDiagnosticRow> stage3_rows =
     SortedFiniteRows(stage3_reference.rows);
-  if (stage2_rows.empty()) {
+  if (stage2_reference_states.empty()) {
     throw std::runtime_error("cannot align Stage3 references from an empty Stage2 trajectory");
   }
   if (target_timestamps_s.empty()) {
@@ -250,13 +200,20 @@ Stage3VerticalReferenceTimelineAlignResult AlignStage3VerticalReferencesToTimeli
   result.stage2_reference.boundary_references = stage2_reference.boundary_references;
   result.stage2_reference.source_config = stage2_reference.source_config;
   result.stage2_reference.trajectory.reserve(target_timestamps_s.size());
+  result.stage2_reference.reference_states.reserve(target_timestamps_s.size());
   result.stage3_reference.source_config = stage3_reference.source_config;
   result.stage3_reference.rows.reserve(target_timestamps_s.size());
 
   for (std::size_t state_index = 0; state_index < target_timestamps_s.size(); ++state_index) {
     const double target_time_s = target_timestamps_s[state_index];
+    if (!HasReferenceStateCoverage(stage2_reference_states, target_time_s, kMaxBridgeGapS)) {
+      throw std::runtime_error("Stage2 trajectory does not cover the Stage3 graph timeline");
+    }
+    const ReferenceNodeState aligned_state =
+      InterpolateStageReferenceState(stage2_reference_states, target_time_s);
+    result.stage2_reference.reference_states.push_back(aligned_state);
     result.stage2_reference.trajectory.push_back(
-      InterpolateTrajectoryRow(stage2_rows, target_time_s));
+      TrajectoryRowFromReferenceState(aligned_state));
     result.stage3_reference.rows.push_back(
       InterpolateStage3Row(stage3_rows, target_time_s, state_index));
   }

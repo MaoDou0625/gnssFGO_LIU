@@ -26,6 +26,13 @@ struct Stage1YawRefinementDiagnosticRow {
   double max_abs_error_rad = std::numeric_limits<double>::quiet_NaN();
   double final_error = std::numeric_limits<double>::quiet_NaN();
   double gnss_nis_mean = std::numeric_limits<double>::quiet_NaN();
+  bool cycle_detected = false;
+  bool selected_branch = false;
+  bool reference_valid_for_strong_hold = false;
+  double branch_continuity_max_rot_rad = std::numeric_limits<double>::quiet_NaN();
+  double imu_rotation_mismatch_max_rad = std::numeric_limits<double>::quiet_NaN();
+  double branch_score = std::numeric_limits<double>::quiet_NaN();
+  std::string selection_reason = "UNSET";
   std::string stop_reason;
 };
 
@@ -427,7 +434,13 @@ struct RunSummary {
   bool stage1_yaw_refinement_enabled = false;
   int stage1_yaw_refinement_iteration_count = 0;
   bool stage1_yaw_refinement_converged = false;
+  bool stage1_yaw_refinement_cycle_detected = false;
+  bool stage1_yaw_refinement_reference_valid = false;
   std::string stage1_yaw_refinement_stop_reason;
+  int stage1_yaw_refinement_selected_iteration = 0;
+  std::string stage1_yaw_refinement_selection_reason = "UNSET";
+  double stage1_yaw_refinement_selected_branch_score =
+    std::numeric_limits<double>::quiet_NaN();
   double stage1_yaw_refinement_final_yaw_rad = std::numeric_limits<double>::quiet_NaN();
   double stage1_yaw_refinement_final_median_error_rad = std::numeric_limits<double>::quiet_NaN();
   double stage1_yaw_refinement_final_noise_rad = std::numeric_limits<double>::quiet_NaN();
@@ -996,8 +1009,18 @@ struct RunSummary {
         << stage1_yaw_refinement_iteration_count << '\n'
         << "stage1_yaw_refinement_converged="
         << (stage1_yaw_refinement_converged ? "true" : "false") << '\n'
+        << "stage1_yaw_refinement_cycle_detected="
+        << (stage1_yaw_refinement_cycle_detected ? "true" : "false") << '\n'
+        << "stage1_yaw_refinement_reference_valid="
+        << (stage1_yaw_refinement_reference_valid ? "true" : "false") << '\n'
         << "stage1_yaw_refinement_stop_reason="
         << stage1_yaw_refinement_stop_reason << '\n'
+        << "stage1_yaw_refinement_selected_iteration="
+        << stage1_yaw_refinement_selected_iteration << '\n'
+        << "stage1_yaw_refinement_selection_reason="
+        << stage1_yaw_refinement_selection_reason << '\n'
+        << "stage1_yaw_refinement_selected_branch_score="
+        << stage1_yaw_refinement_selected_branch_score << '\n'
         << "stage1_yaw_refinement_final_yaw_rad="
         << stage1_yaw_refinement_final_yaw_rad << '\n'
         << "stage1_yaw_refinement_final_median_error_rad="
@@ -1016,6 +1039,8 @@ struct OfflineRunResult {
   std::vector<TrajectoryRow> initial_static_trajectory;
   std::vector<TrajectoryRow> optimized_static_terminal_forward_trajectory;
   std::vector<ReferenceNodeRow> reference_node_trajectory;
+  std::vector<ReferenceNodeState> imu_propagated_reference_states;
+  std::vector<ReferenceNodeState> optimized_reference_states;
   std::vector<ReferenceNodeState> attitude_reference_states;
   std::vector<BodyZSeedImuDiagnosticRow> seed_body_z_acc_diagnostics;
   std::vector<BodyZSeedJumpWindowRow> body_z_seed_jump_windows;

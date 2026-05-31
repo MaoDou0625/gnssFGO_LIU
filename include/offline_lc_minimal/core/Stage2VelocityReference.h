@@ -13,6 +13,7 @@ namespace offline_lc_minimal {
 
 struct Stage2VelocityReference {
   std::vector<TrajectoryRow> trajectory;
+  std::vector<ReferenceNodeState> reference_states;
   std::vector<RtkOutageBoundaryReferenceRow> boundary_references;
   std::shared_ptr<const OfflineRunnerConfig> source_config;
 };
@@ -28,6 +29,9 @@ Stage2AttitudeHorizontalReferenceApplicationOptions();
 
 [[nodiscard]] std::vector<ReferenceNodeState> BuildStage2ReferenceStatesFromTrajectory(
   const std::vector<TrajectoryRow> &trajectory);
+
+[[nodiscard]] std::vector<ReferenceNodeState> BuildStage2ReferenceStates(
+  const Stage2VelocityReference &reference);
 
 void ApplyStage2ReferenceTrajectoryToInitialValues(
   const Stage2VelocityReference &reference,

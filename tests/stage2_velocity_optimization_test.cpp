@@ -11,11 +11,13 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
 #include <gtsam/geometry/Pose3.h>
+#include <gtsam/navigation/ImuBias.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/core/OptimizationStagePolicy.h"
+#include "offline_lc_minimal/core/RtkOutageSegmentedBatchRunner.h"
 #include "offline_lc_minimal/core/Stage2AttitudeHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage2HorizontalHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage1OutageBodyYEnvelopeConstraintBuilder.h"
@@ -93,7 +95,10 @@ std::vector<offline_lc_minimal::TrajectoryRow> MakeTrajectoryRows(
   for (int time_s = start; time_s <= end; ++time_s) {
     offline_lc_minimal::TrajectoryRow row;
     row.time_s = static_cast<double>(time_s);
-    row.enu_position_m = Eigen::Vector3d(0.0, 0.0, 0.01 * static_cast<double>(time_s));
+    row.enu_position_m = Eigen::Vector3d(
+      static_cast<double>(time_s),
+      0.0,
+      0.01 * static_cast<double>(time_s));
     row.enu_velocity_mps = Eigen::Vector3d::Zero();
     rows.push_back(row);
   }
@@ -140,9 +145,20 @@ offline_lc_minimal::GnssSolutionSample MakeRecoveryGnssSample(
   sample.sigma_h_m = 0.01;
   sample.best_sol_status_code = 1;
   sample.gnssfgo_type_code = 1;
-  sample.enu_position_m = Eigen::Vector3d(0.0, 0.0, up_m);
+  sample.enu_position_m = Eigen::Vector3d(time_s, 0.0, up_m);
   sample.has_enu_position = true;
   return sample;
+}
+
+std::vector<offline_lc_minimal::GnssSolutionSample> MakeRecoveryGnssSamples(
+  const double start_time_s,
+  const double end_time_s,
+  const double step_s) {
+  std::vector<offline_lc_minimal::GnssSolutionSample> samples;
+  for (double time_s = start_time_s; time_s <= end_time_s + 1.0e-9; time_s += step_s) {
+    samples.push_back(MakeRecoveryGnssSample(time_s, 0.10 + 0.01 * time_s));
+  }
+  return samples;
 }
 
 void TestStage2ReferenceAttitudeHorizontalApplicationPreservesVerticalComponents() {
@@ -151,11 +167,22 @@ void TestStage2ReferenceAttitudeHorizontalApplicationPreservesVerticalComponents
   row.time_s = 0.0;
   row.enu_position_m = Eigen::Vector3d(1.0, 2.0, 30.0);
   row.enu_velocity_mps = Eigen::Vector3d(4.0, 5.0, 60.0);
-  row.ypr_rad = Eigen::Vector3d(0.3, -0.2, 0.1);
+  row.ypr_rad = Eigen::Vector3d(2.0, 0.0, 0.0);
   row.bias_acc = Eigen::Vector3d(0.01, 0.02, 0.03);
   row.bias_gyro = Eigen::Vector3d(0.04, 0.05, 0.06);
   row.omega_radps = Eigen::Vector3d(0.07, 0.08, 0.09);
   reference.trajectory.push_back(row);
+  offline_lc_minimal::ReferenceNodeState reference_state;
+  reference_state.time_s = 0.0;
+  reference_state.pose = gtsam::Pose3(
+    gtsam::Rot3::Ypr(0.3, -0.2, 0.1),
+    gtsam::Point3(1.0, 2.0, 30.0));
+  reference_state.velocity = gtsam::Vector3(4.0, 5.0, 60.0);
+  reference_state.bias = gtsam::imuBias::ConstantBias(
+    gtsam::Vector3(0.01, 0.02, 0.03),
+    gtsam::Vector3(0.04, 0.05, 0.06));
+  reference_state.omega = gtsam::Vector3(0.07, 0.08, 0.09);
+  reference.reference_states.push_back(reference_state);
 
   gtsam::Values values;
   values.insert(
@@ -638,6 +665,58 @@ void TestStage1OutageBodyYEnvelopeBuilderAddsOnlyOutageFactors() {
              "summary should count body-y envelope factors");
 }
 
+void TestStage2SkipsStrongReferenceWhenStage1ReferenceInvalid() {
+  struct CallRecord {
+    bool has_stage2_reference = false;
+    bool enable_stage2_velocity_optimization = false;
+  };
+
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage1_yaw_refinement = true;
+  config.stage1_yaw_refinement_max_iterations = 1;
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_rtk_outage_segmented_batch = false;
+
+  std::vector<CallRecord> calls;
+  offline_lc_minimal::Stage2VelocityOptimizationRequest request;
+  request.config = config;
+  request.dataset = offline_lc_minimal::DataSet{};
+  request.run_once = [&](
+                       const offline_lc_minimal::OfflineRunnerConfig &run_config,
+                       std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> stage2_reference,
+                       std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
+                       offline_lc_minimal::DataSet) {
+    calls.push_back(CallRecord{
+      stage2_reference != nullptr,
+      run_config.enable_stage2_velocity_optimization});
+
+    offline_lc_minimal::OfflineRunResult result;
+    result.run_summary.origin_lat_rad = 0.1;
+    result.run_summary.origin_lon_rad = 0.2;
+    result.run_summary.origin_h_m = 10.0;
+    result.run_summary.dynamic_start_time_s = 0.0;
+    result.run_summary.processing_start_time_s = 0.0;
+    result.run_summary.processing_end_time_s = 4.0;
+    result.trajectory = MakeTrajectoryRows(0.0, 4.0);
+    return result;
+  };
+
+  const auto result =
+    offline_lc_minimal::Stage2VelocityOptimizationRunner(std::move(request)).Run();
+  ExpectTrue(calls.size() == 1U,
+             "invalid Stage1 reference should stop before the Stage2 hold pass");
+  ExpectTrue(!calls.front().has_stage2_reference,
+             "the Stage1 pass must not receive a Stage2 reference");
+  ExpectTrue(!calls.front().enable_stage2_velocity_optimization,
+             "the Stage1 pass should run with Stage2 disabled");
+  ExpectTrue(result.run_summary.stage1_yaw_refinement_enabled,
+             "result should expose the Stage1 diagnostic state");
+  ExpectTrue(!result.run_summary.stage1_yaw_refinement_reference_valid,
+             "invalid Stage1 branch should be marked unusable for strong hold");
+  ExpectTrue(!result.run_summary.stage2_velocity_optimization_enabled,
+             "Stage2 should be degraded instead of locking an invalid attitude reference");
+}
+
 void TestStage2RunsConstrainedStage1BeforeSegmentedStage2() {
   struct CallRecord {
     bool has_stage2_reference = false;
@@ -653,6 +732,7 @@ void TestStage2RunsConstrainedStage1BeforeSegmentedStage2() {
   config.enable_rtk_outage_smoothing = true;
   config.enable_rtk_outage_segmented_batch = true;
   config.enable_stage1_outage_body_y_envelope = true;
+  config.stage1_heading_min_displacement_m = 0.1;
   config.stage1_outage_body_y_pre_window_s = 5.0;
   config.stage1_outage_body_y_min_sample_count = 4;
   config.stage1_outage_body_y_min_speed_mps = 0.5;
@@ -662,12 +742,7 @@ void TestStage2RunsConstrainedStage1BeforeSegmentedStage2() {
   offline_lc_minimal::Stage2VelocityOptimizationRequest request;
   request.config = config;
   request.dataset = offline_lc_minimal::DataSet{};
-  request.dataset.gnss_samples = {
-    MakeRecoveryGnssSample(20.0, 0.20),
-    MakeRecoveryGnssSample(20.4, 0.21),
-    MakeRecoveryGnssSample(20.8, 0.22),
-    MakeRecoveryGnssSample(21.2, 0.23),
-    MakeRecoveryGnssSample(21.6, 0.24)};
+  request.dataset.gnss_samples = MakeRecoveryGnssSamples(0.0, 30.0, 0.5);
   request.run_once = [&](
                        const offline_lc_minimal::OfflineRunnerConfig &run_config,
                        std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> stage2_reference,
@@ -714,7 +789,14 @@ void TestStage2RunsConstrainedStage1BeforeSegmentedStage2() {
   const auto result =
     offline_lc_minimal::Stage2VelocityOptimizationRunner(std::move(request)).Run();
   ExpectTrue(calls.size() == 5U,
-             "body-y envelope flow should run baseline Stage1, constrained Stage1, then three segments");
+             "body-y envelope flow should run baseline Stage1, constrained Stage1, then three segments; actual=" +
+               std::to_string(calls.size()) +
+               " stop=" + result.run_summary.stage1_yaw_refinement_stop_reason +
+               " reason=" + result.run_summary.stage1_yaw_refinement_selection_reason +
+               " final_median=" +
+               std::to_string(result.run_summary.stage1_yaw_refinement_final_median_error_rad) +
+               " valid=" +
+               (result.run_summary.stage1_yaw_refinement_reference_valid ? "true" : "false"));
   ExpectTrue(!calls[0].has_body_y_reference && !calls[0].has_stage2_reference,
              "baseline Stage1 should not receive body-y or stage2 references");
   ExpectTrue(calls[1].has_body_y_reference && !calls[1].has_stage2_reference,
@@ -753,12 +835,7 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
   offline_lc_minimal::Stage2VelocityOptimizationRequest request;
   request.config = config;
   request.dataset = offline_lc_minimal::DataSet{};
-  request.dataset.gnss_samples = {
-    MakeRecoveryGnssSample(20.0, 0.20),
-    MakeRecoveryGnssSample(20.4, 0.21),
-    MakeRecoveryGnssSample(20.8, 0.22),
-    MakeRecoveryGnssSample(21.2, 0.23),
-    MakeRecoveryGnssSample(21.6, 0.24)};
+  request.dataset.gnss_samples = MakeRecoveryGnssSamples(0.0, 30.0, 0.5);
   request.run_once = [&](const offline_lc_minimal::OfflineRunnerConfig &run_config,
                          std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> reference,
                          std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
@@ -841,6 +918,85 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
              "assembled result should contain pre/outage/post segments");
 }
 
+void TestSegmentedStage2SlicesRotationNativeReferenceWithoutTrajectoryRows() {
+  struct CallRecord {
+    bool has_reference = false;
+    bool reference_has_states = false;
+    bool reference_has_trajectory = false;
+  };
+
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_velocity_optimization = true;
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_segmented_batch = true;
+  config.enable_rtk_outage_boundary_constraints = false;
+  config.enable_initial_static_subgraph = true;
+  config.static_alignment_duration_s = 1.0;
+  config.initial_static_state_frequency_hz = 1.0;
+  config.state_frequency_hz = 1.0;
+  config.rtk_outage_segmented_batch_max_outages = 1;
+  config.processing_start_time_s = 0.0;
+  config.processing_end_time_s = 30.0;
+
+  auto reference = std::make_shared<offline_lc_minimal::Stage2VelocityReference>();
+  reference->reference_states = MakeReferenceStates(31U);
+
+  std::vector<double> state_timestamps;
+  for (int time_s = 0; time_s <= 30; ++time_s) {
+    state_timestamps.push_back(static_cast<double>(time_s));
+  }
+
+  std::vector<CallRecord> calls;
+  offline_lc_minimal::RtkOutageSegmentedBatchRunRequest request;
+  request.base_config = config;
+  request.config = config;
+  request.stage2_reference = reference;
+  request.outage_windows.push_back(MakePlannedOutageWindow());
+  request.state_timestamps = state_timestamps;
+  request.dynamic_start_time_s = 0.0;
+  request.processing_end_time_s = 30.0;
+  request.run_once = [&](
+                       offline_lc_minimal::OfflineRunnerConfig run_config,
+                       std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> child_reference,
+                       std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
+                       offline_lc_minimal::DataSet) {
+    calls.push_back(CallRecord{
+      child_reference != nullptr,
+      child_reference != nullptr && !child_reference->reference_states.empty(),
+      child_reference != nullptr && !child_reference->trajectory.empty()});
+
+    offline_lc_minimal::OfflineRunResult result;
+    const double start_time_s = run_config.processing_start_time_s;
+    const double end_time_s =
+      run_config.processing_end_time_s > 0.0 ? run_config.processing_end_time_s : 30.0;
+    result.run_summary.dynamic_start_time_s = start_time_s;
+    result.run_summary.processing_start_time_s = start_time_s;
+    result.run_summary.processing_end_time_s = end_time_s;
+    result.trajectory = MakeTrajectoryRows(start_time_s, end_time_s);
+    result.optimized_reference_states =
+      offline_lc_minimal::BuildStage2ReferenceStatesFromTrajectory(result.trajectory);
+    return result;
+  };
+
+  const auto result =
+    offline_lc_minimal::RtkOutageSegmentedBatchRunner(std::move(request)).Run();
+  ExpectTrue(!calls.empty(), "segmented runner should invoke child solves");
+  const bool saw_sliced_reference =
+    std::any_of(
+      calls.begin(),
+      calls.end(),
+      [](const CallRecord &call) {
+        return call.has_reference &&
+               call.reference_has_states &&
+               call.reference_has_trajectory;
+      });
+  ExpectTrue(
+    saw_sliced_reference,
+    "segmented runner should slice a reference that has only native states");
+  ExpectTrue(result.run_summary.rtk_outage_segmented_batch_enabled,
+             "assembled result should mark segmented batch enabled");
+}
+
 void TestStage2ConfigParsingAndValidation() {
   auto config = offline_lc_minimal::DefaultConfig();
   offline_lc_minimal::OverrideConfigField(config, "enable_stage2_velocity_optimization", "true");
@@ -898,11 +1054,17 @@ int main() {
       "TestStage1OutageBodyYEnvelopeBuilderAddsOnlyOutageFactors",
       TestStage1OutageBodyYEnvelopeBuilderAddsOnlyOutageFactors);
     RunTest(
+      "TestStage2SkipsStrongReferenceWhenStage1ReferenceInvalid",
+      TestStage2SkipsStrongReferenceWhenStage1ReferenceInvalid);
+    RunTest(
       "TestStage2RunsConstrainedStage1BeforeSegmentedStage2",
       TestStage2RunsConstrainedStage1BeforeSegmentedStage2);
     RunTest(
       "TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren",
       TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren);
+    RunTest(
+      "TestSegmentedStage2SlicesRotationNativeReferenceWithoutTrajectoryRows",
+      TestSegmentedStage2SlicesRotationNativeReferenceWithoutTrajectoryRows);
     RunTest("TestStage2ConfigParsingAndValidation", TestStage2ConfigParsingAndValidation);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';

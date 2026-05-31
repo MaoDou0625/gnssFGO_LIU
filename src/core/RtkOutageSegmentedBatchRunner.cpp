@@ -14,6 +14,7 @@
 #include "offline_lc_minimal/core/RtkOutageBatchSegmentPlanner.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
 #include "offline_lc_minimal/core/SegmentedBatchResultAssembler.h"
+#include "offline_lc_minimal/core/StageAttitudeReference.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -144,62 +145,22 @@ std::shared_ptr<const Stage2VelocityReference> SliceStage2ReferenceForSegment(
   if (reference == nullptr) {
     return nullptr;
   }
-  if (reference->trajectory.empty()) {
-    throw std::runtime_error("cannot slice an empty stage2 reference trajectory");
+  const std::vector<ReferenceNodeState> source_reference_states =
+    SortedFiniteReferenceStates(BuildStage2ReferenceStates(*reference));
+  if (source_reference_states.empty()) {
+    throw std::runtime_error("cannot slice an empty stage2 reference state sequence");
   }
   auto sliced = std::make_shared<Stage2VelocityReference>();
   sliced->source_config = reference->source_config;
 
-  const auto interpolate_row = [&](const double time_s) {
-    const auto &trajectory = reference->trajectory;
-    const auto upper = std::lower_bound(
-      trajectory.begin(),
-      trajectory.end(),
-      time_s,
-      [](const TrajectoryRow &row, const double target_time_s) {
-        return row.time_s < target_time_s;
-      });
-    if (upper == trajectory.begin()) {
-      TrajectoryRow row = trajectory.front();
-      row.time_s = time_s;
-      return row;
-    }
-    if (upper == trajectory.end()) {
-      TrajectoryRow row = trajectory.back();
-      row.time_s = time_s;
-      return row;
-    }
-    const auto &right = *upper;
-    const auto &left = *std::prev(upper);
-    if (std::abs(right.time_s - time_s) <= kTimeEpsilonS) {
-      return right;
-    }
-    if (std::abs(left.time_s - time_s) <= kTimeEpsilonS ||
-        right.time_s <= left.time_s + kTimeEpsilonS) {
-      return left;
-    }
-    const double alpha = (time_s - left.time_s) / (right.time_s - left.time_s);
-    TrajectoryRow row;
-    row.time_s = time_s;
-    row.enu_position_m =
-      (1.0 - alpha) * left.enu_position_m + alpha * right.enu_position_m;
-    row.enu_velocity_mps =
-      (1.0 - alpha) * left.enu_velocity_mps + alpha * right.enu_velocity_mps;
-    row.ypr_rad = (1.0 - alpha) * left.ypr_rad + alpha * right.ypr_rad;
-    row.omega_radps = (1.0 - alpha) * left.omega_radps + alpha * right.omega_radps;
-    row.bias_acc = (1.0 - alpha) * left.bias_acc + alpha * right.bias_acc;
-    row.bias_gyro = (1.0 - alpha) * left.bias_gyro + alpha * right.bias_gyro;
-    row.gnss_factor_used = left.gnss_factor_used || right.gnss_factor_used;
-    row.gnss_fix_type = right.gnss_fix_type;
-    row.gnss_residual_m =
-      (1.0 - alpha) * left.gnss_residual_m + alpha * right.gnss_residual_m;
-    return row;
+  const auto interpolate_state = [&](const double time_s) {
+    return InterpolateStageReferenceState(source_reference_states, time_s);
   };
 
   std::vector<double> target_timestamps;
   if (child_config.enable_initial_static_subgraph &&
       child_config.static_alignment_duration_s > 0.0) {
-    const double alignment_start_time_s = reference->trajectory.front().time_s;
+    const double alignment_start_time_s = source_reference_states.front().time_s;
     const double alignment_end_time_s =
       alignment_start_time_s + child_config.static_alignment_duration_s;
     target_timestamps = BuildStateTimestamps(
@@ -227,8 +188,11 @@ std::shared_ptr<const Stage2VelocityReference> SliceStage2ReferenceForSegment(
     dynamic_timestamps.end());
 
   sliced->trajectory.reserve(target_timestamps.size());
+  sliced->reference_states.reserve(target_timestamps.size());
   for (const double time_s : target_timestamps) {
-    sliced->trajectory.push_back(interpolate_row(time_s));
+    const ReferenceNodeState state = interpolate_state(time_s);
+    sliced->reference_states.push_back(state);
+    sliced->trajectory.push_back(TrajectoryRowFromReferenceState(state));
   }
   return sliced;
 }

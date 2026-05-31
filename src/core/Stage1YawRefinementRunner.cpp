@@ -9,6 +9,7 @@
 
 #include "offline_lc_minimal/core/OptimizationStagePolicy.h"
 #include "offline_lc_minimal/core/RtkHeadingAlignmentEstimator.h"
+#include "offline_lc_minimal/core/Stage1YawBranchResolver.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -47,16 +48,37 @@ void ApplyStage1Summary(
   const std::vector<Stage1YawRefinementDiagnosticRow> &diagnostics,
   const bool converged,
   const std::string &stop_reason,
-  const double final_yaw_rad) {
+  const double final_yaw_rad,
+  const bool reference_valid_for_strong_hold,
+  const bool cycle_detected = false,
+  const int selected_iteration = 0,
+  const std::string &selection_reason = "UNSET",
+  const double selected_branch_score = std::numeric_limits<double>::quiet_NaN()) {
   result.stage1_yaw_refinement_diagnostics = diagnostics;
   result.run_summary.stage1_yaw_refinement_enabled = true;
   result.run_summary.stage1_yaw_refinement_iteration_count =
     static_cast<int>(diagnostics.size());
   result.run_summary.stage1_yaw_refinement_converged = converged;
+  result.run_summary.stage1_yaw_refinement_cycle_detected = cycle_detected;
+  result.run_summary.stage1_yaw_refinement_reference_valid =
+    reference_valid_for_strong_hold;
   result.run_summary.stage1_yaw_refinement_stop_reason = stop_reason;
+  result.run_summary.stage1_yaw_refinement_selected_iteration = selected_iteration;
+  result.run_summary.stage1_yaw_refinement_selection_reason = selection_reason;
+  result.run_summary.stage1_yaw_refinement_selected_branch_score =
+    selected_branch_score;
   result.run_summary.stage1_yaw_refinement_final_yaw_rad = final_yaw_rad;
   if (!diagnostics.empty()) {
-    const auto &last = diagnostics.back();
+    const auto selected_it = selected_iteration > 0
+      ? std::find_if(
+          diagnostics.begin(),
+          diagnostics.end(),
+          [&](const Stage1YawRefinementDiagnosticRow &row) {
+            return row.iteration == selected_iteration;
+          })
+      : diagnostics.end();
+    const auto &last =
+      selected_it != diagnostics.end() ? *selected_it : diagnostics.back();
     result.run_summary.stage1_yaw_refinement_final_median_error_rad =
       last.median_error_rad;
     result.run_summary.stage1_yaw_refinement_final_noise_rad =
@@ -101,6 +123,9 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
   std::vector<Stage1YawRefinementDiagnosticRow> diagnostics;
   diagnostics.reserve(
     static_cast<std::size_t>(stage_config.stage1_yaw_refinement_max_iterations));
+  std::vector<Stage1YawBranchCandidate> branch_candidates;
+  branch_candidates.reserve(
+    static_cast<std::size_t>(stage_config.stage1_yaw_refinement_max_iterations));
 
   OfflineRunResult last_result;
   double final_yaw_rad = std::numeric_limits<double>::quiet_NaN();
@@ -139,7 +164,13 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
       stop_reason = estimate.valid ? "invalid_input_yaw" : estimate.stop_reason;
       row.stop_reason = stop_reason;
       diagnostics.push_back(row);
-      ApplyStage1Summary(last_result, diagnostics, false, stop_reason, final_yaw_rad);
+      ApplyStage1Summary(
+        last_result,
+        diagnostics,
+        false,
+        stop_reason,
+        final_yaw_rad,
+        false);
       return last_result;
     }
 
@@ -152,8 +183,21 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
       stop_reason = "converged";
       converged = true;
       row.stop_reason = stop_reason;
+      row.selected_branch = true;
+      row.reference_valid_for_strong_hold = true;
+      row.selection_reason = "converged";
       diagnostics.push_back(row);
-      ApplyStage1Summary(last_result, diagnostics, converged, stop_reason, final_yaw_rad);
+      ApplyStage1Summary(
+        last_result,
+        diagnostics,
+        converged,
+        stop_reason,
+        final_yaw_rad,
+        true,
+        false,
+        row.iteration,
+        "converged",
+        0.0);
       return last_result;
     }
 
@@ -161,8 +205,42 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
       stop_reason = "max_iterations";
       row.stop_reason = stop_reason;
       diagnostics.push_back(row);
-      ApplyStage1Summary(last_result, diagnostics, false, stop_reason, final_yaw_rad);
-      return last_result;
+      branch_candidates.push_back(Stage1YawBranchCandidate{last_result, row});
+      const Stage1YawBranchResolution resolution =
+        Stage1YawBranchResolver().Resolve(branch_candidates);
+      if (!resolution.has_selection) {
+        ApplyStage1Summary(
+          last_result,
+          resolution.diagnostics.empty() ? diagnostics : resolution.diagnostics,
+          false,
+          "max_iterations_unresolved",
+          final_yaw_rad,
+          false,
+          resolution.cycle_detected,
+          0,
+          resolution.selection_reason,
+          std::numeric_limits<double>::quiet_NaN());
+        return last_result;
+      }
+
+      OfflineRunResult selected_result =
+        branch_candidates[resolution.selected_index].result;
+      const double selected_yaw_rad =
+        resolution.selected_index < resolution.diagnostics.size()
+          ? resolution.diagnostics[resolution.selected_index].input_yaw_rad
+          : final_yaw_rad;
+      ApplyStage1Summary(
+        selected_result,
+        resolution.diagnostics,
+        false,
+        resolution.stop_reason,
+        selected_yaw_rad,
+        resolution.reference_valid_for_strong_hold,
+        resolution.cycle_detected,
+        resolution.selected_iteration,
+        resolution.selection_reason,
+        resolution.selected_branch_score);
+      return selected_result;
     }
 
     const double yaw_update_rad =
@@ -172,13 +250,20 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
     row.next_yaw_rad = next_yaw_rad;
     row.stop_reason = "updated";
     diagnostics.push_back(row);
+    branch_candidates.push_back(Stage1YawBranchCandidate{last_result, row});
 
     stage_config.enable_initial_yaw_override = true;
     stage_config.initial_yaw_override_rad = next_yaw_rad;
     final_yaw_rad = next_yaw_rad;
   }
 
-  ApplyStage1Summary(last_result, diagnostics, converged, stop_reason, final_yaw_rad);
+  ApplyStage1Summary(
+    last_result,
+    diagnostics,
+    converged,
+    stop_reason,
+    final_yaw_rad,
+    converged);
   return last_result;
 }
 

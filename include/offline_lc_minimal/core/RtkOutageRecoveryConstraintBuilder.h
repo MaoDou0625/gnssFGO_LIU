@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
 #include <gtsam/base/Vector.h>
@@ -25,6 +26,7 @@ struct RtkOutageRecoveryConstraintBuildRequest {
   const std::vector<double> *state_timestamps = nullptr;
   const std::vector<RtkOutageWindowRow> *outage_windows = nullptr;
   const std::vector<ReferenceNodeState> *reference_states = nullptr;
+  std::string attitude_reference_source = "reference_states";
   const std::vector<VelocityDeltaPropagationRecord> *velocity_delta_records = nullptr;
   gtsam::NonlinearFactorGraph *graph = nullptr;
   RunSummary *run_summary = nullptr;

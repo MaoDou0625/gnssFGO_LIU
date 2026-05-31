@@ -4,10 +4,12 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "offline_lc_minimal/core/OptimizationStagePolicy.h"
 #include "offline_lc_minimal/core/RtkHeadingAlignmentEstimator.h"
+#include "offline_lc_minimal/core/Stage1YawBranchResolver.h"
 #include "offline_lc_minimal/core/Stage1YawRefinementRunner.h"
 
 namespace {
@@ -71,6 +73,31 @@ std::vector<offline_lc_minimal::TrajectoryRow> MakeTrajectory(const double yaw_r
     rows.push_back(row);
   }
   return rows;
+}
+
+std::vector<offline_lc_minimal::TrajectoryRow> MakeTrajectoryWithYawStep(
+  const double first_yaw_rad,
+  const double second_yaw_rad) {
+  std::vector<offline_lc_minimal::TrajectoryRow> rows = MakeTrajectory(first_yaw_rad);
+  for (std::size_t index = rows.size() / 2U; index < rows.size(); ++index) {
+    rows[index].ypr_rad.x() = second_yaw_rad;
+  }
+  return rows;
+}
+
+offline_lc_minimal::Stage1YawBranchCandidate MakeBranchCandidate(
+  const int iteration,
+  const double input_yaw_rad,
+  std::vector<offline_lc_minimal::TrajectoryRow> trajectory) {
+  offline_lc_minimal::OfflineRunResult result;
+  result.trajectory = std::move(trajectory);
+
+  offline_lc_minimal::Stage1YawRefinementDiagnosticRow diagnostic;
+  diagnostic.iteration = iteration;
+  diagnostic.input_yaw_rad = input_yaw_rad;
+  diagnostic.median_error_rad = 1.0;
+  diagnostic.final_error = static_cast<double>(iteration);
+  return offline_lc_minimal::Stage1YawBranchCandidate{std::move(result), diagnostic};
 }
 
 void TestStage1PolicyDisablesSecondStageConstraints() {
@@ -223,6 +250,9 @@ void TestStage1RunnerUpdatesYawOverrideAndConverges() {
   ExpectTrue(result.run_summary.stage1_yaw_refinement_enabled, "stage1 summary should be enabled");
   ExpectTrue(result.run_summary.stage1_yaw_refinement_converged, "stage1 should converge");
   ExpectTrue(
+    result.run_summary.stage1_yaw_refinement_reference_valid,
+    "converged stage1 should produce a valid strong-hold reference");
+  ExpectTrue(
     result.stage1_yaw_refinement_diagnostics.size() == 2U,
     "stage1 should keep one diagnostic row per optimization run");
   ExpectNear(
@@ -264,8 +294,66 @@ void TestStage1RunnerHonorsMaxIterations() {
     result.run_summary.stage1_yaw_refinement_stop_reason == "max_iterations",
     "stage1 should report max_iterations");
   ExpectTrue(
+    !result.run_summary.stage1_yaw_refinement_reference_valid,
+    "max-iteration stage1 without branch resolution should not be a strong-hold reference");
+  ExpectTrue(
     result.stage1_yaw_refinement_diagnostics.size() == 1U,
     "stage1 should run only once when max_iterations is one");
+}
+
+void TestStage1BranchResolverSelectsContinuousBranchFromTwoCycle() {
+  const double yaw_a = 0.083;
+  const double yaw_b = 1.654;
+  std::vector<offline_lc_minimal::Stage1YawBranchCandidate> candidates;
+  candidates.push_back(MakeBranchCandidate(1, yaw_a, MakeTrajectory(yaw_a)));
+  candidates.push_back(
+    MakeBranchCandidate(2, yaw_b, MakeTrajectoryWithYawStep(yaw_a, yaw_b)));
+  candidates.push_back(MakeBranchCandidate(3, yaw_a, MakeTrajectory(yaw_a)));
+
+  const auto resolution =
+    offline_lc_minimal::Stage1YawBranchResolver().Resolve(std::move(candidates));
+
+  ExpectTrue(resolution.has_selection, "resolver should select a branch");
+  ExpectTrue(resolution.cycle_detected, "resolver should detect the A/B/A yaw cycle");
+  ExpectTrue(
+    resolution.selected_iteration == 1,
+    "resolver should prefer the continuous branch instead of the last oscillating result");
+  ExpectTrue(
+    resolution.stop_reason == "cycle_detected_selected_branch",
+    "resolver stop reason should expose cycle handling");
+  ExpectTrue(
+    resolution.reference_valid_for_strong_hold,
+    "resolver should mark the clearly continuous branch valid for strong hold");
+  ExpectTrue(
+    resolution.diagnostics.front().selected_branch,
+    "selected diagnostic row should be marked");
+  ExpectTrue(
+    resolution.diagnostics.front().reference_valid_for_strong_hold,
+    "selected diagnostic row should expose strong-hold validity");
+  ExpectTrue(
+    !resolution.diagnostics.back().selected_branch,
+    "last oscillating row should not be selected");
+}
+
+void TestStage1BranchResolverInvalidatesAmbiguousTwoCycle() {
+  const double yaw_a = 0.083;
+  const double yaw_b = 1.654;
+  std::vector<offline_lc_minimal::Stage1YawBranchCandidate> candidates;
+  candidates.push_back(MakeBranchCandidate(1, yaw_a, MakeTrajectory(yaw_a)));
+  candidates.push_back(MakeBranchCandidate(2, yaw_b, MakeTrajectory(yaw_b)));
+  candidates.push_back(MakeBranchCandidate(3, yaw_a, MakeTrajectory(yaw_a)));
+
+  const auto resolution =
+    offline_lc_minimal::Stage1YawBranchResolver().Resolve(std::move(candidates));
+
+  ExpectTrue(resolution.has_selection, "resolver can still identify a candidate for diagnostics");
+  ExpectTrue(resolution.cycle_detected, "resolver should detect the ambiguous A/B/A cycle");
+  ExpectTrue(
+    !resolution.reference_valid_for_strong_hold,
+    "equally smooth opposing branches should not be valid for strong hold");
+  ExpectTrue(
+    resolution.stop_reason == "cycle_detected_unresolved",
+    "ambiguous cycle should be reported as unresolved");
 }
 
 }  // namespace
@@ -277,6 +365,12 @@ int main() {
     RunTest("TestRtkHeadingAlignmentEstimatorSkipsNonRtkFix", TestRtkHeadingAlignmentEstimatorSkipsNonRtkFix);
     RunTest("TestStage1RunnerUpdatesYawOverrideAndConverges", TestStage1RunnerUpdatesYawOverrideAndConverges);
     RunTest("TestStage1RunnerHonorsMaxIterations", TestStage1RunnerHonorsMaxIterations);
+    RunTest(
+      "TestStage1BranchResolverSelectsContinuousBranchFromTwoCycle",
+      TestStage1BranchResolverSelectsContinuousBranchFromTwoCycle);
+    RunTest(
+      "TestStage1BranchResolverInvalidatesAmbiguousTwoCycle",
+      TestStage1BranchResolverInvalidatesAmbiguousTwoCycle);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

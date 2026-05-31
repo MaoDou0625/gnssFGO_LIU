@@ -154,6 +154,8 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   OfflineRunResult assembled = request_.pieces.front().result;
   assembled.trajectory.clear();
   assembled.reference_node_trajectory.clear();
+  assembled.imu_propagated_reference_states.clear();
+  assembled.optimized_reference_states.clear();
   assembled.gnss_factor_records.clear();
   assembled.gnss_consistency_records.clear();
   assembled.vertical_envelope_diagnostics.clear();
@@ -218,6 +220,42 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
     true,
     true,
     [](const ReferenceNodeRow &row) { return row.time_s; });
+  AppendRowsInSegment(
+    assembled.imu_propagated_reference_states,
+    first_piece.result.imu_propagated_reference_states,
+    RtkOutageBatchSegmentRow{
+      0U,
+      "INITIAL_STATIC",
+      -1,
+      -std::numeric_limits<double>::infinity(),
+      first_piece.segment.start_time_s - 2.0 * kTimeEpsilonS,
+      std::numeric_limits<double>::quiet_NaN(),
+      true,
+      false,
+      "RUN_START",
+      "DYNAMIC_START",
+      "PLANNED"},
+    true,
+    true,
+    [](const ReferenceNodeState &row) { return row.time_s; });
+  AppendRowsInSegment(
+    assembled.optimized_reference_states,
+    first_piece.result.optimized_reference_states,
+    RtkOutageBatchSegmentRow{
+      0U,
+      "INITIAL_STATIC",
+      -1,
+      -std::numeric_limits<double>::infinity(),
+      first_piece.segment.start_time_s - 2.0 * kTimeEpsilonS,
+      std::numeric_limits<double>::quiet_NaN(),
+      true,
+      false,
+      "RUN_START",
+      "DYNAMIC_START",
+      "PLANNED"},
+    true,
+    true,
+    [](const ReferenceNodeState &row) { return row.time_s; });
 
   for (std::size_t piece_index = 0; piece_index < request_.pieces.size(); ++piece_index) {
     const auto &piece = request_.pieces[piece_index];
@@ -239,6 +277,20 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       include_start,
       include_end,
       [](const ReferenceNodeRow &row) { return row.time_s; });
+    AppendRowsInSegment(
+      assembled.imu_propagated_reference_states,
+      piece.result.imu_propagated_reference_states,
+      splice_segment,
+      include_start,
+      include_end,
+      [](const ReferenceNodeState &row) { return row.time_s; });
+    AppendRowsInSegment(
+      assembled.optimized_reference_states,
+      piece.result.optimized_reference_states,
+      splice_segment,
+      include_start,
+      include_end,
+      [](const ReferenceNodeState &row) { return row.time_s; });
     AppendRowsInSegment(
       assembled.gnss_factor_records,
       piece.result.gnss_factor_records,

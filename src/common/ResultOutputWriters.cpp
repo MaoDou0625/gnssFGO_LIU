@@ -804,12 +804,14 @@ void WriteRtkOutageAttitudeHoldDiagnosticsCsv(
   stream << std::setprecision(17);
   stream
     << "window_index,constraint_type,state_index_i,state_index_j,time_i_s,time_j_s,"
-       "factor_added,skip_reason,sigma_rad,"
+       "factor_added,skip_reason,reference_source,sigma_rad,"
        "reference_yaw_i_rad,reference_pitch_i_rad,reference_roll_i_rad,"
        "reference_yaw_j_rad,reference_pitch_j_rad,reference_roll_j_rad,"
        "optimized_yaw_i_rad,optimized_pitch_i_rad,optimized_roll_i_rad,"
        "optimized_yaw_j_rad,optimized_pitch_j_rad,optimized_roll_j_rad,"
        "residual_x_rad,residual_y_rad,residual_z_rad,residual_norm_rad,"
+       "reference_relative_rotvec_x_rad,reference_relative_rotvec_y_rad,"
+       "reference_relative_rotvec_z_rad,reference_relative_angle_rad,"
        "reference_delta_yaw_rad,optimized_delta_yaw_rad,residual_yaw_rad\n";
   for (const auto &row : rows) {
     stream << row.window_index << ','
@@ -820,6 +822,7 @@ void WriteRtkOutageAttitudeHoldDiagnosticsCsv(
            << row.time_j_s << ','
            << (row.factor_added ? 1 : 0) << ','
            << row.skip_reason << ','
+           << row.reference_source << ','
            << row.sigma_rad << ','
            << row.reference_ypr_i_rad.x() << ','
            << row.reference_ypr_i_rad.y() << ','
@@ -837,6 +840,10 @@ void WriteRtkOutageAttitudeHoldDiagnosticsCsv(
            << row.residual_rad.y() << ','
            << row.residual_rad.z() << ','
            << row.residual_norm_rad << ','
+           << row.reference_relative_rotvec_rad.x() << ','
+           << row.reference_relative_rotvec_rad.y() << ','
+           << row.reference_relative_rotvec_rad.z() << ','
+           << row.reference_relative_angle_rad << ','
            << row.reference_delta_yaw_rad << ','
            << row.optimized_delta_yaw_rad << ','
            << row.residual_yaw_rad << '\n';
@@ -936,7 +943,9 @@ void WriteStage1YawRefinementDiagnosticsCsv(
   stream
     << "iteration,input_yaw_rad,median_error_rad,heading_noise_rad,yaw_update_rad,next_yaw_rad,"
        "valid_pair_count,mean_abs_error_rad,rms_error_rad,max_abs_error_rad,final_error,gnss_nis_mean,"
-       "stop_reason\n";
+       "cycle_detected,selected_branch,reference_valid_for_strong_hold,"
+       "branch_continuity_max_rot_rad,imu_rotation_mismatch_max_rad,branch_score,"
+       "selection_reason,stop_reason\n";
   for (const auto &row : rows) {
     stream << row.iteration << ','
            << row.input_yaw_rad << ','
@@ -950,6 +959,13 @@ void WriteStage1YawRefinementDiagnosticsCsv(
            << row.max_abs_error_rad << ','
            << row.final_error << ','
            << row.gnss_nis_mean << ','
+           << (row.cycle_detected ? 1 : 0) << ','
+           << (row.selected_branch ? 1 : 0) << ','
+           << (row.reference_valid_for_strong_hold ? 1 : 0) << ','
+           << row.branch_continuity_max_rot_rad << ','
+           << row.imu_rotation_mismatch_max_rad << ','
+           << row.branch_score << ','
+           << row.selection_reason << ','
            << row.stop_reason << '\n';
   }
 }

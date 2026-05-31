@@ -8,6 +8,7 @@
 
 #include <Eigen/Core>
 #include <gtsam/geometry/Pose3.h>
+#include <gtsam/geometry/Rot3.h>
 #include <gtsam/navigation/ImuBias.h>
 
 #include "offline_lc_minimal/common/SensorTypes.h"
@@ -686,7 +687,10 @@ struct RtkOutageAttitudeHoldDiagnosticRow {
   double time_j_s = std::numeric_limits<double>::quiet_NaN();
   bool factor_added = false;
   std::string skip_reason = "UNSET";
+  std::string reference_source = "UNSET";
   double sigma_rad = std::numeric_limits<double>::quiet_NaN();
+  gtsam::Rot3 reference_rotation_i;
+  gtsam::Rot3 reference_rotation_j;
   Eigen::Vector3d reference_ypr_i_rad =
     Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
   Eigen::Vector3d reference_ypr_j_rad =
@@ -698,6 +702,9 @@ struct RtkOutageAttitudeHoldDiagnosticRow {
   Eigen::Vector3d residual_rad =
     Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
   double residual_norm_rad = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector3d reference_relative_rotvec_rad =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double reference_relative_angle_rad = std::numeric_limits<double>::quiet_NaN();
   double reference_delta_yaw_rad = std::numeric_limits<double>::quiet_NaN();
   double optimized_delta_yaw_rad = std::numeric_limits<double>::quiet_NaN();
   double residual_yaw_rad = std::numeric_limits<double>::quiet_NaN();

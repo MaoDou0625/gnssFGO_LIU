@@ -75,6 +75,12 @@ gtsam::Pose3 MakePose(const double up_m) {
   return gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(1.0, 2.0, up_m));
 }
 
+double RelativeRotationAngleRad(
+  const gtsam::Rot3 &lhs,
+  const gtsam::Rot3 &rhs) {
+  return gtsam::Rot3::Logmap(lhs.between(rhs)).norm();
+}
+
 void TestProfilePlannerBuildsFiniteZeroPhaseLowpass() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
@@ -945,6 +951,44 @@ void TestTimelineAlignerResamplesSegmentedStage2Reference() {
     "Stage3 lowpass delta should remain lowpass minus Stage2 up");
 }
 
+void TestTimelineAlignerUsesRot3InterpolationAcrossYawWrap() {
+  const double deg = M_PI / 180.0;
+  offline_lc_minimal::Stage2VelocityReference stage2_reference;
+  stage2_reference.trajectory = MakeTrajectory(2U, 0.0);
+  stage2_reference.trajectory[0].time_s = 0.0;
+  stage2_reference.trajectory[0].ypr_rad = Eigen::Vector3d(179.0 * deg, 0.0, 0.0);
+  stage2_reference.trajectory[1].time_s = 1.0;
+  stage2_reference.trajectory[1].ypr_rad = Eigen::Vector3d(-179.0 * deg, 0.0, 0.0);
+
+  offline_lc_minimal::Stage3VerticalReference stage3_reference;
+  for (std::size_t index = 0; index < stage2_reference.trajectory.size(); ++index) {
+    offline_lc_minimal::Stage3VerticalReferenceDiagnosticRow row;
+    row.state_index = index;
+    row.time_s = stage2_reference.trajectory[index].time_s;
+    row.stage2_up_m = stage2_reference.trajectory[index].enu_position_m.z();
+    row.stage2_lowpass_up_m = row.stage2_up_m;
+    row.skip_reason = "PLANNED";
+    stage3_reference.rows.push_back(row);
+  }
+
+  const auto aligned =
+    offline_lc_minimal::AlignStage3VerticalReferencesToTimeline(
+      stage2_reference,
+      stage3_reference,
+      std::vector<double>{0.0, 0.5, 1.0});
+
+  ExpectTrue(
+    aligned.stage2_reference.reference_states.size() == 3U,
+    "aligned Stage2 reference should retain Rot3 states");
+  ExpectNear(
+    RelativeRotationAngleRad(
+      aligned.stage2_reference.reference_states[0].pose.rotation(),
+      aligned.stage2_reference.reference_states[1].pose.rotation()),
+    1.0 * deg,
+    1.0e-12,
+    "Stage3 timeline alignment should interpolate along the short Rot3 path");
+}
+
 void TestTimelineAlignerRejectsMissingStage2Coverage() {
   offline_lc_minimal::Stage2VelocityReference stage2_reference;
   stage2_reference.trajectory = MakeTrajectory(4U, 0.0);
@@ -1467,6 +1511,9 @@ int main() {
     RunTest(
       "TestTimelineAlignerResamplesSegmentedStage2Reference",
       TestTimelineAlignerResamplesSegmentedStage2Reference);
+    RunTest(
+      "TestTimelineAlignerUsesRot3InterpolationAcrossYawWrap",
+      TestTimelineAlignerUsesRot3InterpolationAcrossYawWrap);
     RunTest(
       "TestTimelineAlignerRejectsMissingStage2Coverage",
       TestTimelineAlignerRejectsMissingStage2Coverage);

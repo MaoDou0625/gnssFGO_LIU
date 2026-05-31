@@ -51,6 +51,7 @@
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
 #include "offline_lc_minimal/core/RtkVerticalDriftReferenceEstimator.h"
 #include "offline_lc_minimal/core/Stage1OutageBodyYEnvelopeConstraintBuilder.h"
+#include "offline_lc_minimal/core/StageAttitudeReference.h"
 #include "offline_lc_minimal/core/Stage2AttitudeHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage2HorizontalHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage2VehicleNHCConstraintBuilder.h"
@@ -128,12 +129,14 @@ gtsam::Matrix66 ComputeBiasProcessCovariance(const double dt_s, const OfflineRun
 bool Stage2ReferenceMatchesGraphTimeline(
   const Stage2VelocityReference &reference,
   const std::vector<double> &state_timestamps) {
-  if (reference.trajectory.size() != state_timestamps.size()) {
+  const std::vector<ReferenceNodeState> reference_states =
+    BuildStage2ReferenceStates(reference);
+  if (reference_states.size() != state_timestamps.size()) {
     return false;
   }
   for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
-    if (!std::isfinite(reference.trajectory[index].time_s) ||
-        std::abs(reference.trajectory[index].time_s - state_timestamps[index]) > 1.0e-6) {
+    if (!std::isfinite(reference_states[index].time_s) ||
+        std::abs(reference_states[index].time_s - state_timestamps[index]) > 1.0e-6) {
       return false;
     }
   }
@@ -1003,6 +1006,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     previous_time_s = current_time_s;
   }
 
+  const std::vector<ReferenceNodeState> imu_propagated_reference_states =
+    reference_node_states;
+  run_result.imu_propagated_reference_states = imu_propagated_reference_states;
   std::vector<ReferenceNodeState> stage2_fixed_reference_states;
   const bool stage2_reference_matches_graph =
     active_stage2_reference != nullptr &&
@@ -1932,11 +1938,32 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   VerticalPositionVelocityConsistencyConstraintBuilder(
     std::move(vertical_position_velocity_request)).Build();
 
+  std::vector<ReferenceNodeState> outage_attitude_reference_states;
+  const std::vector<ReferenceNodeState> *rtk_outage_attitude_reference_states =
+    &reference_node_states;
+  std::string rtk_outage_attitude_reference_source = "reference_states";
+  if (active_stage2_reference != nullptr &&
+      !stage2_fixed_reference_states.empty() &&
+      !imu_propagated_reference_states.empty() &&
+      config_.enable_rtk_outage_smoothing &&
+      config_.enable_rtk_outage_attitude_hold) {
+    outage_attitude_reference_states = BuildImuDeltaOutageAttitudeReference(
+      stage2_fixed_reference_states,
+      imu_propagated_reference_states,
+      state_timestamps,
+      run_result.rtk_outage_windows,
+      config_.rtk_outage_attitude_guard_duration_s);
+    rtk_outage_attitude_reference_states = &outage_attitude_reference_states;
+    rtk_outage_attitude_reference_source = "stage2_anchor_imu_delta";
+  }
+
   RtkOutageRecoveryConstraintBuildRequest rtk_outage_recovery_request;
   rtk_outage_recovery_request.config = &config_;
   rtk_outage_recovery_request.state_timestamps = &state_timestamps;
   rtk_outage_recovery_request.outage_windows = &run_result.rtk_outage_windows;
-  rtk_outage_recovery_request.reference_states = &reference_node_states;
+  rtk_outage_recovery_request.reference_states = rtk_outage_attitude_reference_states;
+  rtk_outage_recovery_request.attitude_reference_source =
+    rtk_outage_attitude_reference_source;
   rtk_outage_recovery_request.velocity_delta_records = &velocity_delta_records;
   rtk_outage_recovery_request.graph = &graph_with_gnss;
   rtk_outage_recovery_request.run_summary = &run_result.run_summary;
@@ -2261,12 +2288,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     optimized_values,
     run_result.vertical_jump_bias_diagnostics);
 
+  run_result.optimized_reference_states =
+    BuildReferenceStatesFromOptimizedValues(state_timestamps, optimized_values);
   if (collect_reference_states) {
-    const std::vector<ReferenceNodeState> optimized_reference_states =
-      BuildReferenceStatesFromOptimizedValues(state_timestamps, optimized_values);
     run_result.reference_node_trajectory.clear();
-    run_result.reference_node_trajectory.reserve(optimized_reference_states.size());
-    for (const auto &reference_state : optimized_reference_states) {
+    run_result.reference_node_trajectory.reserve(run_result.optimized_reference_states.size());
+    for (const auto &reference_state : run_result.optimized_reference_states) {
       run_result.reference_node_trajectory.push_back(MakeReferenceNodeRow(reference_state));
     }
   }

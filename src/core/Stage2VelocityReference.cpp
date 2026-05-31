@@ -10,6 +10,7 @@
 #include <gtsam/navigation/ImuBias.h>
 
 #include "offline_lc_minimal/core/RtkHeadingAlignmentEstimator.h"
+#include "offline_lc_minimal/core/StageAttitudeReference.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -21,24 +22,11 @@ using gtsam::symbol_shorthand::X;
 
 constexpr double kTimestampToleranceS = 1.0e-6;
 
-gtsam::Pose3 PoseFromTrajectoryRow(const TrajectoryRow &row) {
-  return gtsam::Pose3(
-    gtsam::Rot3::Ypr(row.ypr_rad.x(), row.ypr_rad.y(), row.ypr_rad.z()),
-    gtsam::Point3(
-      row.enu_position_m.x(),
-      row.enu_position_m.y(),
-      row.enu_position_m.z()));
-}
-
-gtsam::Vector3 VectorFromEigen(const Eigen::Vector3d &vector) {
-  return gtsam::Vector3(vector.x(), vector.y(), vector.z());
-}
-
 gtsam::Pose3 MergedReferencePose(
-  const TrajectoryRow &row,
+  const ReferenceNodeState &reference_state,
   const gtsam::Pose3 &existing_pose,
   const Stage2ReferenceApplicationOptions &options) {
-  const gtsam::Pose3 reference_pose = PoseFromTrajectoryRow(row);
+  const gtsam::Pose3 &reference_pose = reference_state.pose;
   return gtsam::Pose3(
     reference_pose.rotation(),
     gtsam::Point3(
@@ -50,10 +38,10 @@ gtsam::Pose3 MergedReferencePose(
 }
 
 gtsam::Vector3 MergedReferenceVelocity(
-  const TrajectoryRow &row,
+  const ReferenceNodeState &reference_state,
   const gtsam::Vector3 &existing_velocity,
   const Stage2ReferenceApplicationOptions &options) {
-  gtsam::Vector3 reference_velocity = VectorFromEigen(row.enu_velocity_mps);
+  gtsam::Vector3 reference_velocity = reference_state.velocity;
   if (!options.apply_vertical_velocity) {
     reference_velocity.z() = existing_velocity.z();
   }
@@ -61,30 +49,30 @@ gtsam::Vector3 MergedReferenceVelocity(
 }
 
 gtsam::imuBias::ConstantBias MergedReferenceBias(
-  const TrajectoryRow &row,
+  const ReferenceNodeState &reference_state,
   const gtsam::imuBias::ConstantBias &existing_bias,
   const Stage2ReferenceApplicationOptions &options) {
-  gtsam::Vector3 reference_accel_bias = VectorFromEigen(row.bias_acc);
+  gtsam::Vector3 reference_accel_bias = reference_state.bias.accelerometer();
   if (!options.apply_accel_z_bias) {
     reference_accel_bias.z() = existing_bias.accelerometer().z();
   }
   return gtsam::imuBias::ConstantBias(
     reference_accel_bias,
-    VectorFromEigen(row.bias_gyro));
+    reference_state.bias.gyroscope());
 }
 
 void ValidateReferenceSizeAndTimes(
-  const std::vector<TrajectoryRow> &trajectory,
+  const std::vector<ReferenceNodeState> &reference_states,
   const std::vector<double> &state_timestamps) {
-  if (trajectory.size() != state_timestamps.size()) {
+  if (reference_states.size() != state_timestamps.size()) {
       std::ostringstream oss;
       oss.precision(17);
       oss << "stage2 reference trajectory size does not match graph timeline"
-        << ": reference_size=" << trajectory.size()
+        << ": reference_size=" << reference_states.size()
         << ", state_count=" << state_timestamps.size();
-    if (!trajectory.empty()) {
-      oss << ", reference_start_s=" << trajectory.front().time_s
-          << ", reference_end_s=" << trajectory.back().time_s;
+    if (!reference_states.empty()) {
+      oss << ", reference_start_s=" << reference_states.front().time_s
+          << ", reference_end_s=" << reference_states.back().time_s;
     }
     if (!state_timestamps.empty()) {
       oss << ", state_start_s=" << state_timestamps.front()
@@ -92,15 +80,15 @@ void ValidateReferenceSizeAndTimes(
     }
     throw std::runtime_error(oss.str());
   }
-  for (std::size_t index = 0; index < trajectory.size(); ++index) {
-    if (!std::isfinite(trajectory[index].time_s) ||
-        std::abs(trajectory[index].time_s - state_timestamps[index]) >
+  for (std::size_t index = 0; index < reference_states.size(); ++index) {
+    if (!std::isfinite(reference_states[index].time_s) ||
+        std::abs(reference_states[index].time_s - state_timestamps[index]) >
           kTimestampToleranceS) {
       std::ostringstream oss;
       oss.precision(17);
       oss << "stage2 reference trajectory timestamps do not match graph timeline"
           << ": index=" << index
-          << ", reference_time_s=" << trajectory[index].time_s
+          << ", reference_time_s=" << reference_states[index].time_s
           << ", state_time_s=" << state_timestamps[index];
       throw std::runtime_error(oss.str());
     }
@@ -120,20 +108,15 @@ Stage2AttitudeHorizontalReferenceApplicationOptions() {
 
 std::vector<ReferenceNodeState> BuildStage2ReferenceStatesFromTrajectory(
   const std::vector<TrajectoryRow> &trajectory) {
-  std::vector<ReferenceNodeState> states;
-  states.reserve(trajectory.size());
-  for (const auto &row : trajectory) {
-    ReferenceNodeState state;
-    state.time_s = row.time_s;
-    state.pose = PoseFromTrajectoryRow(row);
-    state.velocity = VectorFromEigen(row.enu_velocity_mps);
-    state.bias = gtsam::imuBias::ConstantBias(
-      VectorFromEigen(row.bias_acc),
-      VectorFromEigen(row.bias_gyro));
-    state.omega = VectorFromEigen(row.omega_radps);
-    states.push_back(state);
+  return BuildReferenceStatesFromTrajectoryRows(trajectory);
+}
+
+std::vector<ReferenceNodeState> BuildStage2ReferenceStates(
+  const Stage2VelocityReference &reference) {
+  if (!reference.reference_states.empty()) {
+    return reference.reference_states;
   }
-  return states;
+  return BuildStage2ReferenceStatesFromTrajectory(reference.trajectory);
 }
 
 void ApplyStage2ReferenceTrajectoryToInitialValues(
@@ -141,28 +124,30 @@ void ApplyStage2ReferenceTrajectoryToInitialValues(
   const std::vector<double> &state_timestamps,
   gtsam::Values &values,
   const Stage2ReferenceApplicationOptions &options) {
-  ValidateReferenceSizeAndTimes(reference.trajectory, state_timestamps);
-  for (std::size_t state_index = 0; state_index < reference.trajectory.size(); ++state_index) {
-    const auto &row = reference.trajectory[state_index];
+  const std::vector<ReferenceNodeState> reference_states =
+    BuildStage2ReferenceStates(reference);
+  ValidateReferenceSizeAndTimes(reference_states, state_timestamps);
+  for (std::size_t state_index = 0; state_index < reference_states.size(); ++state_index) {
+    const auto &reference_state = reference_states[state_index];
     values.update(
       X(state_index),
       MergedReferencePose(
-        row,
+        reference_state,
         values.at<gtsam::Pose3>(X(state_index)),
         options));
     values.update(
       V(state_index),
       MergedReferenceVelocity(
-        row,
+        reference_state,
         values.at<gtsam::Vector3>(V(state_index)),
         options));
     values.update(
       B(state_index),
       MergedReferenceBias(
-        row,
+        reference_state,
         values.at<gtsam::imuBias::ConstantBias>(B(state_index)),
         options));
-    values.update(W(state_index), VectorFromEigen(row.omega_radps));
+    values.update(W(state_index), reference_state.omega);
   }
 }
 

@@ -41,6 +41,10 @@ std::shared_ptr<Stage2VelocityReference> MakeStage2ReferenceFromResult(
   }
   auto reference = std::make_shared<Stage2VelocityReference>();
   reference->trajectory = stage2_result.trajectory;
+  reference->reference_states =
+    !stage2_result.optimized_reference_states.empty()
+      ? stage2_result.optimized_reference_states
+      : BuildStage2ReferenceStatesFromTrajectory(stage2_result.trajectory);
   reference->source_config =
     std::make_shared<OfflineRunnerConfig>(source_config);
   return reference;
@@ -61,8 +65,18 @@ void CopySourceDiagnostics(
     stage2_result.run_summary.stage1_yaw_refinement_iteration_count;
   stage3_result.run_summary.stage1_yaw_refinement_converged =
     stage2_result.run_summary.stage1_yaw_refinement_converged;
+  stage3_result.run_summary.stage1_yaw_refinement_cycle_detected =
+    stage2_result.run_summary.stage1_yaw_refinement_cycle_detected;
+  stage3_result.run_summary.stage1_yaw_refinement_reference_valid =
+    stage2_result.run_summary.stage1_yaw_refinement_reference_valid;
   stage3_result.run_summary.stage1_yaw_refinement_stop_reason =
     stage2_result.run_summary.stage1_yaw_refinement_stop_reason;
+  stage3_result.run_summary.stage1_yaw_refinement_selected_iteration =
+    stage2_result.run_summary.stage1_yaw_refinement_selected_iteration;
+  stage3_result.run_summary.stage1_yaw_refinement_selection_reason =
+    stage2_result.run_summary.stage1_yaw_refinement_selection_reason;
+  stage3_result.run_summary.stage1_yaw_refinement_selected_branch_score =
+    stage2_result.run_summary.stage1_yaw_refinement_selected_branch_score;
   stage3_result.run_summary.stage1_yaw_refinement_final_yaw_rad =
     stage2_result.run_summary.stage1_yaw_refinement_final_yaw_rad;
   stage3_result.run_summary.stage1_yaw_refinement_final_median_error_rad =
@@ -101,6 +115,11 @@ OfflineRunResult Stage3VerticalReferenceOptimizationRunner::Run() const {
   OfflineRunnerConfig stage2_config = MakeStage2SourceConfig(request_.config);
   OfflineRunResult stage2_result =
     request_.run_once(stage2_config, nullptr, nullptr, request_.dataset);
+  if (stage2_result.run_summary.stage1_yaw_refinement_enabled &&
+      !stage2_result.run_summary.stage1_yaw_refinement_reference_valid) {
+    stage2_result.run_summary.stage3_vertical_reference_optimization_enabled = false;
+    return stage2_result;
+  }
   auto stage2_reference =
     MakeStage2ReferenceFromResult(stage2_result, request_.config);
 
