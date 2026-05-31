@@ -5,9 +5,9 @@ function app = stage2_lowpass_frequency_tuner(resultDir, varargin)
 %   stage2_lowpass_frequency_tuner(resultDir)
 %   app = stage2_lowpass_frequency_tuner(resultDir, 'Visible', 'off')
 %
-% The tool reads stage3_vertical_reference_diagnostics.csv from resultDir,
-% recomputes the same first-order forward/backward lowpass used by the C++
-% Stage3 reference planner, and lets the cutoff frequency be adjusted live.
+% The tool reads the current vertical solution from resultDir. It prefers
+% stage3_vertical_reference_diagnostics.csv when available, otherwise it falls
+% back to trajectory.csv so Stage2-only runs can be smoothed directly.
 
 if nargin < 1 || isempty(resultDir)
   resultDir = defaultResultDir();
@@ -24,7 +24,7 @@ state.protectInitialDynamicStatic = true;
 state.showRtkScatter = false;
 state.showStage2Up = true;
 state.showTunedReference = true;
-state.showSolverReference = true;
+state.showSolverReference = data.hasSolverReference;
 
 fig = figure( ...
   'Name', 'Stage2 Lowpass Frequency Tuner', ...
@@ -72,6 +72,7 @@ solverReferenceCheckbox = uicontrol(fig, 'Style', 'checkbox', ...
   'Units', 'normalized', 'Position', [0.87 0.947 0.10 0.025], ...
   'String', 'solver ref', ...
   'Value', state.showSolverReference, ...
+  'Enable', onOff(data.hasSolverReference), ...
   'BackgroundColor', 'w', ...
   'Callback', @onSolverReferenceCheckbox);
 
@@ -291,18 +292,27 @@ end
 
 function resultDir = defaultResultDir()
 resultDir = ['D:\Code\dataset\BeiJingGongLuTuiChe\gnssFGO_use\' ...
-  '20260323_124742\transformed1rtkjumpcut2\offline_lc_v2_0_result_static_range_fix'];
+  '20260323_124742\transformed1rtkjumpcut2\offline_lc_v2_0_result_stage2_center006'];
 end
 
 function data = loadStage2LowpassData(resultDir)
 csvPath = fullfile(resultDir, 'stage3_vertical_reference_diagnostics.csv');
-if ~isfile(csvPath)
-  error('Missing stage3_vertical_reference_diagnostics.csv under: %s', resultDir);
+trajectoryPath = fullfile(resultDir, 'trajectory.csv');
+if isfile(csvPath)
+  data = loadStage3DiagnosticsData(resultDir, csvPath);
+elseif isfile(trajectoryPath)
+  data = loadTrajectoryData(resultDir, trajectoryPath);
+else
+  error('Missing stage3_vertical_reference_diagnostics.csv or trajectory.csv under: %s', resultDir);
 end
+data = finalizeLowpassData(data, resultDir);
+end
+
+function data = loadStage3DiagnosticsData(resultDir, csvPath)
 T = readtable(csvPath, 'TextType', 'string');
 data.resultDir = resultDir;
+data.sourceName = 'stage3_vertical_reference_diagnostics.csv';
 data.timeS = T.time_s;
-data.relativeTimeS = data.timeS - data.timeS(1);
 data.stage2UpM = T.stage2_up_m;
 data.solverReferenceUpM = T.stage2_lowpass_up_m;
 data.optimizedUpM = optionalColumn(T, 'optimized_up_m', nan(height(T), 1));
@@ -310,11 +320,47 @@ data.skipReason = T.skip_reason;
 data.initialMask = data.skipReason == "INITIAL_STATIC";
 data.terminalMask = data.skipReason == "TERMINAL_STATIC";
 data.currentFactorMask = logical(optionalColumn(T, 'factor_added', zeros(height(T), 1)));
-data.dynamicStartTimeS = firstNonInitialTime(data);
+end
+
+function data = loadTrajectoryData(resultDir, trajectoryPath)
+T = readtable(trajectoryPath, 'TextType', 'string');
+requiredColumns = {'time_s','up_m'};
+if ~all(ismember(requiredColumns, T.Properties.VariableNames))
+  error('trajectory.csv must contain time_s and up_m columns: %s', trajectoryPath);
+end
+data.resultDir = resultDir;
+data.sourceName = 'trajectory.csv';
+data.timeS = T.time_s;
+data.stage2UpM = T.up_m;
+data.solverReferenceUpM = nan(height(T), 1);
+data.optimizedUpM = nan(height(T), 1);
+data.currentFactorMask = logical(optionalColumn(T, 'gnss_factor_used', zeros(height(T), 1)));
+data.dynamicStartTimeS = readSummaryValue(resultDir, 'dynamic_start_time_s', nan);
+if ~isfinite(data.dynamicStartTimeS)
+  data.dynamicStartTimeS = data.timeS(1);
+end
+data.initialMask = data.timeS < data.dynamicStartTimeS;
+data.terminalMask = readWindowMask(resultDir, data.timeS, 'late_static_windows.csv');
+data.skipReason = buildSkipReason(data.initialMask, data.terminalMask);
+end
+
+function data = finalizeLowpassData(data, resultDir)
+data.relativeTimeS = data.timeS - data.timeS(1);
+if ~isfield(data, 'dynamicStartTimeS') || ~isfinite(data.dynamicStartTimeS)
+  data.dynamicStartTimeS = firstNonInitialTime(data);
+end
 data.dynamicStartRelS = data.dynamicStartTimeS - data.timeS(1);
 data.configBlendS = readConfigValue(resultDir, 'initial_dynamic_static_lowpass_blend_s', 2.0);
 data.initialDynamicStaticWindows = readInitialDynamicStaticWindows(resultDir);
 data.rtkScatter = readRtkScatter(resultDir, data.timeS(1));
+data.hasSolverReference = any(isfinite(data.solverReferenceUpM));
+end
+
+function skipReason = buildSkipReason(initialMask, terminalMask)
+skipReason = strings(numel(initialMask), 1);
+skipReason(:) = "DYNAMIC";
+skipReason(initialMask) = "INITIAL_STATIC";
+skipReason(terminalMask) = "TERMINAL_STATIC";
 end
 
 function values = optionalColumn(T, name, defaultValue)
@@ -322,6 +368,33 @@ if ismember(name, T.Properties.VariableNames)
   values = T.(name);
 else
   values = defaultValue;
+end
+end
+
+function mask = readWindowMask(resultDir, timeS, fileName)
+mask = false(size(timeS));
+windowPath = fullfile(resultDir, fileName);
+if ~isfile(windowPath)
+  return;
+end
+T = readtable(windowPath, 'TextType', 'string');
+requiredColumns = {'start_time_s','end_time_s'};
+if ~all(ismember(requiredColumns, T.Properties.VariableNames))
+  return;
+end
+valid = true(height(T), 1);
+if ismember('valid', T.Properties.VariableNames)
+  valid = T.valid ~= 0;
+end
+for i = 1:height(T)
+  if ~valid(i)
+    continue;
+  end
+  startS = T.start_time_s(i);
+  endS = T.end_time_s(i);
+  if isfinite(startS) && isfinite(endS)
+    mask = mask | (timeS >= startS & timeS <= endS);
+  end
 end
 end
 
@@ -631,7 +704,7 @@ if state.showTunedReference
   legendHandles(end + 1) = hTuned;
   legendItems{end + 1} = 'tuned lowpass';
 end
-if state.showSolverReference
+if state.showSolverReference && data.hasSolverReference
   hSolver = plot(ax, data.relativeTimeS, data.solverReferenceUpM, '--', ...
     'Color', [0.75 0.20 0.15], 'LineWidth', 0.9);
   legendHandles(end + 1) = hSolver;
@@ -657,7 +730,7 @@ if state.showTunedReference
   legendHandles(end + 1) = hTuned;
   legendItems{end + 1} = 'tuned delta';
 end
-if state.showSolverReference
+if state.showSolverReference && data.hasSolverReference
   hSolver = plot(ax, data.relativeTimeS, data.solverReferenceUpM - data.stage2UpM, '--', ...
     'Color', [0.75 0.20 0.15], 'LineWidth', 0.8);
   legendHandles(end + 1) = hSolver;
@@ -710,8 +783,9 @@ function text = summaryString(data, result, cutoffHz)
 dynamicMask = ~data.initialMask & ~data.terminalMask & isfinite(result.deltaM);
 startMask = data.timeS >= data.dynamicStartTimeS & data.timeS <= data.dynamicStartTimeS + 10.0;
 terminalMask = data.terminalMask & isfinite(result.deltaM);
-text = sprintf(['cutoff=%.5g Hz | max abs delta dynamic=%.4g m | ' ...
+text = sprintf(['source=%s | cutoff=%.5g Hz | max abs delta dynamic=%.4g m | ' ...
   'first 10s=%.4g m | terminal=%.4g m | filter states %d..%d'], ...
+  data.sourceName, ...
   cutoffHz, ...
   finiteMaxAbs(result.deltaM(dynamicMask)), ...
   finiteMaxAbs(result.deltaM(startMask)), ...
@@ -731,4 +805,12 @@ end
 
 function text = formatCutoff(value)
 text = sprintf('%.5g', value);
+end
+
+function value = onOff(condition)
+if condition
+  value = 'on';
+else
+  value = 'off';
+end
 end
