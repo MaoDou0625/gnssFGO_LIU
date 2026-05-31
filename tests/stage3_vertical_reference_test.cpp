@@ -211,6 +211,76 @@ void TestProfilePlannerUsesDetectedInitialDynamicStaticWindows() {
     "unprotected lowpass should still be dragged by the surrounding motion");
 }
 
+void TestProfilePlannerStartsLowpassAfterInitialStatic() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
+
+  auto trajectory = MakeTrajectory(10U, 0.0);
+  for (std::size_t index = 0; index < trajectory.size(); ++index) {
+    trajectory[index].enu_position_m.z() = index < 5U ? 10.0 : 0.0;
+  }
+
+  offline_lc_minimal::Stage3VerticalReferenceProfilePlanRequest request;
+  request.config = &config;
+  request.stage2_trajectory = &trajectory;
+  request.dynamic_start_index = 5U;
+  request.dynamic_start_time_s = 5.0;
+  const auto reference =
+    offline_lc_minimal::Stage3VerticalReferenceProfilePlanner(std::move(request)).Plan();
+
+  ExpectNear(
+    reference.rows[4].stage2_lowpass_up_m,
+    10.0,
+    1.0e-12,
+    "initial static rows should keep their unfiltered diagnostic height");
+  ExpectNear(
+    reference.rows[5].stage2_lowpass_up_m,
+    0.0,
+    1.0e-12,
+    "dynamic lowpass should not be initialized from the static height");
+  ExpectNear(
+    reference.rows[9].stage2_lowpass_up_m,
+    0.0,
+    1.0e-12,
+    "dynamic lowpass should only use dynamic samples in this fixture");
+}
+
+void TestProfilePlannerExcludesTerminalStaticFromLowpass() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
+  config.stage3_vertical_reference_terminal_static_min_duration_s = 2.0;
+
+  auto trajectory = MakeTrajectory(10U, 0.0);
+  for (std::size_t index = 0; index < trajectory.size(); ++index) {
+    trajectory[index].enu_position_m.z() = index < 6U ? 0.0 : 10.0;
+    if (index >= 6U) {
+      trajectory[index].enu_velocity_mps = Eigen::Vector3d(0.0, 0.0, 0.0);
+    }
+  }
+
+  offline_lc_minimal::Stage3VerticalReferenceProfilePlanRequest request;
+  request.config = &config;
+  request.stage2_trajectory = &trajectory;
+  request.dynamic_start_index = 0U;
+  request.dynamic_start_time_s = 0.0;
+  const auto reference =
+    offline_lc_minimal::Stage3VerticalReferenceProfilePlanner(std::move(request)).Plan();
+
+  ExpectNear(
+    reference.rows[5].stage2_lowpass_up_m,
+    0.0,
+    1.0e-12,
+    "dynamic lowpass should not be pulled by the terminal static suffix");
+  ExpectNear(
+    reference.rows[6].stage2_lowpass_up_m,
+    10.0,
+    1.0e-12,
+    "terminal static rows should retain unfiltered diagnostic height");
+  ExpectTrue(
+    reference.rows[6].skip_reason == "TERMINAL_STATIC",
+    "terminal static rows should be marked so constraint building can skip them");
+}
+
 void TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
@@ -281,6 +351,51 @@ void TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics() {
     0.02,
     1.0e-12,
       "max absolute Stage3 residual should be summarized");
+}
+
+void TestConstraintBuilderSkipsTerminalStaticReferences() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
+  config.stage3_vertical_reference_terminal_static_min_duration_s = 2.0;
+
+  auto trajectory = MakeTrajectory(10U, 0.0);
+  std::vector<double> timestamps;
+  timestamps.reserve(trajectory.size());
+  for (std::size_t index = 0; index < trajectory.size(); ++index) {
+    trajectory[index].enu_position_m.z() = index < 6U ? 0.0 : 10.0;
+    if (index >= 6U) {
+      trajectory[index].enu_velocity_mps = Eigen::Vector3d(0.0, 0.0, 0.0);
+    }
+    timestamps.push_back(trajectory[index].time_s);
+  }
+
+  offline_lc_minimal::Stage3VerticalReferenceProfilePlanRequest plan_request;
+  plan_request.config = &config;
+  plan_request.stage2_trajectory = &trajectory;
+  plan_request.dynamic_start_index = 0U;
+  auto reference =
+    offline_lc_minimal::Stage3VerticalReferenceProfilePlanner(std::move(plan_request)).Plan();
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::Stage3VerticalReferenceDiagnosticRow> diagnostics;
+  offline_lc_minimal::Stage3VerticalReferenceConstraintBuildRequest build_request;
+  build_request.config = &config;
+  build_request.state_timestamps = &timestamps;
+  build_request.reference = &reference;
+  build_request.dynamic_start_index = 0U;
+  build_request.graph = &graph;
+  build_request.run_summary = &summary;
+  build_request.diagnostics = &diagnostics;
+  offline_lc_minimal::Stage3VerticalReferenceConstraintBuilder(std::move(build_request)).Build();
+
+  ExpectTrue(summary.stage3_vertical_reference_factor_count == 6U,
+             "terminal static rows should not receive Stage3 vertical anchors");
+  ExpectTrue(summary.stage3_vertical_reference_skipped_count == 4U,
+             "terminal static rows should be counted as skipped references");
+  ExpectTrue(!diagnostics[6].factor_added, "first terminal static row should be skipped");
+  ExpectTrue(diagnostics[6].skip_reason == "TERMINAL_STATIC",
+             "terminal static skip reason should survive constraint building");
 }
 
 void TestConstraintBuilderEnvelopeModeUsesGateAndCenterPull() {
@@ -1263,8 +1378,17 @@ int main() {
       "TestProfilePlannerUsesDetectedInitialDynamicStaticWindows",
       TestProfilePlannerUsesDetectedInitialDynamicStaticWindows);
     RunTest(
+      "TestProfilePlannerStartsLowpassAfterInitialStatic",
+      TestProfilePlannerStartsLowpassAfterInitialStatic);
+    RunTest(
+      "TestProfilePlannerExcludesTerminalStaticFromLowpass",
+      TestProfilePlannerExcludesTerminalStaticFromLowpass);
+    RunTest(
       "TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics",
       TestConstraintBuilderAddsOnlyDynamicAnchorsAndDiagnostics);
+    RunTest(
+      "TestConstraintBuilderSkipsTerminalStaticReferences",
+      TestConstraintBuilderSkipsTerminalStaticReferences);
     RunTest(
       "TestConstraintBuilderEnvelopeModeUsesGateAndCenterPull",
       TestConstraintBuilderEnvelopeModeUsesGateAndCenterPull);

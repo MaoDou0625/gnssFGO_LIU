@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <string>
 
 #include "offline_lc_minimal/core/RtkHeadingAlignmentEstimator.h"
 
@@ -123,6 +124,18 @@ template <typename Row>
   return std::numeric_limits<double>::quiet_NaN();
 }
 
+[[nodiscard]] std::string BlendSkipReason(
+  const Stage3VerticalReferenceDiagnosticRow &lhs,
+  const Stage3VerticalReferenceDiagnosticRow &rhs,
+  const double alpha,
+  const double stage2_lowpass_up_m) {
+  const auto &nearest = alpha < 0.5 ? lhs : rhs;
+  if (nearest.skip_reason == "TERMINAL_STATIC") {
+    return "TERMINAL_STATIC";
+  }
+  return std::isfinite(stage2_lowpass_up_m) ? "PLANNED" : "LOWPASS_UNAVAILABLE";
+}
+
 [[nodiscard]] double InterpolationAlpha(
   const double time_s,
   const double lhs_time_s,
@@ -194,7 +207,10 @@ template <typename Row>
     row.factor_added = false;
     row.optimized_up_m = std::numeric_limits<double>::quiet_NaN();
     row.residual_m = std::numeric_limits<double>::quiet_NaN();
-    row.skip_reason = std::isfinite(row.stage2_lowpass_up_m) ? "PLANNED" : "LOWPASS_UNAVAILABLE";
+    if (row.skip_reason != "TERMINAL_STATIC") {
+      row.skip_reason =
+        std::isfinite(row.stage2_lowpass_up_m) ? "PLANNED" : "LOWPASS_UNAVAILABLE";
+    }
     return row;
   }
 
@@ -209,7 +225,7 @@ template <typename Row>
   row.sigma_m = BlendFiniteOrNearest(lhs.sigma_m, rhs.sigma_m, alpha);
   row.optimized_up_m = std::numeric_limits<double>::quiet_NaN();
   row.residual_m = std::numeric_limits<double>::quiet_NaN();
-  row.skip_reason = std::isfinite(row.stage2_lowpass_up_m) ? "PLANNED" : "LOWPASS_UNAVAILABLE";
+  row.skip_reason = BlendSkipReason(lhs, rhs, alpha, row.stage2_lowpass_up_m);
   return row;
 }
 

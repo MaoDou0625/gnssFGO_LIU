@@ -125,6 +125,8 @@ struct OfflineRunnerConfig {
   double initial_dynamic_static_lowpass_blend_s = 2.0;
   bool enable_initial_dynamic_static_vz_constraint = false;
   double initial_dynamic_static_vz_sigma_mps = 0.0005;
+  double initial_dynamic_static_up_sigma_m = 0.02;
+  double initial_dynamic_static_height_hold_sigma_m = 0.001;
   bool enable_stage2_velocity_optimization = false;
   bool enable_stage2_vehicle_nhc_constraint = true;
   double stage2_attitude_hold_sigma_rad = 1e-5;
@@ -145,6 +147,10 @@ struct OfflineRunnerConfig {
   double stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale = 1.0;
   bool enable_stage3_vertical_reference_optimization = false;
   double stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
+  bool enable_stage3_vertical_reference_terminal_static_exclusion = true;
+  double stage3_vertical_reference_terminal_static_min_duration_s = 8.0;
+  double stage3_vertical_reference_terminal_static_speed_threshold_mps = 0.05;
+  double stage3_vertical_reference_terminal_static_vz_threshold_mps = 0.005;
   double stage3_vertical_anchor_sigma_m = 0.015;
   bool enable_stage3_initial_dynamic_static_reference_hold = false;
   double stage3_initial_dynamic_static_reference_hold_duration_s = 10.0;

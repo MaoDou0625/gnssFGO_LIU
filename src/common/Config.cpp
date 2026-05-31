@@ -319,12 +319,16 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       !std::isfinite(config.initial_dynamic_static_merge_gap_s) ||
       !std::isfinite(config.initial_dynamic_static_lowpass_blend_s) ||
       !std::isfinite(config.initial_dynamic_static_vz_sigma_mps) ||
+      !std::isfinite(config.initial_dynamic_static_up_sigma_m) ||
+      !std::isfinite(config.initial_dynamic_static_height_hold_sigma_m) ||
       config.initial_dynamic_static_search_duration_s <= 0.0 ||
       config.initial_dynamic_static_threshold_multiplier <= 0.0 ||
       config.initial_dynamic_static_min_duration_s <= 0.0 ||
       config.initial_dynamic_static_merge_gap_s < 0.0 ||
       config.initial_dynamic_static_lowpass_blend_s < 0.0 ||
-      config.initial_dynamic_static_vz_sigma_mps <= 0.0) {
+      config.initial_dynamic_static_vz_sigma_mps <= 0.0 ||
+      config.initial_dynamic_static_up_sigma_m <= 0.0 ||
+      config.initial_dynamic_static_height_hold_sigma_m <= 0.0) {
     throw std::runtime_error("initial dynamic static detector settings are invalid");
   }
   if ((config.enable_initial_dynamic_static_lowpass_protection ||
@@ -409,8 +413,14 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       "stage2 lowfreq final hold relaxation requires sigma scales >= 1");
   }
   if (!std::isfinite(config.stage3_vertical_reference_lowpass_cutoff_hz) ||
+      !std::isfinite(config.stage3_vertical_reference_terminal_static_min_duration_s) ||
+      !std::isfinite(config.stage3_vertical_reference_terminal_static_speed_threshold_mps) ||
+      !std::isfinite(config.stage3_vertical_reference_terminal_static_vz_threshold_mps) ||
       !std::isfinite(config.stage3_vertical_anchor_sigma_m) ||
       config.stage3_vertical_reference_lowpass_cutoff_hz <= 0.0 ||
+      config.stage3_vertical_reference_terminal_static_min_duration_s <= 0.0 ||
+      config.stage3_vertical_reference_terminal_static_speed_threshold_mps <= 0.0 ||
+      config.stage3_vertical_reference_terminal_static_vz_threshold_mps <= 0.0 ||
       config.stage3_vertical_anchor_sigma_m <= 0.0) {
     throw std::runtime_error(
       "stage3 vertical reference settings must be finite and positive");
@@ -1164,6 +1174,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_initial_dynamic_static_vz_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "initial_dynamic_static_vz_sigma_mps") {
     config.initial_dynamic_static_vz_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "initial_dynamic_static_up_sigma_m") {
+    config.initial_dynamic_static_up_sigma_m = ParseDouble(normalized_value);
+  } else if (normalized_key == "initial_dynamic_static_height_hold_sigma_m") {
+    config.initial_dynamic_static_height_hold_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_stage2_velocity_optimization") {
     config.enable_stage2_velocity_optimization = ParseBool(normalized_value);
   } else if (normalized_key == "enable_stage2_vehicle_nhc_constraint") {
@@ -1211,6 +1225,21 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_stage3_vertical_reference_optimization = ParseBool(normalized_value);
   } else if (normalized_key == "stage3_vertical_reference_lowpass_cutoff_hz") {
     config.stage3_vertical_reference_lowpass_cutoff_hz = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_stage3_vertical_reference_terminal_static_exclusion") {
+    config.enable_stage3_vertical_reference_terminal_static_exclusion =
+      ParseBool(normalized_value);
+  } else if (normalized_key ==
+             "stage3_vertical_reference_terminal_static_min_duration_s") {
+    config.stage3_vertical_reference_terminal_static_min_duration_s =
+      ParseDouble(normalized_value);
+  } else if (normalized_key ==
+             "stage3_vertical_reference_terminal_static_speed_threshold_mps") {
+    config.stage3_vertical_reference_terminal_static_speed_threshold_mps =
+      ParseDouble(normalized_value);
+  } else if (normalized_key ==
+             "stage3_vertical_reference_terminal_static_vz_threshold_mps") {
+    config.stage3_vertical_reference_terminal_static_vz_threshold_mps =
+      ParseDouble(normalized_value);
   } else if (normalized_key == "stage3_vertical_anchor_sigma_m") {
     config.stage3_vertical_anchor_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_stage3_initial_dynamic_static_reference_hold") {
@@ -1934,6 +1963,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.enable_initial_dynamic_static_vz_constraint ? "true" : "false") << '\n'
     << "initial_dynamic_static_vz_sigma_mps="
     << config.initial_dynamic_static_vz_sigma_mps << '\n'
+    << "initial_dynamic_static_up_sigma_m="
+    << config.initial_dynamic_static_up_sigma_m << '\n'
+    << "initial_dynamic_static_height_hold_sigma_m="
+    << config.initial_dynamic_static_height_hold_sigma_m << '\n'
     << "enable_stage2_velocity_optimization="
     << (config.enable_stage2_velocity_optimization ? "true" : "false") << '\n'
     << "enable_stage2_vehicle_nhc_constraint="
@@ -1971,6 +2004,16 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.enable_stage3_vertical_reference_optimization ? "true" : "false") << '\n'
     << "stage3_vertical_reference_lowpass_cutoff_hz="
     << config.stage3_vertical_reference_lowpass_cutoff_hz << '\n'
+    << "enable_stage3_vertical_reference_terminal_static_exclusion="
+    << (config.enable_stage3_vertical_reference_terminal_static_exclusion
+          ? "true"
+          : "false") << '\n'
+    << "stage3_vertical_reference_terminal_static_min_duration_s="
+    << config.stage3_vertical_reference_terminal_static_min_duration_s << '\n'
+    << "stage3_vertical_reference_terminal_static_speed_threshold_mps="
+    << config.stage3_vertical_reference_terminal_static_speed_threshold_mps << '\n'
+    << "stage3_vertical_reference_terminal_static_vz_threshold_mps="
+    << config.stage3_vertical_reference_terminal_static_vz_threshold_mps << '\n'
     << "stage3_vertical_anchor_sigma_m="
     << config.stage3_vertical_anchor_sigma_m << '\n'
     << "enable_stage3_initial_dynamic_static_reference_hold="

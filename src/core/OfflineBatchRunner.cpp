@@ -1170,6 +1170,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.run_summary.initial_dynamic_static_window_count =
       run_result.initial_dynamic_static_windows.size();
     run_result.run_summary.initial_dynamic_static_vz_factor_count = 0U;
+    run_result.run_summary.initial_dynamic_static_up_factor_count = 0U;
+    run_result.run_summary.initial_dynamic_static_height_hold_factor_count = 0U;
     run_result.run_summary.initial_dynamic_static_rtk_speed_threshold_mps =
       std::numeric_limits<double>::quiet_NaN();
     run_result.run_summary.initial_dynamic_static_gyro_rms_threshold_radps =

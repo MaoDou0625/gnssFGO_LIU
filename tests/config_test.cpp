@@ -1809,6 +1809,21 @@ void TestStage3VerticalReferenceConfigValidation() {
     std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.05) < 1e-15,
     "Stage3 default cutoff should be 0.05 Hz");
   ExpectTrue(
+    config.enable_stage3_vertical_reference_terminal_static_exclusion,
+    "Stage3 lowpass should exclude terminal static suffixes by default");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_terminal_static_min_duration_s - 8.0) <
+      1e-15,
+    "Stage3 terminal static exclusion duration should default to 8 s");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_terminal_static_speed_threshold_mps - 0.05) <
+      1e-15,
+    "Stage3 terminal static horizontal speed threshold should default to 0.05 m/s");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_terminal_static_vz_threshold_mps - 0.005) <
+      1e-15,
+    "Stage3 terminal static vertical speed threshold should default to 0.005 m/s");
+  ExpectTrue(
     std::abs(config.stage3_vertical_anchor_sigma_m - 0.015) < 1e-15,
     "Stage3 default anchor sigma should be 0.015 m");
   ExpectTrue(
@@ -1835,6 +1850,12 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     !config.enable_initial_dynamic_static_vz_constraint,
     "initial dynamic static vz constraint should default off");
+  ExpectTrue(
+    std::abs(config.initial_dynamic_static_up_sigma_m - 0.02) < 1e-15,
+    "initial dynamic static up sigma should default to 0.02 m");
+  ExpectTrue(
+    std::abs(config.initial_dynamic_static_height_hold_sigma_m - 0.001) < 1e-15,
+    "initial dynamic static height hold sigma should default to 0.001 m");
   ExpectTrue(
     config.stage3_vertical_reference_constraint_mode ==
       offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kGaussian,
@@ -1926,6 +1947,22 @@ void TestStage3VerticalReferenceConfigValidation() {
     "0.03");
   offline_lc_minimal::OverrideConfigField(
     config,
+    "enable_stage3_vertical_reference_terminal_static_exclusion",
+    "false");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_reference_terminal_static_min_duration_s",
+    "9.5");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_reference_terminal_static_speed_threshold_mps",
+    "0.035");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_vertical_reference_terminal_static_vz_threshold_mps",
+    "0.004");
+  offline_lc_minimal::OverrideConfigField(
+    config,
     "stage3_vertical_anchor_sigma_m",
     "0.02");
   offline_lc_minimal::OverrideConfigField(
@@ -1976,6 +2013,14 @@ void TestStage3VerticalReferenceConfigValidation() {
     config,
     "initial_dynamic_static_vz_sigma_mps",
     "0.0007");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "initial_dynamic_static_up_sigma_m",
+    "0.018");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "initial_dynamic_static_height_hold_sigma_m",
+    "0.0025");
   offline_lc_minimal::OverrideConfigField(
     config,
     "stage3_vertical_reference_constraint_mode",
@@ -2081,6 +2126,21 @@ void TestStage3VerticalReferenceConfigValidation() {
     std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.03) < 1e-15,
     "Stage3 cutoff should parse");
   ExpectTrue(
+    !config.enable_stage3_vertical_reference_terminal_static_exclusion,
+    "Stage3 terminal static exclusion flag should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_terminal_static_min_duration_s - 9.5) <
+      1e-15,
+    "Stage3 terminal static exclusion duration should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_terminal_static_speed_threshold_mps - 0.035) <
+      1e-15,
+    "Stage3 terminal static horizontal speed threshold should parse");
+  ExpectTrue(
+    std::abs(config.stage3_vertical_reference_terminal_static_vz_threshold_mps - 0.004) <
+      1e-15,
+    "Stage3 terminal static vertical speed threshold should parse");
+  ExpectTrue(
     std::abs(config.stage3_vertical_anchor_sigma_m - 0.02) < 1e-15,
     "Stage3 anchor sigma should parse");
   ExpectTrue(
@@ -2119,6 +2179,12 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     std::abs(config.initial_dynamic_static_vz_sigma_mps - 0.0007) < 1e-15,
     "initial dynamic static vz sigma should parse");
+  ExpectTrue(
+    std::abs(config.initial_dynamic_static_up_sigma_m - 0.018) < 1e-15,
+    "initial dynamic static up sigma should parse");
+  ExpectTrue(
+    std::abs(config.initial_dynamic_static_height_hold_sigma_m - 0.0025) < 1e-15,
+    "initial dynamic static height hold sigma should parse");
   ExpectTrue(
     config.stage3_vertical_reference_constraint_mode ==
       offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope,
@@ -2201,6 +2267,22 @@ void TestStage3VerticalReferenceConfigValidation() {
     serialized.find("stage3_vertical_reference_lowpass_cutoff_hz=0.03") != std::string::npos,
     "Stage3 cutoff should be serialized");
   ExpectTrue(
+    serialized.find("enable_stage3_vertical_reference_terminal_static_exclusion=false") !=
+      std::string::npos,
+    "Stage3 terminal static exclusion flag should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_reference_terminal_static_min_duration_s=9.5") !=
+      std::string::npos,
+    "Stage3 terminal static exclusion duration should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_reference_terminal_static_speed_threshold_mps=0.035") !=
+      std::string::npos,
+    "Stage3 terminal static horizontal speed threshold should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_vertical_reference_terminal_static_vz_threshold_mps=0.004") !=
+      std::string::npos,
+    "Stage3 terminal static vertical speed threshold should be serialized");
+  ExpectTrue(
     serialized.find("stage3_vertical_anchor_sigma_m=0.02") != std::string::npos,
     "Stage3 anchor sigma should be serialized");
   ExpectTrue(
@@ -2239,6 +2321,12 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("initial_dynamic_static_vz_sigma_mps=0.0007") != std::string::npos,
     "initial dynamic static vz sigma should be serialized");
+  ExpectTrue(
+    serialized.find("initial_dynamic_static_up_sigma_m=0.018") != std::string::npos,
+    "initial dynamic static up sigma should be serialized");
+  ExpectTrue(
+    serialized.find("initial_dynamic_static_height_hold_sigma_m=0.0025") != std::string::npos,
+    "initial dynamic static height hold sigma should be serialized");
   ExpectTrue(
     serialized.find("stage3_vertical_reference_constraint_mode=envelope") != std::string::npos,
     "Stage3 envelope mode should be serialized");
@@ -2327,6 +2415,18 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(threw, "non-positive Stage3 cutoff should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_terminal_static_speed_threshold_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("stage3 vertical reference settings") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive Stage3 terminal static speed threshold should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
   config.stage3_vertical_anchor_sigma_m = 0.0;
   threw = false;
   try {
@@ -2384,6 +2484,18 @@ void TestStage3VerticalReferenceConfigValidation() {
       std::string::npos;
   }
   ExpectTrue(threw, "non-positive initial dynamic static threshold multiplier should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.initial_dynamic_static_height_hold_sigma_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("initial dynamic static detector settings") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "initial dynamic static height hold sigma should be positive");
 
   config = offline_lc_minimal::DefaultConfig();
   threw = false;

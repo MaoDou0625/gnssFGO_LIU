@@ -379,7 +379,41 @@ void TestInitialDynamicStaticDetectorUsesBaselineImuAndRtkEvidence() {
              "moving candidate windows should be rejected by the combined gates");
 }
 
-void TestInitialDynamicStaticConstraintAddsOnlyVzPriors() {
+void TestInitialDynamicStaticDetectorAcceptsShortDynamicPrefix() {
+  auto config = MakeLateStaticConfig();
+  config.late_static_window_s = 5.0;
+  config.late_static_stride_s = 0.5;
+  config.initial_dynamic_static_min_duration_s = 8.0;
+  config.late_static_min_rtkfix_samples = 5;
+  const auto gnss = MakeInitialDynamicStaticGnss();
+  const auto imu = MakeInitialDynamicStaticImu();
+
+  offline_lc_minimal::InitialDynamicStaticDetectionRequest request;
+  request.config = &config;
+  request.gnss_samples = &gnss;
+  request.imu_samples = &imu;
+  request.alignment_start_time_s = 0.0;
+  request.alignment_end_time_s = 100.0;
+  request.dynamic_start_time_s = 100.0;
+  request.processing_end_time_s = 106.0;
+  request.should_use_rtkfix_sample =
+    [](const offline_lc_minimal::GnssSolutionSample &) { return true; };
+  request.corrected_time_s =
+    [](const offline_lc_minimal::GnssSolutionSample &sample) {
+      return sample.time_s;
+    };
+
+  const auto result =
+    offline_lc_minimal::InitialDynamicStaticDetector(std::move(request)).Detect();
+  ExpectTrue(!result.windows.empty(),
+             "detector should keep an initial static prefix even below normal min duration");
+  ExpectTrue(result.windows.front().duration_s < config.initial_dynamic_static_min_duration_s,
+             "fixture should exercise the short-prefix path");
+  ExpectTrue(result.windows.front().duration_s >= config.late_static_window_s,
+             "short prefix should still cover at least one full feature window");
+}
+
+void TestInitialDynamicStaticConstraintAddsVerticalStaticPriors() {
   auto config = MakeLateStaticConfig();
   std::vector<double> timestamps{99.0, 100.0, 101.0, 102.0, 103.0, 104.0, 105.0};
   std::vector<offline_lc_minimal::LateStaticWindowRow> windows(1U);
@@ -387,6 +421,7 @@ void TestInitialDynamicStaticConstraintAddsOnlyVzPriors() {
   windows.front().end_time_s = 104.0;
   windows.front().duration_s = 4.0;
   windows.front().valid = true;
+  windows.front().rtk_median_up_m = 7.0;
   windows.front().skip_reason = "OK";
 
   gtsam::NonlinearFactorGraph graph;
@@ -402,17 +437,27 @@ void TestInitialDynamicStaticConstraintAddsOnlyVzPriors() {
 
   ExpectTrue(windows.front().vz_factor_count == 5U,
              "initial dynamic static constraint should add one vz prior per static state");
-  ExpectTrue(windows.front().up_factor_count == 0U,
-             "initial dynamic static constraint should not add up priors");
-  ExpectTrue(windows.front().height_hold_factor_count == 0U,
-             "initial dynamic static constraint should not add height-hold priors");
-  ExpectTrue(graph.size() == 5U,
-             "graph should contain only the vertical velocity priors");
+  ExpectTrue(windows.front().up_factor_count == 5U,
+             "initial dynamic static constraint should add one up prior per static state");
+  ExpectTrue(windows.front().height_hold_factor_count == 4U,
+             "initial dynamic static constraint should add window-internal height holds");
+  ExpectTrue(graph.size() == 14U,
+             "graph should contain vertical velocity, up, and height-hold priors");
   const auto first_vz =
     boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalVelocityPriorFactor>(graph.at(0));
+  const auto first_up =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::VerticalPositionFactor>(graph.at(1));
+  const auto first_hold =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::StaticVerticalPositionHoldFactor>(graph.at(4));
   ExpectTrue(first_vz.get() != nullptr, "first factor should be a vertical velocity prior");
+  ExpectTrue(first_up.get() != nullptr, "second factor should be a vertical position prior");
+  ExpectTrue(first_hold.get() != nullptr, "builder should add static height hold factors");
   ExpectTrue(summary.initial_dynamic_static_vz_factor_count == 5U,
              "summary should count initial dynamic static vz priors");
+  ExpectTrue(summary.initial_dynamic_static_up_factor_count == 5U,
+             "summary should count initial dynamic static up priors");
+  ExpectTrue(summary.initial_dynamic_static_height_hold_factor_count == 4U,
+             "summary should count initial dynamic static height holds");
 }
 
 }  // namespace
@@ -435,8 +480,11 @@ int main() {
       "TestInitialDynamicStaticDetectorUsesBaselineImuAndRtkEvidence",
       TestInitialDynamicStaticDetectorUsesBaselineImuAndRtkEvidence);
     RunTest(
-      "TestInitialDynamicStaticConstraintAddsOnlyVzPriors",
-      TestInitialDynamicStaticConstraintAddsOnlyVzPriors);
+      "TestInitialDynamicStaticDetectorAcceptsShortDynamicPrefix",
+      TestInitialDynamicStaticDetectorAcceptsShortDynamicPrefix);
+    RunTest(
+      "TestInitialDynamicStaticConstraintAddsVerticalStaticPriors",
+      TestInitialDynamicStaticConstraintAddsVerticalStaticPriors);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
     return 1;

@@ -426,6 +426,8 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
         [](const LateStaticFeatureDiagnosticRow &row) { return row.valid_features; }));
   assembled.run_summary.initial_dynamic_static_window_count = 0;
   assembled.run_summary.initial_dynamic_static_vz_factor_count = 0;
+  assembled.run_summary.initial_dynamic_static_up_factor_count = 0;
+  assembled.run_summary.initial_dynamic_static_height_hold_factor_count = 0;
   assembled.run_summary.stage2_velocity_optimization_enabled =
     std::any_of(
       request_.pieces.begin(),
@@ -479,6 +481,10 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
           piece.result.run_summary.initial_dynamic_static_window_count;
         assembled.run_summary.initial_dynamic_static_vz_factor_count +=
           piece.result.run_summary.initial_dynamic_static_vz_factor_count;
+        assembled.run_summary.initial_dynamic_static_up_factor_count +=
+          piece.result.run_summary.initial_dynamic_static_up_factor_count;
+        assembled.run_summary.initial_dynamic_static_height_hold_factor_count +=
+          piece.result.run_summary.initial_dynamic_static_height_hold_factor_count;
         if (!std::isfinite(assembled.run_summary.initial_dynamic_static_rtk_speed_threshold_mps) &&
             std::isfinite(piece.result.run_summary.initial_dynamic_static_rtk_speed_threshold_mps)) {
           assembled.run_summary.initial_dynamic_static_rtk_speed_threshold_mps =

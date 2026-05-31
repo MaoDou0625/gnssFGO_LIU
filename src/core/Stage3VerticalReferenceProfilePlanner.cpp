@@ -16,6 +16,20 @@ bool CanFilterRow(const TrajectoryRow &row) {
   return std::isfinite(row.time_s) && std::isfinite(row.enu_position_m.z());
 }
 
+bool IsTerminalStaticCandidate(
+  const OfflineRunnerConfig &config,
+  const TrajectoryRow &row) {
+  if (!std::isfinite(row.time_s) || !row.enu_velocity_mps.allFinite()) {
+    return false;
+  }
+  const double horizontal_speed_mps =
+    std::hypot(row.enu_velocity_mps.x(), row.enu_velocity_mps.y());
+  return horizontal_speed_mps <=
+           config.stage3_vertical_reference_terminal_static_speed_threshold_mps &&
+         std::abs(row.enu_velocity_mps.z()) <=
+           config.stage3_vertical_reference_terminal_static_vz_threshold_mps;
+}
+
 std::vector<double> BuildRawFilterInputUp(
   const std::vector<TrajectoryRow> &trajectory) {
   std::vector<double> input_up_m(
@@ -74,13 +88,21 @@ void FilterSegment(
 std::vector<double> BuildLowpassProfile(
   const OfflineRunnerConfig &config,
   const std::vector<TrajectoryRow> &trajectory,
-  const std::vector<double> &input_up_m) {
+  const std::vector<double> &input_up_m,
+  const std::size_t first_filter_index,
+  const std::size_t one_past_last_filter_index) {
   std::vector<double> lowpass_up_m(
     trajectory.size(),
     std::numeric_limits<double>::quiet_NaN());
   std::vector<std::size_t> segment;
   segment.reserve(trajectory.size());
   for (std::size_t index = 0; index < trajectory.size(); ++index) {
+    if (index < first_filter_index || index >= one_past_last_filter_index) {
+      if (CanFilterRow(trajectory[index]) && std::isfinite(input_up_m[index])) {
+        lowpass_up_m[index] = input_up_m[index];
+      }
+      continue;
+    }
     if (!CanFilterRow(trajectory[index]) || !std::isfinite(input_up_m[index])) {
       FilterSegment(config, segment, trajectory, input_up_m, lowpass_up_m);
       segment.clear();
@@ -98,6 +120,45 @@ std::vector<double> BuildLowpassProfile(
   }
   FilterSegment(config, segment, trajectory, input_up_m, lowpass_up_m);
   return lowpass_up_m;
+}
+
+std::size_t FirstLowpassFilterIndex(
+  const std::size_t dynamic_start_index,
+  const std::size_t trajectory_size) {
+  if (dynamic_start_index >= trajectory_size) {
+    return 0U;
+  }
+  return dynamic_start_index;
+}
+
+std::size_t OnePastLastLowpassFilterIndex(
+  const OfflineRunnerConfig &config,
+  const std::vector<TrajectoryRow> &trajectory,
+  const std::size_t dynamic_start_index) {
+  if (!config.enable_stage3_vertical_reference_terminal_static_exclusion ||
+      dynamic_start_index >= trajectory.size() || trajectory.empty()) {
+    return trajectory.size();
+  }
+
+  std::size_t first_terminal_static_index = trajectory.size();
+  for (std::size_t reverse = trajectory.size(); reverse > dynamic_start_index; --reverse) {
+    const std::size_t index = reverse - 1U;
+    if (!IsTerminalStaticCandidate(config, trajectory[index])) {
+      break;
+    }
+    first_terminal_static_index = index;
+  }
+  if (first_terminal_static_index == trajectory.size()) {
+    return trajectory.size();
+  }
+  const double terminal_static_duration_s =
+    trajectory.back().time_s - trajectory[first_terminal_static_index].time_s;
+  if (!std::isfinite(terminal_static_duration_s) ||
+      terminal_static_duration_s + 1.0e-9 <
+        config.stage3_vertical_reference_terminal_static_min_duration_s) {
+    return trajectory.size();
+  }
+  return first_terminal_static_index;
 }
 
 bool FindInitialDynamicStaticReferenceUp(
@@ -319,11 +380,22 @@ Stage3VerticalReference Stage3VerticalReferenceProfilePlanner::Plan() const {
       *request_.stage2_trajectory,
       filter_input_up_m);
   }
+  const std::size_t first_filter_index =
+    FirstLowpassFilterIndex(
+      request_.dynamic_start_index,
+      request_.stage2_trajectory->size());
+  const std::size_t one_past_last_filter_index =
+    OnePastLastLowpassFilterIndex(
+      *request_.config,
+      *request_.stage2_trajectory,
+      request_.dynamic_start_index);
   std::vector<double> lowpass_up_m =
     BuildLowpassProfile(
       *request_.config,
       *request_.stage2_trajectory,
-      filter_input_up_m);
+      filter_input_up_m,
+      first_filter_index,
+      one_past_last_filter_index);
   const bool applied_detected_static_windows_to_output =
     ApplyInitialDynamicStaticWindowsToProfile(
       *request_.config,
@@ -355,7 +427,10 @@ Stage3VerticalReference Stage3VerticalReferenceProfilePlanner::Plan() const {
     row.lowpass_delta_m = row.stage2_lowpass_up_m - row.stage2_up_m;
     row.sigma_m = request_.config->stage3_vertical_anchor_sigma_m;
     row.factor_added = false;
-    row.skip_reason = std::isfinite(row.stage2_lowpass_up_m) ? "PLANNED" : "LOWPASS_UNAVAILABLE";
+    row.skip_reason =
+      index >= one_past_last_filter_index
+        ? "TERMINAL_STATIC"
+        : (std::isfinite(row.stage2_lowpass_up_m) ? "PLANNED" : "LOWPASS_UNAVAILABLE");
     reference.rows.push_back(row);
   }
   return reference;

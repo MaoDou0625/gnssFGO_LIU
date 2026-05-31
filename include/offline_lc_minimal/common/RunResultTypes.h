@@ -128,6 +128,8 @@ struct RunSummary {
   std::size_t initial_dynamic_static_valid_feature_window_count = 0;
   std::size_t initial_dynamic_static_window_count = 0;
   std::size_t initial_dynamic_static_vz_factor_count = 0;
+  std::size_t initial_dynamic_static_up_factor_count = 0;
+  std::size_t initial_dynamic_static_height_hold_factor_count = 0;
   double initial_dynamic_static_rtk_speed_threshold_mps =
     std::numeric_limits<double>::quiet_NaN();
   double initial_dynamic_static_gyro_rms_threshold_radps =
@@ -573,6 +575,10 @@ struct RunSummary {
         << initial_dynamic_static_window_count << '\n'
         << "initial_dynamic_static_vz_factor_count="
         << initial_dynamic_static_vz_factor_count << '\n'
+        << "initial_dynamic_static_up_factor_count="
+        << initial_dynamic_static_up_factor_count << '\n'
+        << "initial_dynamic_static_height_hold_factor_count="
+        << initial_dynamic_static_height_hold_factor_count << '\n'
         << "initial_dynamic_static_rtk_speed_threshold_mps="
         << initial_dynamic_static_rtk_speed_threshold_mps << '\n'
         << "initial_dynamic_static_gyro_rms_threshold_radps="

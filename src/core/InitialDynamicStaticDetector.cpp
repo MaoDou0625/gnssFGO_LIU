@@ -187,6 +187,7 @@ Thresholds BuildThresholds(
 LateStaticWindowRow MakeWindowRow(
   const ActiveWindow &active,
   const OfflineRunnerConfig &config,
+  const double dynamic_start_time_s,
   const std::size_t index) {
   LateStaticWindowRow row;
   row.window_index = index;
@@ -201,10 +202,20 @@ LateStaticWindowRow MakeWindowRow(
       *std::min_element(active.up_lows.begin(), active.up_lows.end());
   }
   row.vz_sigma_mps = config.initial_dynamic_static_vz_sigma_mps;
-  row.up_sigma_m = std::numeric_limits<double>::quiet_NaN();
-  row.height_hold_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  row.up_sigma_m = config.initial_dynamic_static_up_sigma_m;
+  row.height_hold_sigma_m = config.initial_dynamic_static_height_hold_sigma_m;
+  const double prefix_start_tolerance_s =
+    std::max(0.05, config.late_static_stride_s + kTimeEpsilonS);
+  const bool is_initial_dynamic_prefix =
+    std::isfinite(dynamic_start_time_s) &&
+    active.start_time_s <= dynamic_start_time_s + prefix_start_tolerance_s &&
+    active.end_time_s >= dynamic_start_time_s - kTimeEpsilonS;
+  const double minimum_duration_s =
+    is_initial_dynamic_prefix
+      ? std::min(config.initial_dynamic_static_min_duration_s, config.late_static_window_s)
+      : config.initial_dynamic_static_min_duration_s;
   row.valid =
-    row.duration_s + kTimeEpsilonS >= config.initial_dynamic_static_min_duration_s &&
+    row.duration_s + kTimeEpsilonS >= minimum_duration_s &&
     std::isfinite(row.rtk_median_up_m);
   row.skip_reason = row.valid ? "OK" : "SHORT_OR_INVALID";
   return row;
@@ -213,6 +224,7 @@ LateStaticWindowRow MakeWindowRow(
 std::vector<LateStaticWindowRow> DetectWindows(
   const OfflineRunnerConfig &config,
   const Thresholds &thresholds,
+  const double dynamic_start_time_s,
   std::vector<LateStaticFeatureDiagnosticRow> &features) {
   std::vector<LateStaticWindowRow> windows;
   if (!thresholds.valid) {
@@ -225,7 +237,8 @@ std::vector<LateStaticWindowRow> DetectWindows(
     if (!has_active) {
       return;
     }
-    LateStaticWindowRow row = MakeWindowRow(active, config, windows.size());
+    LateStaticWindowRow row =
+      MakeWindowRow(active, config, dynamic_start_time_s, windows.size());
     if (row.valid) {
       windows.push_back(std::move(row));
     }
@@ -332,6 +345,7 @@ InitialDynamicStaticDetectionResult InitialDynamicStaticDetector::Detect() const
     DetectWindows(
       *request_.config,
       thresholds,
+      request_.dynamic_start_time_s,
       result.feature_diagnostics);
   return result;
 }
