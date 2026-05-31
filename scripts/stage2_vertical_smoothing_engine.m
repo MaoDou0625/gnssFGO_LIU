@@ -3,6 +3,22 @@ function result = stage2_vertical_smoothing_engine(data, params)
 %
 % The output is always sampled on the original time_s timeline so the result
 % can be exported as a Stage3 vertical reference candidate.
+%
+% Use stage2_lowpass_frequency_tuner() for the interactive GUI. Calling this
+% helper without input arguments opens that GUI for convenience.
+
+if nargin == 0
+  if nargout > 0
+    error(['stage2_vertical_smoothing_engine requires data and params when an output is requested. ' ...
+      'Use stage2_lowpass_frequency_tuner() for the interactive GUI.']);
+  end
+  stage2_lowpass_frequency_tuner();
+  return;
+end
+
+if nargin < 2 || isempty(params)
+  params = struct();
+end
 
 params = normalizeParams(params);
 timeS = data.timeS(:);
