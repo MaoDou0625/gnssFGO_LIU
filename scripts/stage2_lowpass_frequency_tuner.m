@@ -352,6 +352,24 @@ if isfinite(parsed)
 end
 end
 
+function value = readSummaryValue(resultDir, key, defaultValue)
+value = defaultValue;
+summaryPath = fullfile(resultDir, 'summary.txt');
+if ~isfile(summaryPath)
+  return;
+end
+text = fileread(summaryPath);
+pattern = "(?m)^" + regexptranslate('escape', key) + "=(?<value>[^\r\n]+)";
+match = regexp(text, pattern, 'names', 'once');
+if isempty(match)
+  return;
+end
+parsed = str2double(match.value);
+if isfinite(parsed)
+  value = parsed;
+end
+end
+
 function windows = readInitialDynamicStaticWindows(resultDir)
 windows = table();
 windowPath = fullfile(resultDir, 'initial_dynamic_static_windows.csv');
@@ -395,17 +413,48 @@ end
 function rtkScatter = readStaticAlignmentRtkScatter(resultDir)
 rtkScatter = emptyRtkScatter();
 validationPath = fullfile(resultDir, 'static_alignment_validation.csv');
-if ~isfile(validationPath)
+gnssPath = findGnssSolutionPath(resultDir);
+originHeightM = readSummaryValue(resultDir, 'origin_h_m', nan);
+if ~isfile(validationPath) || ~isfile(gnssPath) || ~isfinite(originHeightM)
   return;
 end
 T = readtable(validationPath, 'TextType', 'string');
-requiredColumns = {'time_s','rtk_reference_up_m'};
-if ~all(ismember(requiredColumns, T.Properties.VariableNames))
+if ~ismember('time_s', T.Properties.VariableNames)
   return;
 end
-valid = isfinite(T.time_s) & isfinite(T.rtk_reference_up_m);
-rtkScatter.timeS = T.time_s(valid);
-rtkScatter.upM = T.rtk_reference_up_m(valid);
+staticTimes = T.time_s(isfinite(T.time_s));
+if isempty(staticTimes)
+  return;
+end
+staticStartS = min(staticTimes);
+staticEndS = max(staticTimes);
+gnssMatrix = readmatrix(gnssPath, 'FileType', 'text');
+if size(gnssMatrix, 2) < 13
+  return;
+end
+timeOffsetS = readConfigValue(resultDir, 'gnss_time_offset_s', 0.0);
+timeS = gnssMatrix(:, 1) - timeOffsetS;
+heightM = gnssMatrix(:, 4);
+fixType = gnssMatrix(:, 13);
+valid = isfinite(timeS) & isfinite(heightM) & ...
+  timeS >= staticStartS & timeS <= staticEndS & fixType == 1;
+rtkScatter.timeS = timeS(valid);
+rtkScatter.upM = heightM(valid) - originHeightM;
+end
+
+function gnssPath = findGnssSolutionPath(resultDir)
+candidatePaths = {
+  fullfile(resultDir, 'gnss_solution_gnss_fgo.txt')
+  fullfile(resultDir, '..', 'gnss_solution_gnss_fgo.txt')
+  };
+gnssPath = '';
+for i = 1:numel(candidatePaths)
+  candidatePath = char(candidatePaths{i});
+  if isfile(candidatePath)
+    gnssPath = candidatePath;
+    return;
+  end
+end
 end
 
 function rtkScatter = combineRtkScatter(staticRtk, dynamicRtk, referenceTimeS)
