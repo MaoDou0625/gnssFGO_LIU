@@ -361,7 +361,17 @@ end
 end
 
 function rtkScatter = readRtkScatter(resultDir, referenceTimeS)
+dynamicRtk = readDynamicRtkScatter(resultDir);
+staticRtk = readStaticAlignmentRtkScatter(resultDir);
+rtkScatter = combineRtkScatter(staticRtk, dynamicRtk, referenceTimeS);
+end
+
+function rtkScatter = emptyRtkScatter()
 rtkScatter = struct('timeS', [], 'relativeTimeS', [], 'upM', []);
+end
+
+function rtkScatter = readDynamicRtkScatter(resultDir)
+rtkScatter = emptyRtkScatter();
 alignmentPath = fullfile(resultDir, 'gnss_alignment.csv');
 if ~isfile(alignmentPath)
   return;
@@ -379,8 +389,40 @@ if ismember('fix_type', T.Properties.VariableNames)
   valid = valid & T.fix_type == "RTKFIX";
 end
 rtkScatter.timeS = T.corrected_time_s(valid);
-rtkScatter.relativeTimeS = rtkScatter.timeS - referenceTimeS;
 rtkScatter.upM = T.raw_rtk_up_m(valid);
+end
+
+function rtkScatter = readStaticAlignmentRtkScatter(resultDir)
+rtkScatter = emptyRtkScatter();
+validationPath = fullfile(resultDir, 'static_alignment_validation.csv');
+if ~isfile(validationPath)
+  return;
+end
+T = readtable(validationPath, 'TextType', 'string');
+requiredColumns = {'time_s','rtk_reference_up_m'};
+if ~all(ismember(requiredColumns, T.Properties.VariableNames))
+  return;
+end
+valid = isfinite(T.time_s) & isfinite(T.rtk_reference_up_m);
+rtkScatter.timeS = T.time_s(valid);
+rtkScatter.upM = T.rtk_reference_up_m(valid);
+end
+
+function rtkScatter = combineRtkScatter(staticRtk, dynamicRtk, referenceTimeS)
+rtkScatter = emptyRtkScatter();
+timeS = [staticRtk.timeS(:); dynamicRtk.timeS(:)];
+upM = [staticRtk.upM(:); dynamicRtk.upM(:)];
+valid = isfinite(timeS) & isfinite(upM);
+if ~any(valid)
+  return;
+end
+timeS = timeS(valid);
+upM = upM(valid);
+[timeS, order] = sort(timeS);
+upM = upM(order);
+rtkScatter.timeS = timeS;
+rtkScatter.relativeTimeS = timeS - referenceTimeS;
+rtkScatter.upM = upM;
 end
 
 function result = computeTunedReference(data, cutoffHz, excludeStatic, protectInitialDynamicStatic)
