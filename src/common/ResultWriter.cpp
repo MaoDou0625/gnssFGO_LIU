@@ -76,6 +76,26 @@ void ResultWriter::WriteOutputs(
       output_path / "segment_error_summary.txt",
       BuildSegmentErrorSummaryText(result.segment_error_diagnostics));
   }
+  if (!result.residual_module_contributions.empty()) {
+    WriteResidualContributionCsv(
+      output_path / "residual_module_contributions.csv",
+      result.residual_module_contributions);
+  }
+  if (!result.residual_factor_contributions.empty()) {
+    WriteResidualContributionCsv(
+      output_path / "residual_factor_contributions.csv",
+      result.residual_factor_contributions);
+  }
+  if (!result.stage1_yaw_residual_module_contributions.empty()) {
+    WriteResidualContributionCsv(
+      output_path / "stage1_yaw_residual_module_contributions.csv",
+      result.stage1_yaw_residual_module_contributions);
+  }
+  if (!result.stage1_yaw_residual_factor_contributions.empty()) {
+    WriteResidualContributionCsv(
+      output_path / "stage1_yaw_residual_factor_contributions.csv",
+      result.stage1_yaw_residual_factor_contributions);
+  }
   if (!result.gnss_consistency_records.empty()) {
     WriteGnssConsistencyCsv(output_path / "gnss_consistency.csv", result.gnss_consistency_records);
   }

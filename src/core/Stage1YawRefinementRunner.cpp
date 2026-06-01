@@ -109,6 +109,18 @@ Stage1YawRefinementDiagnosticRow MakeDiagnosticRow(
   return row;
 }
 
+void AppendStage1ResidualContributionRows(
+  const std::vector<ResidualContributionRow> &source_rows,
+  const int iteration,
+  std::vector<ResidualContributionRow> &target_rows) {
+  target_rows.reserve(target_rows.size() + source_rows.size());
+  for (auto row : source_rows) {
+    row.stage_name = "stage1_yaw_refinement";
+    row.stage_iteration = iteration;
+    target_rows.push_back(std::move(row));
+  }
+}
+
 }  // namespace
 
 Stage1YawRefinementRunner::Stage1YawRefinementRunner(Stage1YawRefinementRequest request)
@@ -126,6 +138,13 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
   std::vector<Stage1YawBranchCandidate> branch_candidates;
   branch_candidates.reserve(
     static_cast<std::size_t>(stage_config.stage1_yaw_refinement_max_iterations));
+  std::vector<ResidualContributionRow> stage1_module_residuals;
+  std::vector<ResidualContributionRow> stage1_factor_residuals;
+
+  const auto attach_stage1_residuals = [&] (OfflineRunResult &result) {
+    result.stage1_yaw_residual_module_contributions = stage1_module_residuals;
+    result.stage1_yaw_residual_factor_contributions = stage1_factor_residuals;
+  };
 
   OfflineRunResult last_result;
   double final_yaw_rad = std::numeric_limits<double>::quiet_NaN();
@@ -137,6 +156,14 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
       stage_config,
       request_.body_y_envelope_reference,
       request_.dataset);
+    AppendStage1ResidualContributionRows(
+      last_result.residual_module_contributions,
+      iteration,
+      stage1_module_residuals);
+    AppendStage1ResidualContributionRows(
+      last_result.residual_factor_contributions,
+      iteration,
+      stage1_factor_residuals);
     const double input_yaw_rad = InitialYawForNextUpdate(stage_config, last_result);
     final_yaw_rad = input_yaw_rad;
 
@@ -171,6 +198,7 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
         stop_reason,
         final_yaw_rad,
         false);
+      attach_stage1_residuals(last_result);
       return last_result;
     }
 
@@ -198,6 +226,7 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
         row.iteration,
         "converged",
         0.0);
+      attach_stage1_residuals(last_result);
       return last_result;
     }
 
@@ -220,6 +249,7 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
           0,
           resolution.selection_reason,
           std::numeric_limits<double>::quiet_NaN());
+        attach_stage1_residuals(last_result);
         return last_result;
       }
 
@@ -240,6 +270,7 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
         resolution.selected_iteration,
         resolution.selection_reason,
         resolution.selected_branch_score);
+      attach_stage1_residuals(selected_result);
       return selected_result;
     }
 
@@ -264,6 +295,7 @@ OfflineRunResult Stage1YawRefinementRunner::Run() const {
     stop_reason,
     final_yaw_rad,
     converged);
+  attach_stage1_residuals(last_result);
   return last_result;
 }
 

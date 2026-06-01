@@ -55,6 +55,10 @@ void CopySourceDiagnostics(
   OfflineRunResult &stage3_result) {
   stage3_result.stage1_yaw_refinement_diagnostics =
     stage2_result.stage1_yaw_refinement_diagnostics;
+  stage3_result.stage1_yaw_residual_module_contributions =
+    stage2_result.stage1_yaw_residual_module_contributions;
+  stage3_result.stage1_yaw_residual_factor_contributions =
+    stage2_result.stage1_yaw_residual_factor_contributions;
   stage3_result.stage1_outage_body_y_envelopes =
     stage2_result.stage1_outage_body_y_envelopes;
   stage3_result.stage1_outage_body_y_state_diagnostics =

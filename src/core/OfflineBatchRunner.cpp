@@ -47,6 +47,7 @@
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageSegmentedBatchRunner.h"
 #include "offline_lc_minimal/core/RtkOutageSmoothingConstraintBuilder.h"
+#include "offline_lc_minimal/core/ResidualContributionAnalyzer.h"
 #include "offline_lc_minimal/core/RtkVelocityConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
 #include "offline_lc_minimal/core/RtkVerticalDriftReferenceEstimator.h"
@@ -2094,6 +2095,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.initial_error = optimizer.error();
   const gtsam::Values optimized_values = optimizer.optimize();
   run_result.run_summary.final_error = graph_with_gnss.error(optimized_values);
+  const ResidualContributionReport residual_contribution_report =
+    AnalyzeResidualContributions(graph_with_gnss, optimized_values);
+  run_result.residual_module_contributions =
+    residual_contribution_report.module_rows;
+  run_result.residual_factor_contributions =
+    residual_contribution_report.factor_rows;
   RtkVelocityConstraintBuilder::PopulateDiagnostics(
     optimized_values,
     run_result.rtk_velocity_diagnostics,

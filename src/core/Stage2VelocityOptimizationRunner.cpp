@@ -21,6 +21,10 @@ void CopyStage1Summary(
   OfflineRunResult &stage2_result) {
   stage2_result.stage1_yaw_refinement_diagnostics =
     stage1_result.stage1_yaw_refinement_diagnostics;
+  stage2_result.stage1_yaw_residual_module_contributions =
+    stage1_result.stage1_yaw_residual_module_contributions;
+  stage2_result.stage1_yaw_residual_factor_contributions =
+    stage1_result.stage1_yaw_residual_factor_contributions;
   stage2_result.run_summary.stage1_yaw_refinement_enabled =
     stage1_result.run_summary.stage1_yaw_refinement_enabled;
   stage2_result.run_summary.stage1_yaw_refinement_iteration_count =

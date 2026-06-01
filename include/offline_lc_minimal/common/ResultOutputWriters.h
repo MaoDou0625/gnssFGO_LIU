@@ -42,6 +42,10 @@ void WriteSegmentErrorCsv(
 [[nodiscard]] std::string BuildSegmentErrorSummaryText(
   const std::vector<SegmentErrorDiagnostic> &rows);
 
+void WriteResidualContributionCsv(
+  const std::filesystem::path &path,
+  const std::vector<ResidualContributionRow> &rows);
+
 void WriteGnssConsistencyCsv(
   const std::filesystem::path &path,
   const std::vector<GnssConsistencyRecord> &records);

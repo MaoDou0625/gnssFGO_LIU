@@ -68,6 +68,18 @@ void WriteTextFile(const std::filesystem::path &path, const std::string &content
   output_stream << content;
 }
 
+void WriteCsvString(std::ostream &stream, const std::string &value) {
+  stream << '"';
+  for (const char character : value) {
+    if (character == '"') {
+      stream << "\"\"";
+    } else {
+      stream << character;
+    }
+  }
+  stream << '"';
+}
+
 void WriteTrajectoryCsv(
   const std::filesystem::path &path,
   const std::vector<TrajectoryRow> &rows,
@@ -353,6 +365,34 @@ std::string BuildSegmentErrorSummaryText(const std::vector<SegmentErrorDiagnosti
            << label << ".total_variation=" << stats.total_variation << '\n';
   }
   return stream.str();
+}
+
+void WriteResidualContributionCsv(
+  const std::filesystem::path &path,
+  const std::vector<ResidualContributionRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "stage_name,stage_iteration,module,factor_type,factor_count,evaluated_factor_count,"
+       "failed_factor_count,total_error,mean_error,max_error,max_error_factor_index,total_error_fraction\n";
+  for (const auto &row : rows) {
+    WriteCsvString(stream, row.stage_name);
+    stream << ',' << row.stage_iteration << ',';
+    WriteCsvString(stream, row.module);
+    stream << ',';
+    WriteCsvString(stream, row.factor_type);
+    stream << ',' << row.factor_count
+           << ',' << row.evaluated_factor_count
+           << ',' << row.failed_factor_count
+           << ',' << row.total_error
+           << ',' << row.mean_error
+           << ',' << row.max_error
+           << ',' << row.max_error_factor_index
+           << ',' << row.total_error_fraction << '\n';
+  }
 }
 
 void WriteGnssConsistencyCsv(

@@ -1048,6 +1048,10 @@ struct OfflineRunResult {
   std::vector<BodyZBiasReestimateSegmentRow> body_z_bias_reestimate_segments;
   std::vector<ErrorStateRow> error_state_trajectory;
   std::vector<SegmentErrorDiagnostic> segment_error_diagnostics;
+  std::vector<ResidualContributionRow> residual_module_contributions;
+  std::vector<ResidualContributionRow> residual_factor_contributions;
+  std::vector<ResidualContributionRow> stage1_yaw_residual_module_contributions;
+  std::vector<ResidualContributionRow> stage1_yaw_residual_factor_contributions;
   std::vector<TrajectoryRow> trajectory;
   std::vector<ImuRateAvpRow> imu_rate_avp;
   std::vector<ImuRateIntervalDiagnostic> imu_rate_interval_diagnostics;

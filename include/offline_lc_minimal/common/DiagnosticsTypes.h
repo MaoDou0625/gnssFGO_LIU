@@ -156,6 +156,21 @@ struct SegmentErrorDiagnostic {
   double mean_postfit_nis = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct ResidualContributionRow {
+  std::string stage_name = "final";
+  int stage_iteration = 0;
+  std::string module = "UNSET";
+  std::string factor_type = "UNSET";
+  std::size_t factor_count = 0;
+  std::size_t evaluated_factor_count = 0;
+  std::size_t failed_factor_count = 0;
+  double total_error = 0.0;
+  double mean_error = std::numeric_limits<double>::quiet_NaN();
+  double max_error = std::numeric_limits<double>::quiet_NaN();
+  long long max_error_factor_index = -1;
+  double total_error_fraction = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct GnssConsistencyRecord {
   std::size_t sample_index = 0;
   double raw_time_s = 0.0;
