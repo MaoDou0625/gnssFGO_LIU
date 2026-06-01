@@ -201,9 +201,6 @@ std::shared_ptr<const Stage2VelocityReference> SliceStage2ReferenceForSegment(
 std::shared_ptr<const Stage2VelocityReference> WithBoundaryReferences(
   std::shared_ptr<const Stage2VelocityReference> reference,
   std::vector<RtkOutageBoundaryReferenceRow> boundary_references) {
-  if (reference == nullptr) {
-    return nullptr;
-  }
   auto mutable_reference = reference != nullptr
     ? std::make_shared<Stage2VelocityReference>(*reference)
     : std::make_shared<Stage2VelocityReference>();
@@ -237,6 +234,32 @@ const TrajectoryRow *NearestTrajectoryRow(
     : &right;
 }
 
+const ReferenceNodeState *NearestReferenceState(
+  const std::vector<ReferenceNodeState> &states,
+  const double time_s) {
+  if (states.empty() || !std::isfinite(time_s)) {
+    return nullptr;
+  }
+  const auto upper = std::lower_bound(
+    states.begin(),
+    states.end(),
+    time_s,
+    [](const ReferenceNodeState &state, const double target_time_s) {
+      return state.time_s < target_time_s;
+    });
+  if (upper == states.begin()) {
+    return &states.front();
+  }
+  if (upper == states.end()) {
+    return &states.back();
+  }
+  const auto &right = *upper;
+  const auto &left = *std::prev(upper);
+  return std::abs(left.time_s - time_s) <= std::abs(right.time_s - time_s)
+    ? &left
+    : &right;
+}
+
 RtkOutageBoundaryReferenceRow MakeBoundaryReferenceFromTrajectory(
   const OfflineRunnerConfig &config,
   const OfflineRunResult &result,
@@ -253,22 +276,45 @@ RtkOutageBoundaryReferenceRow MakeBoundaryReferenceFromTrajectory(
   reference.up_sigma_m = config.rtk_outage_boundary_up_sigma_m;
   reference.vz_sigma_mps = config.rtk_outage_boundary_vz_sigma_mps;
   reference.ba_z_sigma_mps2 = config.rtk_outage_boundary_baz_sigma_mps2;
+  reference.horizontal_position_sigma_m = config.stage2_horizontal_position_hold_sigma_m;
+  reference.horizontal_velocity_sigma_mps = config.stage2_horizontal_velocity_hold_sigma_mps;
+  reference.attitude_sigma_rad = config.rtk_outage_absolute_attitude_sigma_rad;
 
   const TrajectoryRow *row = NearestTrajectoryRow(result.trajectory, target_time_s);
-  if (row == nullptr) {
-    reference.skip_reason = "missing_trajectory_reference";
+  const ReferenceNodeState *state =
+    NearestReferenceState(result.optimized_reference_states, target_time_s);
+  if (row == nullptr && state == nullptr) {
+    reference.skip_reason = "missing_boundary_reference";
     return reference;
   }
-  reference.reference_up_m = row->enu_position_m.z();
-  reference.reference_vz_mps = row->enu_velocity_mps.z();
-  reference.reference_ba_z_mps2 = row->bias_acc.z();
+  if (row != nullptr) {
+    reference.reference_up_m = row->enu_position_m.z();
+    reference.reference_vz_mps = row->enu_velocity_mps.z();
+    reference.reference_ba_z_mps2 = row->bias_acc.z();
+    reference.reference_horizontal_position_m =
+      Eigen::Vector2d(row->enu_position_m.x(), row->enu_position_m.y());
+    reference.reference_horizontal_velocity_mps =
+      Eigen::Vector2d(row->enu_velocity_mps.x(), row->enu_velocity_mps.y());
+  }
+  if (state != nullptr && state->pose.rotation().matrix().allFinite()) {
+    reference.reference_rotation = state->pose.rotation();
+    reference.has_attitude = true;
+  }
   reference.has_up = std::isfinite(reference.reference_up_m);
   reference.has_vz = std::isfinite(reference.reference_vz_mps);
   reference.has_ba_z = allow_ba_z && std::isfinite(reference.reference_ba_z_mps2);
+  reference.has_horizontal_position = reference.reference_horizontal_position_m.allFinite();
+  reference.has_horizontal_velocity = reference.reference_horizontal_velocity_mps.allFinite();
   reference.add_up_constraint = reference.has_up;
   reference.add_vz_constraint = reference.has_vz;
   reference.add_ba_z_constraint = reference.has_ba_z;
-  reference.valid = reference.has_up || reference.has_vz || reference.has_ba_z;
+  reference.add_horizontal_position_constraint = reference.has_horizontal_position;
+  reference.add_horizontal_velocity_constraint = reference.has_horizontal_velocity;
+  reference.add_attitude_constraint = reference.has_attitude;
+  reference.valid =
+    reference.has_up || reference.has_vz || reference.has_ba_z ||
+    reference.has_horizontal_position || reference.has_horizontal_velocity ||
+    reference.has_attitude;
   reference.skip_reason = reference.valid ? "OK" : "nonfinite_trajectory_reference";
   return reference;
 }

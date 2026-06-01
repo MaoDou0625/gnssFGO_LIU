@@ -480,15 +480,29 @@ struct RtkOutageBoundaryReferenceRow {
   bool has_up = false;
   bool has_vz = false;
   bool has_ba_z = false;
+  bool has_horizontal_position = false;
+  bool has_horizontal_velocity = false;
+  bool has_attitude = false;
   bool add_up_constraint = false;
   bool add_vz_constraint = false;
   bool add_ba_z_constraint = false;
+  bool add_horizontal_position_constraint = false;
+  bool add_horizontal_velocity_constraint = false;
+  bool add_attitude_constraint = false;
   double reference_up_m = std::numeric_limits<double>::quiet_NaN();
   double reference_vz_mps = std::numeric_limits<double>::quiet_NaN();
   double reference_ba_z_mps2 = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector2d reference_horizontal_position_m =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector2d reference_horizontal_velocity_mps =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  gtsam::Rot3 reference_rotation;
   double up_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double vz_sigma_mps = std::numeric_limits<double>::quiet_NaN();
   double ba_z_sigma_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double horizontal_position_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double horizontal_velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double attitude_sigma_rad = std::numeric_limits<double>::quiet_NaN();
   std::string skip_reason = "UNSET";
 };
 
@@ -529,6 +543,25 @@ struct RtkOutageBoundaryDiagnosticRow {
   bool up_factor_added = false;
   bool vz_factor_added = false;
   bool ba_z_factor_added = false;
+  bool horizontal_position_factor_added = false;
+  bool horizontal_velocity_factor_added = false;
+  bool attitude_factor_added = false;
+  Eigen::Vector2d reference_horizontal_position_m =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector2d optimized_horizontal_position_m =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector2d horizontal_position_residual_m =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double horizontal_position_residual_norm_m = std::numeric_limits<double>::quiet_NaN();
+  double horizontal_position_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector2d reference_horizontal_velocity_mps =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector2d optimized_horizontal_velocity_mps =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector2d horizontal_velocity_residual_mps =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double horizontal_velocity_residual_norm_mps = std::numeric_limits<double>::quiet_NaN();
+  double horizontal_velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
   double reference_up_m = std::numeric_limits<double>::quiet_NaN();
   double optimized_up_m = std::numeric_limits<double>::quiet_NaN();
   double up_residual_m = std::numeric_limits<double>::quiet_NaN();
@@ -541,6 +574,15 @@ struct RtkOutageBoundaryDiagnosticRow {
   double optimized_ba_z_ug = std::numeric_limits<double>::quiet_NaN();
   double ba_z_residual_ug = std::numeric_limits<double>::quiet_NaN();
   double ba_z_sigma_ug = std::numeric_limits<double>::quiet_NaN();
+  gtsam::Rot3 reference_rotation;
+  Eigen::Vector3d reference_ypr_rad =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d optimized_ypr_rad =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d attitude_residual_rad =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double attitude_residual_norm_rad = std::numeric_limits<double>::quiet_NaN();
+  double attitude_sigma_rad = std::numeric_limits<double>::quiet_NaN();
   std::string skip_reason = "UNSET";
 };
 

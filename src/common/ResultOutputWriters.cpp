@@ -804,9 +804,21 @@ void WriteRtkOutageBoundaryDiagnosticsCsv(
   stream
     << "window_index,boundary_role,source_type,target_state_index,target_time_s,"
        "valid,up_factor_added,vz_factor_added,ba_z_factor_added,"
+       "horizontal_position_factor_added,horizontal_velocity_factor_added,"
+       "attitude_factor_added,"
+       "reference_east_m,reference_north_m,optimized_east_m,optimized_north_m,"
+       "horizontal_position_residual_east_m,horizontal_position_residual_north_m,"
+       "horizontal_position_residual_norm_m,horizontal_position_sigma_m,"
+       "reference_ve_mps,reference_vn_mps,optimized_ve_mps,optimized_vn_mps,"
+       "horizontal_velocity_residual_east_mps,horizontal_velocity_residual_north_mps,"
+       "horizontal_velocity_residual_norm_mps,horizontal_velocity_sigma_mps,"
        "reference_up_m,optimized_up_m,up_residual_m,up_sigma_m,"
        "reference_vz_mps,optimized_vz_mps,vz_residual_mps,vz_sigma_mps,"
        "reference_ba_z_ug,optimized_ba_z_ug,ba_z_residual_ug,ba_z_sigma_ug,"
+       "reference_yaw_rad,reference_pitch_rad,reference_roll_rad,"
+       "optimized_yaw_rad,optimized_pitch_rad,optimized_roll_rad,"
+       "attitude_residual_x_rad,attitude_residual_y_rad,attitude_residual_z_rad,"
+       "attitude_residual_norm_rad,attitude_sigma_rad,"
        "skip_reason\n";
   for (const auto &row : rows) {
     stream << row.window_index << ','
@@ -818,6 +830,25 @@ void WriteRtkOutageBoundaryDiagnosticsCsv(
            << (row.up_factor_added ? 1 : 0) << ','
            << (row.vz_factor_added ? 1 : 0) << ','
            << (row.ba_z_factor_added ? 1 : 0) << ','
+           << (row.horizontal_position_factor_added ? 1 : 0) << ','
+           << (row.horizontal_velocity_factor_added ? 1 : 0) << ','
+           << (row.attitude_factor_added ? 1 : 0) << ','
+           << row.reference_horizontal_position_m.x() << ','
+           << row.reference_horizontal_position_m.y() << ','
+           << row.optimized_horizontal_position_m.x() << ','
+           << row.optimized_horizontal_position_m.y() << ','
+           << row.horizontal_position_residual_m.x() << ','
+           << row.horizontal_position_residual_m.y() << ','
+           << row.horizontal_position_residual_norm_m << ','
+           << row.horizontal_position_sigma_m << ','
+           << row.reference_horizontal_velocity_mps.x() << ','
+           << row.reference_horizontal_velocity_mps.y() << ','
+           << row.optimized_horizontal_velocity_mps.x() << ','
+           << row.optimized_horizontal_velocity_mps.y() << ','
+           << row.horizontal_velocity_residual_mps.x() << ','
+           << row.horizontal_velocity_residual_mps.y() << ','
+           << row.horizontal_velocity_residual_norm_mps << ','
+           << row.horizontal_velocity_sigma_mps << ','
            << row.reference_up_m << ','
            << row.optimized_up_m << ','
            << row.up_residual_m << ','
@@ -830,6 +861,17 @@ void WriteRtkOutageBoundaryDiagnosticsCsv(
            << row.optimized_ba_z_ug << ','
            << row.ba_z_residual_ug << ','
            << row.ba_z_sigma_ug << ','
+           << row.reference_ypr_rad.x() << ','
+           << row.reference_ypr_rad.y() << ','
+           << row.reference_ypr_rad.z() << ','
+           << row.optimized_ypr_rad.x() << ','
+           << row.optimized_ypr_rad.y() << ','
+           << row.optimized_ypr_rad.z() << ','
+           << row.attitude_residual_rad.x() << ','
+           << row.attitude_residual_rad.y() << ','
+           << row.attitude_residual_rad.z() << ','
+           << row.attitude_residual_norm_rad << ','
+           << row.attitude_sigma_rad << ','
            << row.skip_reason << '\n';
   }
 }

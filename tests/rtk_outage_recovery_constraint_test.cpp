@@ -15,6 +15,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeReference.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutagePreOutageVerticalFenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
@@ -348,7 +349,194 @@ void TestPreOutageVerticalFenceDisabledAddsNoFactors() {
              "disabled pre-outage fence should report zero factors");
 }
 
-void TestBoundaryConstraintBuilderConstrainsOnlyUpVzAndBaz() {
+void TestBoundaryAttitudeReferenceAnchorsStartAndEndWithImuDelta() {
+  const std::vector<double> timestamps{0.0, 1.0, 2.0, 3.0};
+  std::vector<offline_lc_minimal::ReferenceNodeState> imu_states(timestamps.size());
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    imu_states[index].time_s = timestamps[index];
+    imu_states[index].pose = gtsam::Pose3(
+      gtsam::Rot3::Ypr(0.1 * static_cast<double>(index), 0.0, 0.0),
+      gtsam::Point3::Zero());
+  }
+
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> refs(2U);
+  refs[0].window_index = 9U;
+  refs[0].boundary_role = "OUTAGE_START";
+  refs[0].target_time_s = 1.0;
+  refs[0].valid = true;
+  refs[0].has_attitude = true;
+  refs[0].reference_rotation = gtsam::Rot3::Ypr(1.0, 0.0, 0.0);
+  refs[1].window_index = 9U;
+  refs[1].boundary_role = "OUTAGE_END";
+  refs[1].target_time_s = 3.0;
+  refs[1].valid = true;
+  refs[1].has_attitude = true;
+  refs[1].reference_rotation = gtsam::Rot3::Ypr(1.4, 0.0, 0.0);
+
+  const auto reference =
+    offline_lc_minimal::BuildRtkOutageBoundaryAttitudeReference(
+      timestamps,
+      imu_states,
+      refs);
+  ExpectTrue(reference.valid(), "boundary attitude reference should be valid");
+  ExpectTrue(reference.outage_windows.size() == 1U, "one synthetic outage window expected");
+  ExpectTrue(reference.outage_windows.front().pre_anchor_state_index == 1U,
+             "synthetic outage start index is wrong");
+  ExpectTrue(reference.outage_windows.front().post_anchor_state_index == 3U,
+             "synthetic outage end index is wrong");
+  ExpectNear(reference.reference_states[1].pose.rotation().ypr().x(), 1.0, 1e-12,
+             "start rotation must match the pre boundary");
+  ExpectNear(reference.reference_states[2].pose.rotation().ypr().x(), 1.2, 1e-12,
+             "middle rotation should preserve IMU delta with smooth end correction");
+  ExpectNear(reference.reference_states[3].pose.rotation().ypr().x(), 1.4, 1e-12,
+             "end rotation must match the post boundary");
+
+  gtsam::Values values;
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(
+        gtsam::Rot3::Identity(),
+        gtsam::Point3(static_cast<double>(index), 0.0, 0.0)));
+  }
+  offline_lc_minimal::ApplyRtkOutageBoundaryAttitudeInitialValues(
+    reference,
+    timestamps,
+    0.0,
+    values);
+  ExpectNear(
+    values.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(0)).rotation().ypr().x(),
+    0.0,
+    1e-12,
+    "states outside the synthetic outage should not be changed");
+  ExpectNear(
+    values.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(2)).rotation().ypr().x(),
+    1.2,
+    1e-12,
+    "initial values should be moved onto the boundary-anchored branch");
+}
+
+void TestBoundaryStateInitialValuesDoNotRequireAttitude() {
+  const std::vector<double> timestamps{0.0, 1.0, 2.0};
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> refs(2U);
+  refs[0].window_index = 5U;
+  refs[0].boundary_role = "OUTAGE_START";
+  refs[0].target_time_s = 1.0;
+  refs[0].valid = true;
+  refs[0].has_horizontal_position = true;
+  refs[0].has_horizontal_velocity = true;
+  refs[0].has_up = true;
+  refs[0].has_vz = true;
+  refs[0].reference_horizontal_position_m = Eigen::Vector2d(10.0, 20.0);
+  refs[0].reference_horizontal_velocity_mps = Eigen::Vector2d(1.0, 2.0);
+  refs[0].reference_up_m = 3.0;
+  refs[0].reference_vz_mps = 4.0;
+  refs[1].window_index = 5U;
+  refs[1].boundary_role = "OUTAGE_END";
+  refs[1].target_time_s = 2.0;
+  refs[1].valid = true;
+  refs[1].has_horizontal_position = true;
+  refs[1].has_horizontal_velocity = true;
+  refs[1].has_up = true;
+  refs[1].has_vz = true;
+  refs[1].reference_horizontal_position_m = Eigen::Vector2d(12.0, 24.0);
+  refs[1].reference_horizontal_velocity_mps = Eigen::Vector2d(3.0, 6.0);
+  refs[1].reference_up_m = 5.0;
+  refs[1].reference_vz_mps = 8.0;
+
+  offline_lc_minimal::RtkOutageBoundaryAttitudeReference reference;
+  reference.reference_states.resize(timestamps.size());
+  reference.outage_windows.resize(1U);
+  reference.outage_windows.front().window_index = 5U;
+  reference.outage_windows.front().pre_anchor_state_index = 1U;
+  reference.outage_windows.front().post_anchor_state_index = 2U;
+  reference.outage_windows.front().start_time_s = 1.0;
+  reference.outage_windows.front().end_time_s = 2.0;
+
+  gtsam::Values values;
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(
+        gtsam::Rot3::Identity(),
+        gtsam::Point3(0.0, 0.0, 0.0)));
+    values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(0.0, 0.0, 0.0));
+  }
+  offline_lc_minimal::ApplyRtkOutageBoundaryStateInitialValues(
+    reference,
+    refs,
+    timestamps,
+    0.0,
+    values);
+
+  const auto start_pose = values.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(1));
+  const auto end_pose = values.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(2));
+  const auto start_velocity = values.at<gtsam::Vector3>(gtsam::symbol_shorthand::V(1));
+  const auto end_velocity = values.at<gtsam::Vector3>(gtsam::symbol_shorthand::V(2));
+  ExpectNear(start_pose.translation().x(), 10.0, 1e-12,
+             "start horizontal position should not require attitude");
+  ExpectNear(start_pose.translation().z(), 3.0, 1e-12,
+             "start vertical position should not require attitude");
+  ExpectNear(end_pose.translation().y(), 24.0, 1e-12,
+             "end horizontal position should not require attitude");
+  ExpectNear(end_pose.translation().z(), 5.0, 1e-12,
+             "end vertical position should not require attitude");
+  ExpectNear(start_velocity.y(), 2.0, 1e-12,
+             "start horizontal velocity should not require attitude");
+  ExpectNear(start_velocity.z(), 4.0, 1e-12,
+             "start vertical velocity should not require attitude");
+  ExpectNear(end_velocity.x(), 3.0, 1e-12,
+             "end horizontal velocity should not require attitude");
+  ExpectNear(end_velocity.z(), 8.0, 1e-12,
+             "end vertical velocity should not require attitude");
+}
+
+void TestBoundaryConstraintBuilderUsesBoundarySideForOffGridTimes() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_boundary_constraints = true;
+  config.rtk_outage_boundary_up_sigma_m = 0.01;
+
+  const std::vector<double> timestamps{0.0, 1.0, 2.0};
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> references(2U);
+  references[0].window_index = 1U;
+  references[0].boundary_role = "OUTAGE_START";
+  references[0].target_time_s = 0.6;
+  references[0].valid = true;
+  references[0].has_up = true;
+  references[0].add_up_constraint = true;
+  references[0].reference_up_m = 10.0;
+  references[0].up_sigma_m = config.rtk_outage_boundary_up_sigma_m;
+  references[1].window_index = 1U;
+  references[1].boundary_role = "OUTAGE_END";
+  references[1].target_time_s = 1.4;
+  references[1].valid = true;
+  references[1].has_up = true;
+  references[1].add_up_constraint = true;
+  references[1].reference_up_m = 20.0;
+  references[1].up_sigma_m = config.rtk_outage_boundary_up_sigma_m;
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::RtkOutageBoundaryDiagnosticRow> diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.boundary_references = &references;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(diagnostics.size() == 2U, "two boundary diagnostics expected");
+  ExpectTrue(diagnostics[0].target_state_index == 1U,
+             "outage start should bind the first state at or after the boundary");
+  ExpectTrue(diagnostics[1].target_state_index == 1U,
+             "outage end should bind the last state at or before the boundary");
+}
+
+void TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_rtk_outage_boundary_constraints = true;
   config.rtk_outage_boundary_up_sigma_m = 0.01;
@@ -366,16 +554,29 @@ void TestBoundaryConstraintBuilderConstrainsOnlyUpVzAndBaz() {
   references.front().has_up = true;
   references.front().has_vz = true;
   references.front().has_ba_z = true;
+  references.front().has_horizontal_position = true;
+  references.front().has_horizontal_velocity = true;
+  references.front().has_attitude = true;
   references.front().add_up_constraint = true;
   references.front().add_vz_constraint = true;
   references.front().add_ba_z_constraint = true;
+  references.front().add_horizontal_position_constraint = true;
+  references.front().add_horizontal_velocity_constraint = true;
+  references.front().add_attitude_constraint = true;
   references.front().reference_up_m = 10.0;
   references.front().reference_vz_mps = -0.1;
   references.front().reference_ba_z_mps2 =
     offline_lc_minimal::MicroGToMps2(120.0);
+  references.front().reference_horizontal_position_m = Eigen::Vector2d(5.0, -6.0);
+  references.front().reference_horizontal_velocity_mps = Eigen::Vector2d(2.0, 3.0);
+  references.front().reference_rotation = gtsam::Rot3::Ypr(0.1, -0.2, 0.3);
   references.front().up_sigma_m = config.rtk_outage_boundary_up_sigma_m;
   references.front().vz_sigma_mps = config.rtk_outage_boundary_vz_sigma_mps;
   references.front().ba_z_sigma_mps2 = config.rtk_outage_boundary_baz_sigma_mps2;
+  references.front().horizontal_position_sigma_m = config.stage2_horizontal_position_hold_sigma_m;
+  references.front().horizontal_velocity_sigma_mps =
+    config.stage2_horizontal_velocity_hold_sigma_mps;
+  references.front().attitude_sigma_rad = config.rtk_outage_absolute_attitude_sigma_rad;
   references.front().skip_reason = "OK";
 
   gtsam::NonlinearFactorGraph graph;
@@ -390,23 +591,32 @@ void TestBoundaryConstraintBuilderConstrainsOnlyUpVzAndBaz() {
   request.diagnostics = &diagnostics;
   offline_lc_minimal::RtkOutageBoundaryConstraintBuilder(std::move(request)).Build();
 
-  ExpectTrue(graph.size() == 3U, "boundary should add up, vz, and ba_z scalar factors");
+  ExpectTrue(
+    graph.size() == 6U,
+    "boundary should add up, vz, ba_z, horizontal position, horizontal velocity, and attitude factors");
   ExpectTrue(summary.rtk_outage_boundary_up_factor_count == 1U,
              "up factor count is wrong");
   ExpectTrue(summary.rtk_outage_boundary_vz_factor_count == 1U,
              "vz factor count is wrong");
   ExpectTrue(summary.rtk_outage_boundary_baz_factor_count == 1U,
              "ba_z factor count is wrong");
+  ExpectTrue(summary.rtk_outage_boundary_horizontal_position_factor_count == 1U,
+             "horizontal position factor count is wrong");
+  ExpectTrue(summary.rtk_outage_boundary_horizontal_velocity_factor_count == 1U,
+             "horizontal velocity factor count is wrong");
+  ExpectTrue(summary.rtk_outage_boundary_attitude_factor_count == 1U,
+             "attitude factor count is wrong");
 
   gtsam::Values matching_values;
   gtsam::Values shifted_attitude_values;
+  gtsam::Values shifted_horizontal_values;
   gtsam::Values shifted_vertical_values;
   for (std::size_t index = 0; index < timestamps.size(); ++index) {
     matching_values.insert(
       gtsam::symbol_shorthand::X(index),
       gtsam::Pose3(
-        gtsam::Rot3::Ypr(0.1, -0.2, 0.3),
-        gtsam::Point3(0.0, 0.0, index == 1U ? 10.0 : 0.0)));
+        references.front().reference_rotation,
+        gtsam::Point3(5.0, -6.0, index == 1U ? 10.0 : 0.0)));
     matching_values.insert(
       gtsam::symbol_shorthand::V(index),
       gtsam::Vector3(2.0, 3.0, index == 1U ? -0.1 : 0.0));
@@ -420,24 +630,40 @@ void TestBoundaryConstraintBuilderConstrainsOnlyUpVzAndBaz() {
       gtsam::symbol_shorthand::X(index),
       gtsam::Pose3(
         gtsam::Rot3::Ypr(-1.0, 0.5, -0.3),
-        gtsam::Point3(50.0, -40.0, index == 1U ? 10.0 : 0.0)));
+        gtsam::Point3(5.0, -6.0, index == 1U ? 10.0 : 0.0)));
     shifted_attitude_values.insert(
       gtsam::symbol_shorthand::V(index),
-      gtsam::Vector3(-2.0, 4.0, index == 1U ? -0.1 : 0.0));
+      gtsam::Vector3(2.0, 3.0, index == 1U ? -0.1 : 0.0));
     shifted_attitude_values.insert(
       gtsam::symbol_shorthand::B(index),
       gtsam::imuBias::ConstantBias(
         gtsam::Vector3(9.0, -8.0, index == 1U ? offline_lc_minimal::MicroGToMps2(120.0) : 0.0),
         gtsam::Vector3::Zero()));
 
+    shifted_horizontal_values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(
+        references.front().reference_rotation,
+        gtsam::Point3(index == 1U ? 5.3 : 5.0, index == 1U ? -6.4 : -6.0,
+                      index == 1U ? 10.0 : 0.0)));
+    shifted_horizontal_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(index == 1U ? 2.2 : 2.0, index == 1U ? 2.7 : 3.0,
+                     index == 1U ? -0.1 : 0.0));
+    shifted_horizontal_values.insert(
+      gtsam::symbol_shorthand::B(index),
+      gtsam::imuBias::ConstantBias(
+        gtsam::Vector3(0.0, 0.0, index == 1U ? offline_lc_minimal::MicroGToMps2(120.0) : 0.0),
+        gtsam::Vector3::Zero()));
+
     shifted_vertical_values.insert(
       gtsam::symbol_shorthand::X(index),
       gtsam::Pose3(
-        gtsam::Rot3(),
-        gtsam::Point3(0.0, 0.0, index == 1U ? 10.2 : 0.0)));
+        references.front().reference_rotation,
+        gtsam::Point3(5.0, -6.0, index == 1U ? 10.2 : 0.0)));
     shifted_vertical_values.insert(
       gtsam::symbol_shorthand::V(index),
-      gtsam::Vector3(0.0, 0.0, index == 1U ? -0.2 : 0.0));
+      gtsam::Vector3(2.0, 3.0, index == 1U ? -0.2 : 0.0));
     shifted_vertical_values.insert(
       gtsam::symbol_shorthand::B(index),
       gtsam::imuBias::ConstantBias(
@@ -447,11 +673,25 @@ void TestBoundaryConstraintBuilderConstrainsOnlyUpVzAndBaz() {
 
   ExpectNear(graph.error(matching_values), 0.0, 1.0e-12,
              "matching boundary state should have zero error");
-  ExpectNear(graph.error(shifted_attitude_values), 0.0, 1.0e-12,
-             "boundary should ignore attitude, horizontal position, velocity, and x/y bias");
+  ExpectTrue(graph.error(shifted_attitude_values) > 1.0,
+             "boundary should penalize attitude changes");
+  ExpectTrue(graph.error(shifted_horizontal_values) > 1.0,
+             "boundary should penalize horizontal position and velocity changes");
   ExpectTrue(graph.error(shifted_vertical_values) > 1.0,
              "boundary should penalize up, vz, and ba_z changes");
 
+  offline_lc_minimal::PopulateRtkOutageBoundaryDiagnostics(
+    shifted_attitude_values,
+    diagnostics);
+  ExpectTrue(diagnostics.front().attitude_residual_norm_rad > 0.1,
+             "boundary diagnostics should report attitude residual");
+  offline_lc_minimal::PopulateRtkOutageBoundaryDiagnostics(
+    shifted_horizontal_values,
+    diagnostics);
+  ExpectTrue(diagnostics.front().horizontal_position_residual_norm_m > 0.4,
+             "boundary diagnostics should report horizontal position residual");
+  ExpectTrue(diagnostics.front().horizontal_velocity_residual_norm_mps > 0.3,
+             "boundary diagnostics should report horizontal velocity residual");
   offline_lc_minimal::PopulateRtkOutageBoundaryDiagnostics(
     shifted_vertical_values,
     diagnostics);
@@ -582,8 +822,17 @@ int main() {
       "TestPreOutageVerticalFenceDisabledAddsNoFactors",
       TestPreOutageVerticalFenceDisabledAddsNoFactors);
     RunTest(
-      "TestBoundaryConstraintBuilderConstrainsOnlyUpVzAndBaz",
-      TestBoundaryConstraintBuilderConstrainsOnlyUpVzAndBaz);
+      "TestBoundaryAttitudeReferenceAnchorsStartAndEndWithImuDelta",
+      TestBoundaryAttitudeReferenceAnchorsStartAndEndWithImuDelta);
+    RunTest(
+      "TestBoundaryStateInitialValuesDoNotRequireAttitude",
+      TestBoundaryStateInitialValuesDoNotRequireAttitude);
+    RunTest(
+      "TestBoundaryConstraintBuilderUsesBoundarySideForOffGridTimes",
+      TestBoundaryConstraintBuilderUsesBoundarySideForOffGridTimes);
+    RunTest(
+      "TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude",
+      TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude);
     RunTest(
       "TestCausalReferenceBuilderUsesPrefixBaseConfig",
       TestCausalReferenceBuilderUsesPrefixBaseConfig);

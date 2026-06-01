@@ -41,6 +41,7 @@
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
 #include "offline_lc_minimal/core/RtkOutageBazReestimatePlanner.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeReference.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutagePreOutageVerticalFenceBuilder.h"
@@ -142,6 +143,11 @@ bool Stage2ReferenceMatchesGraphTimeline(
     }
   }
   return true;
+}
+
+bool HasStage2ReferenceTimeline(const Stage2VelocityReference *reference) {
+  return reference != nullptr &&
+         (!reference->reference_states.empty() || !reference->trajectory.empty());
 }
 
 }  // namespace
@@ -1011,15 +1017,17 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     reference_node_states;
   run_result.imu_propagated_reference_states = imu_propagated_reference_states;
   std::vector<ReferenceNodeState> stage2_fixed_reference_states;
+  const bool has_stage2_reference_timeline =
+    HasStage2ReferenceTimeline(active_stage2_reference);
   const bool stage2_reference_matches_graph =
-    active_stage2_reference != nullptr &&
+    has_stage2_reference_timeline &&
     Stage2ReferenceMatchesGraphTimeline(*active_stage2_reference, state_timestamps);
   const bool defer_stage2_reference_for_segmented_batch =
-    active_stage2_reference != nullptr &&
+    has_stage2_reference_timeline &&
     !stage2_reference_matches_graph &&
     config_.enable_rtk_outage_segmented_batch &&
     config_.enable_rtk_outage_smoothing;
-  if (active_stage2_reference != nullptr && !defer_stage2_reference_for_segmented_batch) {
+  if (has_stage2_reference_timeline && !defer_stage2_reference_for_segmented_batch) {
     const Stage2ReferenceApplicationOptions stage2_reference_options =
       active_stage3_vertical_reference != nullptr
         ? Stage2ReferenceApplicationOptions{}
@@ -1113,7 +1121,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.body_z_seed_bias_windows = body_z_result.bias_windows;
     run_result.attitude_reference_states = body_z_result.seed_reference_states;
   }
-  if (active_stage2_reference != nullptr) {
+  if (has_stage2_reference_timeline) {
     run_result.attitude_reference_states = stage2_fixed_reference_states;
   }
   run_result.body_z_bias_reestimate_segments = PlanBodyZBiasReestimateSegments(
@@ -1300,7 +1308,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.rtk_outage_causal_nav_reference_diagnostics =
     causal_reference_result.nav_reference_rows;
 
-  if (config_.enable_late_static_detection && active_stage2_reference != nullptr) {
+  if (config_.enable_late_static_detection && has_stage2_reference_timeline) {
     LateStaticDetectionRequest late_static_request;
     late_static_request.config = &config_;
     late_static_request.imu_samples = &dataset.imu_samples;
@@ -1349,7 +1357,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       late_static_thresholds.gyro_rms_threshold_radps;
   } else {
     run_result.run_summary.late_static_detection_enabled =
-      config_.enable_late_static_detection && active_stage2_reference != nullptr;
+      config_.enable_late_static_detection && has_stage2_reference_timeline;
   }
 
   std::vector<VerticalMotionAdaptiveReweightingDiagnosticRow> adaptive_reweighting_diagnostics;
@@ -1429,6 +1437,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.rtk_outage_boundary_up_factor_count = 0;
   run_result.run_summary.rtk_outage_boundary_vz_factor_count = 0;
   run_result.run_summary.rtk_outage_boundary_baz_factor_count = 0;
+  run_result.run_summary.rtk_outage_boundary_horizontal_position_factor_count = 0;
+  run_result.run_summary.rtk_outage_boundary_horizontal_velocity_factor_count = 0;
+  run_result.run_summary.rtk_outage_boundary_attitude_factor_count = 0;
   run_result.run_summary.rtk_outage_preoutage_vertical_fence_enabled =
     config_.enable_rtk_outage_preoutage_vertical_fence && causal_reference_result.valid;
   run_result.run_summary.rtk_outage_preoutage_vertical_fence_factor_count = 0;
@@ -1524,7 +1535,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.stage1_outage_body_y_deadband_mps =
     std::numeric_limits<double>::quiet_NaN();
   run_result.run_summary.stage2_velocity_optimization_enabled =
-    active_stage2_reference != nullptr && config_.enable_stage2_velocity_optimization;
+    has_stage2_reference_timeline && config_.enable_stage2_velocity_optimization;
   run_result.run_summary.stage2_attitude_hold_factor_count = 0;
   run_result.run_summary.stage2_horizontal_position_hold_factor_count = 0;
   run_result.run_summary.stage2_horizontal_velocity_hold_factor_count = 0;
@@ -1940,10 +1951,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     std::move(vertical_position_velocity_request)).Build();
 
   std::vector<ReferenceNodeState> outage_attitude_reference_states;
+  std::vector<RtkOutageWindowRow> boundary_attitude_windows;
   const std::vector<ReferenceNodeState> *rtk_outage_attitude_reference_states =
     &reference_node_states;
+  const std::vector<RtkOutageWindowRow> *rtk_outage_recovery_windows =
+    &run_result.rtk_outage_windows;
   std::string rtk_outage_attitude_reference_source = "reference_states";
-  if (active_stage2_reference != nullptr &&
+  if (has_stage2_reference_timeline &&
       !stage2_fixed_reference_states.empty() &&
       !imu_propagated_reference_states.empty() &&
       config_.enable_rtk_outage_smoothing &&
@@ -1957,11 +1971,35 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     rtk_outage_attitude_reference_states = &outage_attitude_reference_states;
     rtk_outage_attitude_reference_source = "stage2_anchor_imu_delta";
   }
+  if (active_stage2_reference != nullptr &&
+      !active_stage2_reference->boundary_references.empty() &&
+      !imu_propagated_reference_states.empty()) {
+    RtkOutageBoundaryAttitudeReference boundary_attitude_reference =
+      BuildRtkOutageBoundaryAttitudeReference(
+        state_timestamps,
+        imu_propagated_reference_states,
+        active_stage2_reference->boundary_references);
+    if (boundary_attitude_reference.valid()) {
+      ApplyRtkOutageBoundaryStateInitialValues(
+        boundary_attitude_reference,
+        active_stage2_reference->boundary_references,
+        state_timestamps,
+        config_.rtk_outage_attitude_guard_duration_s,
+        optimization_initial_values);
+      outage_attitude_reference_states =
+        std::move(boundary_attitude_reference.reference_states);
+      boundary_attitude_windows =
+        std::move(boundary_attitude_reference.outage_windows);
+      rtk_outage_attitude_reference_states = &outage_attitude_reference_states;
+      rtk_outage_recovery_windows = &boundary_attitude_windows;
+      rtk_outage_attitude_reference_source = boundary_attitude_reference.source;
+    }
+  }
 
   RtkOutageRecoveryConstraintBuildRequest rtk_outage_recovery_request;
   rtk_outage_recovery_request.config = &config_;
   rtk_outage_recovery_request.state_timestamps = &state_timestamps;
-  rtk_outage_recovery_request.outage_windows = &run_result.rtk_outage_windows;
+  rtk_outage_recovery_request.outage_windows = rtk_outage_recovery_windows;
   rtk_outage_recovery_request.reference_states = rtk_outage_attitude_reference_states;
   rtk_outage_recovery_request.attitude_reference_source =
     rtk_outage_attitude_reference_source;
@@ -2012,7 +2050,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     &run_result.body_z_nhc_horizontal_leakage_diagnostics;
   BodyZNHCConstraintBuilder(std::move(body_z_nhc_request)).Build();
 
-  if (active_stage2_reference != nullptr) {
+  if (has_stage2_reference_timeline) {
     Stage2VehicleNHCConstraintBuildRequest stage2_vehicle_request;
     stage2_vehicle_request.config = &config_;
     stage2_vehicle_request.state_timestamps = &state_timestamps;
@@ -2052,7 +2090,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     &run_result.relative_yaw_reference_diagnostics;
   AttitudeReferenceConstraintBuilder(std::move(attitude_reference_request)).Build();
 
-  if (active_stage2_reference != nullptr) {
+  if (has_stage2_reference_timeline) {
     Stage2AttitudeHoldBuildRequest attitude_hold_request;
     attitude_hold_request.config = &config_;
     attitude_hold_request.state_timestamps = &state_timestamps;
@@ -2262,7 +2300,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     &run_result.body_z_nhc_state_diagnostics,
     &run_result.attitude_reference_states,
     &run_result.run_summary);
-  if (active_stage2_reference != nullptr) {
+  if (has_stage2_reference_timeline) {
     PopulateStage2VehicleNHCDiagnostics(
       optimization_initial_values,
       optimized_values,

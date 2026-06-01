@@ -428,6 +428,18 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.run_summary.rtk_outage_boundary_up_factor_count = 0;
   assembled.run_summary.rtk_outage_boundary_vz_factor_count = 0;
   assembled.run_summary.rtk_outage_boundary_baz_factor_count = 0;
+  assembled.run_summary.rtk_outage_boundary_horizontal_position_factor_count = 0;
+  assembled.run_summary.rtk_outage_boundary_horizontal_velocity_factor_count = 0;
+  assembled.run_summary.rtk_outage_boundary_attitude_factor_count = 0;
+  assembled.run_summary.rtk_outage_attitude_hold_factor_count = 0;
+  assembled.run_summary.rtk_outage_relative_attitude_factor_count = 0;
+  assembled.run_summary.rtk_outage_velocity_delta_3d_factor_count = 0;
+  assembled.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  assembled.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad =
+    std::numeric_limits<double>::quiet_NaN();
+  assembled.run_summary.rtk_outage_velocity_delta_3d_rms_mps =
+    std::numeric_limits<double>::quiet_NaN();
   assembled.run_summary.late_static_detection_enabled =
     std::any_of(
       request_.pieces.begin(),
@@ -509,6 +521,39 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       piece.result.run_summary.rtk_outage_boundary_vz_factor_count;
     assembled.run_summary.rtk_outage_boundary_baz_factor_count +=
       piece.result.run_summary.rtk_outage_boundary_baz_factor_count;
+    assembled.run_summary.rtk_outage_boundary_horizontal_position_factor_count +=
+      piece.result.run_summary.rtk_outage_boundary_horizontal_position_factor_count;
+    assembled.run_summary.rtk_outage_boundary_horizontal_velocity_factor_count +=
+      piece.result.run_summary.rtk_outage_boundary_horizontal_velocity_factor_count;
+    assembled.run_summary.rtk_outage_boundary_attitude_factor_count +=
+      piece.result.run_summary.rtk_outage_boundary_attitude_factor_count;
+    assembled.run_summary.rtk_outage_attitude_hold_factor_count +=
+      piece.result.run_summary.rtk_outage_attitude_hold_factor_count;
+    assembled.run_summary.rtk_outage_relative_attitude_factor_count +=
+      piece.result.run_summary.rtk_outage_relative_attitude_factor_count;
+    assembled.run_summary.rtk_outage_velocity_delta_3d_factor_count +=
+      piece.result.run_summary.rtk_outage_velocity_delta_3d_factor_count;
+    if (std::isfinite(piece.result.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad)) {
+      assembled.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad =
+        std::isfinite(assembled.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad)
+          ? std::max(
+              assembled.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad,
+              piece.result.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad)
+          : piece.result.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad;
+    }
+    if (std::isfinite(piece.result.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad)) {
+      assembled.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad =
+        std::isfinite(assembled.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad)
+          ? std::max(
+              assembled.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad,
+              piece.result.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad)
+          : piece.result.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad;
+    }
+    if (std::isfinite(piece.result.run_summary.rtk_outage_velocity_delta_3d_rms_mps) &&
+        !std::isfinite(assembled.run_summary.rtk_outage_velocity_delta_3d_rms_mps)) {
+      assembled.run_summary.rtk_outage_velocity_delta_3d_rms_mps =
+        piece.result.run_summary.rtk_outage_velocity_delta_3d_rms_mps;
+    }
     if (piece.segment.segment_role != "RTK_OUTAGE") {
       assembled.run_summary.late_static_window_count +=
         piece.result.run_summary.late_static_window_count;

@@ -370,11 +370,27 @@ void TestBatchSegmentPlannerSplitsFirstPlannedOutage() {
   ExpectTrue(segments[1].vertical_boundary_jump_allowed, "boundary jump flag should be retained");
 }
 
-offline_lc_minimal::TrajectoryRow MakeTrajectoryRow(const double time_s, const double up_m) {
+offline_lc_minimal::TrajectoryRow MakeTrajectoryRow(
+  const double time_s,
+  const double up_m,
+  const double yaw_rad = 0.0) {
   offline_lc_minimal::TrajectoryRow row;
   row.time_s = time_s;
   row.enu_position_m = Eigen::Vector3d(0.0, 0.0, up_m);
+  row.ypr_rad = Eigen::Vector3d(yaw_rad, 0.0, 0.0);
   return row;
+}
+
+offline_lc_minimal::ReferenceNodeState MakeReferenceNodeState(
+  const double time_s,
+  const double up_m,
+  const double yaw_rad) {
+  offline_lc_minimal::ReferenceNodeState state;
+  state.time_s = time_s;
+  state.pose = gtsam::Pose3(
+    gtsam::Rot3::Ypr(yaw_rad, 0.0, 0.0),
+    gtsam::Point3(0.0, 0.0, up_m));
+  return state;
 }
 
 offline_lc_minimal::GnssFactorRecord MakeGnssFactorRecord(
@@ -553,6 +569,101 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
     "post child should keep relaxed DVZ output sigma scale");
 }
 
+void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timeline() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_segmented_batch = true;
+  config.enable_rtk_outage_boundary_constraints = true;
+  config.rtk_outage_segmented_batch_max_outages = 1;
+  config.rtk_outage_segmented_batch_allow_vertical_boundary_jump = true;
+  config.rtk_outage_recovery_reference_min_fix_samples = 3;
+  config.rtk_outage_recovery_reference_max_duration_s = 2.0;
+  config.required_best_sol_status_code = 1;
+
+  offline_lc_minimal::RtkOutageWindowRow outage;
+  outage.window_index = 11U;
+  outage.pre_anchor_state_index = 3U;
+  outage.post_anchor_state_index = 5U;
+  outage.start_time_s = 10.0;
+  outage.end_time_s = 20.0;
+  outage.skip_reason = "PLANNED";
+
+  struct Call {
+    double processing_start_time_s = 0.0;
+    double processing_end_time_s = 0.0;
+    std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> reference;
+  };
+  std::vector<Call> calls;
+
+  offline_lc_minimal::RtkOutageSegmentedBatchRunRequest request;
+  request.base_config = config;
+  request.config = config;
+  request.dataset.gnss_samples = {
+    MakeRecoverySample(20.0, 1, 100.0),
+    MakeRecoverySample(20.5, 1, 100.05),
+    MakeRecoverySample(21.0, 1, 100.10)};
+  request.outage_windows = {outage};
+  request.state_timestamps = {0.0, 2.0, 8.0, 10.1, 15.0, 20.2, 30.0};
+  request.dynamic_start_time_s = 2.0;
+  request.processing_end_time_s = 30.0;
+  request.run_once =
+    [&](offline_lc_minimal::OfflineRunnerConfig child_config,
+        std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> stage2_reference,
+        std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
+        offline_lc_minimal::DataSet) {
+      calls.push_back(Call{
+        child_config.processing_start_time_s,
+        child_config.processing_end_time_s,
+        stage2_reference});
+
+      offline_lc_minimal::OfflineRunResult result;
+      if (child_config.processing_end_time_s <= outage.start_time_s + 1.0e-9) {
+        result.trajectory = {
+          MakeTrajectoryRow(0.0, 0.0, 2.0),
+          MakeTrajectoryRow(outage.start_time_s, 10.0, 2.0)};
+        result.optimized_reference_states = {
+          MakeReferenceNodeState(0.0, 0.0, 0.1),
+          MakeReferenceNodeState(outage.start_time_s, 10.0, 0.4)};
+      } else if (child_config.processing_start_time_s >= outage.end_time_s - 1.0e-9) {
+        result.trajectory = {
+          MakeTrajectoryRow(outage.end_time_s, 20.0, 2.5),
+          MakeTrajectoryRow(child_config.processing_end_time_s, 30.0, 2.5)};
+        result.optimized_reference_states = {
+          MakeReferenceNodeState(outage.end_time_s, 20.0, -0.3),
+          MakeReferenceNodeState(child_config.processing_end_time_s, 30.0, -0.1)};
+      } else {
+        result.trajectory = {
+          MakeTrajectoryRow(0.0, 0.0),
+          MakeTrajectoryRow(child_config.processing_end_time_s, 1.0)};
+      }
+      return result;
+    };
+
+  (void)offline_lc_minimal::RtkOutageSegmentedBatchRunner(std::move(request)).Run();
+
+  ExpectTrue(calls.size() == 3U, "boundary handoff should run pre, post, and outage children");
+  ExpectTrue(calls[0].reference == nullptr, "pre child should not receive a boundary carrier");
+  ExpectTrue(calls[1].reference != nullptr, "post child should receive recovery boundary reference");
+  ExpectTrue(calls[1].reference->boundary_references.size() == 1U,
+             "post child should receive only the recovery vertical boundary");
+  ExpectTrue(!calls[1].reference->boundary_references.front().has_attitude,
+             "recovery-only post boundary should not fabricate attitude");
+
+  ExpectTrue(calls[2].reference != nullptr, "outage child should receive boundary references");
+  const auto &refs = calls[2].reference->boundary_references;
+  ExpectTrue(refs.size() == 2U, "outage child should receive start and end boundaries");
+  ExpectTrue(refs[0].boundary_role == "OUTAGE_START", "first outage boundary should be start");
+  ExpectTrue(refs[1].boundary_role == "OUTAGE_END", "second outage boundary should be end");
+  ExpectTrue(refs[0].has_attitude && refs[0].add_attitude_constraint,
+             "outage start should carry an attitude constraint");
+  ExpectTrue(refs[1].has_attitude && refs[1].add_attitude_constraint,
+             "outage end should carry an attitude constraint");
+  ExpectTrue(std::abs(refs[0].reference_rotation.ypr().x() - 0.4) < 1e-12,
+             "outage start attitude must use the pre optimized Rot3 branch");
+  ExpectTrue(std::abs(refs[1].reference_rotation.ypr().x() + 0.3) < 1e-12,
+             "outage end attitude must use the post optimized Rot3 branch");
+}
+
 void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   offline_lc_minimal::RtkOutageBatchSegmentRow pre;
   pre.segment_index = 0U;
@@ -600,6 +711,10 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   outage_result.gnss_factor_records = {
     MakeGnssFactorRecord(15.0, "stage2_lowpass", "OK")};
   outage_result.run_summary.gnss_vertical_reference_source = "stage2_lowpass";
+  outage_result.run_summary.rtk_outage_attitude_hold_factor_count = 2U;
+  outage_result.run_summary.rtk_outage_relative_attitude_factor_count = 1U;
+  outage_result.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad = 0.01;
+  outage_result.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad = 0.02;
   offline_lc_minimal::OfflineRunResult post_result;
   post_result.trajectory = {
     MakeTrajectoryRow(19.95, 200.0),
@@ -647,6 +762,16 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
              "assembled summary should count selected vertical references");
   ExpectTrue(assembled.run_summary.gnss_vertical_reference_skipped_count == 1U,
              "assembled summary should count skipped vertical references");
+  ExpectTrue(assembled.run_summary.rtk_outage_attitude_hold_factor_count == 2U,
+             "assembled summary should count outage attitude hold factors");
+  ExpectTrue(assembled.run_summary.rtk_outage_relative_attitude_factor_count == 1U,
+             "assembled summary should count outage relative attitude factors");
+  ExpectTrue(
+    std::abs(assembled.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad - 0.01) < 1e-12,
+    "assembled summary should keep outage attitude hold residual summary");
+  ExpectTrue(
+    std::abs(assembled.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad - 0.02) < 1e-12,
+    "assembled summary should keep outage relative attitude residual summary");
   ExpectTrue(assembled.initial_dynamic_static_windows.size() == 1U,
              "assembler should keep only prefix initial dynamic static windows");
   ExpectTrue(assembled.initial_dynamic_static_windows.front().start_time_s == 1.0,
@@ -685,6 +810,9 @@ int main() {
     RunTest(
       "TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales",
       TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales);
+    RunTest(
+      "TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timeline",
+      TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timeline);
     RunTest(
       "TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates",
       TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates);

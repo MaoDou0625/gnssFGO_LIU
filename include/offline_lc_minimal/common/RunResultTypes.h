@@ -167,6 +167,9 @@ struct RunSummary {
   std::size_t rtk_outage_boundary_up_factor_count = 0;
   std::size_t rtk_outage_boundary_vz_factor_count = 0;
   std::size_t rtk_outage_boundary_baz_factor_count = 0;
+  std::size_t rtk_outage_boundary_horizontal_position_factor_count = 0;
+  std::size_t rtk_outage_boundary_horizontal_velocity_factor_count = 0;
+  std::size_t rtk_outage_boundary_attitude_factor_count = 0;
   bool rtk_outage_preoutage_vertical_fence_enabled = false;
   std::size_t rtk_outage_preoutage_vertical_fence_factor_count = 0;
   double rtk_outage_preoutage_vertical_fence_max_delta_m =
@@ -652,6 +655,12 @@ struct RunSummary {
         << rtk_outage_boundary_vz_factor_count << '\n'
         << "rtk_outage_boundary_baz_factor_count="
         << rtk_outage_boundary_baz_factor_count << '\n'
+        << "rtk_outage_boundary_horizontal_position_factor_count="
+        << rtk_outage_boundary_horizontal_position_factor_count << '\n'
+        << "rtk_outage_boundary_horizontal_velocity_factor_count="
+        << rtk_outage_boundary_horizontal_velocity_factor_count << '\n'
+        << "rtk_outage_boundary_attitude_factor_count="
+        << rtk_outage_boundary_attitude_factor_count << '\n'
         << "rtk_outage_preoutage_vertical_fence_enabled="
         << (rtk_outage_preoutage_vertical_fence_enabled ? "true" : "false") << '\n'
         << "rtk_outage_preoutage_vertical_fence_factor_count="
