@@ -91,6 +91,7 @@ add_library(offline_lc_minimal_lib
   src/core/RtkOutageRecoveryConstraintBuilder.cpp
   src/core/RtkOutageRecoveryReferenceBuilder.cpp
   src/core/RtkOutageSegmentedBatchRunner.cpp
+  src/core/RtkOutageSegmentationPolicy.cpp
   src/core/RtkOutageSmoothingConstraintBuilder.cpp
   src/core/ResidualContributionAnalyzer.cpp
   src/core/RtkHeadingAlignmentEstimator.cpp
@@ -102,6 +103,7 @@ add_library(offline_lc_minimal_lib
   src/core/RtkVerticalLowpassReferenceFilter.cpp
   src/core/Stage1OutageBodyYEnvelopeConstraintBuilder.cpp
   src/core/Stage1OutageLateralVelocityEnvelopeEstimator.cpp
+  src/core/Stage1SourceReferencePolicy.cpp
   src/core/Stage1YawBranchResolver.cpp
   src/core/Stage1YawRefinementRunner.cpp
   src/core/StageAttitudeReference.cpp

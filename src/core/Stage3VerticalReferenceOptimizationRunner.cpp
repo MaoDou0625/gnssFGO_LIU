@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "offline_lc_minimal/core/OptimizationStagePolicy.h"
+#include "offline_lc_minimal/core/RtkOutageSegmentationPolicy.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -20,7 +21,7 @@ OfflineRunnerConfig MakeStage2SourceConfig(OfflineRunnerConfig config) {
 OfflineRunnerConfig MakeStage3Config(OfflineRunnerConfig config) {
   config = MakeStage2VelocityOptimizationConfig(config);
   config.enable_stage3_vertical_reference_optimization = false;
-  config.enable_rtk_outage_segmented_batch = false;
+  config = DisableRtkOutageSegmentedBatchRecursion(std::move(config));
   config.enable_rtk_vertical_drift_reference = false;
   config.enable_rtk_vertical_lowpass_reference = false;
   config.enable_rtk_outage_causal_drift_reference = false;
@@ -89,6 +90,24 @@ void CopySourceDiagnostics(
     stage2_result.run_summary.stage1_yaw_refinement_final_noise_rad;
   stage3_result.run_summary.stage1_yaw_refinement_final_update_rad =
     stage2_result.run_summary.stage1_yaw_refinement_final_update_rad;
+  stage3_result.run_summary.stage1_source_segmentation_context =
+    stage2_result.run_summary.stage1_source_segmentation_context;
+  stage3_result.run_summary.stage1_source_segmented_batch_requested =
+    stage2_result.run_summary.stage1_source_segmented_batch_requested;
+  stage3_result.run_summary.stage1_source_segmented_batch_enabled =
+    stage2_result.run_summary.stage1_source_segmented_batch_enabled;
+  stage3_result.run_summary.stage1_source_segment_count =
+    stage2_result.run_summary.stage1_source_segment_count;
+  stage3_result.run_summary.stage1_source_segmented_batch_run_count =
+    stage2_result.run_summary.stage1_source_segmented_batch_run_count;
+  stage3_result.run_summary.stage1_source_segmented_batch_disabled_reason =
+    stage2_result.run_summary.stage1_source_segmented_batch_disabled_reason;
+  stage3_result.run_summary.stage1_source_reference_evaluated =
+    stage2_result.run_summary.stage1_source_reference_evaluated;
+  stage3_result.run_summary.stage1_source_reference_valid =
+    stage2_result.run_summary.stage1_source_reference_valid;
+  stage3_result.run_summary.stage1_source_reference_reject_reason =
+    stage2_result.run_summary.stage1_source_reference_reject_reason;
   stage3_result.run_summary.stage1_outage_body_y_envelope_enabled =
     stage2_result.run_summary.stage1_outage_body_y_envelope_enabled;
   stage3_result.run_summary.stage1_outage_body_y_envelope_count =

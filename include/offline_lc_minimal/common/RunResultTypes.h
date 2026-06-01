@@ -445,6 +445,15 @@ struct RunSummary {
   double stage1_yaw_refinement_final_median_error_rad = std::numeric_limits<double>::quiet_NaN();
   double stage1_yaw_refinement_final_noise_rad = std::numeric_limits<double>::quiet_NaN();
   double stage1_yaw_refinement_final_update_rad = std::numeric_limits<double>::quiet_NaN();
+  std::string stage1_source_segmentation_context = "unset";
+  bool stage1_source_segmented_batch_requested = false;
+  bool stage1_source_segmented_batch_enabled = false;
+  std::size_t stage1_source_segment_count = 0;
+  std::size_t stage1_source_segmented_batch_run_count = 0;
+  std::string stage1_source_segmented_batch_disabled_reason;
+  bool stage1_source_reference_evaluated = false;
+  bool stage1_source_reference_valid = false;
+  std::string stage1_source_reference_reject_reason;
 
   [[nodiscard]] std::string ToMultilineString() const {
     std::ostringstream oss;
@@ -1028,7 +1037,25 @@ struct RunSummary {
         << "stage1_yaw_refinement_final_noise_rad="
         << stage1_yaw_refinement_final_noise_rad << '\n'
         << "stage1_yaw_refinement_final_update_rad="
-        << stage1_yaw_refinement_final_update_rad << '\n';
+        << stage1_yaw_refinement_final_update_rad << '\n'
+        << "stage1_source_segmentation_context="
+        << stage1_source_segmentation_context << '\n'
+        << "stage1_source_segmented_batch_requested="
+        << (stage1_source_segmented_batch_requested ? "true" : "false") << '\n'
+        << "stage1_source_segmented_batch_enabled="
+        << (stage1_source_segmented_batch_enabled ? "true" : "false") << '\n'
+        << "stage1_source_segment_count="
+        << stage1_source_segment_count << '\n'
+        << "stage1_source_segmented_batch_run_count="
+        << stage1_source_segmented_batch_run_count << '\n'
+        << "stage1_source_segmented_batch_disabled_reason="
+        << stage1_source_segmented_batch_disabled_reason << '\n'
+        << "stage1_source_reference_evaluated="
+        << (stage1_source_reference_evaluated ? "true" : "false") << '\n'
+        << "stage1_source_reference_valid="
+        << (stage1_source_reference_valid ? "true" : "false") << '\n'
+        << "stage1_source_reference_reject_reason="
+        << stage1_source_reference_reject_reason << '\n';
     return oss.str();
   }
 };

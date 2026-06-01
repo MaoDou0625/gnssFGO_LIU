@@ -13,6 +13,7 @@
 #include "offline_lc_minimal/core/RtkOutageBiasContinuityPolicy.h"
 #include "offline_lc_minimal/core/RtkOutageBatchSegmentPlanner.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
+#include "offline_lc_minimal/core/RtkOutageSegmentationPolicy.h"
 #include "offline_lc_minimal/core/SegmentedBatchResultAssembler.h"
 #include "offline_lc_minimal/core/StageAttitudeReference.h"
 
@@ -28,7 +29,7 @@ bool IsStandalonePrefixSegment(const RtkOutageBatchSegmentRow &segment) {
 OfflineRunnerConfig MakeStandalonePrefixChildConfig(
   OfflineRunnerConfig config,
   const RtkOutageWindowRow *source_outage) {
-  config.enable_rtk_outage_segmented_batch = false;
+  config = DisableRtkOutageSegmentedBatchRecursion(std::move(config));
   config.enable_stage2_lowfreq_vertical_reference_optimization = false;
   config.enable_stage2_lowfreq_final_dvz_relaxation = false;
   config.enable_stage2_lowfreq_final_hold_relaxation = false;
@@ -54,7 +55,7 @@ OfflineRunnerConfig MakeChildConfig(
   }
 
   OfflineRunnerConfig config = stage_config;
-  config.enable_rtk_outage_segmented_batch = false;
+  config = DisableRtkOutageSegmentedBatchRecursion(std::move(config));
   config.enable_rtk_outage_causal_drift_reference = false;
   config.enable_rtk_outage_preoutage_vertical_fence = false;
   config.enable_initial_dynamic_static_detection = false;
@@ -352,7 +353,8 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
     RtkOutageBatchSegmentPlanner(std::move(plan_request)).Plan();
   if (segments.empty()) {
     OfflineRunnerConfig passthrough_config = request_.config;
-    passthrough_config.enable_rtk_outage_segmented_batch = false;
+    passthrough_config =
+      DisableRtkOutageSegmentedBatchRecursion(std::move(passthrough_config));
     return request_.run_once(
       std::move(passthrough_config),
       request_.stage2_reference,

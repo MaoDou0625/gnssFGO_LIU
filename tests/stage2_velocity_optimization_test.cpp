@@ -22,6 +22,7 @@
 #include "offline_lc_minimal/core/Stage2HorizontalHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage1OutageBodyYEnvelopeConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage1OutageLateralVelocityEnvelopeEstimator.h"
+#include "offline_lc_minimal/core/Stage1SourceReferencePolicy.h"
 #include "offline_lc_minimal/core/Stage2VehicleNHCConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage2VelocityOptimizationRunner.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
@@ -768,6 +769,11 @@ void TestStage2RunsConstrainedStage1BeforeSegmentedStage2() {
       result.run_summary.processing_end_time_s = 30.0;
       result.trajectory = MakeMovingTrajectoryRows(0.0, 30.0);
       result.rtk_outage_windows.push_back(MakePlannedOutageWindow());
+      if (run_config.enable_rtk_outage_segmented_batch) {
+        result.run_summary.rtk_outage_segmented_batch_enabled = true;
+        result.run_summary.rtk_outage_batch_segment_count = 3U;
+        result.run_summary.rtk_outage_segmented_batch_run_count = 3U;
+      }
     }
     if (body_y_reference != nullptr) {
       result.stage1_outage_body_y_envelopes = body_y_reference->envelopes;
@@ -799,11 +805,17 @@ void TestStage2RunsConstrainedStage1BeforeSegmentedStage2() {
                (result.run_summary.stage1_yaw_refinement_reference_valid ? "true" : "false"));
   ExpectTrue(!calls[0].has_body_y_reference && !calls[0].has_stage2_reference,
              "baseline Stage1 should not receive body-y or stage2 references");
+  ExpectTrue(calls[0].enable_rtk_outage_segmented_batch,
+             "baseline Stage1 source should preserve top-level segmented batch");
   ExpectTrue(calls[1].has_body_y_reference && !calls[1].has_stage2_reference,
              "constrained Stage1 should receive the estimated body-y envelope");
+  ExpectTrue(calls[1].enable_rtk_outage_segmented_batch,
+             "constrained Stage1 source should preserve top-level segmented batch");
   for (std::size_t index = 2U; index < calls.size(); ++index) {
     ExpectTrue(!calls[index].has_body_y_reference,
                "segmented Stage2 children should not add Stage1 body-y factors");
+    ExpectTrue(!calls[index].enable_rtk_outage_segmented_batch,
+               "segmented Stage2 children should disable segmented recursion");
   }
   ExpectTrue(result.stage1_outage_body_y_envelopes.size() == 1U,
              "assembled Stage2 result should keep Stage1 body-y envelope diagnostics");
@@ -864,6 +876,11 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
       result.run_summary.processing_end_time_s = 30.0;
       result.trajectory = MakeTrajectoryRows(0.0, 30.0);
       result.rtk_outage_windows.push_back(MakePlannedOutageWindow());
+      if (run_config.enable_rtk_outage_segmented_batch) {
+        result.run_summary.rtk_outage_segmented_batch_enabled = true;
+        result.run_summary.rtk_outage_batch_segment_count = 3U;
+        result.run_summary.rtk_outage_segmented_batch_run_count = 3U;
+      }
     }
     return result;
   };
@@ -877,8 +894,8 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
              "global stage1 run_once should already be inside the yaw refinement runner");
   ExpectTrue(!calls[0].enable_stage2_velocity_optimization,
              "global stage1 pass should disable stage2 optimization");
-  ExpectTrue(!calls[0].enable_rtk_outage_segmented_batch,
-             "global stage1 pass should disable segmented recursion");
+  ExpectTrue(calls[0].enable_rtk_outage_segmented_batch,
+             "Stage1 source pass should preserve top-level segmented batch");
   ExpectTrue(!calls[0].has_stage2_reference,
              "global stage1 pass should not receive a stage2 reference");
 
@@ -916,6 +933,72 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
              "assembled result should mark segmented batch enabled");
   ExpectTrue(result.run_summary.rtk_outage_batch_segment_count == 3U,
              "assembled result should contain pre/outage/post segments");
+  ExpectTrue(result.run_summary.stage1_source_segmented_batch_requested,
+             "result should record that Stage1 source was allowed to segment");
+  ExpectTrue(result.run_summary.stage1_source_segmentation_context == "stage1_source",
+             "result should label the Stage1 source segmentation context");
+}
+
+void TestStage1SourcePolicyRejectsForcedGlobalOutageReference() {
+  auto requested_config = offline_lc_minimal::DefaultConfig();
+  requested_config.enable_rtk_outage_smoothing = true;
+  requested_config.enable_rtk_outage_segmented_batch = true;
+  requested_config.rtk_outage_segmented_batch_max_outages = 1;
+
+  auto source_config = requested_config;
+  source_config.enable_rtk_outage_segmented_batch = false;
+
+  offline_lc_minimal::OfflineRunResult source_result;
+  source_result.run_summary.stage1_yaw_refinement_enabled = true;
+  source_result.run_summary.stage1_yaw_refinement_reference_valid = true;
+  source_result.rtk_outage_windows.push_back(MakePlannedOutageWindow());
+
+  offline_lc_minimal::ApplyStage1SourceReferencePolicy(
+    offline_lc_minimal::Stage1SourceReferencePolicyRequest{
+      &requested_config,
+      &source_config},
+    source_result);
+
+  ExpectTrue(!source_result.run_summary.stage1_source_reference_valid,
+             "forced-global Stage1 source should be rejected when outage segmentation was requested");
+  ExpectTrue(source_result.run_summary.stage1_source_reference_evaluated,
+             "Stage1 source policy should mark the reference decision as evaluated");
+  ExpectTrue(!source_result.run_summary.stage1_yaw_refinement_reference_valid,
+             "forced-global rejection should disable strong Stage1 yaw reference handoff");
+  ExpectTrue(
+    source_result.run_summary.stage1_source_reference_reject_reason ==
+      "segmented_batch_disabled_with_outage",
+    "forced-global rejection reason should identify the disabled outage segmentation");
+}
+
+void TestStage1SourcePolicyRejectsSegmentedPassthroughOutageReference() {
+  auto requested_config = offline_lc_minimal::DefaultConfig();
+  requested_config.enable_rtk_outage_smoothing = true;
+  requested_config.enable_rtk_outage_segmented_batch = true;
+  requested_config.rtk_outage_segmented_batch_max_outages = 1;
+
+  auto source_config = requested_config;
+
+  offline_lc_minimal::OfflineRunResult source_result;
+  source_result.run_summary.stage1_yaw_refinement_enabled = true;
+  source_result.run_summary.stage1_yaw_refinement_reference_valid = true;
+  source_result.run_summary.rtk_outage_segmented_batch_enabled = false;
+  source_result.rtk_outage_windows.push_back(MakePlannedOutageWindow());
+
+  offline_lc_minimal::ApplyStage1SourceReferencePolicy(
+    offline_lc_minimal::Stage1SourceReferencePolicyRequest{
+      &requested_config,
+      &source_config},
+    source_result);
+
+  ExpectTrue(!source_result.run_summary.stage1_source_reference_valid,
+             "Stage1 source should reject outage references when requested segmentation did not run");
+  ExpectTrue(source_result.run_summary.stage1_source_reference_evaluated,
+             "Stage1 source policy should mark passthrough decisions as evaluated");
+  ExpectTrue(
+    source_result.run_summary.stage1_source_reference_reject_reason ==
+      "segmented_batch_requested_but_not_run",
+    "passthrough rejection reason should identify the missing segmented solve");
 }
 
 void TestSegmentedStage2SlicesRotationNativeReferenceWithoutTrajectoryRows() {
@@ -1062,6 +1145,12 @@ int main() {
     RunTest(
       "TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren",
       TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren);
+    RunTest(
+      "TestStage1SourcePolicyRejectsForcedGlobalOutageReference",
+      TestStage1SourcePolicyRejectsForcedGlobalOutageReference);
+    RunTest(
+      "TestStage1SourcePolicyRejectsSegmentedPassthroughOutageReference",
+      TestStage1SourcePolicyRejectsSegmentedPassthroughOutageReference);
     RunTest(
       "TestSegmentedStage2SlicesRotationNativeReferenceWithoutTrajectoryRows",
       TestSegmentedStage2SlicesRotationNativeReferenceWithoutTrajectoryRows);

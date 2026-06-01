@@ -11,6 +11,7 @@
 #include "offline_lc_minimal/core/OptimizationStagePolicy.h"
 #include "offline_lc_minimal/core/RtkOutageSegmentedBatchRunner.h"
 #include "offline_lc_minimal/core/Stage1OutageLateralVelocityEnvelopeEstimator.h"
+#include "offline_lc_minimal/core/Stage1SourceReferencePolicy.h"
 #include "offline_lc_minimal/core/Stage1YawRefinementRunner.h"
 
 namespace offline_lc_minimal {
@@ -51,6 +52,24 @@ void CopyStage1Summary(
     stage1_result.run_summary.stage1_yaw_refinement_final_noise_rad;
   stage2_result.run_summary.stage1_yaw_refinement_final_update_rad =
     stage1_result.run_summary.stage1_yaw_refinement_final_update_rad;
+  stage2_result.run_summary.stage1_source_segmentation_context =
+    stage1_result.run_summary.stage1_source_segmentation_context;
+  stage2_result.run_summary.stage1_source_segmented_batch_requested =
+    stage1_result.run_summary.stage1_source_segmented_batch_requested;
+  stage2_result.run_summary.stage1_source_segmented_batch_enabled =
+    stage1_result.run_summary.stage1_source_segmented_batch_enabled;
+  stage2_result.run_summary.stage1_source_segment_count =
+    stage1_result.run_summary.stage1_source_segment_count;
+  stage2_result.run_summary.stage1_source_segmented_batch_run_count =
+    stage1_result.run_summary.stage1_source_segmented_batch_run_count;
+  stage2_result.run_summary.stage1_source_segmented_batch_disabled_reason =
+    stage1_result.run_summary.stage1_source_segmented_batch_disabled_reason;
+  stage2_result.run_summary.stage1_source_reference_evaluated =
+    stage1_result.run_summary.stage1_source_reference_evaluated;
+  stage2_result.run_summary.stage1_source_reference_valid =
+    stage1_result.run_summary.stage1_source_reference_valid;
+  stage2_result.run_summary.stage1_source_reference_reject_reason =
+    stage1_result.run_summary.stage1_source_reference_reject_reason;
   stage2_result.stage1_outage_body_y_envelopes =
     stage1_result.stage1_outage_body_y_envelopes;
   stage2_result.stage1_outage_body_y_state_diagnostics =
@@ -141,7 +160,6 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
   stage1_config.enable_stage2_lowfreq_final_dvz_relaxation = false;
   stage1_config.enable_stage2_lowfreq_final_hold_relaxation = false;
   stage1_config.enable_stage1_yaw_refinement = true;
-  stage1_config.enable_rtk_outage_segmented_batch = false;
   stage1_config.gnss_vertical_reference_source =
     GnssVerticalReferenceSource::kRawRtk;
   Stage1YawRefinementRequest stage1_request;
@@ -155,6 +173,9 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
   };
   OfflineRunResult stage1_result =
     Stage1YawRefinementRunner(std::move(stage1_request)).Run();
+  ApplyStage1SourceReferencePolicy(
+    Stage1SourceReferencePolicyRequest{&request_.config, &stage1_config},
+    stage1_result);
   if (stage1_result.trajectory.empty()) {
     throw std::runtime_error("stage2 velocity optimization received an empty stage1 trajectory");
   }
@@ -191,6 +212,9 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
       };
       stage1_result =
         Stage1YawRefinementRunner(std::move(constrained_stage1_request)).Run();
+      ApplyStage1SourceReferencePolicy(
+        Stage1SourceReferencePolicyRequest{&request_.config, &stage1_config},
+        stage1_result);
       if (stage1_result.trajectory.empty()) {
         throw std::runtime_error(
           "stage2 velocity optimization received an empty constrained stage1 trajectory");
