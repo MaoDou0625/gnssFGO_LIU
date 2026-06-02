@@ -21,6 +21,7 @@
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
+#include "offline_lc_minimal/factor/AttitudeReferenceFactor.h"
 #include "offline_lc_minimal/factor/VelocityDeltaFactor.h"
 
 namespace {
@@ -161,24 +162,29 @@ void TestBuilderAddsOutageAttitudeAndVelocityConstraints() {
   request.velocity_diagnostics = &velocity_diagnostics;
   offline_lc_minimal::RtkOutageRecoveryConstraintBuilder(std::move(request)).Build();
 
-  ExpectTrue(summary.rtk_outage_attitude_hold_factor_count == 5U,
-             "absolute attitude hold should include the configured boundary guard");
+  ExpectTrue(summary.rtk_outage_attitude_hold_factor_count == 0U,
+             "outage recovery should not add absolute attitude hold factors");
   ExpectTrue(summary.rtk_outage_relative_attitude_factor_count == 4U,
-             "relative yaw should cover guarded adjacent outage edges");
+             "relative rotation should cover guarded adjacent outage edges");
   ExpectTrue(summary.rtk_outage_velocity_delta_3d_factor_count == 2U,
              "3D velocity delta should cover intervals inside the outage");
-  ExpectTrue(graph.size() == 11U, "unexpected outage recovery factor count");
-  ExpectTrue(attitude_diagnostics.size() == 9U, "attitude diagnostics should include absolute and relative rows");
+  ExpectTrue(graph.size() == 6U, "unexpected outage recovery factor count");
+  ExpectTrue(attitude_diagnostics.size() == 4U, "attitude diagnostics should include relative rotation rows");
   ExpectTrue(velocity_diagnostics.size() == 2U, "velocity diagnostics should include each added interval");
+  ExpectTrue(attitude_diagnostics.front().constraint_type == "relative_rotation",
+             "outage attitude diagnostic should describe relative rotation");
 
   const auto first_attitude_factor =
-    boost::dynamic_pointer_cast<offline_lc_minimal::factor::AttitudeHoldFactor>(graph.at(0));
-  ExpectTrue(first_attitude_factor.get() != nullptr, "first outage factor should hold attitude");
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::RelativeRotationReferenceFactor>(graph.at(0));
+  ExpectTrue(first_attitude_factor.get() != nullptr, "first outage factor should hold relative rotation");
   ExpectTrue(
     first_attitude_factor->keys()[0] == gtsam::symbol_shorthand::X(0),
-    "guarded attitude hold should start before the outage pre-anchor");
+    "guarded relative rotation should start before the outage pre-anchor");
+  ExpectTrue(
+    first_attitude_factor->keys()[1] == gtsam::symbol_shorthand::X(1),
+    "guarded relative rotation should connect adjacent pose states");
   const auto first_velocity_factor =
-    boost::dynamic_pointer_cast<offline_lc_minimal::factor::VelocityDeltaFactor>(graph.at(9));
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::VelocityDeltaFactor>(graph.at(4));
   ExpectTrue(first_velocity_factor.get() != nullptr, "velocity factor should be present after attitude factors");
   ExpectTrue(first_velocity_factor->keys()[0] == gtsam::symbol_shorthand::V(1),
              "velocity factor should start at the first outage interval");
@@ -200,16 +206,16 @@ void TestBuilderAddsOutageAttitudeAndVelocityConstraints() {
     attitude_diagnostics,
     velocity_diagnostics,
     summary);
-  ExpectNear(
-    summary.rtk_outage_attitude_hold_max_abs_residual_rad,
-    0.0,
-    1e-12,
-    "absolute attitude residual should be zero at the reference");
+  ExpectTrue(std::isfinite(attitude_diagnostics.front().optimized_relative_angle_rad),
+             "relative rotation diagnostics should include optimized relative angle");
+  ExpectTrue(
+    std::isnan(summary.rtk_outage_attitude_hold_max_abs_residual_rad),
+    "absolute attitude residual summary should remain unset");
   ExpectNear(
     summary.rtk_outage_relative_attitude_max_abs_residual_rad,
     0.0,
     1e-12,
-    "relative yaw residual should be zero at the reference");
+    "relative rotation residual should be zero at the reference");
   ExpectNear(
     summary.rtk_outage_velocity_delta_3d_rms_mps,
     0.0,

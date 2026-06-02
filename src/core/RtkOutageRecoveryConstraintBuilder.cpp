@@ -9,7 +9,6 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
 
-#include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
 #include "offline_lc_minimal/factor/AttitudeReferenceFactor.h"
 #include "offline_lc_minimal/factor/VelocityDeltaFactor.h"
 
@@ -73,32 +72,7 @@ Eigen::Vector3d Rot3ToYpr(const gtsam::Rot3 &rotation) {
   return Eigen::Vector3d(ypr.x(), ypr.y(), ypr.z());
 }
 
-RtkOutageAttitudeHoldDiagnosticRow MakeAbsoluteAttitudeDiagnostic(
-  const std::size_t window_index,
-  const std::size_t state_index,
-  const double time_s,
-  const gtsam::Rot3 &reference_rotation,
-  const std::string &reference_source,
-  const double sigma_rad) {
-  RtkOutageAttitudeHoldDiagnosticRow row;
-  row.window_index = window_index;
-  row.constraint_type = "absolute";
-  row.state_index_i = state_index;
-  row.state_index_j = state_index;
-  row.time_i_s = time_s;
-  row.time_j_s = time_s;
-  row.factor_added = true;
-  row.skip_reason = "ADDED";
-  row.reference_source = reference_source;
-  row.sigma_rad = sigma_rad;
-  row.reference_rotation_i = reference_rotation;
-  row.reference_rotation_j = reference_rotation;
-  row.reference_ypr_i_rad = Rot3ToYpr(reference_rotation);
-  row.reference_ypr_j_rad = row.reference_ypr_i_rad;
-  return row;
-}
-
-RtkOutageAttitudeHoldDiagnosticRow MakeRelativeYawDiagnostic(
+RtkOutageAttitudeHoldDiagnosticRow MakeRelativeRotationDiagnostic(
   const std::size_t window_index,
   const std::size_t state_index_i,
   const std::size_t state_index_j,
@@ -110,7 +84,7 @@ RtkOutageAttitudeHoldDiagnosticRow MakeRelativeYawDiagnostic(
   const double sigma_rad) {
   RtkOutageAttitudeHoldDiagnosticRow row;
   row.window_index = window_index;
-  row.constraint_type = "relative_yaw";
+  row.constraint_type = "relative_rotation";
   row.state_index_i = state_index_i;
   row.state_index_j = state_index_j;
   row.time_i_s = time_i_s;
@@ -169,6 +143,10 @@ void AccumulateAttitudeSummary(
     } else if (row.constraint_type == "relative_yaw" &&
                std::isfinite(row.residual_yaw_rad)) {
       relative_max = std::max(relative_max, std::abs(row.residual_yaw_rad));
+      has_relative = true;
+    } else if (row.constraint_type == "relative_rotation" &&
+               std::isfinite(row.residual_norm_rad)) {
+      relative_max = std::max(relative_max, row.residual_norm_rad);
       has_relative = true;
     }
   }
@@ -234,11 +212,8 @@ void RtkOutageRecoveryConstraintBuilder::Build() const {
     if (request_.reference_states->size() != request_.state_timestamps->size()) {
       throw std::runtime_error("RTK outage attitude hold requires one reference state per graph state");
     }
-    const auto absolute_noise = gtsam::noiseModel::Isotropic::Sigma(
+    const auto relative_rotation_noise = gtsam::noiseModel::Isotropic::Sigma(
       3,
-      request_.config->rtk_outage_absolute_attitude_sigma_rad);
-    const auto relative_yaw_noise = gtsam::noiseModel::Isotropic::Sigma(
-      1,
       request_.config->rtk_outage_relative_attitude_sigma_rad);
     for (const auto &window : *request_.outage_windows) {
       if (!IsPlannedOutage(window) ||
@@ -250,37 +225,20 @@ void RtkOutageRecoveryConstraintBuilder::Build() const {
         window,
         *request_.state_timestamps,
         request_.config->rtk_outage_attitude_guard_duration_s);
-      for (std::size_t state_index = hold_start_index;
-           state_index <= hold_end_index;
-           ++state_index) {
-        const auto &reference_state = (*request_.reference_states)[state_index];
-        request_.graph->add(factor::AttitudeHoldFactor(
-          symbol::X(state_index),
-          reference_state.pose.rotation(),
-          absolute_noise));
-        ++request_.run_summary->rtk_outage_attitude_hold_factor_count;
-        request_.attitude_diagnostics->push_back(MakeAbsoluteAttitudeDiagnostic(
-          window.window_index,
-          state_index,
-          (*request_.state_timestamps)[state_index],
-          reference_state.pose.rotation(),
-          request_.attitude_reference_source,
-          request_.config->rtk_outage_absolute_attitude_sigma_rad));
-      }
       for (std::size_t state_index_j = hold_start_index + 1U;
            state_index_j <= hold_end_index;
            ++state_index_j) {
         const std::size_t state_index_i = state_index_j - 1U;
         const auto &reference_state_i = (*request_.reference_states)[state_index_i];
         const auto &reference_state_j = (*request_.reference_states)[state_index_j];
-        request_.graph->add(factor::RelativeYawReferenceFactor(
+        request_.graph->add(factor::RelativeRotationReferenceFactor(
           symbol::X(state_index_i),
           symbol::X(state_index_j),
           reference_state_i.pose.rotation(),
           reference_state_j.pose.rotation(),
-          relative_yaw_noise));
+          relative_rotation_noise));
         ++request_.run_summary->rtk_outage_relative_attitude_factor_count;
-        request_.attitude_diagnostics->push_back(MakeRelativeYawDiagnostic(
+        request_.attitude_diagnostics->push_back(MakeRelativeRotationDiagnostic(
           window.window_index,
           state_index_i,
           state_index_j,
@@ -352,11 +310,35 @@ void PopulateRtkOutageRecoveryDiagnostics(
       const auto optimized_pose_j = optimized_values.at<gtsam::Pose3>(symbol::X(row.state_index_j));
       row.optimized_ypr_i_rad = Rot3ToYpr(optimized_pose_i.rotation());
       row.optimized_ypr_j_rad = Rot3ToYpr(optimized_pose_j.rotation());
+      const gtsam::Rot3 optimized_delta_rotation =
+        optimized_pose_i.rotation().between(optimized_pose_j.rotation());
+      row.optimized_relative_rotvec_rad =
+        gtsam::Rot3::Logmap(optimized_delta_rotation);
+      row.optimized_relative_angle_rad = row.optimized_relative_rotvec_rad.norm();
       row.optimized_delta_yaw_rad =
         factor::RelativeYawRad(optimized_pose_i.rotation(), optimized_pose_j.rotation());
       row.residual_yaw_rad =
         factor::NormalizeAngleRad(row.optimized_delta_yaw_rad - row.reference_delta_yaw_rad);
       row.residual_norm_rad = std::abs(row.residual_yaw_rad);
+    } else if (row.constraint_type == "relative_rotation") {
+      const auto optimized_pose_i = optimized_values.at<gtsam::Pose3>(symbol::X(row.state_index_i));
+      const auto optimized_pose_j = optimized_values.at<gtsam::Pose3>(symbol::X(row.state_index_j));
+      row.optimized_ypr_i_rad = Rot3ToYpr(optimized_pose_i.rotation());
+      row.optimized_ypr_j_rad = Rot3ToYpr(optimized_pose_j.rotation());
+      const gtsam::Rot3 reference_delta_rotation =
+        row.reference_rotation_i.between(row.reference_rotation_j);
+      const gtsam::Rot3 optimized_delta_rotation =
+        optimized_pose_i.rotation().between(optimized_pose_j.rotation());
+      row.optimized_relative_rotvec_rad =
+        gtsam::Rot3::Logmap(optimized_delta_rotation);
+      row.optimized_relative_angle_rad = row.optimized_relative_rotvec_rad.norm();
+      row.residual_rad =
+        gtsam::Rot3::Logmap(reference_delta_rotation.between(optimized_delta_rotation));
+      row.residual_norm_rad = row.residual_rad.norm();
+      row.optimized_delta_yaw_rad =
+        factor::RelativeYawRad(optimized_pose_i.rotation(), optimized_pose_j.rotation());
+      row.residual_yaw_rad =
+        factor::NormalizeAngleRad(row.optimized_delta_yaw_rad - row.reference_delta_yaw_rad);
     }
   }
   for (auto &row : velocity_diagnostics) {

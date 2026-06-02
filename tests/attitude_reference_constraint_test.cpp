@@ -83,6 +83,33 @@ void TestRelativeYawReferenceFactorIgnoresCommonYawOffset() {
   ExpectTrue(changed_delta_residual.norm() > 0.04, "relative yaw delta error should create residual");
 }
 
+void TestRelativeRotationReferenceFactorUsesFullRot3Delta() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(3, 1.0);
+  const gtsam::Rot3 reference_i = gtsam::Rot3::Ypr(0.2, -0.1, 0.05);
+  const gtsam::Rot3 reference_j = gtsam::Rot3::Ypr(0.45, -0.08, 0.12);
+  const offline_lc_minimal::factor::RelativeRotationReferenceFactor factor(
+    1,
+    2,
+    reference_i,
+    reference_j,
+    noise);
+
+  const gtsam::Rot3 common_rotation = gtsam::Rot3::Ypr(1.0, 0.2, -0.3);
+  const gtsam::Vector common_offset_residual = factor.evaluateError(
+    gtsam::Pose3(common_rotation.compose(reference_i), gtsam::Point3(5.0, -1.0, 3.0)),
+    gtsam::Pose3(common_rotation.compose(reference_j), gtsam::Point3(-2.0, 7.0, 0.5)));
+  ExpectNear(
+    common_offset_residual.norm(),
+    0.0,
+    1e-12,
+    "common rotation and translations should not affect relative Rot3");
+
+  const gtsam::Vector changed_delta_residual = factor.evaluateError(
+    gtsam::Pose3(common_rotation.compose(reference_i), gtsam::Point3::Zero()),
+    gtsam::Pose3(common_rotation.compose(reference_j).compose(gtsam::Rot3::Rx(0.05)), gtsam::Point3::Zero()));
+  ExpectTrue(changed_delta_residual.norm() > 0.04, "full relative rotation error should create residual");
+}
+
 std::vector<offline_lc_minimal::ReferenceNodeState> MakeReferenceStates(const std::size_t count = 4U) {
   std::vector<offline_lc_minimal::ReferenceNodeState> states(count);
   for (std::size_t index = 0; index < states.size(); ++index) {
@@ -270,6 +297,9 @@ int main() {
     RunTest(
       "TestRelativeYawReferenceFactorIgnoresCommonYawOffset",
       TestRelativeYawReferenceFactorIgnoresCommonYawOffset);
+    RunTest(
+      "TestRelativeRotationReferenceFactorUsesFullRot3Delta",
+      TestRelativeRotationReferenceFactorUsesFullRot3Delta);
     RunTest(
       "TestBuilderAddsNoAttitudeReferences",
       TestBuilderAddsNoAttitudeReferences);

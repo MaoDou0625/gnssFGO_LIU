@@ -27,12 +27,23 @@ This path does not add RTK course, RTK velocity, body-y velocity, IMU-derived
 relative yaw, or other yaw observation factors. RTK-derived heading checks are
 diagnostics or future work only.
 
+RTK outage recovery is a separate path. When `enable_rtk_outage_attitude_hold`
+is enabled, it no longer adds per-state absolute attitude hold factors inside
+the guarded outage span. It adds adjacent `Rot3` relative-rotation factors whose
+residual is `Logmap(reference_delta.between(optimized_delta))`, matching the
+relative-change semantics of the velocity-delta outage recovery path.
+
 ## Configuration
 
 - `attitude_reference_sigma_rad` is retained for backward config compatibility but
   is not used by the ordinary attitude-reference builder.
 - `attitude_reference_relative_yaw_sigma_rad` is retained for backward config
   compatibility but is not used by the ordinary attitude-reference builder.
+- `rtk_outage_relative_attitude_sigma_rad` is the active outage attitude sigma
+  for adjacent `Rot3` relative-rotation factors.
+- `rtk_outage_absolute_attitude_sigma_rad` is retained for compatibility and for
+  other legacy attitude-hold paths, but outage recovery no longer uses it for
+  per-state attitude hold.
 
 ## Diagnostics
 
@@ -40,3 +51,8 @@ diagnostics or future work only.
   per-state roll/pitch reference is added.
 - `relative_yaw_reference_diagnostics.csv` is empty for the ordinary builder
   because no relative-yaw reference is added.
+- `rtk_outage_attitude_hold_diagnostics.csv` uses `constraint_type=relative_rotation`
+  for outage recovery rows. `residual_x/y/z_rad` are the full relative `Rot3`
+  residual vector, while `reference_relative_rotvec_*` and
+  `optimized_relative_rotvec_*` record the target and optimized adjacent-state
+  rotation vectors.

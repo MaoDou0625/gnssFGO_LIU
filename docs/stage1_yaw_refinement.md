@@ -5,8 +5,8 @@ It runs the existing offline optimizer with RTK/GNSS position, IMU, initial stat
 constraints, RTK vertical envelope/drift paths, and the current attitude
 reference path. It disables NHC, RTK velocity, vertical motion window
 consistency, and vertical jump/window constraints. RTK outage smoothing remains
-available in stage1 so fixed-solution gaps can keep attitude locked while
-velocity is recovered with loose IMU-propagated delta-velocity constraints.
+available in stage1 so fixed-solution gaps can keep adjacent attitude changes
+and velocity changes aligned with IMU-propagated references.
 
 After each optimization run, it computes RTK course from RTKFIX position
 differences using a centered heading window, matches those course samples to the
@@ -32,7 +32,6 @@ Key configuration:
 - `stage1_yaw_update_max_rad`
 - `enable_rtk_outage_attitude_hold`
 - `rtk_outage_attitude_guard_duration_s`
-- `rtk_outage_absolute_attitude_sigma_rad`
 - `rtk_outage_relative_attitude_sigma_rad`
 - `enable_rtk_outage_velocity_delta_3d`
 - `rtk_outage_velocity_delta_3d_sigma_mps`
@@ -43,6 +42,6 @@ the input yaw, median heading error, estimated heading noise, applied update,
 next yaw, matched sample count, optimizer final error, and GNSS NIS mean.
 
 When outage recovery is enabled, `rtk_outage_attitude_hold_diagnostics.csv`
-records the guarded absolute attitude hold rows and relative-yaw rows, and
+records guarded adjacent `Rot3` relative-rotation rows, and
 `rtk_outage_velocity_delta_3d_diagnostics.csv` records the loose 3D
 delta-velocity residuals inside each outage window.
