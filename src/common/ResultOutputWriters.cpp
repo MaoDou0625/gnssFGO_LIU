@@ -894,8 +894,6 @@ void WriteRtkOutageAttitudeHoldDiagnosticsCsv(
        "residual_x_rad,residual_y_rad,residual_z_rad,residual_norm_rad,"
        "reference_relative_rotvec_x_rad,reference_relative_rotvec_y_rad,"
        "reference_relative_rotvec_z_rad,reference_relative_angle_rad,"
-       "optimized_relative_rotvec_x_rad,optimized_relative_rotvec_y_rad,"
-       "optimized_relative_rotvec_z_rad,optimized_relative_angle_rad,"
        "reference_delta_yaw_rad,optimized_delta_yaw_rad,residual_yaw_rad\n";
   for (const auto &row : rows) {
     stream << row.window_index << ','
@@ -928,10 +926,6 @@ void WriteRtkOutageAttitudeHoldDiagnosticsCsv(
            << row.reference_relative_rotvec_rad.y() << ','
            << row.reference_relative_rotvec_rad.z() << ','
            << row.reference_relative_angle_rad << ','
-           << row.optimized_relative_rotvec_rad.x() << ','
-           << row.optimized_relative_rotvec_rad.y() << ','
-           << row.optimized_relative_rotvec_rad.z() << ','
-           << row.optimized_relative_angle_rad << ','
            << row.reference_delta_yaw_rad << ','
            << row.optimized_delta_yaw_rad << ','
            << row.residual_yaw_rad << '\n';

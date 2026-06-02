@@ -779,6 +779,9 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.attitude_reference_relative_yaw_sigma_rad <= 0.0) {
     throw std::runtime_error("attitude reference settings must be positive");
   }
+  if (config.enable_attitude_reference_constraint && !config.enable_body_z_jump_detection) {
+    throw std::runtime_error("attitude reference constraint requires body-z jump detection seed optimization");
+  }
   if (config.enable_body_z_nhc_global_weak_constraint &&
       !config.enable_body_z_nhc_constraint) {
     throw std::runtime_error("enable_body_z_nhc_global_weak_constraint requires enable_body_z_nhc_constraint");

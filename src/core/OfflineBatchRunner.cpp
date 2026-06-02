@@ -607,6 +607,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     collect_segment_error_diagnostics ||
     config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone ||
     config_.enable_body_z_jump_detection ||
+    config_.enable_attitude_reference_constraint ||
     (config_.enable_rtk_outage_smoothing && config_.enable_rtk_outage_attitude_hold) ||
     active_stage2_reference != nullptr;
   run_result.run_summary.error_state_count = 0;

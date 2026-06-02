@@ -1331,7 +1331,13 @@ void TestVerticalVelocityDeltaConfigValidation() {
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_attitude_reference_constraint = true;
-  offline_lc_minimal::ValidateConfig(config);
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("attitude reference constraint") != std::string::npos;
+  }
+  ExpectTrue(threw, "attitude reference constraints should require body-z seed optimization");
 }
 
 void TestVerticalEnvelopeCenterPullConfigValidation() {

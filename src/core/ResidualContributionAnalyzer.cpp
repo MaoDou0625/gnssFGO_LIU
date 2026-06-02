@@ -62,9 +62,6 @@ struct ResidualAccumulator {
   if (Contains(factor_type, "AttitudeHoldFactor")) {
     return "attitude_hold";
   }
-  if (Contains(factor_type, "RelativeRotationReferenceFactor")) {
-    return "rtk_outage_relative_attitude";
-  }
   if (Contains(factor_type, "RollPitchReferenceFactor") ||
       Contains(factor_type, "RelativeYawReferenceFactor") ||
       Contains(factor_type, "AttitudeReferenceFactor")) {

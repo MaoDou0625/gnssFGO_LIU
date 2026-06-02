@@ -4,55 +4,25 @@ This document records the current attitude-reference constraint boundary after t
 
 ## Constraint Semantics
 
-`enable_attitude_reference_constraint` is retained for configuration compatibility,
-but `AttitudeReferenceConstraintBuilder` no longer adds ordinary yaw, roll, or
-pitch reference factors.
+`enable_attitude_reference_constraint` now enables two non-overlapping factor types through `AttitudeReferenceConstraintBuilder`:
 
-The builder no longer adds per-node roll/pitch absolute factors from the RTK/body-z
-seed reference and no longer adds adjacent yaw-increment factors from the base/IMU
-reference states. Yaw, roll, and pitch continuity are left to the IMU
-preintegration chain and any explicit physical factors in the main graph. This
-avoids feeding a seed-optimized attitude branch, or a separate precomputed yaw
-reference chain, back into the main optimization as a pseudo observation.
+- `RollPitchReferenceFactor(X_i)` keeps the optimized roll and pitch close to the seed/reference roll and pitch at every dynamic node.
+- `RelativeYawReferenceFactor(X_i, X_j)` keeps only the adjacent yaw increment close to the base/IMU reference yaw increment.
+
+The builder adds roll/pitch factors for `dynamic_start_index ... end`, using the RTK seed/reference attitude only for roll and pitch. It adds relative-yaw factors for every adjacent graph state from `X(0)->X(1)` through the final state, including the initial static segment and the static-to-dynamic boundary. Those yaw increments come from the base IMU forward/reference states, not from the RTK seed optimized attitude, so low-motion dynamic intervals are not pulled by RTK-seed yaw drift.
 
 ## Yaw Offset
 
-The attitude reference path no longer locks each node to an absolute reference yaw
-and no longer constrains adjacent yaw increments. A common yaw offset across the
-full static/dynamic chain is therefore not corrected by this path. If a later
-yaw-sensitive constraint is added, it should be introduced explicitly instead of
-reusing seed-derived attitude references.
+The attitude reference path no longer locks each node to an absolute reference yaw. A common yaw offset across the full static/dynamic chain is therefore not corrected by these factors. If a later yaw-sensitive constraint is added, the relative yaw chain lets the initial/static and dynamic attitudes move together rather than bending only the dynamic segment.
 
-This path does not add RTK course, RTK velocity, body-y velocity, IMU-derived
-relative yaw, or other yaw observation factors. RTK-derived heading checks are
-diagnostics or future work only.
-
-RTK outage recovery is a separate path. When `enable_rtk_outage_attitude_hold`
-is enabled, it no longer adds per-state absolute attitude hold factors inside
-the guarded outage span. It adds adjacent `Rot3` relative-rotation factors whose
-residual is `Logmap(reference_delta.between(optimized_delta))`, matching the
-relative-change semantics of the velocity-delta outage recovery path.
+This path does not add RTK course, RTK velocity, body-y velocity, or other yaw observation factors. RTK-derived heading checks are diagnostics or future work only.
 
 ## Configuration
 
-- `attitude_reference_sigma_rad` is retained for backward config compatibility but
-  is not used by the ordinary attitude-reference builder.
-- `attitude_reference_relative_yaw_sigma_rad` is retained for backward config
-  compatibility but is not used by the ordinary attitude-reference builder.
-- `rtk_outage_relative_attitude_sigma_rad` is the active outage attitude sigma
-  for adjacent `Rot3` relative-rotation factors.
-- `rtk_outage_absolute_attitude_sigma_rad` is retained for compatibility and for
-  other legacy attitude-hold paths, but outage recovery no longer uses it for
-  per-state attitude hold.
+- `attitude_reference_sigma_rad` controls the roll/pitch absolute reference factor.
+- `attitude_reference_relative_yaw_sigma_rad` controls the adjacent relative-yaw reference factor. The default is `0.01`.
 
 ## Diagnostics
 
-- `attitude_reference_diagnostics.csv` is empty for the ordinary builder because no
-  per-state roll/pitch reference is added.
-- `relative_yaw_reference_diagnostics.csv` is empty for the ordinary builder
-  because no relative-yaw reference is added.
-- `rtk_outage_attitude_hold_diagnostics.csv` uses `constraint_type=relative_rotation`
-  for outage recovery rows. `residual_x/y/z_rad` are the full relative `Rot3`
-  residual vector, while `reference_relative_rotvec_*` and
-  `optimized_relative_rotvec_*` record the target and optimized adjacent-state
-  rotation vectors.
+- `attitude_reference_diagnostics.csv` is now a per-state roll/pitch diagnostic. It still records reference and optimized yaw for inspection, but its yaw residual column is `NaN` because no absolute yaw factor is present.
+- `relative_yaw_reference_diagnostics.csv` records each full-chain relative-yaw edge, including reference delta yaw, optimized delta yaw, and the yaw residual.
