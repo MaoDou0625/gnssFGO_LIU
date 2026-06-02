@@ -794,8 +794,8 @@ void TestStage2RunsConstrainedStage1BeforeSegmentedStage2() {
 
   const auto result =
     offline_lc_minimal::Stage2VelocityOptimizationRunner(std::move(request)).Run();
-  ExpectTrue(calls.size() == 5U,
-             "body-y envelope flow should run baseline Stage1, constrained Stage1, then three segments; actual=" +
+  ExpectTrue(calls.size() == 6U,
+             "body-y envelope flow should run baseline Stage1, constrained Stage1, then four segmented child solves; actual=" +
                std::to_string(calls.size()) +
                " stop=" + result.run_summary.stage1_yaw_refinement_stop_reason +
                " reason=" + result.run_summary.stage1_yaw_refinement_selection_reason +
@@ -888,8 +888,8 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
   const offline_lc_minimal::OfflineRunResult result =
     offline_lc_minimal::Stage2VelocityOptimizationRunner(std::move(request)).Run();
 
-  ExpectTrue(calls.size() == 4U,
-             "segmented stage2 should make one global stage1 pass plus three child solves");
+  ExpectTrue(calls.size() == 5U,
+             "segmented stage2 should make one global stage1 pass plus four child solves");
   ExpectTrue(!calls[0].enable_stage1_yaw_refinement,
              "global stage1 run_once should already be inside the yaw refinement runner");
   ExpectTrue(!calls[0].enable_stage2_velocity_optimization,
@@ -922,11 +922,15 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
              "pre child start should match the prefix run");
   ExpectNear(calls[1].processing_end_time_s, 10.0, 1e-12,
              "pre child end should stop at outage start");
-  ExpectNear(calls[2].processing_start_time_s, 0.0, 1e-12,
-             "outage child should run as a causal prefix before post");
-  ExpectNear(calls[2].processing_end_time_s, 20.0, 1e-12,
+  ExpectNear(calls[2].processing_start_time_s, 20.0, 1e-12,
+             "post probe should run before outage to produce position/velocity closure");
+  ExpectNear(calls[2].processing_end_time_s, 30.0, 1e-12,
+             "post probe should cover the post segment");
+  ExpectNear(calls[3].processing_start_time_s, 0.0, 1e-12,
+             "outage child should still run as the causal prefix for attitude");
+  ExpectNear(calls[3].processing_end_time_s, 20.0, 1e-12,
               "outage child end should match outage end");
-  ExpectNear(calls[3].processing_start_time_s, 20.0, 1e-12,
+  ExpectNear(calls[4].processing_start_time_s, 20.0, 1e-12,
              "post child should run after outage and start at outage end");
 
   ExpectTrue(result.run_summary.rtk_outage_segmented_batch_enabled,

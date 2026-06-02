@@ -413,7 +413,7 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.run_summary.rtk_outage_batch_segment_count =
     assembled.rtk_outage_batch_segments.size();
   assembled.run_summary.rtk_outage_segmented_batch_run_count =
-    request_.pieces.size();
+    request_.pieces.size() + request_.additional_child_run_count;
   assembled.run_summary.rtk_outage_segmented_batch_vertical_boundary_jump_allowed =
     request_.vertical_boundary_jump_allowed;
   assembled.run_summary.rtk_outage_window_count = request_.outage_windows.size();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <vector>
 
 #include "offline_lc_minimal/common/RunResultTypes.h"
@@ -17,6 +18,7 @@ struct SegmentedBatchResultAssemblerRequest {
   double processing_start_time_s = 0.0;
   double processing_end_time_s = 0.0;
   bool vertical_boundary_jump_allowed = false;
+  std::size_t additional_child_run_count = 0U;
 };
 
 class SegmentedBatchResultAssembler {

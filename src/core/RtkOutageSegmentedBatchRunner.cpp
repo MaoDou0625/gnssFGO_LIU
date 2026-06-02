@@ -339,6 +339,47 @@ void AttachAttitudeReferenceFromTrajectory(
   reference.skip_reason = "OK";
 }
 
+void RemoveAttitudeReference(RtkOutageBoundaryReferenceRow &reference) {
+  reference.has_attitude = false;
+  reference.add_attitude_constraint = false;
+  reference.attitude_sigma_rad = std::numeric_limits<double>::quiet_NaN();
+  reference.valid =
+    reference.has_up || reference.has_vz || reference.has_ba_z ||
+    reference.has_horizontal_position || reference.has_horizontal_velocity;
+  if (!reference.valid) {
+    reference.skip_reason = "nonfinite_trajectory_reference";
+  }
+}
+
+void RemoveBiasReference(RtkOutageBoundaryReferenceRow &reference) {
+  reference.has_ba_z = false;
+  reference.add_ba_z_constraint = false;
+  reference.reference_ba_z_mps2 = std::numeric_limits<double>::quiet_NaN();
+  reference.valid =
+    reference.has_up || reference.has_vz || reference.has_ba_z ||
+    reference.has_horizontal_position || reference.has_horizontal_velocity;
+  if (!reference.valid) {
+    reference.skip_reason = "nonfinite_trajectory_reference";
+  }
+}
+
+RtkOutageBoundaryReferenceRow MakeOutageEndPositionVelocityReferenceFromPostResult(
+  const OfflineRunnerConfig &config,
+  const OfflineRunResult &post_result,
+  const RtkOutageWindowRow &outage) {
+  RtkOutageBoundaryReferenceRow reference = MakeBoundaryReferenceFromTrajectory(
+    config,
+    post_result,
+    outage.window_index,
+    outage.end_time_s,
+    "OUTAGE_END",
+    "POST_RECOVERY_OPTIMIZED_POSITION_VELOCITY",
+    false);
+  RemoveAttitudeReference(reference);
+  RemoveBiasReference(reference);
+  return reference;
+}
+
 RtkOutageBoundaryReferenceRow MakeTimeOnlyBoundaryReference(
   const std::size_t window_index,
   const std::string &boundary_role,
@@ -442,7 +483,8 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
   }
 
   const auto assemble_pieces =
-    [&](std::vector<SegmentedBatchResultPiece> pieces) {
+    [&](std::vector<SegmentedBatchResultPiece> pieces,
+        const std::size_t additional_child_run_count = 0U) {
       SegmentedBatchResultAssemblerRequest assemble_request;
       assemble_request.pieces = std::move(pieces);
       assemble_request.outage_windows = request_.outage_windows;
@@ -450,6 +492,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       assemble_request.processing_end_time_s = request_.processing_end_time_s;
       assemble_request.vertical_boundary_jump_allowed =
         request_.config.rtk_outage_segmented_batch_allow_vertical_boundary_jump;
+      assemble_request.additional_child_run_count = additional_child_run_count;
       OfflineRunResult assembled =
         SegmentedBatchResultAssembler(std::move(assemble_request)).Assemble();
       assembled.rtk_outage_recovery_references = recovery_references;
@@ -503,6 +546,33 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       bias_policy,
       outage.window_index,
       "OUTAGE_START");
+    const RtkOutageWindowRow *post_source_outage =
+      FindSourceOutage(request_.outage_windows, *post_segment);
+    OfflineRunResult post_probe_result;
+    bool has_post_probe_result = false;
+    if (has_valid_recovery_reference) {
+      OfflineRunnerConfig post_probe_config =
+        MakeChildConfig(request_.config, request_.base_config, *post_segment, post_source_outage);
+      std::shared_ptr<const Stage2VelocityReference> post_probe_reference =
+        SliceStage2ReferenceForSegment(
+          request_.stage2_reference,
+          post_probe_config,
+          *post_segment,
+          request_.dynamic_start_time_s);
+      std::vector<RtkOutageBoundaryReferenceRow> post_probe_boundary_refs;
+      post_probe_boundary_refs.push_back(
+        MakePostStartBoundaryReferenceFromRecovery(
+          request_.config,
+          *recovery_reference));
+      post_probe_result = request_.run_once(
+        std::move(post_probe_config),
+        WithBoundaryReferences(
+          std::move(post_probe_reference),
+          std::move(post_probe_boundary_refs)),
+        nullptr,
+        request_.dataset);
+      has_post_probe_result = true;
+    }
 
     std::vector<RtkOutageBoundaryReferenceRow> outage_boundary_refs;
     outage_boundary_refs.push_back(MakeBoundaryReferenceFromTrajectory(
@@ -513,11 +583,18 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       "OUTAGE_START",
       "PRE_TERMINAL",
       allow_start_ba_z));
-    if (has_valid_recovery_reference) {
-      outage_boundary_refs.push_back(
-        MakeOutageEndBoundaryReferenceFromRecovery(
+    if (has_post_probe_result) {
+      RtkOutageBoundaryReferenceRow outage_end_reference =
+        MakeOutageEndPositionVelocityReferenceFromPostResult(
           request_.config,
-          *recovery_reference));
+          post_probe_result,
+          outage);
+      if (!outage_end_reference.valid && recovery_reference != nullptr) {
+        outage_end_reference = MakeOutageEndBoundaryReferenceFromRecovery(
+          request_.config,
+          *recovery_reference);
+      }
+      outage_boundary_refs.push_back(std::move(outage_end_reference));
     } else {
       outage_boundary_refs.push_back(MakeTimeOnlyBoundaryReference(
         outage.window_index,
@@ -542,8 +619,6 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       nullptr,
       request_.dataset);
 
-    const RtkOutageWindowRow *post_source_outage =
-      FindSourceOutage(request_.outage_windows, *post_segment);
     OfflineRunnerConfig post_config =
       MakeChildConfig(request_.config, request_.base_config, *post_segment, post_source_outage);
     std::shared_ptr<const Stage2VelocityReference> post_reference =
@@ -583,7 +658,8 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
     pieces.push_back(SegmentedBatchResultPiece{*pre_segment, std::move(pre_result)});
     pieces.push_back(SegmentedBatchResultPiece{*outage_segment, std::move(outage_result)});
     pieces.push_back(SegmentedBatchResultPiece{*post_segment, std::move(post_result)});
-    OfflineRunResult assembled = assemble_pieces(std::move(pieces));
+    OfflineRunResult assembled =
+      assemble_pieces(std::move(pieces), has_post_probe_result ? 1U : 0U);
     assembled.rtk_outage_bias_continuity_policy = std::move(bias_policy);
     return assembled;
   }

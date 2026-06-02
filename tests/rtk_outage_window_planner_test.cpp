@@ -644,27 +644,46 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
 
   (void)offline_lc_minimal::RtkOutageSegmentedBatchRunner(std::move(request)).Run();
 
-  ExpectTrue(calls.size() == 3U, "boundary handoff should run pre, outage, and post children");
+  ExpectTrue(
+    calls.size() == 4U,
+    "hybrid boundary handoff should run pre, post-probe, outage, and final post children");
   ExpectTrue(calls[0].reference == nullptr, "pre child should not receive a boundary carrier");
 
-  ExpectTrue(calls[1].reference != nullptr, "outage child should receive boundary references");
-  const auto &refs = calls[1].reference->boundary_references;
+  ExpectTrue(calls[1].reference != nullptr, "post probe should receive a recovery boundary");
+  ExpectTrue(calls[1].reference->boundary_references.size() == 1U,
+             "post probe should receive one recovery boundary");
+  const auto &post_probe_ref = calls[1].reference->boundary_references.front();
+  ExpectTrue(post_probe_ref.boundary_role == "POST_START",
+             "post probe should target post start");
+  ExpectTrue(post_probe_ref.has_up && post_probe_ref.has_vz,
+             "post probe should carry the recovery vertical boundary");
+  ExpectTrue(!post_probe_ref.has_attitude && !post_probe_ref.add_attitude_constraint,
+             "post probe must not receive an outage-derived attitude");
+
+  ExpectTrue(calls[2].reference != nullptr, "outage child should receive boundary references");
+  const auto &refs = calls[2].reference->boundary_references;
   ExpectTrue(refs.size() == 2U, "outage child should receive start and end boundaries");
   ExpectTrue(refs[0].boundary_role == "OUTAGE_START", "first outage boundary should be start");
   ExpectTrue(refs[1].boundary_role == "OUTAGE_END", "second outage boundary should be end");
   ExpectTrue(refs[0].has_attitude && refs[0].add_attitude_constraint,
               "outage start should carry an attitude constraint");
   ExpectTrue(!refs[1].has_attitude && !refs[1].add_attitude_constraint,
-              "outage end recovery boundary should not carry a post-derived attitude");
+              "outage end post-probe boundary should not carry a post-derived attitude");
+  ExpectTrue(!refs[1].has_ba_z && !refs[1].add_ba_z_constraint,
+              "outage end post-probe boundary should not carry a post-derived bias");
   ExpectTrue(refs[1].has_up && refs[1].has_vz,
-              "outage end should carry the recovery vertical boundary");
+              "outage end should carry position/velocity reference values from post probe");
+  ExpectTrue(refs[1].has_horizontal_position && refs[1].add_horizontal_position_constraint,
+              "outage end should carry post-probe horizontal position");
+  ExpectTrue(refs[1].has_horizontal_velocity && refs[1].add_horizontal_velocity_constraint,
+              "outage end should carry post-probe horizontal velocity");
   ExpectTrue(std::abs(refs[0].reference_rotation.ypr().x() - 0.4) < 1e-12,
               "outage start attitude must use the pre optimized Rot3 branch");
 
-  ExpectTrue(calls[2].reference != nullptr, "post child should receive recovery boundary reference");
-  ExpectTrue(calls[2].reference->boundary_references.size() == 1U,
+  ExpectTrue(calls[3].reference != nullptr, "post child should receive recovery boundary reference");
+  ExpectTrue(calls[3].reference->boundary_references.size() == 1U,
              "post child should receive one post-start boundary");
-  const auto &post_ref = calls[2].reference->boundary_references.front();
+  const auto &post_ref = calls[3].reference->boundary_references.front();
   ExpectTrue(post_ref.boundary_role == "POST_START",
              "post child boundary should target post start");
   ExpectTrue(post_ref.has_up && post_ref.has_vz,
