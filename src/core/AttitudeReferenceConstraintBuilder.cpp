@@ -21,19 +21,6 @@ Eigen::Vector3d Rot3ToYpr(const gtsam::Rot3 &rotation) {
   return Eigen::Vector3d(ypr.x(), ypr.y(), ypr.z());
 }
 
-AttitudeReferenceDiagnosticRow MakeDiagnosticRow(
-  const std::size_t state_index,
-  const double time_s,
-  const gtsam::Rot3 &reference_rotation) {
-  AttitudeReferenceDiagnosticRow row;
-  row.state_index = state_index;
-  row.time_s = time_s;
-  row.factor_added = true;
-  row.skip_reason = "ADDED";
-  row.reference_ypr_rad = Rot3ToYpr(reference_rotation);
-  return row;
-}
-
 RelativeYawReferenceDiagnosticRow MakeRelativeYawDiagnosticRow(
   const std::size_t edge_index,
   const std::size_t state_index_i,
@@ -65,21 +52,13 @@ AttitudeReferenceConstraintBuilder::AttitudeReferenceConstraintBuilder(
 
 void AttitudeReferenceConstraintBuilder::Build() const {
   if (request_.config == nullptr || request_.state_timestamps == nullptr ||
-      request_.reference_states == nullptr || request_.relative_yaw_reference_states == nullptr ||
-      request_.graph == nullptr ||
-      request_.run_summary == nullptr || request_.diagnostics == nullptr ||
+      request_.relative_yaw_reference_states == nullptr || request_.graph == nullptr ||
+      request_.run_summary == nullptr ||
       request_.relative_yaw_diagnostics == nullptr) {
     throw std::runtime_error("AttitudeReferenceConstraintBuilder received an incomplete request");
   }
   if (!request_.config->enable_attitude_reference_constraint) {
     return;
-  }
-  if (request_.reference_states->empty()) {
-    throw std::runtime_error(
-      "attitude reference constraint requires successful seed reference optimization");
-  }
-  if (request_.reference_states->size() != request_.state_timestamps->size()) {
-    throw std::runtime_error("attitude reference state count does not match graph state count");
   }
   if (request_.relative_yaw_reference_states->empty()) {
     throw std::runtime_error("relative yaw reference constraint requires base reference states");
@@ -91,33 +70,13 @@ void AttitudeReferenceConstraintBuilder::Build() const {
     return;
   }
 
-  const auto roll_pitch_noise =
-    gtsam::noiseModel::Isotropic::Sigma(2, request_.config->attitude_reference_sigma_rad);
   const auto relative_yaw_noise =
     gtsam::noiseModel::Isotropic::Sigma(
       1,
       request_.config->attitude_reference_relative_yaw_sigma_rad);
-  const std::size_t dynamic_state_count =
-    request_.state_timestamps->size() - request_.dynamic_start_index;
-  request_.diagnostics->reserve(request_.diagnostics->size() + dynamic_state_count);
   request_.relative_yaw_diagnostics->reserve(
     request_.relative_yaw_diagnostics->size() +
     (request_.state_timestamps->size() > 0U ? request_.state_timestamps->size() - 1U : 0U));
-
-  for (std::size_t state_index = request_.dynamic_start_index;
-       state_index < request_.state_timestamps->size();
-       ++state_index) {
-    const auto &reference_state = (*request_.reference_states)[state_index];
-    request_.graph->add(factor::RollPitchReferenceFactor(
-      symbol::X(state_index),
-      reference_state.pose.rotation(),
-      roll_pitch_noise));
-    ++request_.run_summary->attitude_reference_factor_count;
-    request_.diagnostics->push_back(MakeDiagnosticRow(
-      state_index,
-      (*request_.state_timestamps)[state_index],
-      reference_state.pose.rotation()));
-  }
 
   for (std::size_t state_index_j = 1U;
        state_index_j < request_.state_timestamps->size();

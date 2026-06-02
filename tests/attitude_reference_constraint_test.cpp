@@ -106,7 +106,7 @@ std::vector<offline_lc_minimal::ReferenceNodeState> MakeRelativeYawReferenceStat
   return states;
 }
 
-void TestBuilderAddsDynamicRollPitchAndFullYawChain() {
+void TestBuilderAddsOnlyRelativeYawChain() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_attitude_reference_constraint = true;
   config.attitude_reference_sigma_rad = 0.01;
@@ -132,62 +132,48 @@ void TestBuilderAddsDynamicRollPitchAndFullYawChain() {
 
   ExpectNear(
     static_cast<double>(graph.size()),
-    5.0,
+    3.0,
     0.0,
-    "dynamic roll/pitch factors and full-chain relative yaw edges should be added");
+    "only full-chain relative yaw edges should be added");
   ExpectTrue(
-    boost::dynamic_pointer_cast<offline_lc_minimal::factor::RollPitchReferenceFactor>(graph.at(0)).get() !=
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::RelativeYawReferenceFactor>(graph.at(0)).get() !=
       nullptr,
-    "first factor should be roll/pitch reference");
+    "first factor should be first relative yaw reference");
   ExpectTrue(
-    boost::dynamic_pointer_cast<offline_lc_minimal::factor::RollPitchReferenceFactor>(graph.at(1)).get() !=
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::RelativeYawReferenceFactor>(graph.at(1)).get() !=
       nullptr,
-    "second factor should be roll/pitch reference");
+    "second factor should be relative yaw reference");
   ExpectTrue(
     boost::dynamic_pointer_cast<offline_lc_minimal::factor::RelativeYawReferenceFactor>(graph.at(2)).get() !=
       nullptr,
-    "third factor should be first relative yaw reference");
-  ExpectTrue(
-    boost::dynamic_pointer_cast<offline_lc_minimal::factor::RelativeYawReferenceFactor>(graph.at(3)).get() !=
-      nullptr,
-    "fourth factor should be relative yaw reference");
-  ExpectTrue(
-    boost::dynamic_pointer_cast<offline_lc_minimal::factor::RelativeYawReferenceFactor>(graph.at(4)).get() !=
-      nullptr,
-    "fifth factor should be relative yaw reference");
-  const auto &roll_pitch_keys = graph.at(0)->keys();
-  ExpectNear(static_cast<double>(roll_pitch_keys.size()), 1.0, 0.0, "roll/pitch factor should only connect pose");
-  ExpectTrue(
-    roll_pitch_keys.front() == gtsam::symbol_shorthand::X(2),
-    "roll/pitch factor should connect the first dynamic pose");
-  const auto &relative_yaw_keys = graph.at(2)->keys();
+    "third factor should be relative yaw reference");
+  const auto &relative_yaw_keys = graph.at(0)->keys();
   ExpectNear(static_cast<double>(relative_yaw_keys.size()), 2.0, 0.0, "relative yaw factor should connect two poses");
   ExpectTrue(
     relative_yaw_keys[0] == gtsam::symbol_shorthand::X(0) &&
       relative_yaw_keys[1] == gtsam::symbol_shorthand::X(1),
     "relative yaw chain should start at the first graph state");
-  const auto &boundary_yaw_keys = graph.at(3)->keys();
+  const auto &boundary_yaw_keys = graph.at(1)->keys();
   ExpectTrue(
     boundary_yaw_keys[0] == gtsam::symbol_shorthand::X(1) &&
       boundary_yaw_keys[1] == gtsam::symbol_shorthand::X(2),
     "relative yaw chain should include the static-to-dynamic boundary");
-  const auto &dynamic_yaw_keys = graph.at(4)->keys();
+  const auto &dynamic_yaw_keys = graph.at(2)->keys();
   ExpectTrue(
     dynamic_yaw_keys[0] == gtsam::symbol_shorthand::X(2) &&
       dynamic_yaw_keys[1] == gtsam::symbol_shorthand::X(3),
     "relative yaw chain should include all later adjacent dynamic poses");
   ExpectNear(
     static_cast<double>(summary.attitude_reference_factor_count),
-    5.0,
+    3.0,
     0.0,
     "attitude factor count is wrong");
-  ExpectNear(static_cast<double>(diagnostics.size()), 2.0, 0.0, "roll/pitch diagnostic count is wrong");
+  ExpectTrue(diagnostics.empty(), "ordinary attitude builder should not add roll/pitch diagnostics");
   ExpectNear(
     static_cast<double>(relative_yaw_diagnostics.size()),
     3.0,
     0.0,
     "relative yaw diagnostic count is wrong");
-  ExpectNear(static_cast<double>(diagnostics.front().state_index), 2.0, 0.0, "first diagnostic state is wrong");
   ExpectNear(
     relative_yaw_diagnostics.front().reference_delta_yaw_rad,
     offline_lc_minimal::factor::RelativeYawRad(
@@ -229,7 +215,7 @@ void TestBuilderDisabledAddsNoAttitudeReferences() {
   ExpectTrue(relative_yaw_diagnostics.empty(), "disabled builder should add no relative yaw diagnostics");
 }
 
-void TestBuilderRejectsMissingSeedReferences() {
+void TestBuilderDoesNotRequireSeedReferences() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_attitude_reference_constraint = true;
   const std::vector<double> timestamps{0.0, 1.0};
@@ -251,14 +237,14 @@ void TestBuilderRejectsMissingSeedReferences() {
   request.diagnostics = &diagnostics;
   request.relative_yaw_diagnostics = &relative_yaw_diagnostics;
 
-  bool threw = false;
-  try {
-    offline_lc_minimal::AttitudeReferenceConstraintBuilder(std::move(request)).Build();
-  } catch (const std::runtime_error &exception) {
-    threw = std::string(exception.what()).find("successful seed reference optimization") !=
-            std::string::npos;
-  }
-  ExpectTrue(threw, "enabled attitude reference should require seed reference states");
+  offline_lc_minimal::AttitudeReferenceConstraintBuilder(std::move(request)).Build();
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "relative yaw should not need seed references");
+  ExpectTrue(diagnostics.empty(), "missing seed references should not add roll/pitch diagnostics");
+  ExpectNear(
+    static_cast<double>(relative_yaw_diagnostics.size()),
+    1.0,
+    0.0,
+    "relative yaw diagnostic should be added without seed references");
 }
 
 void TestPopulateAttitudeReferenceDiagnostics() {
@@ -313,13 +299,7 @@ void TestPopulateAttitudeReferenceDiagnostics() {
   offline_lc_minimal::PopulateAttitudeReferenceDiagnostics(values, diagnostics);
   offline_lc_minimal::PopulateRelativeYawReferenceDiagnostics(values, relative_yaw_diagnostics);
 
-  ExpectNear(
-    diagnostics.front().residual_norm_rad,
-    0.0,
-    1e-12,
-    "matching roll/pitch residual should be zero despite yaw offset");
-  ExpectTrue(std::isnan(diagnostics.front().residual_x_rad), "absolute yaw residual should not be reported");
-  ExpectTrue(diagnostics.back().residual_norm_rad > 0.005, "changed roll/pitch residual should be reported");
+  ExpectTrue(diagnostics.empty(), "builder should not emit roll/pitch residual diagnostics");
   ExpectTrue(
     std::abs(relative_yaw_diagnostics.front().residual_yaw_rad) < 1e-12,
     "common yaw offset should not affect the first relative yaw edge");
@@ -339,10 +319,10 @@ int main() {
       "TestRelativeYawReferenceFactorIgnoresCommonYawOffset",
       TestRelativeYawReferenceFactorIgnoresCommonYawOffset);
     RunTest(
-      "TestBuilderAddsDynamicRollPitchAndFullYawChain",
-      TestBuilderAddsDynamicRollPitchAndFullYawChain);
+      "TestBuilderAddsOnlyRelativeYawChain",
+      TestBuilderAddsOnlyRelativeYawChain);
     RunTest("TestBuilderDisabledAddsNoAttitudeReferences", TestBuilderDisabledAddsNoAttitudeReferences);
-    RunTest("TestBuilderRejectsMissingSeedReferences", TestBuilderRejectsMissingSeedReferences);
+    RunTest("TestBuilderDoesNotRequireSeedReferences", TestBuilderDoesNotRequireSeedReferences);
     RunTest("TestPopulateAttitudeReferenceDiagnostics", TestPopulateAttitudeReferenceDiagnostics);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';

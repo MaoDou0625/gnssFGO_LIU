@@ -4,12 +4,22 @@ This document records the current attitude-reference constraint boundary after t
 
 ## Constraint Semantics
 
-`enable_attitude_reference_constraint` now enables two non-overlapping factor types through `AttitudeReferenceConstraintBuilder`:
+`enable_attitude_reference_constraint` now enables only the yaw-increment reference path through
+`AttitudeReferenceConstraintBuilder`:
 
-- `RollPitchReferenceFactor(X_i)` keeps the optimized roll and pitch close to the seed/reference roll and pitch at every dynamic node.
 - `RelativeYawReferenceFactor(X_i, X_j)` keeps only the adjacent yaw increment close to the base/IMU reference yaw increment.
 
-The builder adds roll/pitch factors for `dynamic_start_index ... end`, using the RTK seed/reference attitude only for roll and pitch. It adds relative-yaw factors for every adjacent graph state from `X(0)->X(1)` through the final state, including the initial static segment and the static-to-dynamic boundary. Those yaw increments come from the base IMU forward/reference states, not from the RTK seed optimized attitude, so low-motion dynamic intervals are not pulled by RTK-seed yaw drift.
+The builder no longer adds per-node roll/pitch absolute factors from the RTK/body-z
+seed reference. Roll and pitch continuity are left to the IMU preintegration chain
+and any explicit physical factors in the main graph. This avoids feeding a
+seed-optimized attitude branch back into the main optimization as a pseudo
+observation.
+
+The builder adds relative-yaw factors for every adjacent graph state from
+`X(0)->X(1)` through the final state, including the initial static segment and the
+static-to-dynamic boundary. Those yaw increments come from the base IMU
+forward/reference states, not from the RTK seed optimized attitude, so low-motion
+dynamic intervals are not pulled by RTK-seed yaw drift.
 
 ## Yaw Offset
 
@@ -19,10 +29,12 @@ This path does not add RTK course, RTK velocity, body-y velocity, or other yaw o
 
 ## Configuration
 
-- `attitude_reference_sigma_rad` controls the roll/pitch absolute reference factor.
+- `attitude_reference_sigma_rad` is retained for backward config compatibility but
+  is not used by the ordinary attitude-reference builder.
 - `attitude_reference_relative_yaw_sigma_rad` controls the adjacent relative-yaw reference factor. The default is `0.01`.
 
 ## Diagnostics
 
-- `attitude_reference_diagnostics.csv` is now a per-state roll/pitch diagnostic. It still records reference and optimized yaw for inspection, but its yaw residual column is `NaN` because no absolute yaw factor is present.
+- `attitude_reference_diagnostics.csv` is empty for the ordinary builder because no
+  per-state roll/pitch reference is added.
 - `relative_yaw_reference_diagnostics.csv` records each full-chain relative-yaw edge, including reference delta yaw, optimized delta yaw, and the yaw residual.
