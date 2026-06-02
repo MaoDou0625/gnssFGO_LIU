@@ -405,6 +405,34 @@ offline_lc_minimal::GnssFactorRecord MakeGnssFactorRecord(
   return row;
 }
 
+offline_lc_minimal::AttitudeReferenceDiagnosticRow MakeAttitudeReferenceDiagnostic(
+  const double time_s,
+  const std::size_t state_index) {
+  offline_lc_minimal::AttitudeReferenceDiagnosticRow row;
+  row.state_index = state_index;
+  row.time_s = time_s;
+  row.factor_added = true;
+  row.skip_reason = "ADDED";
+  row.residual_norm_rad = 0.001 * static_cast<double>(state_index + 1U);
+  return row;
+}
+
+offline_lc_minimal::RelativeYawReferenceDiagnosticRow MakeRelativeYawReferenceDiagnostic(
+  const double time_i_s,
+  const double time_j_s,
+  const std::size_t edge_index) {
+  offline_lc_minimal::RelativeYawReferenceDiagnosticRow row;
+  row.edge_index = edge_index;
+  row.state_index_i = edge_index;
+  row.state_index_j = edge_index + 1U;
+  row.time_i_s = time_i_s;
+  row.time_j_s = time_j_s;
+  row.factor_added = true;
+  row.skip_reason = "ADDED";
+  row.residual_yaw_rad = 0.001 * static_cast<double>(edge_index + 1U);
+  return row;
+}
+
 void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_stage2_velocity_optimization = true;
@@ -817,6 +845,11 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   pre_result.trajectory = {
     MakeTrajectoryRow(0.0, 0.0),
     MakeTrajectoryRow(10.0, 10.0)};
+  pre_result.attitude_reference_diagnostics = {
+    MakeAttitudeReferenceDiagnostic(0.0, 0U),
+    MakeAttitudeReferenceDiagnostic(10.0, 1U)};
+  pre_result.relative_yaw_reference_diagnostics = {
+    MakeRelativeYawReferenceDiagnostic(0.0, 10.0, 0U)};
   pre_result.gnss_factor_records = {
     MakeGnssFactorRecord(5.0, "raw_rtk", "OK")};
   pre_result.run_summary.gnss_vertical_reference_source = "raw_rtk";
@@ -834,6 +867,13 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
     MakeTrajectoryRow(10.0, 100.0),
     MakeTrajectoryRow(15.0, 15.0),
     MakeTrajectoryRow(19.95, 20.0)};
+  outage_result.attitude_reference_diagnostics = {
+    MakeAttitudeReferenceDiagnostic(10.0, 2U),
+    MakeAttitudeReferenceDiagnostic(15.0, 3U),
+    MakeAttitudeReferenceDiagnostic(19.95, 4U)};
+  outage_result.relative_yaw_reference_diagnostics = {
+    MakeRelativeYawReferenceDiagnostic(10.0, 15.0, 1U),
+    MakeRelativeYawReferenceDiagnostic(15.0, 19.95, 2U)};
   outage_result.gnss_factor_records = {
     MakeGnssFactorRecord(15.0, "stage2_lowpass", "OK")};
   outage_result.run_summary.gnss_vertical_reference_source = "stage2_lowpass";
@@ -845,6 +885,13 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   post_result.trajectory = {
     MakeTrajectoryRow(19.95, 200.0),
     MakeTrajectoryRow(30.0, 30.0)};
+  post_result.attitude_reference_diagnostics = {
+    MakeAttitudeReferenceDiagnostic(19.95, 5U),
+    MakeAttitudeReferenceDiagnostic(25.0, 6U),
+    MakeAttitudeReferenceDiagnostic(30.0, 7U)};
+  post_result.relative_yaw_reference_diagnostics = {
+    MakeRelativeYawReferenceDiagnostic(19.95, 25.0, 3U),
+    MakeRelativeYawReferenceDiagnostic(25.0, 30.0, 4U)};
   post_result.gnss_factor_records = {
     MakeGnssFactorRecord(25.0, "stage2_lowpass", "STAGE2_LOWPASS_REFERENCE_UNAVAILABLE")};
   post_result.run_summary.gnss_vertical_reference_source = "stage2_lowpass";
@@ -874,6 +921,33 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   const offline_lc_minimal::OfflineRunResult assembled =
     offline_lc_minimal::SegmentedBatchResultAssembler(std::move(request)).Assemble();
   ExpectTrue(assembled.trajectory.size() == 5U, "assembled trajectory should not duplicate boundaries");
+  ExpectTrue(assembled.attitude_reference_diagnostics.size() == 6U,
+             "ordinary attitude diagnostics should be spliced across all segments");
+  const std::vector<double> expected_attitude_times = {0.0, 10.0, 15.0, 19.95, 25.0, 30.0};
+  for (std::size_t index = 0; index < expected_attitude_times.size(); ++index) {
+    ExpectTrue(
+      std::abs(assembled.attitude_reference_diagnostics[index].time_s -
+               expected_attitude_times[index]) < 1e-12,
+      "ordinary attitude diagnostics should preserve expected segment times");
+  }
+  ExpectTrue(assembled.relative_yaw_reference_diagnostics.size() == 5U,
+             "relative yaw diagnostics should be spliced across all segments");
+  const std::vector<std::pair<double, double>> expected_relative_yaw_times = {
+    {0.0, 10.0},
+    {10.0, 15.0},
+    {15.0, 19.95},
+    {19.95, 25.0},
+    {25.0, 30.0}};
+  for (std::size_t index = 0; index < expected_relative_yaw_times.size(); ++index) {
+    ExpectTrue(
+      std::abs(assembled.relative_yaw_reference_diagnostics[index].time_i_s -
+               expected_relative_yaw_times[index].first) < 1e-12,
+      "relative yaw diagnostics should preserve expected segment start times");
+    ExpectTrue(
+      std::abs(assembled.relative_yaw_reference_diagnostics[index].time_j_s -
+               expected_relative_yaw_times[index].second) < 1e-12,
+      "relative yaw diagnostics should preserve expected segment end times");
+  }
   ExpectTrue(std::abs(assembled.trajectory[1].enu_position_m.z() - 10.0) < 1e-12,
              "pre boundary value should be retained at outage start");
   ExpectTrue(std::abs(assembled.trajectory[3].enu_position_m.z() - 200.0) < 1e-12,

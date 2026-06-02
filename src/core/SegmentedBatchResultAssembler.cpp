@@ -28,6 +28,25 @@ bool InSegment(
   return after_start && before_end;
 }
 
+bool EdgeInSegment(
+  const double time_i_s,
+  const double time_j_s,
+  const RtkOutageBatchSegmentRow &segment) {
+  if (!std::isfinite(time_i_s) || !std::isfinite(time_j_s)) {
+    return false;
+  }
+  if (time_j_s < time_i_s - kTimeEpsilonS) {
+    return false;
+  }
+  const bool start_endpoint_in_segment =
+    time_i_s >= segment.start_time_s - kTimeEpsilonS &&
+    time_i_s < segment.end_time_s - kTimeEpsilonS;
+  const bool end_endpoint_in_segment =
+    time_j_s > segment.start_time_s + kTimeEpsilonS &&
+    time_j_s <= segment.end_time_s + kTimeEpsilonS;
+  return start_endpoint_in_segment && end_endpoint_in_segment;
+}
+
 template <typename Row, typename TimeFn>
 void AppendRowsInSegment(
   std::vector<Row> &target,
@@ -38,6 +57,20 @@ void AppendRowsInSegment(
   TimeFn time_fn) {
   for (const auto &row : source) {
     if (InSegment(time_fn(row), segment, include_start, include_end)) {
+      target.push_back(row);
+    }
+  }
+}
+
+template <typename Row, typename TimeIFn, typename TimeJFn>
+void AppendEdgesInSegment(
+  std::vector<Row> &target,
+  const std::vector<Row> &source,
+  const RtkOutageBatchSegmentRow &segment,
+  TimeIFn time_i_fn,
+  TimeJFn time_j_fn) {
+  for (const auto &row : source) {
+    if (EdgeInSegment(time_i_fn(row), time_j_fn(row), segment)) {
       target.push_back(row);
     }
   }
@@ -177,6 +210,8 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.vertical_motion_adaptive_reweighting_diagnostics.clear();
   assembled.vertical_position_velocity_consistency_diagnostics.clear();
   assembled.vertical_state_corrections.clear();
+  assembled.attitude_reference_diagnostics.clear();
+  assembled.relative_yaw_reference_diagnostics.clear();
   assembled.body_z_bias_reestimate_segments.clear();
   assembled.stage2_mount_leakage_diagnostics.clear();
   assembled.stage2_vehicle_nhc_state_diagnostics.clear();
@@ -391,6 +426,19 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       include_start,
       include_end,
       [](const VerticalStateCorrectionRow &row) { return row.corrected_time_s; });
+    AppendRowsInSegment(
+      assembled.attitude_reference_diagnostics,
+      piece.result.attitude_reference_diagnostics,
+      splice_segment,
+      include_start,
+      include_end,
+      [](const AttitudeReferenceDiagnosticRow &row) { return row.time_s; });
+    AppendEdgesInSegment(
+      assembled.relative_yaw_reference_diagnostics,
+      piece.result.relative_yaw_reference_diagnostics,
+      splice_segment,
+      [](const RelativeYawReferenceDiagnosticRow &row) { return row.time_i_s; },
+      [](const RelativeYawReferenceDiagnosticRow &row) { return row.time_j_s; });
     AppendRowsInSegmentWithSegmentLabel(
       assembled.stage2_vehicle_nhc_state_diagnostics,
       piece.result.stage2_vehicle_nhc_state_diagnostics,
