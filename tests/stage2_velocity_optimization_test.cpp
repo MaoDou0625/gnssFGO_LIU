@@ -922,12 +922,12 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
              "pre child start should match the prefix run");
   ExpectNear(calls[1].processing_end_time_s, 10.0, 1e-12,
              "pre child end should stop at outage start");
-  ExpectNear(calls[2].processing_start_time_s, 20.0, 1e-12,
-             "post child should run before outage and start at outage end");
-  ExpectNear(calls[3].processing_start_time_s, 0.0, 1e-12,
-             "outage child start should run as a causal prefix after post");
-  ExpectNear(calls[3].processing_end_time_s, 20.0, 1e-12,
-             "outage child end should match outage end");
+  ExpectNear(calls[2].processing_start_time_s, 0.0, 1e-12,
+             "outage child should run as a causal prefix before post");
+  ExpectNear(calls[2].processing_end_time_s, 20.0, 1e-12,
+              "outage child end should match outage end");
+  ExpectNear(calls[3].processing_start_time_s, 20.0, 1e-12,
+             "post child should run after outage and start at outage end");
 
   ExpectTrue(result.run_summary.rtk_outage_segmented_batch_enabled,
              "assembled result should mark segmented batch enabled");

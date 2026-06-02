@@ -319,6 +319,41 @@ RtkOutageBoundaryReferenceRow MakeBoundaryReferenceFromTrajectory(
   return reference;
 }
 
+void AttachAttitudeReferenceFromTrajectory(
+  RtkOutageBoundaryReferenceRow &reference,
+  const OfflineRunnerConfig &config,
+  const OfflineRunResult &result,
+  const double target_time_s,
+  const std::string &source_type) {
+  const ReferenceNodeState *state =
+    NearestReferenceState(result.optimized_reference_states, target_time_s);
+  if (state == nullptr || !state->pose.rotation().matrix().allFinite()) {
+    return;
+  }
+  reference.source_type = source_type;
+  reference.reference_rotation = state->pose.rotation();
+  reference.has_attitude = true;
+  reference.add_attitude_constraint = true;
+  reference.attitude_sigma_rad = config.rtk_outage_absolute_attitude_sigma_rad;
+  reference.valid = true;
+  reference.skip_reason = "OK";
+}
+
+RtkOutageBoundaryReferenceRow MakeTimeOnlyBoundaryReference(
+  const std::size_t window_index,
+  const std::string &boundary_role,
+  const double target_time_s,
+  const std::string &source_type) {
+  RtkOutageBoundaryReferenceRow reference;
+  reference.window_index = window_index;
+  reference.boundary_role = boundary_role;
+  reference.source_type = source_type;
+  reference.target_time_s = target_time_s;
+  reference.valid = std::isfinite(target_time_s);
+  reference.skip_reason = reference.valid ? "OK" : "invalid_boundary_time";
+  return reference;
+}
+
 std::vector<RtkOutageBiasContinuityPolicyRow> BuildBiasContinuityPolicyRows(
   const OfflineRunnerConfig &config,
   const std::vector<RtkOutageWindowRow> &outage_windows,
@@ -349,17 +384,6 @@ std::vector<RtkOutageRecoveryReferenceRow> BuildRecoveryReferences(
       return CorrectedGnssTime(config, sample);
     };
   return RtkOutageRecoveryReferenceBuilder(std::move(request)).Build();
-}
-
-bool HasValidRecoveryReference(
-  const std::vector<RtkOutageRecoveryReferenceRow> &rows,
-  const std::size_t window_index) {
-  return std::any_of(
-    rows.begin(),
-    rows.end(),
-    [&](const RtkOutageRecoveryReferenceRow &row) {
-      return row.window_index == window_index && row.valid;
-    });
 }
 
 const RtkOutageRecoveryReferenceRow *FindRecoveryReference(
@@ -459,38 +483,16 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
   const bool can_run_boundary_handoff =
     request_.config.enable_rtk_outage_boundary_constraints &&
     pre_segment != nullptr && outage_segment != nullptr &&
-    post_segment != nullptr && source_outage != nullptr &&
-    HasValidRecoveryReference(recovery_references, source_outage->window_index);
+    post_segment != nullptr && source_outage != nullptr;
 
   if (can_run_boundary_handoff) {
     const RtkOutageWindowRow &outage = *source_outage;
     const RtkOutageRecoveryReferenceRow *recovery_reference =
       FindRecoveryReference(recovery_references, outage.window_index);
+    const bool has_valid_recovery_reference =
+      recovery_reference != nullptr && recovery_reference->valid;
 
     OfflineRunResult pre_result = run_segment(*pre_segment, nullptr);
-
-    const RtkOutageWindowRow *post_source_outage =
-      FindSourceOutage(request_.outage_windows, *post_segment);
-    OfflineRunnerConfig post_config =
-      MakeChildConfig(request_.config, request_.base_config, *post_segment, post_source_outage);
-    std::shared_ptr<const Stage2VelocityReference> post_reference =
-      SliceStage2ReferenceForSegment(
-        request_.stage2_reference,
-        post_config,
-        *post_segment,
-        request_.dynamic_start_time_s);
-    std::vector<RtkOutageBoundaryReferenceRow> post_boundary_refs;
-    if (recovery_reference != nullptr) {
-      post_boundary_refs.push_back(
-        MakePostStartBoundaryReferenceFromRecovery(
-          request_.config,
-          *recovery_reference));
-    }
-    OfflineRunResult post_result = request_.run_once(
-      std::move(post_config),
-      WithBoundaryReferences(std::move(post_reference), std::move(post_boundary_refs)),
-      nullptr,
-      request_.dataset);
 
     std::vector<RtkOutageBiasContinuityPolicyRow> bias_policy =
       BuildBiasContinuityPolicyRows(
@@ -501,10 +503,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       bias_policy,
       outage.window_index,
       "OUTAGE_START");
-    const bool allow_end_ba_z = AllowsRtkOutageBazContinuity(
-      bias_policy,
-      outage.window_index,
-      "OUTAGE_END");
+
     std::vector<RtkOutageBoundaryReferenceRow> outage_boundary_refs;
     outage_boundary_refs.push_back(MakeBoundaryReferenceFromTrajectory(
       request_.config,
@@ -514,14 +513,18 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       "OUTAGE_START",
       "PRE_TERMINAL",
       allow_start_ba_z));
-    outage_boundary_refs.push_back(MakeBoundaryReferenceFromTrajectory(
-      request_.config,
-      post_result,
-      outage.window_index,
-      outage.end_time_s,
-      "OUTAGE_END",
-      "POST_RECOVERY_OPTIMIZED",
-      allow_end_ba_z));
+    if (has_valid_recovery_reference) {
+      outage_boundary_refs.push_back(
+        MakeOutageEndBoundaryReferenceFromRecovery(
+          request_.config,
+          *recovery_reference));
+    } else {
+      outage_boundary_refs.push_back(MakeTimeOnlyBoundaryReference(
+        outage.window_index,
+        "OUTAGE_END",
+        outage.end_time_s,
+        "OUTAGE_END_TIME_ONLY"));
+    }
 
     const RtkOutageWindowRow *outage_source_outage =
       FindSourceOutage(request_.outage_windows, *outage_segment);
@@ -536,6 +539,42 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
     OfflineRunResult outage_result = request_.run_once(
       std::move(outage_config),
       WithBoundaryReferences(std::move(outage_reference), std::move(outage_boundary_refs)),
+      nullptr,
+      request_.dataset);
+
+    const RtkOutageWindowRow *post_source_outage =
+      FindSourceOutage(request_.outage_windows, *post_segment);
+    OfflineRunnerConfig post_config =
+      MakeChildConfig(request_.config, request_.base_config, *post_segment, post_source_outage);
+    std::shared_ptr<const Stage2VelocityReference> post_reference =
+      SliceStage2ReferenceForSegment(
+        request_.stage2_reference,
+        post_config,
+        *post_segment,
+        request_.dynamic_start_time_s);
+    std::vector<RtkOutageBoundaryReferenceRow> post_boundary_refs;
+    RtkOutageBoundaryReferenceRow post_start_reference =
+      has_valid_recovery_reference
+      ? MakePostStartBoundaryReferenceFromRecovery(
+          request_.config,
+          *recovery_reference)
+      : MakeTimeOnlyBoundaryReference(
+          outage.window_index,
+          "POST_START",
+          outage.end_time_s,
+          "OUTAGE_ATTITUDE_ONLY");
+    AttachAttitudeReferenceFromTrajectory(
+      post_start_reference,
+      request_.config,
+      outage_result,
+      outage.end_time_s,
+      has_valid_recovery_reference
+        ? "POST_RECOVERY_RTK_WITH_OUTAGE_ATTITUDE"
+        : "OUTAGE_ATTITUDE_ONLY");
+    post_boundary_refs.push_back(std::move(post_start_reference));
+    OfflineRunResult post_result = request_.run_once(
+      std::move(post_config),
+      WithBoundaryReferences(std::move(post_reference), std::move(post_boundary_refs)),
       nullptr,
       request_.dataset);
 

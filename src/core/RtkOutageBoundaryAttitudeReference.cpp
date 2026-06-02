@@ -124,6 +124,8 @@ double InterpolationAlpha(
 void FillBoundaryAnchoredRotations(
   std::vector<ReferenceNodeState> &reference_states,
   const std::vector<double> &state_timestamps,
+  const std::size_t fill_start_index,
+  const std::size_t fill_end_index,
   const std::size_t start_index,
   const std::size_t end_index,
   const RtkOutageBoundaryReferenceRow &start_reference,
@@ -131,6 +133,8 @@ void FillBoundaryAnchoredRotations(
   const gtsam::Rot3 base_start_rotation =
     reference_states[start_index].pose.rotation();
   const gtsam::Rot3 start_rotation = start_reference.reference_rotation;
+  const double start_time_s = state_timestamps[start_index];
+  const double end_time_s = state_timestamps[end_index];
   gtsam::Vector3 end_correction_rotvec = gtsam::Vector3::Zero();
   if (end_reference != nullptr && end_reference->has_attitude &&
       end_reference->reference_rotation.matrix().allFinite() &&
@@ -143,14 +147,14 @@ void FillBoundaryAnchoredRotations(
       gtsam::Rot3::Logmap(propagated_end_rotation.between(end_reference->reference_rotation));
   }
 
-  for (std::size_t state_index = start_index; state_index <= end_index; ++state_index) {
+  for (std::size_t state_index = fill_start_index; state_index <= fill_end_index; ++state_index) {
     const gtsam::Rot3 base_delta =
       base_start_rotation.between(reference_states[state_index].pose.rotation());
     const double alpha = end_reference != nullptr
       ? InterpolationAlpha(
           state_timestamps[state_index],
-          start_reference.target_time_s,
-          end_reference->target_time_s)
+          start_time_s,
+          end_time_s)
       : 0.0;
     const gtsam::Rot3 smooth_end_correction =
       gtsam::Rot3::Expmap(alpha * end_correction_rotvec);
@@ -242,7 +246,8 @@ bool HasVelocityReference(const RtkOutageBoundaryReferenceRow &reference) {
 RtkOutageBoundaryAttitudeReference BuildRtkOutageBoundaryAttitudeReference(
   const std::vector<double> &state_timestamps,
   const std::vector<ReferenceNodeState> &imu_reference_states,
-  const std::vector<RtkOutageBoundaryReferenceRow> &boundary_references) {
+  const std::vector<RtkOutageBoundaryReferenceRow> &boundary_references,
+  const double guard_duration_s) {
   if (state_timestamps.empty() || imu_reference_states.empty() ||
       boundary_references.empty()) {
     return {};
@@ -255,9 +260,11 @@ RtkOutageBoundaryAttitudeReference BuildRtkOutageBoundaryAttitudeReference(
   RtkOutageBoundaryAttitudeReference result;
   result.reference_states = imu_reference_states;
   const std::map<std::size_t, BoundaryPair> pairs =
-    CollectBoundaryPairs(boundary_references, true);
+    CollectBoundaryPairs(boundary_references, false);
   for (const auto &[window_index, pair] : pairs) {
-    if (pair.start == nullptr) {
+    if (pair.start == nullptr ||
+        !pair.start->has_attitude ||
+        !pair.start->reference_rotation.matrix().allFinite()) {
       continue;
     }
     const std::size_t start_index =
@@ -272,20 +279,29 @@ RtkOutageBoundaryAttitudeReference BuildRtkOutageBoundaryAttitudeReference(
     if (end_index < start_index) {
       continue;
     }
-
-    FillBoundaryAnchoredRotations(
-      result.reference_states,
-      state_timestamps,
-      start_index,
-      end_index,
-      *pair.start,
-      has_end ? pair.end : nullptr);
-    result.outage_windows.push_back(MakeSyntheticWindow(
+    const bool has_end_attitude =
+      has_end &&
+      pair.end->has_attitude &&
+      pair.end->reference_rotation.matrix().allFinite();
+    const RtkOutageWindowRow window = MakeSyntheticWindow(
       window_index,
       start_index,
       end_index,
       pair.start->target_time_s,
-      has_end ? pair.end->target_time_s : pair.start->target_time_s));
+      has_end ? pair.end->target_time_s : pair.start->target_time_s);
+    const auto [fill_start_index, fill_end_index] =
+      GuardedSpan(window, state_timestamps, guard_duration_s);
+
+    FillBoundaryAnchoredRotations(
+      result.reference_states,
+      state_timestamps,
+      fill_start_index,
+      fill_end_index,
+      start_index,
+      end_index,
+      *pair.start,
+      has_end_attitude ? pair.end : nullptr);
+    result.outage_windows.push_back(window);
   }
 
   if (result.outage_windows.empty()) {

@@ -19,6 +19,7 @@
 #include "offline_lc_minimal/core/RtkOutageBoundaryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutagePreOutageVerticalFenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
+#include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
 #include "offline_lc_minimal/factor/VelocityDeltaFactor.h"
 
@@ -416,6 +417,120 @@ void TestBoundaryAttitudeReferenceAnchorsStartAndEndWithImuDelta() {
     "initial values should be moved onto the boundary-anchored branch");
 }
 
+void TestBoundaryAttitudeReferencePropagatesThroughGuardedSpan() {
+  const std::vector<double> timestamps{0.0, 1.0, 2.0, 3.0};
+  std::vector<offline_lc_minimal::ReferenceNodeState> imu_states(timestamps.size());
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    imu_states[index].time_s = timestamps[index];
+    imu_states[index].pose = gtsam::Pose3(
+      gtsam::Rot3::Ypr(0.1 * static_cast<double>(index), 0.0, 0.0),
+      gtsam::Point3::Zero());
+  }
+
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> refs(2U);
+  refs[0].window_index = 11U;
+  refs[0].boundary_role = "OUTAGE_START";
+  refs[0].target_time_s = 1.0;
+  refs[0].valid = true;
+  refs[0].has_attitude = true;
+  refs[0].reference_rotation = gtsam::Rot3::Ypr(1.0, 0.0, 0.0);
+  refs[1].window_index = 11U;
+  refs[1].boundary_role = "OUTAGE_END";
+  refs[1].target_time_s = 2.0;
+  refs[1].valid = true;
+  refs[1].has_up = true;
+  refs[1].reference_up_m = 5.0;
+
+  const auto reference =
+    offline_lc_minimal::BuildRtkOutageBoundaryAttitudeReference(
+      timestamps,
+      imu_states,
+      refs,
+      1.0);
+
+  ExpectTrue(reference.valid(), "guarded boundary attitude reference should be valid");
+  ExpectTrue(reference.outage_windows.front().pre_anchor_state_index == 1U,
+             "synthetic window should keep the outage start anchor");
+  ExpectTrue(reference.outage_windows.front().post_anchor_state_index == 2U,
+             "non-attitude outage end should still define the window extent");
+  ExpectNear(reference.reference_states[0].pose.rotation().ypr().x(), 0.9, 1e-12,
+             "pre-start guard state should be reverse-propagated from the start anchor");
+  ExpectNear(reference.reference_states[1].pose.rotation().ypr().x(), 1.0, 1e-12,
+             "start state should match the boundary attitude");
+  ExpectNear(reference.reference_states[2].pose.rotation().ypr().x(), 1.1, 1e-12,
+             "outage state should preserve IMU yaw delta from the start anchor");
+  ExpectNear(reference.reference_states[3].pose.rotation().ypr().x(), 1.2, 1e-12,
+             "post-end guard state should remain on the same propagated branch");
+}
+
+void TestBoundaryAttitudeReferenceKeepsOffGridAnchorsExact() {
+  const std::vector<double> timestamps{0.0, 1.0, 2.0, 3.0};
+  std::vector<offline_lc_minimal::ReferenceNodeState> imu_states(timestamps.size());
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    imu_states[index].time_s = timestamps[index];
+    imu_states[index].pose = gtsam::Pose3(
+      gtsam::Rot3::Ypr(0.1 * static_cast<double>(index), 0.0, 0.0),
+      gtsam::Point3::Zero());
+  }
+
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> refs(2U);
+  refs[0].window_index = 13U;
+  refs[0].boundary_role = "OUTAGE_START";
+  refs[0].target_time_s = 0.6;
+  refs[0].valid = true;
+  refs[0].has_attitude = true;
+  refs[0].reference_rotation = gtsam::Rot3::Ypr(1.0, 0.0, 0.0);
+  refs[1].window_index = 13U;
+  refs[1].boundary_role = "OUTAGE_END";
+  refs[1].target_time_s = 2.4;
+  refs[1].valid = true;
+  refs[1].has_attitude = true;
+  refs[1].reference_rotation = gtsam::Rot3::Ypr(1.4, 0.0, 0.0);
+
+  const auto reference =
+    offline_lc_minimal::BuildRtkOutageBoundaryAttitudeReference(
+      timestamps,
+      imu_states,
+      refs);
+
+  ExpectTrue(reference.valid(), "off-grid boundary attitude reference should be valid");
+  ExpectTrue(reference.outage_windows.front().pre_anchor_state_index == 1U,
+             "off-grid start should bind first state at or after the boundary");
+  ExpectTrue(reference.outage_windows.front().post_anchor_state_index == 2U,
+             "off-grid end should bind last state at or before the boundary");
+  ExpectNear(reference.reference_states[1].pose.rotation().ypr().x(), 1.0, 1e-12,
+             "off-grid start anchor should exactly match the start attitude");
+  ExpectNear(reference.reference_states[2].pose.rotation().ypr().x(), 1.4, 1e-12,
+             "off-grid end anchor should exactly match the end attitude");
+}
+
+void TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryUpVzOnly() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_boundary_up_sigma_m = 0.01;
+  config.rtk_outage_boundary_vz_sigma_mps = 0.02;
+
+  offline_lc_minimal::RtkOutageRecoveryReferenceRow recovery;
+  recovery.window_index = 3U;
+  recovery.outage_end_time_s = 9.0;
+  recovery.reference_up_m = 4.0;
+  recovery.reference_vz_mps = -0.5;
+  recovery.valid = true;
+  recovery.skip_reason = "OK";
+
+  const offline_lc_minimal::RtkOutageBoundaryReferenceRow boundary =
+    offline_lc_minimal::MakeOutageEndBoundaryReferenceFromRecovery(config, recovery);
+  ExpectTrue(boundary.boundary_role == "OUTAGE_END",
+             "recovery boundary should target outage end");
+  ExpectTrue(boundary.has_up && boundary.add_up_constraint,
+             "recovery boundary should constrain up");
+  ExpectTrue(boundary.has_vz && boundary.add_vz_constraint,
+             "recovery boundary should constrain vz");
+  ExpectTrue(!boundary.has_attitude && !boundary.add_attitude_constraint,
+             "recovery boundary should not invent an attitude reference");
+  ExpectNear(boundary.target_time_s, 9.0, 1e-12,
+             "recovery boundary time should match outage end");
+}
+
 void TestBoundaryStateInitialValuesDoNotRequireAttitude() {
   const std::vector<double> timestamps{0.0, 1.0, 2.0};
   std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> refs(2U);
@@ -703,6 +818,48 @@ void TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude() {
              "boundary diagnostics should report ba_z residual in ug");
 }
 
+void TestBoundaryConstraintBuilderAddsPostStartAttitude() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_boundary_constraints = true;
+  config.rtk_outage_absolute_attitude_sigma_rad = 0.0001;
+
+  const std::vector<double> timestamps{0.0, 1.0, 2.0};
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> references(1U);
+  references.front().window_index = 4U;
+  references.front().boundary_role = "POST_START";
+  references.front().source_type = "OUTAGE_ATTITUDE_ONLY";
+  references.front().target_time_s = 1.4;
+  references.front().valid = true;
+  references.front().has_attitude = true;
+  references.front().add_attitude_constraint = true;
+  references.front().reference_rotation = gtsam::Rot3::Ypr(0.3, -0.1, 0.2);
+  references.front().attitude_sigma_rad = config.rtk_outage_absolute_attitude_sigma_rad;
+  references.front().skip_reason = "OK";
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::RtkOutageBoundaryDiagnosticRow> diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.boundary_references = &references;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 1U, "post-start attitude boundary should add one factor");
+  ExpectTrue(summary.rtk_outage_boundary_attitude_factor_count == 1U,
+             "post-start attitude should be counted");
+  ExpectTrue(diagnostics.size() == 1U, "post-start attitude should emit one diagnostic");
+  ExpectTrue(diagnostics.front().target_state_index == 1U,
+             "post-start boundary should bind the last state at or before the boundary");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::AttitudeHoldFactor>(graph.at(0)) !=
+      nullptr,
+    "post-start boundary should add an attitude hold factor");
+}
+
 offline_lc_minimal::GnssSolutionSample MakeCausalReferenceSample(
   const double time_s,
   const double up_m) {
@@ -825,6 +982,15 @@ int main() {
       "TestBoundaryAttitudeReferenceAnchorsStartAndEndWithImuDelta",
       TestBoundaryAttitudeReferenceAnchorsStartAndEndWithImuDelta);
     RunTest(
+      "TestBoundaryAttitudeReferencePropagatesThroughGuardedSpan",
+      TestBoundaryAttitudeReferencePropagatesThroughGuardedSpan);
+    RunTest(
+      "TestBoundaryAttitudeReferenceKeepsOffGridAnchorsExact",
+      TestBoundaryAttitudeReferenceKeepsOffGridAnchorsExact);
+    RunTest(
+      "TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryUpVzOnly",
+      TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryUpVzOnly);
+    RunTest(
       "TestBoundaryStateInitialValuesDoNotRequireAttitude",
       TestBoundaryStateInitialValuesDoNotRequireAttitude);
     RunTest(
@@ -833,6 +999,9 @@ int main() {
     RunTest(
       "TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude",
       TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude);
+    RunTest(
+      "TestBoundaryConstraintBuilderAddsPostStartAttitude",
+      TestBoundaryConstraintBuilderAddsPostStartAttitude);
     RunTest(
       "TestCausalReferenceBuilderUsesPrefixBaseConfig",
       TestCausalReferenceBuilderUsesPrefixBaseConfig);

@@ -1978,7 +1978,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       BuildRtkOutageBoundaryAttitudeReference(
         state_timestamps,
         imu_propagated_reference_states,
-        active_stage2_reference->boundary_references);
+        active_stage2_reference->boundary_references,
+        config_.rtk_outage_attitude_guard_duration_s);
     if (boundary_attitude_reference.valid()) {
       ApplyRtkOutageBoundaryStateInitialValues(
         boundary_attitude_reference,

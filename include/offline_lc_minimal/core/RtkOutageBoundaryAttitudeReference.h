@@ -23,7 +23,8 @@ struct RtkOutageBoundaryAttitudeReference {
 BuildRtkOutageBoundaryAttitudeReference(
   const std::vector<double> &state_timestamps,
   const std::vector<ReferenceNodeState> &imu_reference_states,
-  const std::vector<RtkOutageBoundaryReferenceRow> &boundary_references);
+  const std::vector<RtkOutageBoundaryReferenceRow> &boundary_references,
+  double guard_duration_s = 0.0);
 
 void ApplyRtkOutageBoundaryAttitudeInitialValues(
   const RtkOutageBoundaryAttitudeReference &reference,

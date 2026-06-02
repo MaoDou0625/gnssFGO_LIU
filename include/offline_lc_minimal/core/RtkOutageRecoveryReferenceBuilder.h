@@ -34,4 +34,9 @@ MakePostStartBoundaryReferenceFromRecovery(
   const OfflineRunnerConfig &config,
   const RtkOutageRecoveryReferenceRow &reference);
 
+[[nodiscard]] RtkOutageBoundaryReferenceRow
+MakeOutageEndBoundaryReferenceFromRecovery(
+  const OfflineRunnerConfig &config,
+  const RtkOutageRecoveryReferenceRow &reference);
+
 }  // namespace offline_lc_minimal

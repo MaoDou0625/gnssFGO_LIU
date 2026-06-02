@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace offline_lc_minimal {
@@ -89,6 +90,31 @@ void FitUpAndVzAtBoundary(
   }
   reference_vz_mps = denominator > 1.0e-12 ? numerator / denominator : 0.0;
   reference_up_m = mean_u - reference_vz_mps * mean_t;
+}
+
+RtkOutageBoundaryReferenceRow MakeBoundaryReferenceFromRecovery(
+  const OfflineRunnerConfig &config,
+  const RtkOutageRecoveryReferenceRow &reference,
+  const std::string &boundary_role) {
+  RtkOutageBoundaryReferenceRow row;
+  row.window_index = reference.window_index;
+  row.boundary_role = boundary_role;
+  row.source_type = "POST_RECOVERY_RTK";
+  row.target_time_s = reference.outage_end_time_s;
+  row.valid = reference.valid;
+  row.has_up = reference.valid;
+  row.has_vz = reference.valid;
+  row.has_ba_z = false;
+  row.add_up_constraint = reference.valid;
+  row.add_vz_constraint = reference.valid;
+  row.add_ba_z_constraint = false;
+  row.reference_up_m = reference.reference_up_m;
+  row.reference_vz_mps = reference.reference_vz_mps;
+  row.up_sigma_m = config.rtk_outage_boundary_up_sigma_m;
+  row.vz_sigma_mps = config.rtk_outage_boundary_vz_sigma_mps;
+  row.ba_z_sigma_mps2 = config.rtk_outage_boundary_baz_sigma_mps2;
+  row.skip_reason = reference.valid ? "OK" : reference.skip_reason;
+  return row;
 }
 
 }  // namespace
@@ -179,25 +205,13 @@ RtkOutageRecoveryReferenceBuilder::Build() const {
 RtkOutageBoundaryReferenceRow MakePostStartBoundaryReferenceFromRecovery(
   const OfflineRunnerConfig &config,
   const RtkOutageRecoveryReferenceRow &reference) {
-  RtkOutageBoundaryReferenceRow row;
-  row.window_index = reference.window_index;
-  row.boundary_role = "POST_START";
-  row.source_type = "POST_RECOVERY_RTK";
-  row.target_time_s = reference.outage_end_time_s;
-  row.valid = reference.valid;
-  row.has_up = reference.valid;
-  row.has_vz = reference.valid;
-  row.has_ba_z = false;
-  row.add_up_constraint = reference.valid;
-  row.add_vz_constraint = reference.valid;
-  row.add_ba_z_constraint = false;
-  row.reference_up_m = reference.reference_up_m;
-  row.reference_vz_mps = reference.reference_vz_mps;
-  row.up_sigma_m = config.rtk_outage_boundary_up_sigma_m;
-  row.vz_sigma_mps = config.rtk_outage_boundary_vz_sigma_mps;
-  row.ba_z_sigma_mps2 = config.rtk_outage_boundary_baz_sigma_mps2;
-  row.skip_reason = reference.valid ? "OK" : reference.skip_reason;
-  return row;
+  return MakeBoundaryReferenceFromRecovery(config, reference, "POST_START");
+}
+
+RtkOutageBoundaryReferenceRow MakeOutageEndBoundaryReferenceFromRecovery(
+  const OfflineRunnerConfig &config,
+  const RtkOutageRecoveryReferenceRow &reference) {
+  return MakeBoundaryReferenceFromRecovery(config, reference, "OUTAGE_END");
 }
 
 }  // namespace offline_lc_minimal
