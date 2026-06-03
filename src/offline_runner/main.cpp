@@ -1,0 +1,134 @@
+#include <algorithm>
+#include <exception>
+#include <filesystem>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include "offline_lc_minimal/common/Config.h"
+#include "offline_lc_minimal/common/GeoUtils.h"
+#include "offline_lc_minimal/common/ResultWriter.h"
+#include "offline_lc_minimal/core/OfflineBatchRunner.h"
+#include "offline_lc_minimal/io/TextDatasetLoader.h"
+
+namespace offline_lc_minimal {
+
+namespace {
+
+void PrintUsage() {
+  std::cout
+    << "offline_lc_runner --config <file> [--imu <path>] [--gnss <path>] "
+       "[--output-dir <dir>] [--set key=value] [--imu-only] [--verbose]\n";
+}
+
+}  // namespace
+
+}  // namespace offline_lc_minimal
+
+int main(int argc, char **argv) {
+  using namespace offline_lc_minimal;
+
+  OfflineRunnerConfig config = DefaultConfig();
+  try {
+    std::string config_path;
+    std::string imu_override;
+    std::string gnss_override;
+    std::string output_dir_override;
+    std::vector<std::string> config_overrides;
+    bool imu_only = false;
+    bool verbose = false;
+
+    for (int index = 1; index < argc; ++index) {
+      const std::string arg = argv[index];
+      if (arg == "--help" || arg == "-h") {
+        PrintUsage();
+        return 0;
+      }
+      if ((arg == "--config" || arg == "-c") && index + 1 < argc) {
+        config_path = argv[++index];
+      } else if (arg == "--imu" && index + 1 < argc) {
+        imu_override = argv[++index];
+      } else if (arg == "--gnss" && index + 1 < argc) {
+        gnss_override = argv[++index];
+      } else if (arg == "--output-dir" && index + 1 < argc) {
+        output_dir_override = argv[++index];
+      } else if (arg == "--set" && index + 1 < argc) {
+        config_overrides.push_back(argv[++index]);
+      } else if (arg == "--imu-only") {
+        imu_only = true;
+      } else if (arg == "--verbose") {
+        verbose = true;
+      } else {
+        throw std::runtime_error("unknown or incomplete argument: " + arg);
+      }
+    }
+
+    if (!config_path.empty()) {
+      config = LoadConfigFile(config_path, config);
+    }
+    if (!imu_override.empty()) {
+      config.imu_path = imu_override;
+    }
+    if (!gnss_override.empty()) {
+      config.gnss_path = gnss_override;
+    }
+    if (!output_dir_override.empty()) {
+      config.output_dir = output_dir_override;
+    }
+    for (const auto &override_entry : config_overrides) {
+      const std::size_t delimiter_pos = override_entry.find('=');
+      if (delimiter_pos == std::string::npos) {
+        throw std::runtime_error("--set expects key=value, got: " + override_entry);
+      }
+      OverrideConfigField(
+        config,
+        override_entry.substr(0, delimiter_pos),
+        override_entry.substr(delimiter_pos + 1U));
+    }
+    if (imu_only) {
+      config.enable_gnss = false;
+    }
+    if (verbose) {
+      config.verbose = true;
+    }
+
+    ValidateConfig(config);
+
+    if (config.imu_path.empty() || config.gnss_path.empty()) {
+      throw std::runtime_error("both imu_path and gnss_path must be provided");
+    }
+
+    DataSet dataset = TextDatasetLoader::Load(config);
+    const OfflineBatchRunner runner(config);
+    const OfflineRunResult result = runner.Run(std::move(dataset));
+
+    const GeoReference geo_reference(
+      result.run_summary.origin_lat_rad,
+      result.run_summary.origin_lon_rad,
+      result.run_summary.origin_h_m);
+    ResultWriter::WriteOutputs(config.output_dir, config, result, geo_reference);
+
+    std::cout << "offline_lc_runner completed.\n"
+              << "output_dir=" << std::filesystem::absolute(config.output_dir).string() << '\n'
+              << result.run_summary.ToMultilineString()
+              << result.data_summary.ToMultilineString();
+    return 0;
+  } catch (const OfflineRunFailure &failure) {
+    try {
+      const auto &partial_result = failure.partial_result();
+      const GeoReference geo_reference(
+        partial_result.run_summary.origin_lat_rad,
+        partial_result.run_summary.origin_lon_rad,
+        partial_result.run_summary.origin_h_m);
+      ResultWriter::WriteOutputs(config.output_dir, config, partial_result, geo_reference);
+    } catch (const std::exception &write_exception) {
+      std::cerr << "failed to write partial outputs: " << write_exception.what() << '\n';
+    }
+    std::cerr << "offline_lc_runner failed: " << failure.what() << '\n';
+    return 1;
+  } catch (const std::exception &exception) {
+    std::cerr << "offline_lc_runner failed: " << exception.what() << '\n';
+    return 1;
+  }
+}

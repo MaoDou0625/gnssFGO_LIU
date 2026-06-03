@@ -1,0 +1,163 @@
+import importlib.util
+import math
+import pathlib
+import tempfile
+import unittest
+
+
+SCRIPT_PATH = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "plot_segment_error_diagnostics.py"
+SCRIPT_SPEC = importlib.util.spec_from_file_location("plot_segment_error_diagnostics", SCRIPT_PATH)
+plot_segment_error_diagnostics = importlib.util.module_from_spec(SCRIPT_SPEC)
+SCRIPT_SPEC.loader.exec_module(plot_segment_error_diagnostics)
+
+
+class PlotSegmentErrorDiagnosticsTests(unittest.TestCase):
+    def test_total_variation_accumulates_absolute_differences(self) -> None:
+        self.assertAlmostEqual(plot_segment_error_diagnostics.total_variation([0.0, 1.0, -1.0]), 3.0, places=9)
+
+    def test_summarize_reports_component_ranges(self) -> None:
+        rows = [
+            {
+                "mid_time_s": 0.0,
+                "dtheta_x_rad": 0.0,
+                "dtheta_y_rad": 0.1,
+                "dtheta_z_rad": -0.1,
+                "dv_x_mps": 1.0,
+                "dv_y_mps": 0.0,
+                "dv_z_mps": -1.0,
+                "dp_x_m": 0.01,
+                "dp_y_m": 0.02,
+                "dp_z_m": 0.03,
+                "dbg_x_radps": 0.0,
+                "dbg_y_radps": 0.0,
+                "dbg_z_radps": 0.0,
+                "dba_x_mps2": 0.1,
+                "dba_y_mps2": 0.2,
+                "dba_z_mps2": 0.3,
+                "mean_postfit_nis": 1.0,
+            },
+            {
+                "mid_time_s": 1.0,
+                "dtheta_x_rad": 0.2,
+                "dtheta_y_rad": -0.2,
+                "dtheta_z_rad": 0.3,
+                "dv_x_mps": -2.0,
+                "dv_y_mps": 2.0,
+                "dv_z_mps": 0.5,
+                "dp_x_m": -0.02,
+                "dp_y_m": 0.01,
+                "dp_z_m": 0.00,
+                "dbg_x_radps": 0.01,
+                "dbg_y_radps": -0.02,
+                "dbg_z_radps": 0.03,
+                "dba_x_mps2": -0.4,
+                "dba_y_mps2": 0.5,
+                "dba_z_mps2": -0.6,
+                "mean_postfit_nis": 1.0,
+            },
+        ]
+
+        stats = plot_segment_error_diagnostics.summarize(rows)
+        dtheta_target = next(row for row in stats if row["group"] == "dtheta" and row["component"] == "x")
+        self.assertAlmostEqual(float(dtheta_target["range"]), 0.2, places=9)
+        self.assertAlmostEqual(float(dtheta_target["end_minus_start"]), 0.2, places=9)
+
+    def test_filter_dynamic_rows_discards_static_prefix_segments(self) -> None:
+        rows = [
+            {"start_time_s": 0.0, "mid_time_s": 0.25},
+            {"start_time_s": 0.5, "mid_time_s": 0.75},
+            {"start_time_s": 1.0, "mid_time_s": 1.025},
+            {"start_time_s": 1.05, "mid_time_s": 1.075},
+        ]
+
+        filtered = plot_segment_error_diagnostics.filter_dynamic_rows(rows, 1.0)
+        self.assertEqual(filtered, rows[2:])
+
+    def test_convert_rows_to_display_units_converts_dtheta_to_deg(self) -> None:
+        rows = [
+            {
+                "dtheta_x_rad": math.pi / 2.0,
+                "dtheta_y_rad": -math.pi,
+                "dtheta_z_rad": math.pi / 4.0,
+                "dv_x_mps": 1.23,
+            }
+        ]
+
+        converted = plot_segment_error_diagnostics.convert_rows_to_display_units(rows)
+        self.assertAlmostEqual(converted[0]["dtheta_x_rad"], 90.0, places=9)
+        self.assertAlmostEqual(converted[0]["dtheta_y_rad"], -180.0, places=9)
+        self.assertAlmostEqual(converted[0]["dtheta_z_rad"], 45.0, places=9)
+        self.assertAlmostEqual(converted[0]["dv_x_mps"], 1.23, places=9)
+
+    def test_resolve_trajectory_path_defaults_to_sibling_file(self) -> None:
+        segment_error_path = pathlib.Path("/tmp/demo/segment_error_diagnostics.csv")
+        resolved = plot_segment_error_diagnostics.resolve_trajectory_path(segment_error_path, "")
+        self.assertEqual(resolved, pathlib.Path("/tmp/demo/trajectory.csv"))
+
+    def test_read_dynamic_start_time_reads_first_trajectory_row(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trajectory_path = pathlib.Path(temp_dir) / "trajectory.csv"
+            trajectory_path.write_text(
+                "time_s,east_m\n5801.597,0.0\n5801.647,0.1\n",
+                encoding="utf-8",
+            )
+            dynamic_start_time_s = plot_segment_error_diagnostics.read_dynamic_start_time(trajectory_path)
+            self.assertAlmostEqual(dynamic_start_time_s, 5801.597, places=9)
+
+    def test_read_dynamic_start_time_prefers_summary_field(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = pathlib.Path(temp_dir)
+            trajectory_path = temp_path / "trajectory.csv"
+            summary_path = temp_path / "summary.txt"
+            trajectory_path.write_text(
+                "time_s,east_m\n5701.400,0.0\n5801.597,0.1\n",
+                encoding="utf-8",
+            )
+            summary_path.write_text(
+                "navigation_start_time_s=5701.4\n"
+                "dynamic_start_time_s=5801.597\n",
+                encoding="utf-8",
+            )
+
+            dynamic_start_time_s = plot_segment_error_diagnostics.read_dynamic_start_time(trajectory_path)
+            self.assertAlmostEqual(dynamic_start_time_s, 5801.597, places=9)
+
+    def test_read_rows_accepts_clean_segment_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = pathlib.Path(temp_dir) / "segment_error_diagnostics.csv"
+            csv_path.write_text(
+                ",".join(
+                    [
+                        "segment_index",
+                        "start_time_s",
+                        "end_time_s",
+                        "dtheta_x_rad",
+                        "dtheta_y_rad",
+                        "dtheta_z_rad",
+                        "dv_x_mps",
+                        "dv_y_mps",
+                        "dv_z_mps",
+                        "dp_x_m",
+                        "dp_y_m",
+                        "dp_z_m",
+                        "dbg_x_radps",
+                        "dbg_y_radps",
+                        "dbg_z_radps",
+                        "dba_x_mps2",
+                        "dba_y_mps2",
+                        "dba_z_mps2",
+                        "gnss_factor_count",
+                        "mean_postfit_nis",
+                    ]
+                )
+                + "\n"
+                + "0,1.0,1.1,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1,1.0\n",
+                encoding="utf-8",
+            )
+
+            rows = plot_segment_error_diagnostics.read_rows(csv_path)
+            self.assertAlmostEqual(rows[0]["mean_postfit_nis"], 1.0, places=9)
+
+
+if __name__ == "__main__":
+    unittest.main()
