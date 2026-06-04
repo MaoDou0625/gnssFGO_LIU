@@ -1064,7 +1064,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(kInterpolatorQcVariance)));
   const gtsam::NonlinearFactorGraph base_graph = graph;
   const gtsam::Values base_initial_values = initial_values;
-  const std::vector<TrajectoryRow> base_dynamic_trajectory = run_result.trajectory;
   const RunSummary base_run_summary = run_result.run_summary;
   gtsam::LevenbergMarquardtParams optimizer_params;
   optimizer_params.maxIterations = config_.lm_max_iterations;
@@ -1076,11 +1075,17 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       "base_graph_initial_values",
       BuildReferenceStatesFromOptimizedValues(state_timestamps, base_initial_values),
       run_result.stage_attitude_debug_trajectory);
-    const gtsam::Values base_graph_optimized_values =
-      gtsam::LevenbergMarquardtOptimizer(
-        base_graph,
-        base_initial_values,
-        optimizer_params).optimize();
+  }
+  const gtsam::Values base_graph_optimized_values =
+    gtsam::LevenbergMarquardtOptimizer(
+      base_graph,
+      base_initial_values,
+      optimizer_params).optimize();
+  std::vector<TrajectoryRow> base_dynamic_trajectory = run_result.trajectory;
+  UpdateTrajectoryRowsFromOptimizedValues(
+    base_graph_optimized_values,
+    base_dynamic_trajectory);
+  if (config_.enable_stage_attitude_debug_export) {
     RecordStageAttitudeDebugRows(
       "base_graph_optimized",
       BuildReferenceStatesFromOptimizedValues(state_timestamps, base_graph_optimized_values),
@@ -1112,7 +1117,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     body_z_request.gnss_samples = &dataset.gnss_samples;
     body_z_request.state_timestamps = &state_timestamps;
     body_z_request.base_graph = &body_z_base_graph;
-    body_z_request.base_initial_values = &base_initial_values;
+    body_z_request.base_initial_values = &base_graph_optimized_values;
     body_z_request.optimizer_params = optimizer_params;
     body_z_request.navigation_start_index = navigation_start_index;
     body_z_request.dynamic_start_time_s = dynamic_start_time_s;
@@ -1389,7 +1394,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   std::vector<RtkVerticalDriftReferenceDiagnosticRow> active_rtk_vertical_drift_profile;
   const std::vector<RtkVerticalDriftReferenceDiagnosticRow> *active_rtk_vertical_drift_profile_ptr =
     nullptr;
-  gtsam::Values adaptive_initial_values = base_initial_values;
+  gtsam::Values adaptive_initial_values = base_graph_optimized_values;
   bool adaptive_converged = false;
   const int adaptive_extra_iterations =
     config_.enable_vertical_motion_adaptive_reweighting
