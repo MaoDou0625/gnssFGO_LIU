@@ -19,7 +19,13 @@ OfflineRunnerConfig MakeStage2SourceConfig(OfflineRunnerConfig config) {
 }
 
 OfflineRunnerConfig MakeStage3Config(OfflineRunnerConfig config) {
+  const bool restore_base_tilt_attitude_reference =
+    config.enable_base_graph_tilt_reference_constraint &&
+    config.enable_attitude_reference_constraint;
   config = MakeStage2VelocityOptimizationConfig(config);
+  if (restore_base_tilt_attitude_reference) {
+    config.enable_attitude_reference_constraint = true;
+  }
   config.enable_stage3_vertical_reference_optimization = false;
   config = DisableRtkOutageSegmentedBatchRecursion(std::move(config));
   config.enable_rtk_vertical_drift_reference = false;
