@@ -107,6 +107,7 @@ add_library(offline_lc_minimal_lib
   src/core/Stage1SourceReferencePolicy.cpp
   src/core/Stage1YawBranchResolver.cpp
   src/core/Stage1YawRefinementRunner.cpp
+  src/core/StageAttitudeDebug.cpp
   src/core/StageAttitudeReference.cpp
   src/core/Stage2AttitudeHoldBuilder.cpp
   src/core/Stage2HorizontalHoldBuilder.cpp

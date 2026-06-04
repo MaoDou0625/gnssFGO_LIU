@@ -1078,6 +1078,7 @@ struct OfflineRunResult {
   std::vector<ReferenceNodeState> imu_propagated_reference_states;
   std::vector<ReferenceNodeState> optimized_reference_states;
   std::vector<ReferenceNodeState> attitude_reference_states;
+  std::vector<StageAttitudeDebugRow> stage_attitude_debug_trajectory;
   std::vector<BodyZSeedImuDiagnosticRow> seed_body_z_acc_diagnostics;
   std::vector<BodyZSeedJumpWindowRow> body_z_seed_jump_windows;
   std::vector<BodyZSeedJumpWindowRow> body_z_seed_bias_windows;

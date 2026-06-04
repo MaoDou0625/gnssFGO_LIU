@@ -21,6 +21,10 @@ void WriteReferenceNodeCsv(
   const std::vector<ReferenceNodeRow> &rows,
   const GeoReference &geo_reference);
 
+void WriteStageAttitudeDebugCsv(
+  const std::filesystem::path &path,
+  const std::vector<StageAttitudeDebugRow> &rows);
+
 void WriteSeedBodyZAccDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<BodyZSeedImuDiagnosticRow> &rows);

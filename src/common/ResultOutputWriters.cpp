@@ -157,6 +157,50 @@ void WriteReferenceNodeCsv(
   }
 }
 
+void WriteStageAttitudeDebugCsv(
+  const std::filesystem::path &path,
+  const std::vector<StageAttitudeDebugRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "source,state_index,time_s,east_m,north_m,up_m,vx_mps,vy_mps,vz_mps,"
+       "yaw_rad,pitch_rad,roll_rad,bax,bay,baz,bgx,bgy,bgz,previous_dt_s,"
+       "relative_rotvec_x_rad,relative_rotvec_y_rad,relative_rotvec_z_rad,"
+       "relative_angle_rad,relative_delta_yaw_rad,body_z_axis_nav_z\n";
+
+  for (const auto &row : rows) {
+    WriteCsvString(stream, row.source);
+    stream << ','
+           << row.state_index << ','
+           << row.time_s << ','
+           << row.enu_position_m.x() << ','
+           << row.enu_position_m.y() << ','
+           << row.enu_position_m.z() << ','
+           << row.enu_velocity_mps.x() << ','
+           << row.enu_velocity_mps.y() << ','
+           << row.enu_velocity_mps.z() << ','
+           << row.ypr_rad.x() << ','
+           << row.ypr_rad.y() << ','
+           << row.ypr_rad.z() << ','
+           << row.bias_acc.x() << ','
+           << row.bias_acc.y() << ','
+           << row.bias_acc.z() << ','
+           << row.bias_gyro.x() << ','
+           << row.bias_gyro.y() << ','
+           << row.bias_gyro.z() << ','
+           << row.previous_dt_s << ','
+           << row.relative_rotvec_rad.x() << ','
+           << row.relative_rotvec_rad.y() << ','
+           << row.relative_rotvec_rad.z() << ','
+           << row.relative_angle_rad << ','
+           << row.relative_delta_yaw_rad << ','
+           << row.body_z_axis_nav_z << '\n';
+  }
+}
+
 void WriteSeedBodyZAccDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<BodyZSeedImuDiagnosticRow> &rows) {

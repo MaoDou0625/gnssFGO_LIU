@@ -19,6 +19,7 @@ struct OfflineRunnerConfig {
   bool enable_segment_local_error_feedback = false;
   bool verbose = false;
   bool write_debug_csv = true;
+  bool enable_stage_attitude_debug_export = false;
   bool write_error_diagnostics = false;
   bool write_segment_error_diagnostics = false;
   bool write_imu_rate_avp = false;

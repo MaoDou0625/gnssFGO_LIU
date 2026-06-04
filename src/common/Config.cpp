@@ -983,6 +983,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.verbose = ParseBool(normalized_value);
   } else if (normalized_key == "write_debug_csv") {
     config.write_debug_csv = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_stage_attitude_debug_export") {
+    config.enable_stage_attitude_debug_export = ParseBool(normalized_value);
   } else if (normalized_key == "write_error_diagnostics") {
     config.write_error_diagnostics = ParseBool(normalized_value);
   } else if (normalized_key == "write_segment_error_diagnostics") {
@@ -1873,6 +1875,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "enable_segment_local_error_feedback=" << (config.enable_segment_local_error_feedback ? "true" : "false") << '\n'
     << "verbose=" << (config.verbose ? "true" : "false") << '\n'
     << "write_debug_csv=" << (config.write_debug_csv ? "true" : "false") << '\n'
+    << "enable_stage_attitude_debug_export="
+    << (config.enable_stage_attitude_debug_export ? "true" : "false") << '\n'
     << "write_error_diagnostics=" << (config.write_error_diagnostics ? "true" : "false") << '\n'
     << "write_segment_error_diagnostics=" << (config.write_segment_error_diagnostics ? "true" : "false") << '\n'
     << "write_imu_rate_avp=" << (config.write_imu_rate_avp ? "true" : "false") << '\n'

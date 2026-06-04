@@ -47,6 +47,12 @@ void ResultWriter::WriteOutputs(
   if (!result.reference_node_trajectory.empty()) {
     WriteReferenceNodeCsv(output_path / "reference_node_trajectory.csv", result.reference_node_trajectory, geo_reference);
   }
+  if (config.enable_stage_attitude_debug_export &&
+      !result.stage_attitude_debug_trajectory.empty()) {
+    WriteStageAttitudeDebugCsv(
+      output_path / "stage_attitude_debug_trajectory.csv",
+      result.stage_attitude_debug_trajectory);
+  }
   if (!result.seed_body_z_acc_diagnostics.empty()) {
     WriteSeedBodyZAccDiagnosticsCsv(
       output_path / "seed_body_z_acc_diagnostics.csv",

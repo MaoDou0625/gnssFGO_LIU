@@ -53,6 +53,7 @@
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
 #include "offline_lc_minimal/core/RtkVerticalDriftReferenceEstimator.h"
 #include "offline_lc_minimal/core/Stage1OutageBodyYEnvelopeConstraintBuilder.h"
+#include "offline_lc_minimal/core/StageAttitudeDebug.h"
 #include "offline_lc_minimal/core/StageAttitudeReference.h"
 #include "offline_lc_minimal/core/Stage2AttitudeHoldBuilder.h"
 #include "offline_lc_minimal/core/Stage2HorizontalHoldBuilder.h"
@@ -607,6 +608,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     collect_segment_error_diagnostics ||
     config_.gnss_consistency_gate_mode != GnssConsistencyGateMode::kNone ||
     config_.enable_body_z_jump_detection ||
+    config_.enable_stage_attitude_debug_export ||
     config_.enable_attitude_reference_constraint ||
     (config_.enable_rtk_outage_smoothing && config_.enable_rtk_outage_attitude_hold) ||
     active_stage2_reference != nullptr;
@@ -1069,6 +1071,21 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   optimizer_params.lambdaInitial = config_.lm_lambda_initial;
   optimizer_params.setVerbosity(config_.verbose ? "ERROR" : "SILENT");
   optimizer_params.setVerbosityLM(config_.verbose ? "TRYLAMBDA" : "SILENT");
+  if (config_.enable_stage_attitude_debug_export) {
+    RecordStageAttitudeDebugRows(
+      "base_graph_initial_values",
+      BuildReferenceStatesFromOptimizedValues(state_timestamps, base_initial_values),
+      run_result.stage_attitude_debug_trajectory);
+    const gtsam::Values base_graph_optimized_values =
+      gtsam::LevenbergMarquardtOptimizer(
+        base_graph,
+        base_initial_values,
+        optimizer_params).optimize();
+    RecordStageAttitudeDebugRows(
+      "base_graph_optimized",
+      BuildReferenceStatesFromOptimizedValues(state_timestamps, base_graph_optimized_values),
+      run_result.stage_attitude_debug_trajectory);
+  }
   const auto add_vertical_acc_bias_gm_constraints =
     [&](gtsam::NonlinearFactorGraph &target_graph,
         RunSummary &target_summary,
@@ -1120,6 +1137,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.body_z_seed_jump_windows = body_z_result.jump_windows;
     run_result.body_z_seed_bias_windows = body_z_result.bias_windows;
     run_result.attitude_reference_states = body_z_result.seed_reference_states;
+    if (config_.enable_stage_attitude_debug_export) {
+      RecordStageAttitudeDebugRows(
+        "body_z_seed",
+        body_z_result.seed_reference_states,
+        run_result.stage_attitude_debug_trajectory);
+    }
   }
   if (has_stage2_reference_timeline) {
     run_result.attitude_reference_states = stage2_fixed_reference_states;
@@ -1968,6 +1991,12 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       state_timestamps,
       run_result.rtk_outage_windows,
       config_.rtk_outage_attitude_guard_duration_s);
+    if (config_.enable_stage_attitude_debug_export) {
+      RecordStageAttitudeDebugRows(
+        "stage2_anchor_imu_delta",
+        outage_attitude_reference_states,
+        run_result.stage_attitude_debug_trajectory);
+    }
     rtk_outage_attitude_reference_states = &outage_attitude_reference_states;
     rtk_outage_attitude_reference_source = "stage2_anchor_imu_delta";
   }

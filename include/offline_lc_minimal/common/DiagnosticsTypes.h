@@ -72,6 +72,23 @@ struct ReferenceNodeState {
   gtsam::Vector3 omega = gtsam::Vector3::Zero();
 };
 
+struct StageAttitudeDebugRow {
+  std::string source;
+  std::size_t state_index = 0;
+  double time_s = 0.0;
+  Eigen::Vector3d enu_position_m = Eigen::Vector3d::Zero();
+  Eigen::Vector3d enu_velocity_mps = Eigen::Vector3d::Zero();
+  Eigen::Vector3d ypr_rad = Eigen::Vector3d::Zero();
+  Eigen::Vector3d bias_acc = Eigen::Vector3d::Zero();
+  Eigen::Vector3d bias_gyro = Eigen::Vector3d::Zero();
+  double previous_dt_s = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector3d relative_rotvec_rad =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double relative_angle_rad = std::numeric_limits<double>::quiet_NaN();
+  double relative_delta_yaw_rad = std::numeric_limits<double>::quiet_NaN();
+  double body_z_axis_nav_z = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct BodyZSeedImuDiagnosticRow {
   double time_s = 0.0;
   double relative_time_s = 0.0;
