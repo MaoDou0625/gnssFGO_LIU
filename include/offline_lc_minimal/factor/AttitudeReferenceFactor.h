@@ -60,6 +60,47 @@ class RollPitchReferenceFactor final : public gtsam::NoiseModelFactor1<gtsam::Po
   double reference_roll_rad_ = 0.0;
 };
 
+class TiltReferenceFactor final : public gtsam::NoiseModelFactor1<gtsam::Pose3> {
+ public:
+  TiltReferenceFactor(
+    gtsam::Key pose_key,
+    const gtsam::Rot3 &reference_rotation,
+    const gtsam::SharedNoiseModel &model)
+      : gtsam::NoiseModelFactor1<gtsam::Pose3>(model, pose_key),
+        reference_nav_z_body_(NavZBody(reference_rotation)) {}
+
+  [[nodiscard]] gtsam::NonlinearFactor::shared_ptr clone() const override {
+    return boost::static_pointer_cast<gtsam::NonlinearFactor>(
+      gtsam::NonlinearFactor::shared_ptr(new TiltReferenceFactor(*this)));
+  }
+
+  [[nodiscard]] gtsam::Vector evaluateError(
+    const gtsam::Pose3 &pose,
+    boost::optional<gtsam::Matrix &> h_pose = boost::none) const override {
+    const auto error_function = [this](const gtsam::Pose3 &candidate_pose) {
+      return Evaluate(candidate_pose);
+    };
+    if (h_pose) {
+      *h_pose = gtsam::numericalDerivative11<gtsam::Vector2, gtsam::Pose3>(error_function, pose);
+    }
+    return Evaluate(pose);
+  }
+
+ private:
+  [[nodiscard]] static gtsam::Vector3 NavZBody(const gtsam::Rot3 &rotation) {
+    return rotation.unrotate(gtsam::Vector3::UnitZ());
+  }
+
+  [[nodiscard]] gtsam::Vector2 Evaluate(const gtsam::Pose3 &pose) const {
+    const gtsam::Vector3 nav_z_body = NavZBody(pose.rotation());
+    return (gtsam::Vector2() <<
+      nav_z_body.x() - reference_nav_z_body_.x(),
+      nav_z_body.y() - reference_nav_z_body_.y()).finished();
+  }
+
+  gtsam::Vector3 reference_nav_z_body_ = gtsam::Vector3::UnitZ();
+};
+
 class RelativeYawReferenceFactor final : public gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Pose3> {
  public:
   RelativeYawReferenceFactor(

@@ -1081,6 +1081,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       base_graph,
       base_initial_values,
       optimizer_params).optimize();
+  const std::vector<ReferenceNodeState> base_graph_optimized_reference_states =
+    BuildReferenceStatesFromOptimizedValues(state_timestamps, base_graph_optimized_values);
   std::vector<TrajectoryRow> base_dynamic_trajectory = run_result.trajectory;
   UpdateTrajectoryRowsFromOptimizedValues(
     base_graph_optimized_values,
@@ -1088,7 +1090,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   if (config_.enable_stage_attitude_debug_export) {
     RecordStageAttitudeDebugRows(
       "base_graph_optimized",
-      BuildReferenceStatesFromOptimizedValues(state_timestamps, base_graph_optimized_values),
+      base_graph_optimized_reference_states,
       run_result.stage_attitude_debug_trajectory);
   }
   const auto add_vertical_acc_bias_gm_constraints =
@@ -2116,6 +2118,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   attitude_reference_request.config = &config_;
   attitude_reference_request.state_timestamps = &state_timestamps;
   attitude_reference_request.reference_states = &run_result.attitude_reference_states;
+  attitude_reference_request.tilt_reference_states =
+    &base_graph_optimized_reference_states;
   attitude_reference_request.relative_yaw_reference_states = &reference_node_states;
   attitude_reference_request.dynamic_start_index = graph_timeline.dynamic_start_index;
   attitude_reference_request.graph = &graph_with_gnss;
@@ -2125,7 +2129,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     &run_result.relative_yaw_reference_diagnostics;
   AttitudeReferenceConstraintBuilder(std::move(attitude_reference_request)).Build();
 
-  if (has_stage2_reference_timeline) {
+  const bool use_base_graph_tilt_in_final_stage =
+    config_.enable_base_graph_tilt_reference_constraint &&
+    active_stage3_vertical_reference != nullptr;
+  if (has_stage2_reference_timeline && !use_base_graph_tilt_in_final_stage) {
     Stage2AttitudeHoldBuildRequest attitude_hold_request;
     attitude_hold_request.config = &config_;
     attitude_hold_request.state_timestamps = &state_timestamps;

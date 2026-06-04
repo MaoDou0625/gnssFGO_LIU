@@ -775,8 +775,10 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   }
   if (!std::isfinite(config.attitude_reference_sigma_rad) ||
       !std::isfinite(config.attitude_reference_relative_yaw_sigma_rad) ||
+      !std::isfinite(config.base_graph_tilt_reference_sigma_rad) ||
       config.attitude_reference_sigma_rad <= 0.0 ||
-      config.attitude_reference_relative_yaw_sigma_rad <= 0.0) {
+      config.attitude_reference_relative_yaw_sigma_rad <= 0.0 ||
+      config.base_graph_tilt_reference_sigma_rad <= 0.0) {
     throw std::runtime_error("attitude reference settings must be positive");
   }
   if (config.enable_attitude_reference_constraint && !config.enable_body_z_jump_detection) {
@@ -1640,6 +1642,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.attitude_reference_sigma_rad = ParseDouble(normalized_value);
   } else if (normalized_key == "attitude_reference_relative_yaw_sigma_rad") {
     config.attitude_reference_relative_yaw_sigma_rad = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_base_graph_tilt_reference_constraint") {
+    config.enable_base_graph_tilt_reference_constraint = ParseBool(normalized_value);
+  } else if (normalized_key == "base_graph_tilt_reference_sigma_rad") {
+    config.base_graph_tilt_reference_sigma_rad = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_body_z_nhc_constraint") {
     config.enable_body_z_nhc_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "enable_body_z_nhc_global_weak_constraint") {
@@ -2339,6 +2345,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "attitude_reference_sigma_rad=" << config.attitude_reference_sigma_rad << '\n'
     << "attitude_reference_relative_yaw_sigma_rad="
     << config.attitude_reference_relative_yaw_sigma_rad << '\n'
+    << "enable_base_graph_tilt_reference_constraint="
+    << (config.enable_base_graph_tilt_reference_constraint ? "true" : "false") << '\n'
+    << "base_graph_tilt_reference_sigma_rad="
+    << config.base_graph_tilt_reference_sigma_rad << '\n'
     << "enable_body_z_nhc_constraint=" << (config.enable_body_z_nhc_constraint ? "true" : "false") << '\n'
     << "enable_body_z_nhc_global_weak_constraint="
     << (config.enable_body_z_nhc_global_weak_constraint ? "true" : "false") << '\n'

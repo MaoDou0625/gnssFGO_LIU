@@ -81,6 +81,18 @@ void AttitudeReferenceConstraintBuilder::Build() const {
   if (request_.reference_states->size() != request_.state_timestamps->size()) {
     throw std::runtime_error("attitude reference state count does not match graph state count");
   }
+  const std::vector<ReferenceNodeState> *tilt_reference_states = request_.reference_states;
+  if (request_.config->enable_base_graph_tilt_reference_constraint) {
+    if (request_.tilt_reference_states == nullptr ||
+        request_.tilt_reference_states->empty()) {
+      throw std::runtime_error(
+        "base graph tilt reference constraint requires optimized base graph reference states");
+    }
+    if (request_.tilt_reference_states->size() != request_.state_timestamps->size()) {
+      throw std::runtime_error("base graph tilt reference state count does not match graph state count");
+    }
+    tilt_reference_states = request_.tilt_reference_states;
+  }
   if (request_.relative_yaw_reference_states->empty()) {
     throw std::runtime_error("relative yaw reference constraint requires base reference states");
   }
@@ -93,6 +105,10 @@ void AttitudeReferenceConstraintBuilder::Build() const {
 
   const auto roll_pitch_noise =
     gtsam::noiseModel::Isotropic::Sigma(2, request_.config->attitude_reference_sigma_rad);
+  const auto base_tilt_noise =
+    gtsam::noiseModel::Isotropic::Sigma(
+      2,
+      request_.config->base_graph_tilt_reference_sigma_rad);
   const auto relative_yaw_noise =
     gtsam::noiseModel::Isotropic::Sigma(
       1,
@@ -107,11 +123,18 @@ void AttitudeReferenceConstraintBuilder::Build() const {
   for (std::size_t state_index = request_.dynamic_start_index;
        state_index < request_.state_timestamps->size();
        ++state_index) {
-    const auto &reference_state = (*request_.reference_states)[state_index];
-    request_.graph->add(factor::RollPitchReferenceFactor(
-      symbol::X(state_index),
-      reference_state.pose.rotation(),
-      roll_pitch_noise));
+    const auto &reference_state = (*tilt_reference_states)[state_index];
+    if (request_.config->enable_base_graph_tilt_reference_constraint) {
+      request_.graph->add(factor::TiltReferenceFactor(
+        symbol::X(state_index),
+        reference_state.pose.rotation(),
+        base_tilt_noise));
+    } else {
+      request_.graph->add(factor::RollPitchReferenceFactor(
+        symbol::X(state_index),
+        reference_state.pose.rotation(),
+        roll_pitch_noise));
+    }
     ++request_.run_summary->attitude_reference_factor_count;
     request_.diagnostics->push_back(MakeDiagnosticRow(
       state_index,

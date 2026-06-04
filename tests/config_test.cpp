@@ -1115,11 +1115,19 @@ void TestBodyZJumpDetectionFlagLoads() {
   auto config = offline_lc_minimal::DefaultConfig();
   offline_lc_minimal::OverrideConfigField(config, "enable_body_z_jump_detection", "true");
   offline_lc_minimal::OverrideConfigField(config, "attitude_reference_relative_yaw_sigma_rad", "0.02");
+  offline_lc_minimal::OverrideConfigField(config, "enable_base_graph_tilt_reference_constraint", "true");
+  offline_lc_minimal::OverrideConfigField(config, "base_graph_tilt_reference_sigma_rad", "0.004");
   offline_lc_minimal::OverrideConfigField(config, "body_z_long_bias_min_duration_s", "12.5");
   ExpectTrue(config.enable_body_z_jump_detection, "new body-z detection flag should load");
   ExpectTrue(
     std::abs(config.attitude_reference_relative_yaw_sigma_rad - 0.02) < 1e-15,
     "relative yaw reference sigma should parse");
+  ExpectTrue(
+    config.enable_base_graph_tilt_reference_constraint,
+    "base graph tilt reference flag should parse");
+  ExpectTrue(
+    std::abs(config.base_graph_tilt_reference_sigma_rad - 0.004) < 1e-15,
+    "base graph tilt reference sigma should parse");
   ExpectTrue(
     std::abs(config.body_z_long_bias_min_duration_s - 12.5) < 1e-15,
     "long body-z bias window threshold should parse");
@@ -1328,6 +1336,18 @@ void TestVerticalVelocityDeltaConfigValidation() {
     threw = std::string(exception.what()).find("attitude reference settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive relative yaw reference sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.enable_attitude_reference_constraint = true;
+  config.enable_body_z_jump_detection = true;
+  config.base_graph_tilt_reference_sigma_rad = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("attitude reference settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive base graph tilt reference sigma should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_attitude_reference_constraint = true;
