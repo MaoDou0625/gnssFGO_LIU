@@ -970,6 +970,11 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
     std::abs(config.stage3_jump_height_highfreq_sigma_m - 0.0012) < 1e-15,
     "default Stage3 jump height sigma should be 1.2 mm");
   ExpectTrue(
+    std::abs(
+      config.bias_gyro_prior_sigma -
+      offline_lc_minimal::DegPerHourToRadPerSecond(0.01)) < 1e-18,
+    "default gyro bias prior sigma should be 0.01 deg/hour");
+  ExpectTrue(
     config.enable_stage3_jump_adaptive_context_envelope,
     "default config should enable Stage3 jump context envelopes");
   ExpectTrue(
@@ -3475,6 +3480,53 @@ void TestAccelerometerBiasUgConfigParsing() {
     "initial static dvz constraint flag should parse");
 }
 
+void TestGyroBiasDegPerHourConfigParsing() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "bias_gyro_sigma_dph", "2.0");
+  offline_lc_minimal::OverrideConfigField(config, "bias_gyro_prior_sigma_dph", "0.01");
+  offline_lc_minimal::OverrideConfigField(config, "global_gyro_bias_tie_sigma_dph", "0.02");
+  offline_lc_minimal::OverrideConfigField(config, "error_state_gyro_bias_sigma_dph", "3.0");
+
+  ExpectTrue(
+    std::abs(config.bias_gyro_sigma - offline_lc_minimal::DegPerHourToRadPerSecond(2.0)) < 1e-18,
+    "gyro bias sigma should parse from deg/hour");
+  ExpectTrue(
+    std::abs(config.bias_gyro_prior_sigma -
+             offline_lc_minimal::DegPerHourToRadPerSecond(0.01)) < 1e-18,
+    "gyro bias prior sigma should parse from deg/hour");
+  ExpectTrue(
+    std::abs(config.global_gyro_bias_tie_sigma_radps -
+             offline_lc_minimal::DegPerHourToRadPerSecond(0.02)) < 1e-18,
+    "global gyro bias tie sigma should parse from deg/hour");
+  ExpectTrue(
+    std::abs(config.error_state_gyro_bias_sigma_radps -
+             offline_lc_minimal::DegPerHourToRadPerSecond(3.0)) < 1e-18,
+    "error-state gyro bias sigma should parse from deg/hour");
+
+  offline_lc_minimal::OverrideConfigField(config, "bias_gyro_prior_sigma_radps", "1e-6");
+  ExpectTrue(
+    std::abs(config.bias_gyro_prior_sigma - 1e-6) < 1e-18,
+    "explicit rad/s gyro bias prior sigma should remain supported");
+  offline_lc_minimal::OverrideConfigField(config, "bias_gyro_prior_sigma", "2e-6");
+  ExpectTrue(
+    std::abs(config.bias_gyro_prior_sigma - 2e-6) < 1e-18,
+    "legacy unitless gyro bias prior sigma should remain rad/s-compatible");
+
+  const std::string serialized = offline_lc_minimal::ConfigToString(config);
+  ExpectTrue(
+    serialized.find("bias_gyro_prior_sigma_dph=") != std::string::npos,
+    "serialized config should write gyro bias prior sigma in deg/hour");
+  ExpectTrue(
+    serialized.find("global_gyro_bias_tie_sigma_dph=") != std::string::npos,
+    "serialized config should write global gyro bias tie sigma in deg/hour");
+  ExpectTrue(
+    serialized.find("error_state_gyro_bias_sigma_dph=") != std::string::npos,
+    "serialized config should write error-state gyro bias sigma in deg/hour");
+  ExpectTrue(
+    serialized.find("bias_gyro_prior_sigma=") == std::string::npos,
+    "serialized config should not write the legacy unitless gyro bias prior key");
+}
+
 void TestVerticalJumpConfigValidation() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_vertical_jump_masked_imu = true;
@@ -4519,6 +4571,7 @@ int main() {
       "TestGnssPreOutageQualityOverrideConfigValidation",
       TestGnssPreOutageQualityOverrideConfigValidation);
     RunTest("TestAccelerometerBiasUgConfigParsing", TestAccelerometerBiasUgConfigParsing);
+    RunTest("TestGyroBiasDegPerHourConfigParsing", TestGyroBiasDegPerHourConfigParsing);
     RunTest("TestVerticalVelocityDeltaConfigValidation", TestVerticalVelocityDeltaConfigValidation);
     RunTest("TestVerticalJumpConfigValidation", TestVerticalJumpConfigValidation);
     RunTest(

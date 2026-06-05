@@ -1017,11 +1017,17 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.integration_sigma = ParseDouble(normalized_value);
   } else if (normalized_key == "bias_acc_sigma") {
     config.bias_acc_sigma = ParseDouble(normalized_value);
-  } else if (normalized_key == "bias_gyro_sigma") {
+  } else if (normalized_key == "bias_gyro_sigma_dph") {
+    config.bias_gyro_sigma = DegPerHourToRadPerSecond(ParseDouble(normalized_value));
+  } else if (normalized_key == "bias_gyro_sigma_radps" ||
+             normalized_key == "bias_gyro_sigma") {
     config.bias_gyro_sigma = ParseDouble(normalized_value);
   } else if (normalized_key == "bias_acc_prior_sigma") {
     config.bias_acc_prior_sigma = ParseDouble(normalized_value);
-  } else if (normalized_key == "bias_gyro_prior_sigma") {
+  } else if (normalized_key == "bias_gyro_prior_sigma_dph") {
+    config.bias_gyro_prior_sigma = DegPerHourToRadPerSecond(ParseDouble(normalized_value));
+  } else if (normalized_key == "bias_gyro_prior_sigma_radps" ||
+             normalized_key == "bias_gyro_prior_sigma") {
     config.bias_gyro_prior_sigma = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_global_acc_bias") {
     config.enable_global_acc_bias = ParseBool(normalized_value);
@@ -1035,6 +1041,9 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.global_acc_bias_tie_sigma_xy_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_global_gyro_bias") {
     config.enable_global_gyro_bias = ParseBool(normalized_value);
+  } else if (normalized_key == "global_gyro_bias_tie_sigma_dph") {
+    config.global_gyro_bias_tie_sigma_radps =
+      DegPerHourToRadPerSecond(ParseDouble(normalized_value));
   } else if (normalized_key == "global_gyro_bias_tie_sigma_radps") {
     config.global_gyro_bias_tie_sigma_radps = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_acc_bias_gm_process") {
@@ -1112,6 +1121,9 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.error_state_velocity_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "error_state_acc_bias_sigma_mps2") {
     config.error_state_acc_bias_sigma_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "error_state_gyro_bias_sigma_dph") {
+    config.error_state_gyro_bias_sigma_radps =
+      DegPerHourToRadPerSecond(ParseDouble(normalized_value));
   } else if (normalized_key == "error_state_gyro_bias_sigma_radps") {
     config.error_state_gyro_bias_sigma_radps = ParseDouble(normalized_value);
   } else if (normalized_key == "stationary_window_s") {
@@ -1898,14 +1910,15 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "imu_sigma_gyro=" << config.imu_sigma_gyro << '\n'
     << "integration_sigma=" << config.integration_sigma << '\n'
     << "bias_acc_sigma=" << config.bias_acc_sigma << '\n'
-    << "bias_gyro_sigma=" << config.bias_gyro_sigma << '\n'
+    << "bias_gyro_sigma_dph=" << RadPerSecondToDegPerHour(config.bias_gyro_sigma) << '\n'
     << "bias_acc_prior_sigma=" << config.bias_acc_prior_sigma << '\n'
-    << "bias_gyro_prior_sigma=" << config.bias_gyro_prior_sigma << '\n'
+    << "bias_gyro_prior_sigma_dph=" << RadPerSecondToDegPerHour(config.bias_gyro_prior_sigma) << '\n'
     << "enable_global_acc_bias=" << (config.enable_global_acc_bias ? "true" : "false") << '\n'
     << "global_acc_bias_tie_sigma_ug=" << Mps2ToMicroG(config.global_acc_bias_tie_sigma_mps2) << '\n'
     << "global_acc_bias_tie_sigma_xy_ug=" << Mps2ToMicroG(config.global_acc_bias_tie_sigma_xy_mps2) << '\n'
     << "enable_global_gyro_bias=" << (config.enable_global_gyro_bias ? "true" : "false") << '\n'
-    << "global_gyro_bias_tie_sigma_radps=" << config.global_gyro_bias_tie_sigma_radps << '\n'
+    << "global_gyro_bias_tie_sigma_dph="
+    << RadPerSecondToDegPerHour(config.global_gyro_bias_tie_sigma_radps) << '\n'
     << "enable_vertical_acc_bias_gm_process=" << (config.enable_vertical_acc_bias_gm_process ? "true" : "false") << '\n'
     << "vertical_acc_bias_tau_s=" << config.vertical_acc_bias_tau_s << '\n'
     << "vertical_acc_bias_sigma_ug=" << Mps2ToMicroG(config.vertical_acc_bias_sigma_mps2) << '\n'
@@ -1942,7 +1955,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "error_state_position_sigma_m=" << config.error_state_position_sigma_m << '\n'
     << "error_state_velocity_sigma_mps=" << config.error_state_velocity_sigma_mps << '\n'
     << "error_state_acc_bias_sigma_mps2=" << config.error_state_acc_bias_sigma_mps2 << '\n'
-    << "error_state_gyro_bias_sigma_radps=" << config.error_state_gyro_bias_sigma_radps << '\n'
+    << "error_state_gyro_bias_sigma_dph="
+    << RadPerSecondToDegPerHour(config.error_state_gyro_bias_sigma_radps) << '\n'
     << "stationary_window_s=" << config.stationary_window_s << '\n'
     << "stationary_acc_tolerance_mps2=" << config.stationary_acc_tolerance_mps2 << '\n'
     << "stationary_gyro_threshold_radps=" << config.stationary_gyro_threshold_radps << '\n'

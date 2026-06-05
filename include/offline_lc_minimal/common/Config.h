@@ -4,6 +4,7 @@
 #include <string_view>
 
 #include "offline_lc_minimal/common/Types.h"
+#include "offline_lc_minimal/common/Units.h"
 
 namespace offline_lc_minimal {
 
@@ -38,7 +39,7 @@ struct OfflineRunnerConfig {
   double bias_acc_sigma = 1e-4;
   double bias_gyro_sigma = 1e-5;
   double bias_acc_prior_sigma = 0.10;
-  double bias_gyro_prior_sigma = 0.01;
+  double bias_gyro_prior_sigma = DegPerHourToRadPerSecond(0.01);
   bool enable_global_acc_bias = false;
   double global_acc_bias_tie_sigma_mps2 = 1e-5;
   double global_acc_bias_tie_sigma_xy_mps2 = 1e-5;
