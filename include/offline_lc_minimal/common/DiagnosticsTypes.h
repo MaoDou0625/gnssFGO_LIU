@@ -563,7 +563,6 @@ struct RtkOutageBoundaryDiagnosticRow {
   bool horizontal_position_factor_added = false;
   bool horizontal_velocity_factor_added = false;
   bool attitude_factor_added = false;
-  std::string attitude_constraint_type = "none";
   Eigen::Vector2d reference_horizontal_position_m =
     Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
   Eigen::Vector2d optimized_horizontal_position_m =

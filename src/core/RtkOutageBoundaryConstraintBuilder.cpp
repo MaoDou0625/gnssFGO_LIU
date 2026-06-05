@@ -12,7 +12,6 @@
 #include <gtsam/navigation/ImuBias.h>
 
 #include "offline_lc_minimal/common/Units.h"
-#include "offline_lc_minimal/factor/AttitudeReferenceFactor.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
 #include "offline_lc_minimal/factor/HorizontalHoldFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasPriorFactor.h"
@@ -92,10 +91,6 @@ Eigen::Vector3d Rot3ToYpr(const gtsam::Rot3 &rotation) {
   return Eigen::Vector3d(ypr.x(), ypr.y(), ypr.z());
 }
 
-gtsam::Vector3 NavZBody(const gtsam::Rot3 &rotation) {
-  return rotation.unrotate(gtsam::Vector3::UnitZ());
-}
-
 bool CanAddAttitudeFactor(
   const RtkOutageBoundaryReferenceRow &reference) {
   return reference.add_attitude_constraint &&
@@ -154,25 +149,6 @@ void RtkOutageBoundaryConstraintBuilder::Build() const {
   }
   if (request_.state_timestamps->empty()) {
     throw std::runtime_error("RTK outage boundary constraints require graph timestamps");
-  }
-  const bool use_base_tilt_reference =
-    request_.config->enable_base_graph_tilt_reference_constraint;
-  const bool needs_boundary_tilt_reference = std::any_of(
-    request_.boundary_references->begin(),
-    request_.boundary_references->end(),
-    [](const RtkOutageBoundaryReferenceRow &reference) {
-      return reference.valid && CanAddAttitudeFactor(reference);
-    });
-  if (use_base_tilt_reference && needs_boundary_tilt_reference) {
-    if (request_.tilt_reference_states == nullptr ||
-        request_.tilt_reference_states->empty()) {
-      throw std::runtime_error(
-        "RTK outage boundary tilt constraint requires optimized base graph reference states");
-    }
-    if (request_.tilt_reference_states->size() != request_.state_timestamps->size()) {
-      throw std::runtime_error(
-        "RTK outage boundary tilt reference state count does not match graph state count");
-    }
   }
 
   request_.run_summary->rtk_outage_boundary_constraints_enabled = true;
@@ -264,26 +240,10 @@ void RtkOutageBoundaryConstraintBuilder::Build() const {
 
     const bool add_attitude = CanAddAttitudeFactor(reference);
     if (add_attitude) {
-      if (use_base_tilt_reference) {
-        const auto &tilt_reference_state = (*request_.tilt_reference_states)[state_index];
-        request_.graph->add(factor::TiltReferenceFactor(
-          symbol::X(state_index),
-          tilt_reference_state.pose.rotation(),
-          gtsam::noiseModel::Isotropic::Sigma(
-            2,
-            request_.config->base_graph_tilt_reference_sigma_rad)));
-        diagnostic.attitude_constraint_type = "tilt";
-        diagnostic.reference_rotation = tilt_reference_state.pose.rotation();
-        diagnostic.reference_ypr_rad = Rot3ToYpr(tilt_reference_state.pose.rotation());
-        diagnostic.attitude_sigma_rad =
-          request_.config->base_graph_tilt_reference_sigma_rad;
-      } else {
-        request_.graph->add(factor::AttitudeHoldFactor(
-          symbol::X(state_index),
-          reference.reference_rotation,
-          gtsam::noiseModel::Isotropic::Sigma(3, reference.attitude_sigma_rad)));
-        diagnostic.attitude_constraint_type = "absolute";
-      }
+      request_.graph->add(factor::AttitudeHoldFactor(
+        symbol::X(state_index),
+        reference.reference_rotation,
+        gtsam::noiseModel::Isotropic::Sigma(3, reference.attitude_sigma_rad)));
       diagnostic.attitude_factor_added = true;
       ++request_.run_summary->rtk_outage_boundary_attitude_factor_count;
     }
@@ -344,19 +304,9 @@ void PopulateRtkOutageBoundaryDiagnostics(
     if (row.attitude_factor_added) {
       const auto pose = optimized_values.at<gtsam::Pose3>(symbol::X(row.target_state_index));
       row.optimized_ypr_rad = Rot3ToYpr(pose.rotation());
-      if (row.attitude_constraint_type == "tilt") {
-        const gtsam::Vector3 residual =
-          NavZBody(pose.rotation()) - NavZBody(row.reference_rotation);
-        row.attitude_residual_rad = Eigen::Vector3d(
-          residual.x(),
-          residual.y(),
-          std::numeric_limits<double>::quiet_NaN());
-        row.attitude_residual_norm_rad = std::hypot(residual.x(), residual.y());
-      } else {
-        row.attitude_residual_rad =
-          gtsam::Rot3::Logmap(row.reference_rotation.between(pose.rotation()));
-        row.attitude_residual_norm_rad = row.attitude_residual_rad.norm();
-      }
+      row.attitude_residual_rad =
+        gtsam::Rot3::Logmap(row.reference_rotation.between(pose.rotation()));
+      row.attitude_residual_norm_rad = row.attitude_residual_rad.norm();
     }
   }
 }
