@@ -27,6 +27,8 @@ struct RtkOutageRecoveryConstraintBuildRequest {
   const std::vector<RtkOutageWindowRow> *outage_windows = nullptr;
   const std::vector<ReferenceNodeState> *reference_states = nullptr;
   std::string attitude_reference_source = "reference_states";
+  const std::vector<ReferenceNodeState> *tilt_reference_states = nullptr;
+  std::string tilt_reference_source = "tilt_reference_states";
   const std::vector<VelocityDeltaPropagationRecord> *velocity_delta_records = nullptr;
   gtsam::NonlinearFactorGraph *graph = nullptr;
   RunSummary *run_summary = nullptr;
