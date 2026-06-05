@@ -4,6 +4,9 @@
 #include <memory>
 #include <vector>
 
+#include <boost/shared_ptr.hpp>
+#include <gtsam/navigation/CombinedImuFactor.h>
+
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/RunResultTypes.h"
 #include "offline_lc_minimal/core/Stage1OutageLateralVelocityEnvelopeEstimator.h"
@@ -26,6 +29,7 @@ struct RtkOutageSegmentedBatchRunRequest {
   std::vector<BodyZBiasReestimateSegmentRow> bias_reestimate_segments;
   std::vector<GnssFactorRecord> gnss_factor_records;
   std::vector<double> state_timestamps;
+  boost::shared_ptr<gtsam::PreintegrationCombinedParams> imu_params;
   double dynamic_start_time_s = 0.0;
   double processing_end_time_s = 0.0;
   SegmentedBatchRunOnce run_once;

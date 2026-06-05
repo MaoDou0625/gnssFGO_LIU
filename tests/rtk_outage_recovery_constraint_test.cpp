@@ -14,6 +14,7 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/common/Config.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeReference.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryConstraintBuilder.h"
@@ -165,7 +166,7 @@ void TestBuilderAddsOutageAttitudeAndVelocityConstraints() {
   ExpectTrue(summary.rtk_outage_attitude_hold_factor_count == 5U,
              "absolute attitude hold should include the configured boundary guard");
   ExpectTrue(summary.rtk_outage_relative_attitude_factor_count == 4U,
-             "relative yaw should cover guarded adjacent outage edges");
+             "relative rotation should cover guarded adjacent outage edges");
   ExpectTrue(summary.rtk_outage_velocity_delta_3d_factor_count == 2U,
              "3D velocity delta should cover intervals inside the outage");
   ExpectTrue(graph.size() == 11U, "unexpected outage recovery factor count");
@@ -180,6 +181,10 @@ void TestBuilderAddsOutageAttitudeAndVelocityConstraints() {
     "guarded attitude hold should start before the outage pre-anchor");
   const auto first_velocity_factor =
     boost::dynamic_pointer_cast<offline_lc_minimal::factor::VelocityDeltaFactor>(graph.at(9));
+  const auto first_relative_rotation_factor =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::RelativeRotationReferenceFactor>(graph.at(5));
+  ExpectTrue(first_relative_rotation_factor.get() != nullptr,
+             "guarded outage edges should use full relative rotation factors");
   ExpectTrue(first_velocity_factor.get() != nullptr, "velocity factor should be present after attitude factors");
   ExpectTrue(first_velocity_factor->keys()[0] == gtsam::symbol_shorthand::V(1),
              "velocity factor should start at the first outage interval");
@@ -210,7 +215,7 @@ void TestBuilderAddsOutageAttitudeAndVelocityConstraints() {
     summary.rtk_outage_relative_attitude_max_abs_residual_rad,
     0.0,
     1e-12,
-    "relative yaw residual should be zero at the reference");
+    "relative rotation residual should be zero at the reference");
   ExpectNear(
     summary.rtk_outage_velocity_delta_3d_rms_mps,
     0.0,
@@ -265,7 +270,7 @@ void TestBuilderSplitsOutageTiltAndYawWhenBaseTiltReferenceIsEnabled() {
   ExpectTrue(summary.rtk_outage_attitude_hold_factor_count == 10U,
              "split outage attitude hold should add tilt and yaw factors per guarded state");
   ExpectTrue(summary.rtk_outage_relative_attitude_factor_count == 4U,
-             "relative yaw should still cover guarded adjacent outage edges");
+             "relative rotation should still cover guarded adjacent outage edges");
   ExpectTrue(graph.size() == 16U, "unexpected split outage recovery factor count");
   ExpectTrue(attitude_diagnostics.size() == 14U,
              "attitude diagnostics should include tilt, yaw, and relative rows");
@@ -536,6 +541,45 @@ void TestBoundaryAttitudeReferencePropagatesThroughGuardedSpan() {
              "outage state should preserve IMU yaw delta from the start anchor");
   ExpectNear(reference.reference_states[3].pose.rotation().ypr().x(), 1.2, 1e-12,
              "post-end guard state should remain on the same propagated branch");
+}
+
+void TestBoundaryAttitudeReferenceUsesPostStartAsSingleSidedAnchor() {
+  const std::vector<double> timestamps{1.0, 2.0, 3.0};
+  std::vector<offline_lc_minimal::ReferenceNodeState> imu_states(timestamps.size());
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    imu_states[index].time_s = timestamps[index];
+    imu_states[index].pose = gtsam::Pose3(
+      gtsam::Rot3::Ypr(0.1 * static_cast<double>(index), 0.0, 0.0),
+      gtsam::Point3::Zero());
+  }
+
+  offline_lc_minimal::RtkOutageBoundaryReferenceRow post_start;
+  post_start.window_index = 17U;
+  post_start.boundary_role = "POST_START";
+  post_start.source_type = offline_lc_minimal::kPostStartImuRelativeHandoffSource;
+  post_start.target_time_s = 1.0;
+  post_start.valid = true;
+  post_start.has_attitude = true;
+  post_start.reference_rotation = gtsam::Rot3::Ypr(1.0, 0.0, 0.0);
+
+  const auto reference =
+    offline_lc_minimal::BuildRtkOutageBoundaryAttitudeReference(
+      timestamps,
+      imu_states,
+      {post_start},
+      2.0);
+
+  ExpectTrue(reference.valid(), "POST_START handoff should build a boundary attitude reference");
+  ExpectTrue(reference.outage_windows.front().pre_anchor_state_index == 0U,
+             "POST_START synthetic window should start at the post first state");
+  ExpectTrue(reference.outage_windows.front().post_anchor_state_index == 0U,
+             "single-sided POST_START anchor should not invent a second anchor");
+  ExpectNear(reference.reference_states[0].pose.rotation().ypr().x(), 1.0, 1e-12,
+             "post first reference should match the IMU-relative handoff");
+  ExpectNear(reference.reference_states[1].pose.rotation().ypr().x(), 1.1, 1e-12,
+             "post guard reference should preserve IMU yaw delta from post start");
+  ExpectNear(reference.reference_states[2].pose.rotation().ypr().x(), 1.2, 1e-12,
+             "later post guard reference should stay on the handoff branch");
 }
 
 void TestBoundaryAttitudeReferenceKeepsOffGridAnchorsExact() {
@@ -1004,6 +1048,146 @@ void TestBoundaryConstraintBuilderAddsPostStartAttitude() {
     "post-start boundary should add an attitude hold factor");
 }
 
+void TestBoundaryConstraintBuilderKeepsImuHandoffAsFullAttitudeWhenBaseTiltIsEnabled() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_boundary_constraints = true;
+  config.enable_base_graph_tilt_reference_constraint = true;
+  config.base_graph_tilt_reference_sigma_rad = 0.01;
+  config.rtk_outage_absolute_attitude_sigma_rad = 0.0001;
+
+  const std::vector<double> timestamps{0.0, 1.0, 2.0};
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> references(1U);
+  references.front().window_index = 4U;
+  references.front().boundary_role = "POST_START";
+  references.front().source_type = offline_lc_minimal::kPostStartImuRelativeHandoffSource;
+  references.front().target_time_s = 1.0;
+  references.front().valid = true;
+  references.front().has_attitude = true;
+  references.front().add_attitude_constraint = true;
+  references.front().reference_rotation = gtsam::Rot3::Ypr(0.3, -0.1, 0.2);
+  references.front().attitude_sigma_rad = config.rtk_outage_absolute_attitude_sigma_rad;
+  references.front().skip_reason = "OK";
+
+  auto tilt_reference_states = MakeReferenceStates(timestamps.size());
+  for (auto &state : tilt_reference_states) {
+    state.pose = gtsam::Pose3(
+      gtsam::Rot3::Ypr(0.0, 0.8, -0.7),
+      gtsam::Point3::Zero());
+  }
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::RtkOutageBoundaryDiagnosticRow> diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.boundary_references = &references;
+  request.tilt_reference_states = &tilt_reference_states;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 1U,
+             "IMU handoff boundary should use one full attitude factor even with base tilt enabled");
+  ExpectTrue(summary.rtk_outage_boundary_attitude_factor_count == 1U,
+             "IMU handoff should count one full attitude factor");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::AttitudeHoldFactor>(graph.at(0)) !=
+      nullptr,
+    "IMU handoff should not split pitch/roll away from the propagated reference");
+  ExpectTrue(diagnostics.front().attitude_constraint_type == "relative_handoff",
+             "boundary diagnostic should identify relative handoff attitude");
+}
+
+void TestBoundaryAttitudeHandoffUsesOutageLastPlusImuDelta() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_absolute_attitude_sigma_rad = 0.001;
+
+  offline_lc_minimal::DataSet dataset;
+  dataset.imu_samples = {
+    {0.0, Eigen::Vector3d(0.0, 0.0, 0.1), Eigen::Vector3d::Zero()},
+    {1.0, Eigen::Vector3d(0.0, 0.0, 0.1), Eigen::Vector3d::Zero()},
+  };
+
+  offline_lc_minimal::OfflineRunResult outage_result;
+  outage_result.optimized_reference_states.resize(2U);
+  outage_result.optimized_reference_states[0].time_s = 0.0;
+  outage_result.optimized_reference_states[0].pose =
+    gtsam::Pose3(gtsam::Rot3::Identity(), gtsam::Point3::Zero());
+  outage_result.optimized_reference_states[0].velocity = gtsam::Vector3::Zero();
+  outage_result.optimized_reference_states[1].time_s = 0.5;
+  outage_result.optimized_reference_states[1].pose =
+    gtsam::Pose3(gtsam::Rot3::Identity(), gtsam::Point3::Zero());
+  outage_result.optimized_reference_states[1].velocity = gtsam::Vector3::Zero();
+
+  offline_lc_minimal::RtkOutageWindowRow outage;
+  outage.window_index = 3U;
+  outage.start_time_s = 0.0;
+  outage.end_time_s = 1.0;
+
+  const auto imu_params = gtsam::PreintegrationCombinedParams::MakeSharedU(9.81);
+  imu_params->accelerometerCovariance = 1.0e-6 * gtsam::I_3x3;
+  imu_params->gyroscopeCovariance = 1.0e-6 * gtsam::I_3x3;
+  imu_params->integrationCovariance = 1.0e-6 * gtsam::I_3x3;
+  imu_params->biasAccCovariance = 1.0e-6 * gtsam::I_3x3;
+  imu_params->biasOmegaCovariance = 1.0e-6 * gtsam::I_3x3;
+
+  const auto handoff =
+    offline_lc_minimal::BuildRtkOutageBoundaryAttitudeHandoff(
+      offline_lc_minimal::RtkOutageBoundaryAttitudeHandoffRequest{
+        &config,
+        &dataset,
+        &outage_result,
+        &outage,
+        imu_params,
+        1.0});
+
+  ExpectTrue(handoff.valid, "IMU handoff should be valid");
+  ExpectNear(
+    handoff.boundary_reference.reference_rotation.ypr().x(),
+    0.05,
+    1.0e-9,
+    "handoff yaw should equal outage last yaw plus integrated gyro delta");
+  ExpectNear(
+    handoff.diagnostic.reference_relative_rotvec_rad.z(),
+    0.05,
+    1.0e-9,
+    "handoff diagnostic should expose the IMU relative rotation");
+
+  offline_lc_minimal::RtkOutageBoundaryReferenceRow post_reference;
+  post_reference.window_index = 3U;
+  post_reference.boundary_role = "POST_START";
+  post_reference.source_type = "POST_RECOVERY_RTK";
+  post_reference.target_time_s = 1.0;
+  post_reference.valid = true;
+  post_reference.has_up = true;
+  post_reference.add_up_constraint = true;
+  post_reference.reference_up_m = 12.0;
+  offline_lc_minimal::AttachRtkOutageBoundaryAttitudeHandoff(
+    handoff,
+    post_reference);
+  ExpectTrue(post_reference.source_type == offline_lc_minimal::kPostStartImuRelativeHandoffSource,
+             "post reference should identify IMU handoff as the attitude source");
+  ExpectTrue(post_reference.has_up && post_reference.add_up_constraint,
+             "attaching attitude handoff should preserve recovery position/velocity fields");
+
+  offline_lc_minimal::OfflineRunResult post_result;
+  post_result.optimized_reference_states.resize(1U);
+  post_result.optimized_reference_states.front().time_s = 1.0;
+  post_result.optimized_reference_states.front().pose =
+    gtsam::Pose3(gtsam::Rot3::Ypr(0.05, 0.0, 0.0), gtsam::Point3::Zero());
+  auto diagnostic = handoff.diagnostic;
+  offline_lc_minimal::PopulateRtkOutageBoundaryAttitudeHandoffDiagnostic(
+    post_result,
+    diagnostic);
+  ExpectNear(
+    diagnostic.residual_norm_rad,
+    0.0,
+    1.0e-12,
+    "matching post start attitude should have zero handoff residual");
+}
+
 offline_lc_minimal::GnssSolutionSample MakeCausalReferenceSample(
   const double time_s,
   const double up_m) {
@@ -1132,6 +1316,9 @@ int main() {
       "TestBoundaryAttitudeReferencePropagatesThroughGuardedSpan",
       TestBoundaryAttitudeReferencePropagatesThroughGuardedSpan);
     RunTest(
+      "TestBoundaryAttitudeReferenceUsesPostStartAsSingleSidedAnchor",
+      TestBoundaryAttitudeReferenceUsesPostStartAsSingleSidedAnchor);
+    RunTest(
       "TestBoundaryAttitudeReferenceKeepsOffGridAnchorsExact",
       TestBoundaryAttitudeReferenceKeepsOffGridAnchorsExact);
     RunTest(
@@ -1152,6 +1339,12 @@ int main() {
     RunTest(
       "TestBoundaryConstraintBuilderAddsPostStartAttitude",
       TestBoundaryConstraintBuilderAddsPostStartAttitude);
+    RunTest(
+      "TestBoundaryConstraintBuilderKeepsImuHandoffAsFullAttitudeWhenBaseTiltIsEnabled",
+      TestBoundaryConstraintBuilderKeepsImuHandoffAsFullAttitudeWhenBaseTiltIsEnabled);
+    RunTest(
+      "TestBoundaryAttitudeHandoffUsesOutageLastPlusImuDelta",
+      TestBoundaryAttitudeHandoffUsesOutageLastPlusImuDelta);
     RunTest(
       "TestCausalReferenceBuilderUsesPrefixBaseConfig",
       TestCausalReferenceBuilderUsesPrefixBaseConfig);

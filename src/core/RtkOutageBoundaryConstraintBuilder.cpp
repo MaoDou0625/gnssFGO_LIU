@@ -12,6 +12,7 @@
 #include <gtsam/navigation/ImuBias.h>
 
 #include "offline_lc_minimal/common/Units.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeHandoff.h"
 #include "offline_lc_minimal/factor/AttitudeReferenceFactor.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
 #include "offline_lc_minimal/factor/HorizontalHoldFactor.h"
@@ -260,7 +261,9 @@ void RtkOutageBoundaryConstraintBuilder::Build() const {
 
     const bool add_attitude = CanAddAttitudeFactor(reference);
     if (add_attitude) {
-      if (use_base_tilt_reference) {
+      const bool use_full_relative_handoff =
+        reference.source_type == kPostStartImuRelativeHandoffSource;
+      if (use_base_tilt_reference && !use_full_relative_handoff) {
         const auto &tilt_reference_state = (*request_.tilt_reference_states)[state_index];
         request_.graph->add(factor::TiltReferenceFactor(
           symbol::X(state_index),
@@ -281,11 +284,12 @@ void RtkOutageBoundaryConstraintBuilder::Build() const {
           symbol::X(state_index),
           reference.reference_rotation,
           gtsam::noiseModel::Isotropic::Sigma(3, reference.attitude_sigma_rad)));
-        diagnostic.attitude_constraint_type = "absolute";
+        diagnostic.attitude_constraint_type =
+          use_full_relative_handoff ? "relative_handoff" : "absolute";
       }
       diagnostic.attitude_factor_added = true;
       request_.run_summary->rtk_outage_boundary_attitude_factor_count +=
-        use_base_tilt_reference ? 2U : 1U;
+        (use_base_tilt_reference && !use_full_relative_handoff) ? 2U : 1U;
     }
 
     if (add_up || add_vz || add_ba_z || add_horizontal_position ||

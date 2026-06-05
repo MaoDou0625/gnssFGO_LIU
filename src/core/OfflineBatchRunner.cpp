@@ -151,6 +151,61 @@ bool HasStage2ReferenceTimeline(const Stage2VelocityReference *reference) {
          (!reference->reference_states.empty() || !reference->trajectory.empty());
 }
 
+void ApplyInitialBoundaryReferenceToPriorTarget(
+  const Stage2VelocityReference *reference,
+  const double initial_time_s,
+  gtsam::Pose3 &initial_pose_world,
+  gtsam::Vector3 &initial_velocity,
+  std::optional<double> &attitude_sigma_rad) {
+  if (reference == nullptr || reference->boundary_references.empty() ||
+      !std::isfinite(initial_time_s)) {
+    return;
+  }
+  for (const RtkOutageBoundaryReferenceRow &boundary : reference->boundary_references) {
+    if (!boundary.valid ||
+        !std::isfinite(boundary.target_time_s) ||
+        std::abs(boundary.target_time_s - initial_time_s) > 1.0e-6) {
+      continue;
+    }
+
+    gtsam::Point3 translation = initial_pose_world.translation();
+    if (boundary.has_horizontal_position &&
+        boundary.reference_horizontal_position_m.allFinite()) {
+      translation = gtsam::Point3(
+        boundary.reference_horizontal_position_m.x(),
+        boundary.reference_horizontal_position_m.y(),
+        translation.z());
+    }
+    if (boundary.has_up && std::isfinite(boundary.reference_up_m)) {
+      translation = gtsam::Point3(
+        translation.x(),
+        translation.y(),
+        boundary.reference_up_m);
+    }
+
+    gtsam::Rot3 rotation = initial_pose_world.rotation();
+    if (boundary.has_attitude &&
+        boundary.reference_rotation.matrix().allFinite()) {
+      rotation = boundary.reference_rotation;
+      if (std::isfinite(boundary.attitude_sigma_rad) &&
+          boundary.attitude_sigma_rad > 0.0) {
+        attitude_sigma_rad = boundary.attitude_sigma_rad;
+      }
+    }
+    initial_pose_world = gtsam::Pose3(rotation, translation);
+
+    if (boundary.has_horizontal_velocity &&
+        boundary.reference_horizontal_velocity_mps.allFinite()) {
+      initial_velocity.x() = boundary.reference_horizontal_velocity_mps.x();
+      initial_velocity.y() = boundary.reference_horizontal_velocity_mps.y();
+    }
+    if (boundary.has_vz && std::isfinite(boundary.reference_vz_mps)) {
+      initial_velocity.z() = boundary.reference_vz_mps;
+    }
+    return;
+  }
+}
+
 }  // namespace
 
 OfflineBatchRunner::OfflineBatchRunner(OfflineRunnerConfig config)
@@ -634,14 +689,21 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
 
   const Eigen::Vector3d initial_position_enu =
     graph_timeline.dynamic_start_index > 0U ? origin_sample.enu_position_m : navigation_start_sample.enu_position_m;
-  const gtsam::Pose3 initial_pose_world(
+  gtsam::Pose3 initial_pose_world(
     initial_pose.orientation,
     gtsam::Point3(
       initial_position_enu.x(),
       initial_position_enu.y(),
       initial_position_enu.z()));
-  const gtsam::Vector3 initial_velocity = gtsam::Vector3::Zero();
+  gtsam::Vector3 initial_velocity = gtsam::Vector3::Zero();
   const gtsam::imuBias::ConstantBias initial_bias = initial_pose.imu_bias;
+  std::optional<double> initial_boundary_attitude_sigma_rad;
+  ApplyInitialBoundaryReferenceToPriorTarget(
+    active_stage2_reference,
+    state_timestamps.front(),
+    initial_pose_world,
+    initial_velocity,
+    initial_boundary_attitude_sigma_rad);
   const std::size_t initial_imu_index = FindNearestImuIndex(dataset.imu_samples, state_timestamps.front());
   const gtsam::Vector3 initial_omega =
     initial_bias.correctGyroscope(dataset.imu_samples[initial_imu_index].gyro_radps);
@@ -649,13 +711,16 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   const gtsam::Key global_gyro_bias_key = gtsam::Symbol('g', 0);
   const gtsam::Key stage2_mount_leakage_key = gtsam::Symbol('m', 0);
 
-  const gtsam::Vector6 pose_sigmas =
+  gtsam::Vector6 pose_sigmas =
     (gtsam::Vector6() << config_.initial_roll_pitch_sigma_rad,
       config_.initial_roll_pitch_sigma_rad,
       config_.initial_yaw_sigma_rad,
       config_.initial_position_sigma_m,
       config_.initial_position_sigma_m,
       config_.initial_position_sigma_m).finished();
+  if (initial_boundary_attitude_sigma_rad.has_value()) {
+    pose_sigmas.head<3>().setConstant(*initial_boundary_attitude_sigma_rad);
+  }
 
   graph.add(gtsam::PriorFactor<gtsam::Pose3>(
     X(0),
@@ -1283,6 +1348,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     segmented_request.outage_windows = planned_rtk_outage_windows;
     segmented_request.bias_reestimate_segments = run_result.body_z_bias_reestimate_segments;
     segmented_request.state_timestamps = state_timestamps;
+    segmented_request.imu_params = imu_params;
     segmented_request.dynamic_start_time_s = dynamic_start_time_s;
     segmented_request.processing_end_time_s = end_time_s;
     auto stage2_lowpass_vertical_reference = stage2_lowpass_vertical_reference_;

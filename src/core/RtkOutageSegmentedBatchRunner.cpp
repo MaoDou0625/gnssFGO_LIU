@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "offline_lc_minimal/core/GraphTimelineBuilder.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageBiasContinuityPolicy.h"
 #include "offline_lc_minimal/core/RtkOutageBatchSegmentPlanner.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
@@ -58,6 +59,7 @@ OfflineRunnerConfig MakeChildConfig(
   config = DisableRtkOutageSegmentedBatchRecursion(std::move(config));
   config.enable_rtk_outage_causal_drift_reference = false;
   config.enable_rtk_outage_preoutage_vertical_fence = false;
+  config.enable_stage1_yaw_refinement = false;
   config.enable_initial_dynamic_static_detection = false;
   config.enable_initial_dynamic_static_lowpass_protection = false;
   config.enable_initial_dynamic_static_vz_constraint = false;
@@ -317,26 +319,6 @@ RtkOutageBoundaryReferenceRow MakeBoundaryReferenceFromTrajectory(
     reference.has_attitude;
   reference.skip_reason = reference.valid ? "OK" : "nonfinite_trajectory_reference";
   return reference;
-}
-
-void AttachAttitudeReferenceFromTrajectory(
-  RtkOutageBoundaryReferenceRow &reference,
-  const OfflineRunnerConfig &config,
-  const OfflineRunResult &result,
-  const double target_time_s,
-  const std::string &source_type) {
-  const ReferenceNodeState *state =
-    NearestReferenceState(result.optimized_reference_states, target_time_s);
-  if (state == nullptr || !state->pose.rotation().matrix().allFinite()) {
-    return;
-  }
-  reference.source_type = source_type;
-  reference.reference_rotation = state->pose.rotation();
-  reference.has_attitude = true;
-  reference.add_attitude_constraint = true;
-  reference.attitude_sigma_rad = config.rtk_outage_absolute_attitude_sigma_rad;
-  reference.valid = true;
-  reference.skip_reason = "OK";
 }
 
 void RemoveAttitudeReference(RtkOutageBoundaryReferenceRow &reference) {
@@ -638,20 +620,44 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
           "POST_START",
           outage.end_time_s,
           "OUTAGE_ATTITUDE_ONLY");
-    AttachAttitudeReferenceFromTrajectory(
-      post_start_reference,
-      request_.config,
-      outage_result,
-      outage.end_time_s,
-      has_valid_recovery_reference
-        ? "POST_RECOVERY_RTK_WITH_OUTAGE_ATTITUDE"
-        : "OUTAGE_ATTITUDE_ONLY");
+    RtkOutageBoundaryAttitudeHandoffResult post_start_handoff =
+      BuildRtkOutageBoundaryAttitudeHandoff(
+        RtkOutageBoundaryAttitudeHandoffRequest{
+          &request_.config,
+          &request_.dataset,
+          &outage_result,
+          &outage,
+          request_.imu_params,
+          post_config.processing_start_time_s > 0.0
+            ? post_config.processing_start_time_s
+            : outage.end_time_s});
+    AttachRtkOutageBoundaryAttitudeHandoff(
+      post_start_handoff,
+      post_start_reference);
+    if (post_start_handoff.valid) {
+      post_config.enable_rtk_outage_smoothing = true;
+    }
     post_boundary_refs.push_back(std::move(post_start_reference));
     OfflineRunResult post_result = request_.run_once(
       std::move(post_config),
       WithBoundaryReferences(std::move(post_reference), std::move(post_boundary_refs)),
       nullptr,
       request_.dataset);
+    if (post_start_handoff.valid) {
+      PopulateRtkOutageBoundaryAttitudeHandoffDiagnostic(
+        post_result,
+        post_start_handoff.diagnostic);
+      if (std::isfinite(post_start_handoff.diagnostic.residual_norm_rad)) {
+        post_result.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad =
+          std::isfinite(post_result.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad)
+            ? std::max(
+                post_result.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad,
+                post_start_handoff.diagnostic.residual_norm_rad)
+            : post_start_handoff.diagnostic.residual_norm_rad;
+      }
+    }
+    post_result.rtk_outage_attitude_hold_diagnostics.push_back(
+      std::move(post_start_handoff.diagnostic));
 
     std::vector<SegmentedBatchResultPiece> pieces;
     pieces.reserve(3U);

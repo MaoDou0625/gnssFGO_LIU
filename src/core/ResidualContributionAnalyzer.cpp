@@ -66,6 +66,7 @@ struct ResidualAccumulator {
       Contains(factor_type, "TiltReferenceFactor") ||
       Contains(factor_type, "YawReferenceFactor") ||
       Contains(factor_type, "RelativeYawReferenceFactor") ||
+      Contains(factor_type, "RelativeRotationReferenceFactor") ||
       Contains(factor_type, "AttitudeReferenceFactor")) {
     return "attitude_reference";
   }

@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include <gtsam/navigation/CombinedImuFactor.h>
+
 #include "offline_lc_minimal/core/OptimizationStagePolicy.h"
 #include "offline_lc_minimal/core/RtkOutageSegmentedBatchRunner.h"
 #include "offline_lc_minimal/core/Stage1OutageLateralVelocityEnvelopeEstimator.h"
@@ -136,6 +138,22 @@ std::optional<OfflineRunResult> TryRunSegmentedStage2(
   segmented_request.bias_reestimate_segments = stage1_result.body_z_bias_reestimate_segments;
   segmented_request.gnss_factor_records = stage1_result.gnss_factor_records;
   segmented_request.state_timestamps = std::move(state_timestamps);
+  auto imu_params =
+    gtsam::PreintegrationCombinedParams::MakeSharedU(request.config.gravity_mps2);
+  imu_params->accelerometerCovariance =
+    std::pow(request.config.imu_sigma_acc, 2.0) * gtsam::I_3x3;
+  imu_params->gyroscopeCovariance =
+    std::pow(request.config.imu_sigma_gyro, 2.0) * gtsam::I_3x3;
+  imu_params->integrationCovariance =
+    std::pow(request.config.integration_sigma, 2.0) * gtsam::I_3x3;
+  imu_params->biasAccCovariance =
+    std::pow(request.config.bias_acc_sigma, 2.0) * gtsam::I_3x3;
+  if (request.config.enable_vertical_acc_bias_gm_process) {
+    imu_params->biasAccCovariance(2, 2) *= 1e6;
+  }
+  imu_params->biasOmegaCovariance =
+    std::pow(request.config.bias_gyro_sigma, 2.0) * gtsam::I_3x3;
+  segmented_request.imu_params = imu_params;
   segmented_request.dynamic_start_time_s =
     stage1_result.run_summary.dynamic_start_time_s;
   segmented_request.processing_end_time_s = processing_end_time_s;

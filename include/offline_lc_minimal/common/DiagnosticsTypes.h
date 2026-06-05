@@ -780,6 +780,9 @@ struct RtkOutageAttitudeHoldDiagnosticRow {
   Eigen::Vector3d reference_relative_rotvec_rad =
     Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
   double reference_relative_angle_rad = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector3d optimized_relative_rotvec_rad =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double optimized_relative_angle_rad = std::numeric_limits<double>::quiet_NaN();
   double reference_delta_yaw_rad = std::numeric_limits<double>::quiet_NaN();
   double optimized_delta_yaw_rad = std::numeric_limits<double>::quiet_NaN();
   double residual_yaw_rad = std::numeric_limits<double>::quiet_NaN();

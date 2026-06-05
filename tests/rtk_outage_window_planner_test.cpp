@@ -8,8 +8,10 @@
 
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/inference/Symbol.h>
+#include <gtsam/navigation/CombinedImuFactor.h>
 
 #include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageBiasContinuityPolicy.h"
 #include "offline_lc_minimal/core/RtkOutageBatchSegmentPlanner.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
@@ -32,6 +34,16 @@ void ExpectTrue(const bool condition, const std::string &message) {
   if (!condition) {
     throw std::runtime_error(message);
   }
+}
+
+boost::shared_ptr<gtsam::PreintegrationCombinedParams> MakeTestImuParams() {
+  const auto params = gtsam::PreintegrationCombinedParams::MakeSharedU(9.81);
+  params->accelerometerCovariance = 1.0e-6 * gtsam::I_3x3;
+  params->gyroscopeCovariance = 1.0e-6 * gtsam::I_3x3;
+  params->integrationCovariance = 1.0e-6 * gtsam::I_3x3;
+  params->biasAccCovariance = 1.0e-6 * gtsam::I_3x3;
+  params->biasOmegaCovariance = 1.0e-6 * gtsam::I_3x3;
+  return params;
 }
 
 offline_lc_minimal::GnssSolutionSample MakeGnssSample(
@@ -451,6 +463,7 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
   config.enable_rtk_outage_smoothing = true;
   config.enable_rtk_outage_segmented_batch = true;
   config.enable_rtk_outage_boundary_constraints = false;
+  config.enable_stage1_yaw_refinement = true;
   config.enable_initial_dynamic_static_detection = true;
   config.enable_initial_dynamic_static_lowpass_protection = true;
   config.enable_initial_dynamic_static_vz_constraint = true;
@@ -489,6 +502,7 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
     double horizontal_velocity_hold_sigma_mps = 0.0;
     double processing_start_time_s = 0.0;
     double processing_end_time_s = 0.0;
+    bool stage1_yaw_refinement_enabled = false;
     bool initial_dynamic_static_detection_enabled = false;
     bool initial_dynamic_static_lowpass_protection_enabled = false;
     bool initial_dynamic_static_vz_constraint_enabled = false;
@@ -518,6 +532,7 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
       child_config.stage2_horizontal_velocity_hold_sigma_mps,
       child_config.processing_start_time_s,
       child_config.processing_end_time_s,
+      child_config.enable_stage1_yaw_refinement,
       child_config.enable_initial_dynamic_static_detection,
       child_config.enable_initial_dynamic_static_lowpass_protection,
       child_config.enable_initial_dynamic_static_vz_constraint});
@@ -539,6 +554,9 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
   ExpectTrue(
     !calls[0].final_hold_relaxation_enabled,
     "standalone prefix child should clear final hold relaxation");
+  ExpectTrue(
+    calls[0].stage1_yaw_refinement_enabled,
+    "standalone prefix child should preserve Stage1 yaw refinement");
   ExpectTrue(
     calls[0].initial_dynamic_static_detection_enabled &&
       calls[0].initial_dynamic_static_lowpass_protection_enabled &&
@@ -564,6 +582,9 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
       calls[1].final_hold_relaxation_enabled,
     "outage child should keep Stage2 lowfreq final relaxations");
   ExpectTrue(
+    !calls[1].stage1_yaw_refinement_enabled,
+    "outage child should not run an independent Stage1 yaw refinement");
+  ExpectTrue(
     !calls[1].initial_dynamic_static_detection_enabled &&
       !calls[1].initial_dynamic_static_lowpass_protection_enabled &&
       !calls[1].initial_dynamic_static_vz_constraint_enabled,
@@ -587,6 +608,9 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
     calls[2].stage2_lowfreq_enabled && calls[2].final_dvz_relaxation_enabled &&
       calls[2].final_hold_relaxation_enabled,
     "post child should keep Stage2 lowfreq final relaxations");
+  ExpectTrue(
+    !calls[2].stage1_yaw_refinement_enabled,
+    "post child should not run an independent Stage1 yaw refinement");
   ExpectTrue(
     !calls[2].initial_dynamic_static_detection_enabled &&
       !calls[2].initial_dynamic_static_lowpass_protection_enabled &&
@@ -619,6 +643,7 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
   struct Call {
     double processing_start_time_s = 0.0;
     double processing_end_time_s = 0.0;
+    bool outage_smoothing_enabled = false;
     std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> reference;
   };
   std::vector<Call> calls;
@@ -630,8 +655,12 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
     MakeRecoverySample(20.0, 1, 100.0),
     MakeRecoverySample(20.5, 1, 100.05),
     MakeRecoverySample(21.0, 1, 100.10)};
+  request.dataset.imu_samples = {
+    {0.0, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()},
+    {30.0, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()}};
   request.outage_windows = {outage};
   request.state_timestamps = {0.0, 2.0, 8.0, 10.1, 15.0, 20.2, 30.0};
+  request.imu_params = MakeTestImuParams();
   request.dynamic_start_time_s = 2.0;
   request.processing_end_time_s = 30.0;
   request.run_once =
@@ -642,6 +671,7 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
       calls.push_back(Call{
         child_config.processing_start_time_s,
         child_config.processing_end_time_s,
+        child_config.enable_rtk_outage_smoothing,
         stage2_reference});
 
       offline_lc_minimal::OfflineRunResult result;
@@ -662,9 +692,11 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
       } else {
         result.trajectory = {
           MakeTrajectoryRow(0.0, 0.0),
+          MakeTrajectoryRow(outage.end_time_s - 0.05, 0.95),
           MakeTrajectoryRow(child_config.processing_end_time_s, 1.0)};
         result.optimized_reference_states = {
           MakeReferenceNodeState(0.0, 0.0, 0.2),
+          MakeReferenceNodeState(outage.end_time_s - 0.05, 19.95, 0.7),
           MakeReferenceNodeState(outage.end_time_s, 20.0, 0.7)};
       }
       return result;
@@ -709,6 +741,8 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
               "outage start attitude must use the pre optimized Rot3 branch");
 
   ExpectTrue(calls[3].reference != nullptr, "post child should receive recovery boundary reference");
+  ExpectTrue(calls[3].outage_smoothing_enabled,
+             "post child should re-enable outage smoothing for IMU-relative handoff constraints");
   ExpectTrue(calls[3].reference->boundary_references.size() == 1U,
              "post child should receive one post-start boundary");
   const auto &post_ref = calls[3].reference->boundary_references.front();
@@ -717,9 +751,11 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
   ExpectTrue(post_ref.has_up && post_ref.has_vz,
              "post child should keep the recovery vertical boundary");
   ExpectTrue(post_ref.has_attitude && post_ref.add_attitude_constraint,
-             "post child should receive outage-end attitude");
+             "post child should receive IMU-relative handoff attitude");
+  ExpectTrue(post_ref.source_type == offline_lc_minimal::kPostStartImuRelativeHandoffSource,
+             "post child attitude source should be IMU-relative handoff");
   ExpectTrue(std::abs(post_ref.reference_rotation.ypr().x() - 0.7) < 1e-12,
-             "post start attitude must use the outage optimized Rot3 branch");
+             "post start attitude must use outage last plus IMU delta");
 }
 
 void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
@@ -743,6 +779,7 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
   struct Call {
     double processing_start_time_s = 0.0;
     double processing_end_time_s = 0.0;
+    bool outage_smoothing_enabled = false;
     std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> reference;
   };
   std::vector<Call> calls;
@@ -753,8 +790,12 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
   request.dataset.gnss_samples = {
     MakeRecoverySample(20.0, 3, 100.0),
     MakeRecoverySample(20.5, 3, 100.05)};
+  request.dataset.imu_samples = {
+    {0.0, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()},
+    {30.0, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()}};
   request.outage_windows = {outage};
   request.state_timestamps = {0.0, 2.0, 8.0, 10.1, 15.0, 20.2, 30.0};
+  request.imu_params = MakeTestImuParams();
   request.dynamic_start_time_s = 2.0;
   request.processing_end_time_s = 30.0;
   request.run_once =
@@ -765,6 +806,7 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
       calls.push_back(Call{
         child_config.processing_start_time_s,
         child_config.processing_end_time_s,
+        child_config.enable_rtk_outage_smoothing,
         stage2_reference});
 
       offline_lc_minimal::OfflineRunResult result;
@@ -778,9 +820,11 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
       } else if (child_config.processing_start_time_s < outage.end_time_s - 1.0e-9) {
         result.trajectory = {
           MakeTrajectoryRow(0.0, 0.0),
+          MakeTrajectoryRow(outage.end_time_s - 0.05, 0.95),
           MakeTrajectoryRow(outage.end_time_s, 1.0)};
         result.optimized_reference_states = {
           MakeReferenceNodeState(0.0, 0.0, 0.2),
+          MakeReferenceNodeState(outage.end_time_s - 0.05, 19.95, 0.7),
           MakeReferenceNodeState(outage.end_time_s, 20.0, 0.7)};
       } else {
         result.trajectory = {
@@ -807,15 +851,19 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
              "outage end marker should not invent an attitude reference");
 
   ExpectTrue(calls[2].reference != nullptr, "post child should receive a post-start boundary");
+  ExpectTrue(calls[2].outage_smoothing_enabled,
+             "post child should re-enable outage smoothing when handoff attitude is available");
   const auto &post_ref = calls[2].reference->boundary_references.front();
   ExpectTrue(post_ref.boundary_role == "POST_START",
              "post child boundary should target post start");
   ExpectTrue(!post_ref.has_up && !post_ref.has_vz,
              "invalid recovery should not add post vertical constraints");
   ExpectTrue(post_ref.has_attitude && post_ref.add_attitude_constraint,
-             "post child should still receive outage-end attitude");
+             "post child should still receive IMU-relative handoff attitude");
+  ExpectTrue(post_ref.source_type == offline_lc_minimal::kPostStartImuRelativeHandoffSource,
+             "post child attitude source should be IMU-relative handoff");
   ExpectTrue(std::abs(post_ref.reference_rotation.ypr().x() - 0.7) < 1e-12,
-             "post start attitude must use the outage optimized Rot3 branch");
+             "post start attitude must use outage last plus IMU delta");
 }
 
 void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {

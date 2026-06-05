@@ -105,6 +105,8 @@ std::map<std::size_t, BoundaryPair> CollectBoundaryPairs(
       pair.start = &reference;
     } else if (reference.boundary_role == "OUTAGE_END") {
       pair.end = &reference;
+    } else if (reference.boundary_role == "POST_START" && pair.start == nullptr) {
+      pair.start = &reference;
     }
   }
   return pairs;
