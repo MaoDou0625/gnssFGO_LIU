@@ -857,10 +857,10 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
     std::abs(config.rtk_outage_attitude_guard_duration_s - 1.0) < 1e-15,
     "phase32 outage attitude guard duration should load");
   ExpectTrue(
-    std::abs(config.rtk_outage_absolute_attitude_sigma_rad - 1.0e-4) < 1e-15,
+    std::abs(config.rtk_outage_absolute_attitude_sigma_rad - 1.0e-3) < 1e-15,
     "phase32 outage absolute attitude sigma should load");
   ExpectTrue(
-    std::abs(config.rtk_outage_relative_attitude_sigma_rad - 1.0e-4) < 1e-15,
+    std::abs(config.rtk_outage_relative_attitude_sigma_rad - 1.0e-3) < 1e-15,
     "phase32 outage relative attitude sigma should load");
   ExpectTrue(config.enable_rtk_outage_velocity_delta_3d, "phase32 should enable outage 3D velocity delta");
   ExpectTrue(
@@ -1090,8 +1090,11 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
     std::abs(config.rtk_outage_attitude_guard_duration_s - 1.0) < 1e-15,
     "default outage attitude guard duration should match phase32");
   ExpectTrue(
-    std::abs(config.rtk_outage_absolute_attitude_sigma_rad - 1.0e-4) < 1e-15,
+    std::abs(config.rtk_outage_absolute_attitude_sigma_rad - 1.0e-3) < 1e-15,
     "default outage absolute attitude sigma should match phase32");
+  ExpectTrue(
+    std::abs(config.rtk_outage_relative_attitude_sigma_rad - 1.0e-3) < 1e-15,
+    "default outage relative attitude sigma should match phase32");
   ExpectTrue(config.enable_rtk_outage_velocity_delta_3d, "default config should enable outage 3D velocity delta");
   ExpectTrue(
     std::abs(config.rtk_outage_velocity_delta_3d_sigma_mps - 0.20) < 1e-15,
