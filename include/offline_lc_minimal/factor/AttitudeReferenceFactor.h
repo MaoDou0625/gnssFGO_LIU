@@ -101,6 +101,40 @@ class TiltReferenceFactor final : public gtsam::NoiseModelFactor1<gtsam::Pose3> 
   gtsam::Vector3 reference_nav_z_body_ = gtsam::Vector3::UnitZ();
 };
 
+class YawReferenceFactor final : public gtsam::NoiseModelFactor1<gtsam::Pose3> {
+ public:
+  YawReferenceFactor(
+    gtsam::Key pose_key,
+    const gtsam::Rot3 &reference_rotation,
+    const gtsam::SharedNoiseModel &model)
+      : gtsam::NoiseModelFactor1<gtsam::Pose3>(model, pose_key),
+        reference_yaw_rad_(reference_rotation.ypr().x()) {}
+
+  [[nodiscard]] gtsam::NonlinearFactor::shared_ptr clone() const override {
+    return boost::static_pointer_cast<gtsam::NonlinearFactor>(
+      gtsam::NonlinearFactor::shared_ptr(new YawReferenceFactor(*this)));
+  }
+
+  [[nodiscard]] gtsam::Vector evaluateError(
+    const gtsam::Pose3 &pose,
+    boost::optional<gtsam::Matrix &> h_pose = boost::none) const override {
+    const auto error_function = [this](const gtsam::Pose3 &candidate_pose) {
+      return Evaluate(candidate_pose);
+    };
+    if (h_pose) {
+      *h_pose = gtsam::numericalDerivative11<gtsam::Vector1, gtsam::Pose3>(error_function, pose);
+    }
+    return Evaluate(pose);
+  }
+
+ private:
+  [[nodiscard]] gtsam::Vector1 Evaluate(const gtsam::Pose3 &pose) const {
+    return gtsam::Vector1(NormalizeAngleRad(pose.rotation().ypr().x() - reference_yaw_rad_));
+  }
+
+  double reference_yaw_rad_ = 0.0;
+};
+
 class RelativeYawReferenceFactor final : public gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Pose3> {
  public:
   RelativeYawReferenceFactor(

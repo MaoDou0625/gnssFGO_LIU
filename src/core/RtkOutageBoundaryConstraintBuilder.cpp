@@ -12,6 +12,7 @@
 #include <gtsam/navigation/ImuBias.h>
 
 #include "offline_lc_minimal/common/Units.h"
+#include "offline_lc_minimal/factor/AttitudeReferenceFactor.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
 #include "offline_lc_minimal/factor/HorizontalHoldFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasPriorFactor.h"
@@ -150,6 +151,25 @@ void RtkOutageBoundaryConstraintBuilder::Build() const {
   if (request_.state_timestamps->empty()) {
     throw std::runtime_error("RTK outage boundary constraints require graph timestamps");
   }
+  const bool use_base_tilt_reference =
+    request_.config->enable_base_graph_tilt_reference_constraint;
+  const bool needs_attitude_reference = std::any_of(
+    request_.boundary_references->begin(),
+    request_.boundary_references->end(),
+    [](const RtkOutageBoundaryReferenceRow &reference) {
+      return reference.valid && CanAddAttitudeFactor(reference);
+    });
+  if (use_base_tilt_reference && needs_attitude_reference) {
+    if (request_.tilt_reference_states == nullptr ||
+        request_.tilt_reference_states->empty()) {
+      throw std::runtime_error(
+        "RTK outage boundary tilt constraint requires optimized base graph reference states");
+    }
+    if (request_.tilt_reference_states->size() != request_.state_timestamps->size()) {
+      throw std::runtime_error(
+        "RTK outage boundary tilt reference state count does not match graph state count");
+    }
+  }
 
   request_.run_summary->rtk_outage_boundary_constraints_enabled = true;
   request_.run_summary->rtk_outage_boundary_reference_count +=
@@ -240,12 +260,32 @@ void RtkOutageBoundaryConstraintBuilder::Build() const {
 
     const bool add_attitude = CanAddAttitudeFactor(reference);
     if (add_attitude) {
-      request_.graph->add(factor::AttitudeHoldFactor(
-        symbol::X(state_index),
-        reference.reference_rotation,
-        gtsam::noiseModel::Isotropic::Sigma(3, reference.attitude_sigma_rad)));
+      if (use_base_tilt_reference) {
+        const auto &tilt_reference_state = (*request_.tilt_reference_states)[state_index];
+        request_.graph->add(factor::TiltReferenceFactor(
+          symbol::X(state_index),
+          tilt_reference_state.pose.rotation(),
+          gtsam::noiseModel::Isotropic::Sigma(
+            2,
+            request_.config->base_graph_tilt_reference_sigma_rad)));
+        request_.graph->add(factor::YawReferenceFactor(
+          symbol::X(state_index),
+          reference.reference_rotation,
+          gtsam::noiseModel::Isotropic::Sigma(1, reference.attitude_sigma_rad)));
+        diagnostic.attitude_constraint_type = "tilt_yaw";
+        diagnostic.reference_rotation = reference.reference_rotation;
+        diagnostic.reference_ypr_rad = Rot3ToYpr(tilt_reference_state.pose.rotation());
+        diagnostic.reference_ypr_rad.x() = reference.reference_rotation.ypr().x();
+      } else {
+        request_.graph->add(factor::AttitudeHoldFactor(
+          symbol::X(state_index),
+          reference.reference_rotation,
+          gtsam::noiseModel::Isotropic::Sigma(3, reference.attitude_sigma_rad)));
+        diagnostic.attitude_constraint_type = "absolute";
+      }
       diagnostic.attitude_factor_added = true;
-      ++request_.run_summary->rtk_outage_boundary_attitude_factor_count;
+      request_.run_summary->rtk_outage_boundary_attitude_factor_count +=
+        use_base_tilt_reference ? 2U : 1U;
     }
 
     if (add_up || add_vz || add_ba_z || add_horizontal_position ||
@@ -304,9 +344,19 @@ void PopulateRtkOutageBoundaryDiagnostics(
     if (row.attitude_factor_added) {
       const auto pose = optimized_values.at<gtsam::Pose3>(symbol::X(row.target_state_index));
       row.optimized_ypr_rad = Rot3ToYpr(pose.rotation());
-      row.attitude_residual_rad =
-        gtsam::Rot3::Logmap(row.reference_rotation.between(pose.rotation()));
-      row.attitude_residual_norm_rad = row.attitude_residual_rad.norm();
+      if (row.attitude_constraint_type == "tilt_yaw") {
+        row.attitude_residual_rad.x() =
+          factor::NormalizeAngleRad(row.optimized_ypr_rad.x() - row.reference_ypr_rad.x());
+        row.attitude_residual_rad.y() =
+          factor::NormalizeAngleRad(row.optimized_ypr_rad.y() - row.reference_ypr_rad.y());
+        row.attitude_residual_rad.z() =
+          factor::NormalizeAngleRad(row.optimized_ypr_rad.z() - row.reference_ypr_rad.z());
+        row.attitude_residual_norm_rad = row.attitude_residual_rad.norm();
+      } else {
+        row.attitude_residual_rad =
+          gtsam::Rot3::Logmap(row.reference_rotation.between(pose.rotation()));
+        row.attitude_residual_norm_rad = row.attitude_residual_rad.norm();
+      }
     }
   }
 }

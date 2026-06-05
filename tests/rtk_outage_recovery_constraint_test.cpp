@@ -20,6 +20,7 @@
 #include "offline_lc_minimal/core/RtkOutagePreOutageVerticalFenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
+#include "offline_lc_minimal/factor/AttitudeReferenceFactor.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
 #include "offline_lc_minimal/factor/VelocityDeltaFactor.h"
 
@@ -215,6 +216,80 @@ void TestBuilderAddsOutageAttitudeAndVelocityConstraints() {
     0.0,
     1e-12,
     "3D velocity delta residual should be zero for matching velocities");
+}
+
+void TestBuilderSplitsOutageTiltAndYawWhenBaseTiltReferenceIsEnabled() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_attitude_hold = true;
+  config.enable_base_graph_tilt_reference_constraint = true;
+  config.base_graph_tilt_reference_sigma_rad = 0.01;
+  config.rtk_outage_absolute_attitude_sigma_rad = 1.0e-4;
+  config.rtk_outage_relative_attitude_sigma_rad = 1.0e-4;
+  config.enable_rtk_outage_velocity_delta_3d = true;
+  config.rtk_outage_velocity_delta_3d_sigma_mps = 0.20;
+
+  const std::vector<double> timestamps{0.0, 1.0, 2.0, 3.0, 4.0};
+  const std::vector<offline_lc_minimal::RtkOutageWindowRow> windows{MakeWindow()};
+  const auto yaw_reference_states = MakeReferenceStates(timestamps.size());
+  auto tilt_reference_states = MakeReferenceStates(timestamps.size());
+  for (std::size_t index = 0; index < tilt_reference_states.size(); ++index) {
+    tilt_reference_states[index].pose = gtsam::Pose3(
+      gtsam::Rot3::Ypr(
+        1.0,
+        -0.04 + 0.002 * static_cast<double>(index),
+        0.03 - 0.001 * static_cast<double>(index)),
+      gtsam::Point3::Zero());
+  }
+  const auto velocity_records = MakeVelocityRecords();
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::RtkOutageAttitudeHoldDiagnosticRow> attitude_diagnostics;
+  std::vector<offline_lc_minimal::RtkOutageVelocityDelta3dDiagnosticRow> velocity_diagnostics;
+
+  offline_lc_minimal::RtkOutageRecoveryConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.outage_windows = &windows;
+  request.reference_states = &yaw_reference_states;
+  request.attitude_reference_source = "stage1_yaw_refined_reference_states";
+  request.tilt_reference_states = &tilt_reference_states;
+  request.tilt_reference_source = "base_graph_optimized";
+  request.velocity_delta_records = &velocity_records;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.attitude_diagnostics = &attitude_diagnostics;
+  request.velocity_diagnostics = &velocity_diagnostics;
+  offline_lc_minimal::RtkOutageRecoveryConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(summary.rtk_outage_attitude_hold_factor_count == 10U,
+             "split outage attitude hold should add tilt and yaw factors per guarded state");
+  ExpectTrue(summary.rtk_outage_relative_attitude_factor_count == 4U,
+             "relative yaw should still cover guarded adjacent outage edges");
+  ExpectTrue(graph.size() == 16U, "unexpected split outage recovery factor count");
+  ExpectTrue(attitude_diagnostics.size() == 14U,
+             "attitude diagnostics should include tilt, yaw, and relative rows");
+
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::TiltReferenceFactor>(graph.at(0)).get() !=
+      nullptr,
+    "first split outage factor should constrain base tilt");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::YawReferenceFactor>(graph.at(1)).get() !=
+      nullptr,
+    "second split outage factor should constrain yaw only");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::AttitudeHoldFactor>(graph.at(0)).get() ==
+      nullptr,
+    "split outage path must not add full attitude hold");
+  ExpectTrue(attitude_diagnostics[0].constraint_type == "tilt",
+             "first split diagnostic should be tilt");
+  ExpectTrue(attitude_diagnostics[1].constraint_type == "yaw",
+             "second split diagnostic should be yaw");
+  ExpectTrue(attitude_diagnostics[0].reference_source == "base_graph_optimized",
+             "tilt diagnostic should identify base graph reference");
+  ExpectTrue(attitude_diagnostics[1].reference_source == "stage1_yaw_refined_reference_states",
+             "yaw diagnostic should identify yaw reference");
 }
 
 void TestBuilderDisabledAddsNoFactors() {
@@ -818,6 +893,75 @@ void TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude() {
              "boundary diagnostics should report ba_z residual in ug");
 }
 
+void TestBoundaryConstraintBuilderSplitsTiltAndYawWhenBaseTiltReferenceIsEnabled() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_boundary_constraints = true;
+  config.enable_base_graph_tilt_reference_constraint = true;
+  config.base_graph_tilt_reference_sigma_rad = 0.01;
+  config.rtk_outage_absolute_attitude_sigma_rad = 0.0001;
+
+  const std::vector<double> timestamps{0.0, 1.0, 2.0};
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> references(1U);
+  references.front().window_index = 4U;
+  references.front().boundary_role = "POST_START";
+  references.front().source_type = "OUTAGE_ATTITUDE_ONLY";
+  references.front().target_time_s = 1.4;
+  references.front().valid = true;
+  references.front().has_attitude = true;
+  references.front().add_attitude_constraint = true;
+  references.front().reference_rotation = gtsam::Rot3::Ypr(0.3, -0.1, 0.2);
+  references.front().attitude_sigma_rad = config.rtk_outage_absolute_attitude_sigma_rad;
+  references.front().skip_reason = "OK";
+
+  auto tilt_reference_states = MakeReferenceStates(timestamps.size());
+  for (std::size_t index = 0; index < tilt_reference_states.size(); ++index) {
+    tilt_reference_states[index].pose = gtsam::Pose3(
+      gtsam::Rot3::Ypr(1.0, -0.03, 0.04),
+      gtsam::Point3::Zero());
+  }
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::RtkOutageBoundaryDiagnosticRow> diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.boundary_references = &references;
+  request.tilt_reference_states = &tilt_reference_states;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 2U, "split boundary attitude should add tilt and yaw factors");
+  ExpectTrue(summary.rtk_outage_boundary_attitude_factor_count == 2U,
+             "split boundary attitude should count both factors");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::TiltReferenceFactor>(graph.at(0)).get() !=
+      nullptr,
+    "first split boundary factor should constrain base tilt");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::YawReferenceFactor>(graph.at(1)).get() !=
+      nullptr,
+    "second split boundary factor should constrain yaw only");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::AttitudeHoldFactor>(graph.at(0)).get() ==
+      nullptr,
+    "split boundary path must not add full attitude hold");
+  ExpectTrue(diagnostics.front().attitude_constraint_type == "tilt_yaw",
+             "boundary diagnostic should report split attitude type");
+  ExpectNear(
+    diagnostics.front().reference_ypr_rad.x(),
+    references.front().reference_rotation.ypr().x(),
+    1e-12,
+    "boundary yaw reference should come from the original boundary reference");
+  ExpectNear(
+    diagnostics.front().reference_ypr_rad.y(),
+    tilt_reference_states[1].pose.rotation().ypr().y(),
+    1e-12,
+    "boundary pitch reference should come from base graph tilt");
+}
+
 void TestBoundaryConstraintBuilderAddsPostStartAttitude() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_rtk_outage_boundary_constraints = true;
@@ -971,6 +1115,9 @@ int main() {
     RunTest(
       "TestBuilderAddsOutageAttitudeAndVelocityConstraints",
       TestBuilderAddsOutageAttitudeAndVelocityConstraints);
+    RunTest(
+      "TestBuilderSplitsOutageTiltAndYawWhenBaseTiltReferenceIsEnabled",
+      TestBuilderSplitsOutageTiltAndYawWhenBaseTiltReferenceIsEnabled);
     RunTest("TestBuilderDisabledAddsNoFactors", TestBuilderDisabledAddsNoFactors);
     RunTest(
       "TestPreOutageVerticalFenceConstrainsOnlyUpAndVz",
@@ -999,6 +1146,9 @@ int main() {
     RunTest(
       "TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude",
       TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude);
+    RunTest(
+      "TestBoundaryConstraintBuilderSplitsTiltAndYawWhenBaseTiltReferenceIsEnabled",
+      TestBoundaryConstraintBuilderSplitsTiltAndYawWhenBaseTiltReferenceIsEnabled);
     RunTest(
       "TestBoundaryConstraintBuilderAddsPostStartAttitude",
       TestBoundaryConstraintBuilderAddsPostStartAttitude);

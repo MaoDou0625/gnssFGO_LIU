@@ -24,13 +24,20 @@ Eigen::Vector3d Rot3ToYpr(const gtsam::Rot3 &rotation) {
 AttitudeReferenceDiagnosticRow MakeDiagnosticRow(
   const std::size_t state_index,
   const double time_s,
-  const gtsam::Rot3 &reference_rotation) {
+  const gtsam::Rot3 &tilt_reference_rotation,
+  const gtsam::Rot3 &yaw_reference_rotation,
+  const bool has_yaw_reference) {
   AttitudeReferenceDiagnosticRow row;
   row.state_index = state_index;
   row.time_s = time_s;
   row.factor_added = true;
   row.skip_reason = "ADDED";
-  row.reference_ypr_rad = Rot3ToYpr(reference_rotation);
+  row.reference_ypr_rad = Rot3ToYpr(tilt_reference_rotation);
+  if (has_yaw_reference) {
+    row.reference_ypr_rad.x() = yaw_reference_rotation.ypr().x();
+  } else {
+    row.reference_ypr_rad.x() = std::numeric_limits<double>::quiet_NaN();
+  }
   return row;
 }
 
@@ -82,6 +89,7 @@ void AttitudeReferenceConstraintBuilder::Build() const {
     throw std::runtime_error("attitude reference state count does not match graph state count");
   }
   const std::vector<ReferenceNodeState> *tilt_reference_states = request_.reference_states;
+  const std::vector<ReferenceNodeState> *yaw_reference_states = nullptr;
   if (request_.config->enable_base_graph_tilt_reference_constraint) {
     if (request_.tilt_reference_states == nullptr ||
         request_.tilt_reference_states->empty()) {
@@ -92,6 +100,15 @@ void AttitudeReferenceConstraintBuilder::Build() const {
       throw std::runtime_error("base graph tilt reference state count does not match graph state count");
     }
     tilt_reference_states = request_.tilt_reference_states;
+    yaw_reference_states =
+      request_.yaw_reference_states != nullptr ? request_.yaw_reference_states : request_.reference_states;
+    if (yaw_reference_states == nullptr || yaw_reference_states->empty()) {
+      throw std::runtime_error(
+        "base graph tilt reference constraint requires yaw reference states");
+    }
+    if (yaw_reference_states->size() != request_.state_timestamps->size()) {
+      throw std::runtime_error("yaw reference state count does not match graph state count");
+    }
   }
   if (request_.relative_yaw_reference_states->empty()) {
     throw std::runtime_error("relative yaw reference constraint requires base reference states");
@@ -113,6 +130,10 @@ void AttitudeReferenceConstraintBuilder::Build() const {
     gtsam::noiseModel::Isotropic::Sigma(
       1,
       request_.config->attitude_reference_relative_yaw_sigma_rad);
+  const auto yaw_noise =
+    gtsam::noiseModel::Isotropic::Sigma(
+      1,
+      request_.config->attitude_reference_relative_yaw_sigma_rad);
   const std::size_t dynamic_state_count =
     request_.state_timestamps->size() - request_.dynamic_start_index;
   request_.diagnostics->reserve(request_.diagnostics->size() + dynamic_state_count);
@@ -125,10 +146,16 @@ void AttitudeReferenceConstraintBuilder::Build() const {
        ++state_index) {
     const auto &reference_state = (*tilt_reference_states)[state_index];
     if (request_.config->enable_base_graph_tilt_reference_constraint) {
+      const auto &yaw_reference_state = (*yaw_reference_states)[state_index];
       request_.graph->add(factor::TiltReferenceFactor(
         symbol::X(state_index),
         reference_state.pose.rotation(),
         base_tilt_noise));
+      request_.graph->add(factor::YawReferenceFactor(
+        symbol::X(state_index),
+        yaw_reference_state.pose.rotation(),
+        yaw_noise));
+      ++request_.run_summary->attitude_reference_factor_count;
     } else {
       request_.graph->add(factor::RollPitchReferenceFactor(
         symbol::X(state_index),
@@ -139,7 +166,11 @@ void AttitudeReferenceConstraintBuilder::Build() const {
     request_.diagnostics->push_back(MakeDiagnosticRow(
       state_index,
       (*request_.state_timestamps)[state_index],
-      reference_state.pose.rotation()));
+      reference_state.pose.rotation(),
+      request_.config->enable_base_graph_tilt_reference_constraint
+        ? (*yaw_reference_states)[state_index].pose.rotation()
+        : reference_state.pose.rotation(),
+      request_.config->enable_base_graph_tilt_reference_constraint));
   }
 
   for (std::size_t state_index_j = 1U;
@@ -176,12 +207,25 @@ void PopulateAttitudeReferenceDiagnostics(
     }
     const auto optimized_pose = optimized_values.at<gtsam::Pose3>(symbol::X(row.state_index));
     row.optimized_ypr_rad = Rot3ToYpr(optimized_pose.rotation());
-    row.residual_x_rad = std::numeric_limits<double>::quiet_NaN();
+    row.residual_x_rad =
+      std::isfinite(row.reference_ypr_rad.x())
+        ? factor::NormalizeAngleRad(row.optimized_ypr_rad.x() - row.reference_ypr_rad.x())
+        : std::numeric_limits<double>::quiet_NaN();
     row.residual_y_rad =
       factor::NormalizeAngleRad(row.optimized_ypr_rad.y() - row.reference_ypr_rad.y());
     row.residual_z_rad =
       factor::NormalizeAngleRad(row.optimized_ypr_rad.z() - row.reference_ypr_rad.z());
-    row.residual_norm_rad = std::hypot(row.residual_y_rad, row.residual_z_rad);
+    double residual_sq_sum = 0.0;
+    if (std::isfinite(row.residual_x_rad)) {
+      residual_sq_sum += row.residual_x_rad * row.residual_x_rad;
+    }
+    if (std::isfinite(row.residual_y_rad)) {
+      residual_sq_sum += row.residual_y_rad * row.residual_y_rad;
+    }
+    if (std::isfinite(row.residual_z_rad)) {
+      residual_sq_sum += row.residual_z_rad * row.residual_z_rad;
+    }
+    row.residual_norm_rad = std::sqrt(residual_sq_sum);
   }
 }
 

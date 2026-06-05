@@ -82,6 +82,24 @@ void TestTiltReferenceFactorIgnoresYawAndPenalizesTilt() {
   ExpectTrue(roll_residual.norm() > 0.005, "roll change should create tilt residual");
 }
 
+void TestYawReferenceFactorIgnoresTranslationAndTilt() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
+  const gtsam::Rot3 reference_rotation = gtsam::Rot3::Ypr(0.2, -0.1, 0.05);
+  const offline_lc_minimal::factor::YawReferenceFactor factor(1, reference_rotation, noise);
+
+  const gtsam::Vector same_yaw_residual = factor.evaluateError(
+    gtsam::Pose3(gtsam::Rot3::Ypr(0.2, 0.25, -0.35), gtsam::Point3(100.0, -50.0, 3.0)));
+  ExpectNear(
+    same_yaw_residual.norm(),
+    0.0,
+    1e-12,
+    "translation and tilt should not affect yaw reference");
+
+  const gtsam::Vector changed_yaw_residual = factor.evaluateError(
+    gtsam::Pose3(gtsam::Rot3::Ypr(0.24, 0.25, -0.35), gtsam::Point3::Zero()));
+  ExpectTrue(changed_yaw_residual.norm() > 0.03, "yaw change should create yaw residual");
+}
+
 void TestRelativeYawReferenceFactorIgnoresCommonYawOffset() {
   const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 1.0);
   const gtsam::Rot3 reference_i = gtsam::Rot3::Ypr(0.2, 0.0, 0.0);
@@ -233,6 +251,12 @@ void TestBuilderUsesBaseGraphTiltReferenceWhenEnabled() {
       gtsam::Point3::Zero());
   }
   const auto relative_yaw_reference_states = MakeRelativeYawReferenceStates(timestamps.size());
+  auto yaw_reference_states = MakeRelativeYawReferenceStates(timestamps.size());
+  for (std::size_t index = 0; index < yaw_reference_states.size(); ++index) {
+    yaw_reference_states[index].pose = gtsam::Pose3(
+      gtsam::Rot3::Ypr(-0.4 + 0.03 * static_cast<double>(index), 0.2, -0.1),
+      gtsam::Point3::Zero());
+  }
   gtsam::NonlinearFactorGraph graph;
   offline_lc_minimal::RunSummary summary;
   std::vector<offline_lc_minimal::AttitudeReferenceDiagnosticRow> diagnostics;
@@ -243,6 +267,7 @@ void TestBuilderUsesBaseGraphTiltReferenceWhenEnabled() {
   request.state_timestamps = &timestamps;
   request.reference_states = &reference_states;
   request.tilt_reference_states = &base_tilt_reference_states;
+  request.yaw_reference_states = &yaw_reference_states;
   request.relative_yaw_reference_states = &relative_yaw_reference_states;
   request.dynamic_start_index = 2;
   request.graph = &graph;
@@ -253,17 +278,25 @@ void TestBuilderUsesBaseGraphTiltReferenceWhenEnabled() {
 
   ExpectNear(
     static_cast<double>(graph.size()),
-    5.0,
+    7.0,
     0.0,
-    "base tilt factors and full-chain relative yaw edges should be added");
+    "base tilt/yaw factors and full-chain relative yaw edges should be added");
   ExpectTrue(
     boost::dynamic_pointer_cast<offline_lc_minimal::factor::TiltReferenceFactor>(graph.at(0)).get() !=
       nullptr,
     "first factor should be base graph tilt reference");
   ExpectTrue(
-    boost::dynamic_pointer_cast<offline_lc_minimal::factor::TiltReferenceFactor>(graph.at(1)).get() !=
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::YawReferenceFactor>(graph.at(1)).get() !=
       nullptr,
-    "second factor should be base graph tilt reference");
+    "second factor should be yaw reference");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::TiltReferenceFactor>(graph.at(2)).get() !=
+      nullptr,
+    "third factor should be base graph tilt reference");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::YawReferenceFactor>(graph.at(3)).get() !=
+      nullptr,
+    "fourth factor should be yaw reference");
   ExpectNear(
     diagnostics.front().reference_ypr_rad.y(),
     base_tilt_reference_states[2].pose.rotation().ypr().y(),
@@ -274,6 +307,11 @@ void TestBuilderUsesBaseGraphTiltReferenceWhenEnabled() {
     base_tilt_reference_states[2].pose.rotation().ypr().z(),
     1e-12,
     "tilt diagnostic should come from base graph reference roll");
+  ExpectNear(
+    diagnostics.front().reference_ypr_rad.x(),
+    yaw_reference_states[2].pose.rotation().ypr().x(),
+    1e-12,
+    "yaw diagnostic should come from yaw reference states");
 }
 
 void TestBuilderDisabledAddsNoAttitudeReferences() {
@@ -417,6 +455,9 @@ int main() {
     RunTest(
       "TestTiltReferenceFactorIgnoresYawAndPenalizesTilt",
       TestTiltReferenceFactorIgnoresYawAndPenalizesTilt);
+    RunTest(
+      "TestYawReferenceFactorIgnoresTranslationAndTilt",
+      TestYawReferenceFactorIgnoresTranslationAndTilt);
     RunTest(
       "TestRelativeYawReferenceFactorIgnoresCommonYawOffset",
       TestRelativeYawReferenceFactorIgnoresCommonYawOffset);

@@ -16,6 +16,7 @@ struct AttitudeReferenceConstraintBuildRequest {
   const std::vector<double> *state_timestamps = nullptr;
   const std::vector<ReferenceNodeState> *reference_states = nullptr;
   const std::vector<ReferenceNodeState> *tilt_reference_states = nullptr;
+  const std::vector<ReferenceNodeState> *yaw_reference_states = nullptr;
   const std::vector<ReferenceNodeState> *relative_yaw_reference_states = nullptr;
   std::size_t dynamic_start_index = 0;
   gtsam::NonlinearFactorGraph *graph = nullptr;

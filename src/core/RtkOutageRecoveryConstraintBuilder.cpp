@@ -98,6 +98,49 @@ RtkOutageAttitudeHoldDiagnosticRow MakeAbsoluteAttitudeDiagnostic(
   return row;
 }
 
+RtkOutageAttitudeHoldDiagnosticRow MakeTiltAttitudeDiagnostic(
+  const std::size_t window_index,
+  const std::size_t state_index,
+  const double time_s,
+  const gtsam::Rot3 &reference_rotation,
+  const std::string &reference_source,
+  const double sigma_rad) {
+  RtkOutageAttitudeHoldDiagnosticRow row =
+    MakeAbsoluteAttitudeDiagnostic(
+      window_index,
+      state_index,
+      time_s,
+      reference_rotation,
+      reference_source,
+      sigma_rad);
+  row.constraint_type = "tilt";
+  row.reference_ypr_i_rad.x() = std::numeric_limits<double>::quiet_NaN();
+  row.reference_ypr_j_rad = row.reference_ypr_i_rad;
+  return row;
+}
+
+RtkOutageAttitudeHoldDiagnosticRow MakeYawAttitudeDiagnostic(
+  const std::size_t window_index,
+  const std::size_t state_index,
+  const double time_s,
+  const gtsam::Rot3 &reference_rotation,
+  const std::string &reference_source,
+  const double sigma_rad) {
+  RtkOutageAttitudeHoldDiagnosticRow row =
+    MakeAbsoluteAttitudeDiagnostic(
+      window_index,
+      state_index,
+      time_s,
+      reference_rotation,
+      reference_source,
+      sigma_rad);
+  row.constraint_type = "yaw";
+  row.reference_ypr_i_rad.y() = std::numeric_limits<double>::quiet_NaN();
+  row.reference_ypr_i_rad.z() = std::numeric_limits<double>::quiet_NaN();
+  row.reference_ypr_j_rad = row.reference_ypr_i_rad;
+  return row;
+}
+
 RtkOutageAttitudeHoldDiagnosticRow MakeRelativeYawDiagnostic(
   const std::size_t window_index,
   const std::size_t state_index_i,
@@ -159,7 +202,8 @@ void AccumulateAttitudeSummary(
     if (!row.factor_added) {
       continue;
     }
-    if (row.constraint_type == "absolute") {
+    if (row.constraint_type == "absolute" || row.constraint_type == "tilt" ||
+        row.constraint_type == "yaw") {
       for (int index = 0; index < 3; ++index) {
         if (std::isfinite(row.residual_rad(index))) {
           absolute_max = std::max(absolute_max, std::abs(row.residual_rad(index)));
@@ -234,8 +278,29 @@ void RtkOutageRecoveryConstraintBuilder::Build() const {
     if (request_.reference_states->size() != request_.state_timestamps->size()) {
       throw std::runtime_error("RTK outage attitude hold requires one reference state per graph state");
     }
+    const bool use_base_tilt_reference =
+      request_.config->enable_base_graph_tilt_reference_constraint;
+    const std::vector<ReferenceNodeState> *tilt_reference_states =
+      request_.reference_states;
+    if (use_base_tilt_reference) {
+      if (request_.tilt_reference_states == nullptr ||
+          request_.tilt_reference_states->empty()) {
+        throw std::runtime_error(
+          "RTK outage tilt hold requires optimized base graph reference states");
+      }
+      if (request_.tilt_reference_states->size() != request_.state_timestamps->size()) {
+        throw std::runtime_error("RTK outage tilt hold requires one reference state per graph state");
+      }
+      tilt_reference_states = request_.tilt_reference_states;
+    }
     const auto absolute_noise = gtsam::noiseModel::Isotropic::Sigma(
       3,
+      request_.config->rtk_outage_absolute_attitude_sigma_rad);
+    const auto tilt_noise = gtsam::noiseModel::Isotropic::Sigma(
+      2,
+      request_.config->base_graph_tilt_reference_sigma_rad);
+    const auto yaw_noise = gtsam::noiseModel::Isotropic::Sigma(
+      1,
       request_.config->rtk_outage_absolute_attitude_sigma_rad);
     const auto relative_yaw_noise = gtsam::noiseModel::Isotropic::Sigma(
       1,
@@ -254,18 +319,45 @@ void RtkOutageRecoveryConstraintBuilder::Build() const {
            state_index <= hold_end_index;
            ++state_index) {
         const auto &reference_state = (*request_.reference_states)[state_index];
-        request_.graph->add(factor::AttitudeHoldFactor(
-          symbol::X(state_index),
-          reference_state.pose.rotation(),
-          absolute_noise));
-        ++request_.run_summary->rtk_outage_attitude_hold_factor_count;
-        request_.attitude_diagnostics->push_back(MakeAbsoluteAttitudeDiagnostic(
-          window.window_index,
-          state_index,
-          (*request_.state_timestamps)[state_index],
-          reference_state.pose.rotation(),
-          request_.attitude_reference_source,
-          request_.config->rtk_outage_absolute_attitude_sigma_rad));
+        if (use_base_tilt_reference) {
+          const auto &tilt_reference_state = (*tilt_reference_states)[state_index];
+          request_.graph->add(factor::TiltReferenceFactor(
+            symbol::X(state_index),
+            tilt_reference_state.pose.rotation(),
+            tilt_noise));
+          request_.graph->add(factor::YawReferenceFactor(
+            symbol::X(state_index),
+            reference_state.pose.rotation(),
+            yaw_noise));
+          request_.run_summary->rtk_outage_attitude_hold_factor_count += 2U;
+          request_.attitude_diagnostics->push_back(MakeTiltAttitudeDiagnostic(
+            window.window_index,
+            state_index,
+            (*request_.state_timestamps)[state_index],
+            tilt_reference_state.pose.rotation(),
+            request_.tilt_reference_source,
+            request_.config->base_graph_tilt_reference_sigma_rad));
+          request_.attitude_diagnostics->push_back(MakeYawAttitudeDiagnostic(
+            window.window_index,
+            state_index,
+            (*request_.state_timestamps)[state_index],
+            reference_state.pose.rotation(),
+            request_.attitude_reference_source,
+            request_.config->rtk_outage_absolute_attitude_sigma_rad));
+        } else {
+          request_.graph->add(factor::AttitudeHoldFactor(
+            symbol::X(state_index),
+            reference_state.pose.rotation(),
+            absolute_noise));
+          ++request_.run_summary->rtk_outage_attitude_hold_factor_count;
+          request_.attitude_diagnostics->push_back(MakeAbsoluteAttitudeDiagnostic(
+            window.window_index,
+            state_index,
+            (*request_.state_timestamps)[state_index],
+            reference_state.pose.rotation(),
+            request_.attitude_reference_source,
+            request_.config->rtk_outage_absolute_attitude_sigma_rad));
+        }
       }
       for (std::size_t state_index_j = hold_start_index + 1U;
            state_index_j <= hold_end_index;
@@ -347,6 +439,25 @@ void PopulateRtkOutageRecoveryDiagnostics(
       row.residual_rad =
         gtsam::Rot3::Logmap(row.reference_rotation_i.between(optimized_pose.rotation()));
       row.residual_norm_rad = row.residual_rad.norm();
+    } else if (row.constraint_type == "tilt") {
+      const auto optimized_pose = optimized_values.at<gtsam::Pose3>(symbol::X(row.state_index_i));
+      row.optimized_ypr_i_rad = Rot3ToYpr(optimized_pose.rotation());
+      row.optimized_ypr_j_rad = row.optimized_ypr_i_rad;
+      row.residual_rad.x() = std::numeric_limits<double>::quiet_NaN();
+      row.residual_rad.y() =
+        factor::NormalizeAngleRad(row.optimized_ypr_i_rad.y() - row.reference_ypr_i_rad.y());
+      row.residual_rad.z() =
+        factor::NormalizeAngleRad(row.optimized_ypr_i_rad.z() - row.reference_ypr_i_rad.z());
+      row.residual_norm_rad = std::hypot(row.residual_rad.y(), row.residual_rad.z());
+    } else if (row.constraint_type == "yaw") {
+      const auto optimized_pose = optimized_values.at<gtsam::Pose3>(symbol::X(row.state_index_i));
+      row.optimized_ypr_i_rad = Rot3ToYpr(optimized_pose.rotation());
+      row.optimized_ypr_j_rad = row.optimized_ypr_i_rad;
+      row.residual_rad.x() =
+        factor::NormalizeAngleRad(row.optimized_ypr_i_rad.x() - row.reference_ypr_i_rad.x());
+      row.residual_rad.y() = std::numeric_limits<double>::quiet_NaN();
+      row.residual_rad.z() = std::numeric_limits<double>::quiet_NaN();
+      row.residual_norm_rad = std::abs(row.residual_rad.x());
     } else if (row.constraint_type == "relative_yaw") {
       const auto optimized_pose_i = optimized_values.at<gtsam::Pose3>(symbol::X(row.state_index_i));
       const auto optimized_pose_j = optimized_values.at<gtsam::Pose3>(symbol::X(row.state_index_j));
