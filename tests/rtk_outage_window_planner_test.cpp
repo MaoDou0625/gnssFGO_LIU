@@ -233,6 +233,25 @@ offline_lc_minimal::GnssSolutionSample MakeRecoverySample(
   return sample;
 }
 
+offline_lc_minimal::GnssSolutionSample MakeRecoverySampleEnu(
+  const double time_s,
+  const int gnssfgo_type_code,
+  const double east_m,
+  const double north_m,
+  const double up_m,
+  const int best_sol_status_code = 1,
+  const bool has_position = true) {
+  offline_lc_minimal::GnssSolutionSample sample =
+    MakeRecoverySample(
+      time_s,
+      gnssfgo_type_code,
+      up_m,
+      best_sol_status_code,
+      has_position);
+  sample.enu_position_m = Eigen::Vector3d(east_m, north_m, up_m);
+  return sample;
+}
+
 void TestRecoveryReferenceUsesOnlyValidRtkFixSamples() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.rtk_outage_recovery_reference_min_fix_samples = 3;
@@ -273,6 +292,53 @@ void TestRecoveryReferenceUsesOnlyValidRtkFixSamples() {
              "recovery fit should extrapolate up to outage end");
   ExpectTrue(std::abs(rows.front().reference_vz_mps - 0.10) < 1e-12,
              "recovery fit should estimate vertical velocity");
+}
+
+void TestRecoveryReferenceFitsHorizontalVelocityFromRecoveryRtk() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_recovery_reference_min_fix_samples = 3;
+  config.rtk_outage_recovery_reference_max_duration_s = 2.0;
+
+  std::vector<offline_lc_minimal::RtkOutageWindowRow> outages(1U);
+  outages.front().window_index = 13U;
+  outages.front().end_time_s = 20.0;
+  outages.front().skip_reason = "PLANNED";
+
+  const std::vector<offline_lc_minimal::GnssSolutionSample> samples{
+    MakeRecoverySampleEnu(20.0, 1, 5.0, -6.0, 100.0),
+    MakeRecoverySampleEnu(20.5, 1, 5.05, -6.7, 100.01),
+    MakeRecoverySampleEnu(21.0, 1, 5.10, -7.4, 100.02)};
+
+  offline_lc_minimal::RtkOutageRecoveryReferenceBuildRequest request;
+  request.config = &config;
+  request.gnss_samples = &samples;
+  request.outage_windows = &outages;
+  request.passes_gnss_quality_filters =
+    [&](const offline_lc_minimal::GnssSolutionSample &sample) {
+      return PassesQualityFilters(config, sample);
+    };
+  request.corrected_time_s =
+    [](const offline_lc_minimal::GnssSolutionSample &sample) {
+      return sample.time_s;
+    };
+
+  const std::vector<offline_lc_minimal::RtkOutageRecoveryReferenceRow> rows =
+    offline_lc_minimal::RtkOutageRecoveryReferenceBuilder(std::move(request)).Build();
+  ExpectTrue(rows.size() == 1U, "one recovery reference row should be emitted");
+  const auto &row = rows.front();
+  ExpectTrue(row.valid, "three RTKFIX samples should produce a valid recovery reference");
+  ExpectTrue(row.reference_horizontal_position_m.allFinite(),
+             "horizontal recovery position should be finite");
+  ExpectTrue(row.reference_horizontal_velocity_mps.allFinite(),
+             "horizontal recovery velocity should be finite");
+  ExpectTrue(std::abs(row.reference_horizontal_position_m.x() - 5.0) < 1e-12,
+             "recovery fit should extrapolate east to outage end");
+  ExpectTrue(std::abs(row.reference_horizontal_position_m.y() + 6.0) < 1e-12,
+             "recovery fit should extrapolate north to outage end");
+  ExpectTrue(std::abs(row.reference_horizontal_velocity_mps.x() - 0.10) < 1e-12,
+             "recovery fit should estimate east velocity");
+  ExpectTrue(std::abs(row.reference_horizontal_velocity_mps.y() + 1.40) < 1e-12,
+             "recovery fit should estimate north velocity");
 }
 
 void TestRecoveryReferenceSkipsWhenSamplesAreInsufficient() {
@@ -390,6 +456,21 @@ offline_lc_minimal::TrajectoryRow MakeTrajectoryRow(
   row.time_s = time_s;
   row.enu_position_m = Eigen::Vector3d(0.0, 0.0, up_m);
   row.ypr_rad = Eigen::Vector3d(yaw_rad, 0.0, 0.0);
+  return row;
+}
+
+offline_lc_minimal::TrajectoryRow MakeTrajectoryRowWithHorizontalState(
+  const double time_s,
+  const Eigen::Vector2d &horizontal_position_m,
+  const double up_m,
+  const Eigen::Vector2d &horizontal_velocity_mps,
+  const double yaw_rad = 0.0) {
+  offline_lc_minimal::TrajectoryRow row =
+    MakeTrajectoryRow(time_s, up_m, yaw_rad);
+  row.enu_position_m.x() = horizontal_position_m.x();
+  row.enu_position_m.y() = horizontal_position_m.y();
+  row.enu_velocity_mps.x() = horizontal_velocity_mps.x();
+  row.enu_velocity_mps.y() = horizontal_velocity_mps.y();
   return row;
 }
 
@@ -652,9 +733,9 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
   request.base_config = config;
   request.config = config;
   request.dataset.gnss_samples = {
-    MakeRecoverySample(20.0, 1, 100.0),
-    MakeRecoverySample(20.5, 1, 100.05),
-    MakeRecoverySample(21.0, 1, 100.10)};
+    MakeRecoverySampleEnu(20.0, 1, 5.0, -6.0, 100.0),
+    MakeRecoverySampleEnu(20.5, 1, 5.05, -6.7, 100.05),
+    MakeRecoverySampleEnu(21.0, 1, 5.10, -7.4, 100.10)};
   request.dataset.imu_samples = {
     {0.0, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()},
     {30.0, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()}};
@@ -684,8 +765,18 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
           MakeReferenceNodeState(outage.start_time_s, 10.0, 0.4)};
       } else if (child_config.processing_start_time_s >= outage.end_time_s - 1.0e-9) {
         result.trajectory = {
-          MakeTrajectoryRow(outage.end_time_s, 20.0, 2.5),
-          MakeTrajectoryRow(child_config.processing_end_time_s, 30.0, 2.5)};
+          MakeTrajectoryRowWithHorizontalState(
+            outage.end_time_s,
+            Eigen::Vector2d(5.0, -6.0),
+            20.0,
+            Eigen::Vector2d(0.1, -1.4),
+            2.5),
+          MakeTrajectoryRowWithHorizontalState(
+            child_config.processing_end_time_s,
+            Eigen::Vector2d(6.0, -20.0),
+            30.0,
+            Eigen::Vector2d(0.1, -1.4),
+            2.5)};
         result.optimized_reference_states = {
           MakeReferenceNodeState(outage.end_time_s, 20.0, -0.3),
           MakeReferenceNodeState(child_config.processing_end_time_s, 30.0, -0.1)};
@@ -717,6 +808,16 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
              "post probe should target post start");
   ExpectTrue(post_probe_ref.has_up && post_probe_ref.has_vz,
              "post probe should carry the recovery vertical boundary");
+  ExpectTrue(post_probe_ref.has_horizontal_position &&
+               post_probe_ref.add_horizontal_position_constraint,
+             "post probe should carry the recovery horizontal position");
+  ExpectTrue(post_probe_ref.has_horizontal_velocity &&
+               post_probe_ref.add_horizontal_velocity_constraint,
+             "post probe should carry the recovery horizontal velocity");
+  ExpectTrue(std::abs(post_probe_ref.reference_horizontal_velocity_mps.x() - 0.1) < 1e-12,
+             "post probe should use RTK-estimated east velocity");
+  ExpectTrue(std::abs(post_probe_ref.reference_horizontal_velocity_mps.y() + 1.4) < 1e-12,
+             "post probe should use RTK-estimated north velocity");
   ExpectTrue(!post_probe_ref.has_attitude && !post_probe_ref.add_attitude_constraint,
              "post probe must not receive an outage-derived attitude");
 
@@ -737,6 +838,10 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
               "outage end should carry post-probe horizontal position");
   ExpectTrue(refs[1].has_horizontal_velocity && refs[1].add_horizontal_velocity_constraint,
               "outage end should carry post-probe horizontal velocity");
+  ExpectTrue(std::abs(refs[1].reference_horizontal_velocity_mps.x() - 0.1) < 1e-12,
+              "outage end should receive nonzero east velocity from post probe");
+  ExpectTrue(std::abs(refs[1].reference_horizontal_velocity_mps.y() + 1.4) < 1e-12,
+              "outage end should receive nonzero north velocity from post probe");
   ExpectTrue(std::abs(refs[0].reference_rotation.ypr().x() - 0.4) < 1e-12,
               "outage start attitude must use the pre optimized Rot3 branch");
 
@@ -750,6 +855,8 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
              "post child boundary should target post start");
   ExpectTrue(post_ref.has_up && post_ref.has_vz,
              "post child should keep the recovery vertical boundary");
+  ExpectTrue(post_ref.has_horizontal_velocity && post_ref.add_horizontal_velocity_constraint,
+             "post child should keep the RTK-estimated horizontal velocity");
   ExpectTrue(post_ref.has_attitude && post_ref.add_attitude_constraint,
              "post child should receive IMU-relative handoff attitude");
   ExpectTrue(post_ref.source_type == offline_lc_minimal::kPostStartImuRelativeHandoffSource,
@@ -1046,6 +1153,9 @@ int main() {
     RunTest(
       "TestRecoveryReferenceUsesOnlyValidRtkFixSamples",
       TestRecoveryReferenceUsesOnlyValidRtkFixSamples);
+    RunTest(
+      "TestRecoveryReferenceFitsHorizontalVelocityFromRecoveryRtk",
+      TestRecoveryReferenceFitsHorizontalVelocityFromRecoveryRtk);
     RunTest(
       "TestRecoveryReferenceSkipsWhenSamplesAreInsufficient",
       TestRecoveryReferenceSkipsWhenSamplesAreInsufficient);

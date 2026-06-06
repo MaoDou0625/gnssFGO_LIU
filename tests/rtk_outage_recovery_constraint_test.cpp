@@ -623,16 +623,20 @@ void TestBoundaryAttitudeReferenceKeepsOffGridAnchorsExact() {
              "off-grid end anchor should exactly match the end attitude");
 }
 
-void TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryUpVzOnly() {
+void TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryPositionVelocity() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.rtk_outage_boundary_up_sigma_m = 0.01;
   config.rtk_outage_boundary_vz_sigma_mps = 0.02;
+  config.stage2_horizontal_position_hold_sigma_m = 0.03;
+  config.stage2_horizontal_velocity_hold_sigma_mps = 0.04;
 
   offline_lc_minimal::RtkOutageRecoveryReferenceRow recovery;
   recovery.window_index = 3U;
   recovery.outage_end_time_s = 9.0;
   recovery.reference_up_m = 4.0;
   recovery.reference_vz_mps = -0.5;
+  recovery.reference_horizontal_position_m = Eigen::Vector2d(2.0, -3.0);
+  recovery.reference_horizontal_velocity_mps = Eigen::Vector2d(0.1, -1.4);
   recovery.valid = true;
   recovery.skip_reason = "OK";
 
@@ -644,6 +648,18 @@ void TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryUpVzOnly() {
              "recovery boundary should constrain up");
   ExpectTrue(boundary.has_vz && boundary.add_vz_constraint,
              "recovery boundary should constrain vz");
+  ExpectTrue(boundary.has_horizontal_position && boundary.add_horizontal_position_constraint,
+             "recovery boundary should constrain horizontal position");
+  ExpectTrue(boundary.has_horizontal_velocity && boundary.add_horizontal_velocity_constraint,
+             "recovery boundary should constrain horizontal velocity");
+  ExpectNear(boundary.reference_horizontal_position_m.x(), 2.0, 1e-12,
+             "recovery boundary should carry east");
+  ExpectNear(boundary.reference_horizontal_position_m.y(), -3.0, 1e-12,
+             "recovery boundary should carry north");
+  ExpectNear(boundary.reference_horizontal_velocity_mps.x(), 0.1, 1e-12,
+             "recovery boundary should carry east velocity");
+  ExpectNear(boundary.reference_horizontal_velocity_mps.y(), -1.4, 1e-12,
+             "recovery boundary should carry north velocity");
   ExpectTrue(!boundary.has_attitude && !boundary.add_attitude_constraint,
              "recovery boundary should not invent an attitude reference");
   ExpectNear(boundary.target_time_s, 9.0, 1e-12,
@@ -1322,8 +1338,8 @@ int main() {
       "TestBoundaryAttitudeReferenceKeepsOffGridAnchorsExact",
       TestBoundaryAttitudeReferenceKeepsOffGridAnchorsExact);
     RunTest(
-      "TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryUpVzOnly",
-      TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryUpVzOnly);
+      "TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryPositionVelocity",
+      TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryPositionVelocity);
     RunTest(
       "TestBoundaryStateInitialValuesDoNotRequireAttitude",
       TestBoundaryStateInitialValuesDoNotRequireAttitude);

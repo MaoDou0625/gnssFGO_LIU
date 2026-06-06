@@ -533,10 +533,18 @@ struct RtkOutageRecoveryReferenceRow {
   bool valid = false;
   double reference_up_m = std::numeric_limits<double>::quiet_NaN();
   double reference_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector2d reference_horizontal_position_m =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector2d reference_horizontal_velocity_mps =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
   double first_sample_time_s = std::numeric_limits<double>::quiet_NaN();
   double last_sample_time_s = std::numeric_limits<double>::quiet_NaN();
   double first_sample_up_m = std::numeric_limits<double>::quiet_NaN();
   double last_sample_up_m = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector2d first_sample_horizontal_position_m =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector2d last_sample_horizontal_position_m =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
   std::string skip_reason = "UNSET";
 };
 

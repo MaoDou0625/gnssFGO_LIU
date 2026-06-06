@@ -16,13 +16,14 @@ bool IsPlannedOutage(const RtkOutageWindowRow &window) {
   return window.skip_reason == "PLANNED" || window.skip_reason == "ADDED";
 }
 
-bool HasFiniteEnuUp(const GnssSolutionSample &sample) {
-  return sample.has_enu_position && std::isfinite(sample.enu_position_m.z());
+bool HasFiniteEnuPosition(const GnssSolutionSample &sample) {
+  return sample.has_enu_position && sample.enu_position_m.allFinite();
 }
 
 struct FitSample {
   double time_s = std::numeric_limits<double>::quiet_NaN();
-  double up_m = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector3d enu_position_m =
+    Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
 };
 
 std::vector<FitSample> CollectSamplesFromGnssSamples(
@@ -40,10 +41,10 @@ std::vector<FitSample> CollectSamplesFromGnssSamples(
     }
     if (sample.fix_type() != GnssFixType::kRtkFix ||
         !request.passes_gnss_quality_filters(sample) ||
-        !HasFiniteEnuUp(sample)) {
+        !HasFiniteEnuPosition(sample)) {
       continue;
     }
-    samples.push_back(FitSample{corrected_time_s, sample.enu_position_m.z()});
+    samples.push_back(FitSample{corrected_time_s, sample.enu_position_m});
   }
   return samples;
 }
@@ -59,37 +60,41 @@ std::vector<FitSample> CollectSamplesFromGnssFactorRecords(
         !std::isfinite(record.corrected_time_s) ||
         record.corrected_time_s + kTimeEpsilonS < fit_start_time_s ||
         record.corrected_time_s > fit_end_time_s + kTimeEpsilonS ||
-        !std::isfinite(record.measurement_enu_m.z())) {
+        !record.measurement_enu_m.allFinite()) {
       continue;
     }
-    samples.push_back(FitSample{record.corrected_time_s, record.measurement_enu_m.z()});
+    samples.push_back(FitSample{record.corrected_time_s, record.measurement_enu_m});
   }
   return samples;
 }
 
-void FitUpAndVzAtBoundary(
+void FitPositionAndVelocityAtBoundary(
   const std::vector<FitSample> &samples,
   const double boundary_time_s,
-  double &reference_up_m,
-  double &reference_vz_mps) {
+  Eigen::Vector3d &reference_position_m,
+  Eigen::Vector3d &reference_velocity_mps) {
   double sum_t = 0.0;
-  double sum_u = 0.0;
+  Eigen::Vector3d sum_position = Eigen::Vector3d::Zero();
   for (const auto &sample : samples) {
     sum_t += sample.time_s - boundary_time_s;
-    sum_u += sample.up_m;
+    sum_position += sample.enu_position_m;
   }
   const double count = static_cast<double>(samples.size());
   const double mean_t = sum_t / count;
-  const double mean_u = sum_u / count;
-  double numerator = 0.0;
+  const Eigen::Vector3d mean_position = sum_position / count;
+  Eigen::Vector3d numerator = Eigen::Vector3d::Zero();
   double denominator = 0.0;
   for (const auto &sample : samples) {
     const double centered_t = (sample.time_s - boundary_time_s) - mean_t;
-    numerator += centered_t * (sample.up_m - mean_u);
+    numerator += centered_t * (sample.enu_position_m - mean_position);
     denominator += centered_t * centered_t;
   }
-  reference_vz_mps = denominator > 1.0e-12 ? numerator / denominator : 0.0;
-  reference_up_m = mean_u - reference_vz_mps * mean_t;
+  if (denominator > 1.0e-12) {
+    reference_velocity_mps = numerator / denominator;
+  } else {
+    reference_velocity_mps = Eigen::Vector3d::Zero();
+  }
+  reference_position_m = mean_position - reference_velocity_mps * mean_t;
 }
 
 RtkOutageBoundaryReferenceRow MakeBoundaryReferenceFromRecovery(
@@ -105,14 +110,24 @@ RtkOutageBoundaryReferenceRow MakeBoundaryReferenceFromRecovery(
   row.has_up = reference.valid;
   row.has_vz = reference.valid;
   row.has_ba_z = false;
+  row.has_horizontal_position =
+    reference.valid && reference.reference_horizontal_position_m.allFinite();
+  row.has_horizontal_velocity =
+    reference.valid && reference.reference_horizontal_velocity_mps.allFinite();
   row.add_up_constraint = reference.valid;
   row.add_vz_constraint = reference.valid;
   row.add_ba_z_constraint = false;
+  row.add_horizontal_position_constraint = row.has_horizontal_position;
+  row.add_horizontal_velocity_constraint = row.has_horizontal_velocity;
   row.reference_up_m = reference.reference_up_m;
   row.reference_vz_mps = reference.reference_vz_mps;
+  row.reference_horizontal_position_m = reference.reference_horizontal_position_m;
+  row.reference_horizontal_velocity_mps = reference.reference_horizontal_velocity_mps;
   row.up_sigma_m = config.rtk_outage_boundary_up_sigma_m;
   row.vz_sigma_mps = config.rtk_outage_boundary_vz_sigma_mps;
   row.ba_z_sigma_mps2 = config.rtk_outage_boundary_baz_sigma_mps2;
+  row.horizontal_position_sigma_m = config.stage2_horizontal_position_hold_sigma_m;
+  row.horizontal_velocity_sigma_mps = config.stage2_horizontal_velocity_hold_sigma_mps;
   row.skip_reason = reference.valid ? "OK" : reference.skip_reason;
   return row;
 }
@@ -188,13 +203,23 @@ RtkOutageRecoveryReferenceBuilder::Build() const {
       });
     row.first_sample_time_s = samples.front().time_s;
     row.last_sample_time_s = samples.back().time_s;
-    row.first_sample_up_m = samples.front().up_m;
-    row.last_sample_up_m = samples.back().up_m;
-    FitUpAndVzAtBoundary(
+    row.first_sample_up_m = samples.front().enu_position_m.z();
+    row.last_sample_up_m = samples.back().enu_position_m.z();
+    row.first_sample_horizontal_position_m = samples.front().enu_position_m.head<2>();
+    row.last_sample_horizontal_position_m = samples.back().enu_position_m.head<2>();
+    Eigen::Vector3d reference_position_m =
+      Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d reference_velocity_mps =
+      Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    FitPositionAndVelocityAtBoundary(
       samples,
       window.end_time_s,
-      row.reference_up_m,
-      row.reference_vz_mps);
+      reference_position_m,
+      reference_velocity_mps);
+    row.reference_horizontal_position_m = reference_position_m.head<2>();
+    row.reference_up_m = reference_position_m.z();
+    row.reference_horizontal_velocity_mps = reference_velocity_mps.head<2>();
+    row.reference_vz_mps = reference_velocity_mps.z();
     row.valid = true;
     row.skip_reason = "OK";
     rows.push_back(row);

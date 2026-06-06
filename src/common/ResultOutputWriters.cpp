@@ -794,8 +794,10 @@ void WriteRtkOutageRecoveryReferenceCsv(
   stream
     << "window_index,outage_end_time_s,fit_start_time_s,fit_end_time_s,"
        "valid_fix_sample_count,min_fix_sample_count,valid,reference_up_m,"
-       "reference_vz_mps,first_sample_time_s,last_sample_time_s,"
-       "first_sample_up_m,last_sample_up_m,skip_reason\n";
+       "reference_vz_mps,reference_east_m,reference_north_m,"
+       "reference_ve_mps,reference_vn_mps,first_sample_time_s,last_sample_time_s,"
+       "first_sample_up_m,last_sample_up_m,first_sample_east_m,first_sample_north_m,"
+       "last_sample_east_m,last_sample_north_m,skip_reason\n";
   for (const auto &row : rows) {
     stream << row.window_index << ','
            << row.outage_end_time_s << ','
@@ -806,10 +808,18 @@ void WriteRtkOutageRecoveryReferenceCsv(
            << (row.valid ? 1 : 0) << ','
            << row.reference_up_m << ','
            << row.reference_vz_mps << ','
+           << row.reference_horizontal_position_m.x() << ','
+           << row.reference_horizontal_position_m.y() << ','
+           << row.reference_horizontal_velocity_mps.x() << ','
+           << row.reference_horizontal_velocity_mps.y() << ','
            << row.first_sample_time_s << ','
            << row.last_sample_time_s << ','
            << row.first_sample_up_m << ','
            << row.last_sample_up_m << ','
+           << row.first_sample_horizontal_position_m.x() << ','
+           << row.first_sample_horizontal_position_m.y() << ','
+           << row.last_sample_horizontal_position_m.x() << ','
+           << row.last_sample_horizontal_position_m.y() << ','
            << row.skip_reason << '\n';
   }
 }
