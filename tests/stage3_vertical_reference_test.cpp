@@ -1038,6 +1038,12 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
   config.enable_rtk_outage_preoutage_vertical_fence = true;
   config.enable_late_static_detection = true;
   config.enable_vertical_jump_bias = true;
+  config.enable_attitude_reference_constraint = true;
+  config.enable_base_graph_tilt_reference_constraint = true;
+  config.enable_stage3_jump_velocity_smoothness_regularizer = true;
+  config.enable_stage3_jump_height_highfreq_deadband = true;
+  config.enable_stage3_jump_adaptive_context_envelope = true;
+  config.stage3_disable_stage2_vehicle_nhc_constraint = true;
 
   struct Call {
     bool enable_stage3 = false;
@@ -1052,6 +1058,12 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
     bool enable_vertical_jump_bias = false;
     bool enable_body_z_nhc = false;
     bool enable_stage2_vehicle_nhc = false;
+    bool enable_attitude_reference = false;
+    bool enable_base_graph_tilt_reference = false;
+    bool enable_stage3_jump_velocity_regularizer = false;
+    bool enable_stage3_jump_height_deadband = false;
+    bool enable_stage3_jump_adaptive_context = false;
+    bool stage3_disable_stage2_vehicle_nhc = false;
     bool has_stage2_reference = false;
     bool has_stage3_reference = false;
   };
@@ -1077,6 +1089,12 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
       run_config.enable_vertical_jump_bias,
       run_config.enable_body_z_nhc_constraint,
       run_config.enable_stage2_vehicle_nhc_constraint,
+      run_config.enable_attitude_reference_constraint,
+      run_config.enable_base_graph_tilt_reference_constraint,
+      run_config.enable_stage3_jump_velocity_smoothness_regularizer,
+      run_config.enable_stage3_jump_height_highfreq_deadband,
+      run_config.enable_stage3_jump_adaptive_context_envelope,
+      run_config.stage3_disable_stage2_vehicle_nhc_constraint,
       static_cast<bool>(stage2_reference),
       static_cast<bool>(stage3_reference)});
 
@@ -1120,7 +1138,25 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
   ExpectTrue(calls[0].enable_vertical_jump_bias, "Stage2 source pass should keep requested jump bias");
   ExpectTrue(calls[1].enable_vertical_jump_bias, "Stage3 pass should keep requested jump bias");
   ExpectTrue(!calls[1].enable_body_z_nhc, "Stage3 pass should keep Stage2 policy's Body-Z NHC disabled");
-  ExpectTrue(calls[1].enable_stage2_vehicle_nhc, "Stage3 pass should keep Stage2 vehicle NHC enabled");
+  ExpectTrue(
+    !calls[1].enable_stage2_vehicle_nhc,
+    "Stage3 pass should inherit Stage2 horizontal velocity through holds instead of rerunning vehicle NHC");
+  ExpectTrue(!calls[1].enable_attitude_reference, "Stage3 pass should not restore generic attitude reference");
+  ExpectTrue(
+    !calls[1].enable_base_graph_tilt_reference,
+    "Stage3 pass should not use base-graph tilt as a competing attitude reference");
+  ExpectTrue(
+    !calls[1].enable_stage3_jump_velocity_regularizer,
+    "Stage3 pass should not use the legacy Stage3 jump velocity regularizer");
+  ExpectTrue(
+    !calls[1].enable_stage3_jump_height_deadband,
+    "Stage3 pass should not use the legacy Stage3 jump height deadband");
+  ExpectTrue(
+    !calls[1].enable_stage3_jump_adaptive_context,
+    "Stage3 pass should not use the legacy Stage3 jump context envelope");
+  ExpectTrue(
+    !calls[1].stage3_disable_stage2_vehicle_nhc,
+    "Stage3 child config should clear wrapper-only vehicle NHC switches");
   ExpectTrue(calls[1].has_stage2_reference, "Stage3 pass should receive Stage2 reference");
   ExpectTrue(calls[1].has_stage3_reference, "Stage3 pass should receive Stage3 reference");
   ExpectTrue(
@@ -1161,7 +1197,7 @@ void TestStage3RunnerAlwaysDisablesSegmentedBatch() {
     "Stage3 pass should always disable segmented batch even if the compatibility flag is false");
 }
 
-void TestStage3RunnerCanDisableFinalVehicleNHCOnly() {
+void TestStage3RunnerAlwaysDisablesFinalVehicleNHC() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_stage3_vertical_reference_optimization = true;
   config.enable_stage2_velocity_optimization = true;
@@ -1196,7 +1232,7 @@ void TestStage3RunnerCanDisableFinalVehicleNHCOnly() {
     "Stage2 source pass should keep vehicle NHC enabled for the lowpass source");
   ExpectTrue(
     !vehicle_nhc_flags[1],
-    "Stage3 final pass should disable vehicle NHC when requested");
+    "Stage3 final pass should always disable vehicle NHC after inheriting the Stage2 velocity reference");
   ExpectTrue(
     !child_disable_flags[0] && !child_disable_flags[1],
     "Stage3 child configs should clear the wrapper-only vehicle NHC disable flag");
@@ -1524,8 +1560,8 @@ int main() {
       "TestStage3RunnerAlwaysDisablesSegmentedBatch",
       TestStage3RunnerAlwaysDisablesSegmentedBatch);
     RunTest(
-      "TestStage3RunnerCanDisableFinalVehicleNHCOnly",
-      TestStage3RunnerCanDisableFinalVehicleNHCOnly);
+      "TestStage3RunnerAlwaysDisablesFinalVehicleNHC",
+      TestStage3RunnerAlwaysDisablesFinalVehicleNHC);
     RunTest(
       "TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2",
       TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2);

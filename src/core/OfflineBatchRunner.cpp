@@ -2200,10 +2200,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     &run_result.relative_yaw_reference_diagnostics;
   AttitudeReferenceConstraintBuilder(std::move(attitude_reference_request)).Build();
 
-  const bool use_base_graph_tilt_in_final_stage =
-    config_.enable_base_graph_tilt_reference_constraint &&
-    active_stage3_vertical_reference != nullptr;
-  if (has_stage2_reference_timeline && !use_base_graph_tilt_in_final_stage) {
+  if (has_stage2_reference_timeline) {
     Stage2AttitudeHoldBuildRequest attitude_hold_request;
     attitude_hold_request.config = &config_;
     attitude_hold_request.state_timestamps = &state_timestamps;

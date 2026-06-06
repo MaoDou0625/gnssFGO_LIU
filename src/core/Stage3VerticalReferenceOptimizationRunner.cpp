@@ -15,27 +15,25 @@ OfflineRunnerConfig MakeStage2SourceConfig(OfflineRunnerConfig config) {
   config.stage3_disable_stage2_vehicle_nhc_constraint = false;
   config.enable_stage3_jump_velocity_smoothness_regularizer = false;
   config.enable_stage3_jump_height_highfreq_deadband = false;
+  config.enable_stage3_jump_adaptive_context_envelope = false;
   return config;
 }
 
 OfflineRunnerConfig MakeStage3Config(OfflineRunnerConfig config) {
-  const bool restore_base_tilt_attitude_reference =
-    config.enable_base_graph_tilt_reference_constraint &&
-    config.enable_attitude_reference_constraint;
   config = MakeStage2VelocityOptimizationConfig(config);
-  if (restore_base_tilt_attitude_reference) {
-    config.enable_attitude_reference_constraint = true;
-  }
   config.enable_stage3_vertical_reference_optimization = false;
+  config.enable_attitude_reference_constraint = false;
+  config.enable_base_graph_tilt_reference_constraint = false;
+  config.enable_stage3_jump_velocity_smoothness_regularizer = false;
+  config.enable_stage3_jump_height_highfreq_deadband = false;
+  config.enable_stage3_jump_adaptive_context_envelope = false;
   config = DisableRtkOutageSegmentedBatchRecursion(std::move(config));
   config.enable_rtk_vertical_drift_reference = false;
   config.enable_rtk_vertical_lowpass_reference = false;
   config.enable_rtk_outage_causal_drift_reference = false;
   config.enable_rtk_outage_preoutage_vertical_fence = false;
   config.enable_late_static_detection = false;
-  if (config.stage3_disable_stage2_vehicle_nhc_constraint) {
-    config.enable_stage2_vehicle_nhc_constraint = false;
-  }
+  config.enable_stage2_vehicle_nhc_constraint = false;
   config.stage3_disable_stage2_vehicle_nhc_constraint = false;
   return config;
 }
