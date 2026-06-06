@@ -169,6 +169,7 @@ struct RunSummary {
   std::size_t rtk_outage_boundary_baz_factor_count = 0;
   std::size_t rtk_outage_boundary_horizontal_position_factor_count = 0;
   std::size_t rtk_outage_boundary_horizontal_velocity_factor_count = 0;
+  std::size_t rtk_outage_boundary_horizontal_position_velocity_handoff_factor_count = 0;
   std::size_t rtk_outage_boundary_attitude_factor_count = 0;
   bool rtk_outage_preoutage_vertical_fence_enabled = false;
   std::size_t rtk_outage_preoutage_vertical_fence_factor_count = 0;
@@ -659,6 +660,8 @@ struct RunSummary {
         << rtk_outage_boundary_horizontal_position_factor_count << '\n'
         << "rtk_outage_boundary_horizontal_velocity_factor_count="
         << rtk_outage_boundary_horizontal_velocity_factor_count << '\n'
+        << "rtk_outage_boundary_horizontal_position_velocity_handoff_factor_count="
+        << rtk_outage_boundary_horizontal_position_velocity_handoff_factor_count << '\n'
         << "rtk_outage_boundary_attitude_factor_count="
         << rtk_outage_boundary_attitude_factor_count << '\n'
         << "rtk_outage_preoutage_vertical_fence_enabled="

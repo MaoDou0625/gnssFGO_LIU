@@ -23,6 +23,7 @@
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
 #include "offline_lc_minimal/factor/AttitudeReferenceFactor.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
+#include "offline_lc_minimal/factor/HorizontalPositionVelocityHandoffFactor.h"
 #include "offline_lc_minimal/factor/VelocityDeltaFactor.h"
 
 namespace {
@@ -131,6 +132,39 @@ void TestVelocityDeltaFactorUsesOnlyVelocityKeys() {
   ExpectTrue(factor.keys().size() == 2U, "3D velocity delta should connect only two velocity keys");
   ExpectTrue(factor.keys()[0] == gtsam::symbol_shorthand::V(1), "first key should be V_i");
   ExpectTrue(factor.keys()[1] == gtsam::symbol_shorthand::V(2), "second key should be V_j");
+}
+
+void TestHorizontalPositionVelocityHandoffFactorUsesTrapezoidVelocityDelta() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(2, 1.0);
+  const offline_lc_minimal::factor::HorizontalPositionVelocityHandoffFactor factor(
+    gtsam::symbol_shorthand::X(1),
+    gtsam::symbol_shorthand::V(1),
+    gtsam::Vector2(2.0, -1.0),
+    gtsam::Vector2(3.0, -2.0),
+    0.5,
+    noise);
+
+  const gtsam::Pose3 matching_pose(
+    gtsam::Rot3::Identity(),
+    gtsam::Point3(1.0, -0.25, 4.0));
+  const gtsam::Vector3 matching_velocity(1.0, -1.0, 9.0);
+  ExpectNear(
+    factor.evaluateError(matching_pose, matching_velocity).norm(),
+    0.0,
+    1.0e-12,
+    "horizontal handoff should be zero for trapezoid-integrated position");
+
+  const gtsam::Pose3 shifted_pose(
+    gtsam::Rot3::Identity(),
+    gtsam::Point3(1.2, -0.25, 4.0));
+  ExpectTrue(
+    factor.evaluateError(shifted_pose, matching_velocity).norm() > 0.1,
+    "horizontal handoff should penalize position mismatch");
+
+  const gtsam::Vector3 shifted_velocity(1.4, -1.0, 9.0);
+  ExpectTrue(
+    factor.evaluateError(matching_pose, shifted_velocity).norm() > 0.05,
+    "horizontal handoff should penalize velocity-integrated mismatch");
 }
 
 void TestBuilderAddsOutageAttitudeAndVelocityConstraints() {
@@ -953,6 +987,105 @@ void TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude() {
              "boundary diagnostics should report ba_z residual in ug");
 }
 
+void TestBoundaryConstraintBuilderAddsHorizontalPositionVelocityHandoff() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_boundary_constraints = true;
+  config.stage2_horizontal_position_hold_sigma_m = 0.05;
+
+  const std::vector<double> timestamps{0.0, 1.0, 2.0};
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> references(1U);
+  references.front().window_index = 4U;
+  references.front().boundary_role = "OUTAGE_END_HORIZONTAL_HANDOFF";
+  references.front().source_type =
+    "POST_RECOVERY_OPTIMIZED_HORIZONTAL_POSITION_VELOCITY_HANDOFF";
+  references.front().target_time_s = 1.0;
+  references.front().valid = true;
+  references.front().has_horizontal_position = true;
+  references.front().has_horizontal_velocity = true;
+  references.front().has_horizontal_position_velocity_handoff = true;
+  references.front().add_horizontal_position_constraint = false;
+  references.front().add_horizontal_velocity_constraint = false;
+  references.front().add_horizontal_position_velocity_handoff_constraint = true;
+  references.front().reference_horizontal_position_m = Eigen::Vector2d(2.0, -1.0);
+  references.front().reference_horizontal_velocity_mps = Eigen::Vector2d(3.0, -2.0);
+  references.front().horizontal_position_velocity_handoff_reference_time_s = 1.5;
+  references.front().horizontal_position_velocity_handoff_sigma_m =
+    config.stage2_horizontal_position_hold_sigma_m;
+  references.front().skip_reason = "OK";
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::RtkOutageBoundaryDiagnosticRow> diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.boundary_references = &references;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 1U, "horizontal handoff should add one boundary factor");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<
+      offline_lc_minimal::factor::HorizontalPositionVelocityHandoffFactor>(graph.at(0)).get() !=
+      nullptr,
+    "boundary factor should be a horizontal position-velocity handoff");
+  ExpectTrue(
+    summary.rtk_outage_boundary_horizontal_position_velocity_handoff_factor_count == 1U,
+    "horizontal handoff factor count is wrong");
+  ExpectTrue(diagnostics.size() == 1U, "horizontal handoff should emit one diagnostic");
+  ExpectTrue(diagnostics.front().target_state_index == 1U,
+             "horizontal handoff should target the outage last state");
+  ExpectNear(
+    diagnostics.front().horizontal_position_velocity_handoff_dt_s,
+    0.5,
+    1.0e-12,
+    "horizontal handoff diagnostic should report the post reference dt");
+  ExpectTrue(!diagnostics.front().horizontal_position_factor_added,
+             "horizontal handoff must not add a direct position hold");
+
+  gtsam::Values matching_values;
+  gtsam::Values shifted_values;
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    matching_values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(
+        gtsam::Rot3::Identity(),
+        gtsam::Point3(index == 1U ? 1.0 : 0.0,
+                      index == 1U ? -0.25 : 0.0,
+                      0.0)));
+    matching_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(index == 1U ? 1.0 : 0.0,
+                     index == 1U ? -1.0 : 0.0,
+                     0.0));
+    shifted_values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(
+        gtsam::Rot3::Identity(),
+        gtsam::Point3(index == 1U ? 1.2 : 0.0,
+                      index == 1U ? -0.25 : 0.0,
+                      0.0)));
+    shifted_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(index == 1U ? 1.0 : 0.0,
+                     index == 1U ? -1.0 : 0.0,
+                     0.0));
+  }
+
+  ExpectNear(graph.error(matching_values), 0.0, 1.0e-12,
+             "matching handoff state should have zero error");
+  ExpectTrue(graph.error(shifted_values) > 1.0,
+             "horizontal handoff should penalize position-velocity mismatch");
+  offline_lc_minimal::PopulateRtkOutageBoundaryDiagnostics(
+    shifted_values,
+    diagnostics);
+  ExpectTrue(
+    diagnostics.front().horizontal_position_velocity_handoff_residual_norm_m > 0.1,
+    "horizontal handoff diagnostics should report residual norm");
+}
+
 void TestBoundaryConstraintBuilderSplitsTiltAndYawWhenBaseTiltReferenceIsEnabled() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_rtk_outage_boundary_constraints = true;
@@ -1313,6 +1446,9 @@ int main() {
       TestAttitudeHoldFactorIgnoresTranslationAndPenalizesAttitude);
     RunTest("TestVelocityDeltaFactorUsesOnlyVelocityKeys", TestVelocityDeltaFactorUsesOnlyVelocityKeys);
     RunTest(
+      "TestHorizontalPositionVelocityHandoffFactorUsesTrapezoidVelocityDelta",
+      TestHorizontalPositionVelocityHandoffFactorUsesTrapezoidVelocityDelta);
+    RunTest(
       "TestBuilderAddsOutageAttitudeAndVelocityConstraints",
       TestBuilderAddsOutageAttitudeAndVelocityConstraints);
     RunTest(
@@ -1349,6 +1485,9 @@ int main() {
     RunTest(
       "TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude",
       TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude);
+    RunTest(
+      "TestBoundaryConstraintBuilderAddsHorizontalPositionVelocityHandoff",
+      TestBoundaryConstraintBuilderAddsHorizontalPositionVelocityHandoff);
     RunTest(
       "TestBoundaryConstraintBuilderSplitsTiltAndYawWhenBaseTiltReferenceIsEnabled",
       TestBoundaryConstraintBuilderSplitsTiltAndYawWhenBaseTiltReferenceIsEnabled);

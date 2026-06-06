@@ -859,6 +859,7 @@ void WriteRtkOutageBoundaryDiagnosticsCsv(
     << "window_index,boundary_role,source_type,target_state_index,target_time_s,"
        "valid,up_factor_added,vz_factor_added,ba_z_factor_added,"
        "horizontal_position_factor_added,horizontal_velocity_factor_added,"
+       "horizontal_position_velocity_handoff_factor_added,"
        "attitude_factor_added,attitude_constraint_type,"
        "reference_east_m,reference_north_m,optimized_east_m,optimized_north_m,"
        "horizontal_position_residual_east_m,horizontal_position_residual_north_m,"
@@ -866,6 +867,12 @@ void WriteRtkOutageBoundaryDiagnosticsCsv(
        "reference_ve_mps,reference_vn_mps,optimized_ve_mps,optimized_vn_mps,"
        "horizontal_velocity_residual_east_mps,horizontal_velocity_residual_north_mps,"
        "horizontal_velocity_residual_norm_mps,horizontal_velocity_sigma_mps,"
+       "horizontal_position_velocity_handoff_reference_time_s,"
+       "horizontal_position_velocity_handoff_dt_s,"
+       "horizontal_position_velocity_handoff_residual_east_m,"
+       "horizontal_position_velocity_handoff_residual_north_m,"
+       "horizontal_position_velocity_handoff_residual_norm_m,"
+       "horizontal_position_velocity_handoff_sigma_m,"
        "reference_up_m,optimized_up_m,up_residual_m,up_sigma_m,"
        "reference_vz_mps,optimized_vz_mps,vz_residual_mps,vz_sigma_mps,"
        "reference_ba_z_ug,optimized_ba_z_ug,ba_z_residual_ug,ba_z_sigma_ug,"
@@ -886,6 +893,7 @@ void WriteRtkOutageBoundaryDiagnosticsCsv(
            << (row.ba_z_factor_added ? 1 : 0) << ','
            << (row.horizontal_position_factor_added ? 1 : 0) << ','
            << (row.horizontal_velocity_factor_added ? 1 : 0) << ','
+           << (row.horizontal_position_velocity_handoff_factor_added ? 1 : 0) << ','
            << (row.attitude_factor_added ? 1 : 0) << ','
            << row.attitude_constraint_type << ','
            << row.reference_horizontal_position_m.x() << ','
@@ -904,6 +912,12 @@ void WriteRtkOutageBoundaryDiagnosticsCsv(
            << row.horizontal_velocity_residual_mps.y() << ','
            << row.horizontal_velocity_residual_norm_mps << ','
            << row.horizontal_velocity_sigma_mps << ','
+           << row.horizontal_position_velocity_handoff_reference_time_s << ','
+           << row.horizontal_position_velocity_handoff_dt_s << ','
+           << row.horizontal_position_velocity_handoff_residual_m.x() << ','
+           << row.horizontal_position_velocity_handoff_residual_m.y() << ','
+           << row.horizontal_position_velocity_handoff_residual_norm_m << ','
+           << row.horizontal_position_velocity_handoff_sigma_m << ','
            << row.reference_up_m << ','
            << row.optimized_up_m << ','
            << row.up_residual_m << ','

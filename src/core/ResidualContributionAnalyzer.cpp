@@ -70,6 +70,9 @@ struct ResidualAccumulator {
       Contains(factor_type, "AttitudeReferenceFactor")) {
     return "attitude_reference";
   }
+  if (Contains(factor_type, "HorizontalPositionVelocityHandoffFactor")) {
+    return "rtk_outage_boundary";
+  }
   if (Contains(factor_type, "HorizontalPositionHoldFactor") ||
       Contains(factor_type, "HorizontalVelocityHoldFactor")) {
     return "stage2_hold";

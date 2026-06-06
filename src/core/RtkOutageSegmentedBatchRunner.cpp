@@ -5,6 +5,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <stdexcept>
 #include <utility>
@@ -262,6 +263,37 @@ const ReferenceNodeState *NearestReferenceState(
     : &right;
 }
 
+std::optional<double> LastKeptOutageStateTime(
+  const std::vector<double> &state_timestamps,
+  const RtkOutageWindowRow &outage) {
+  if (!std::isfinite(outage.start_time_s) || !std::isfinite(outage.end_time_s) ||
+      outage.end_time_s <= outage.start_time_s + kTimeEpsilonS) {
+    return std::nullopt;
+  }
+  const auto upper = std::lower_bound(
+    state_timestamps.begin(),
+    state_timestamps.end(),
+    outage.end_time_s - kTimeEpsilonS);
+  if (upper == state_timestamps.begin()) {
+    return std::nullopt;
+  }
+  for (auto it = std::make_reverse_iterator(upper);
+       it != state_timestamps.rend();
+       ++it) {
+    const double time_s = *it;
+    if (!std::isfinite(time_s)) {
+      continue;
+    }
+    if (time_s <= outage.start_time_s + kTimeEpsilonS) {
+      break;
+    }
+    if (time_s < outage.end_time_s - kTimeEpsilonS) {
+      return time_s;
+    }
+  }
+  return std::nullopt;
+}
+
 RtkOutageBoundaryReferenceRow MakeBoundaryReferenceFromTrajectory(
   const OfflineRunnerConfig &config,
   const OfflineRunResult &result,
@@ -321,28 +353,49 @@ RtkOutageBoundaryReferenceRow MakeBoundaryReferenceFromTrajectory(
   return reference;
 }
 
+void RefreshBoundaryReferenceValidity(RtkOutageBoundaryReferenceRow &reference) {
+  reference.valid =
+    reference.has_up || reference.has_vz || reference.has_ba_z ||
+    reference.has_horizontal_position || reference.has_horizontal_velocity ||
+    reference.has_horizontal_position_velocity_handoff || reference.has_attitude;
+  if (!reference.valid) {
+    reference.skip_reason = "nonfinite_trajectory_reference";
+  } else if (reference.skip_reason == "nonfinite_trajectory_reference" ||
+             reference.skip_reason == "UNSET") {
+    reference.skip_reason = "OK";
+  }
+}
+
 void RemoveAttitudeReference(RtkOutageBoundaryReferenceRow &reference) {
   reference.has_attitude = false;
   reference.add_attitude_constraint = false;
   reference.attitude_sigma_rad = std::numeric_limits<double>::quiet_NaN();
-  reference.valid =
-    reference.has_up || reference.has_vz || reference.has_ba_z ||
-    reference.has_horizontal_position || reference.has_horizontal_velocity;
-  if (!reference.valid) {
-    reference.skip_reason = "nonfinite_trajectory_reference";
-  }
+  RefreshBoundaryReferenceValidity(reference);
 }
 
 void RemoveBiasReference(RtkOutageBoundaryReferenceRow &reference) {
   reference.has_ba_z = false;
   reference.add_ba_z_constraint = false;
   reference.reference_ba_z_mps2 = std::numeric_limits<double>::quiet_NaN();
-  reference.valid =
-    reference.has_up || reference.has_vz || reference.has_ba_z ||
-    reference.has_horizontal_position || reference.has_horizontal_velocity;
-  if (!reference.valid) {
-    reference.skip_reason = "nonfinite_trajectory_reference";
-  }
+  RefreshBoundaryReferenceValidity(reference);
+}
+
+void RemoveHorizontalPositionReference(RtkOutageBoundaryReferenceRow &reference) {
+  reference.has_horizontal_position = false;
+  reference.add_horizontal_position_constraint = false;
+  reference.reference_horizontal_position_m =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  reference.horizontal_position_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  RefreshBoundaryReferenceValidity(reference);
+}
+
+void RemoveHorizontalVelocityReference(RtkOutageBoundaryReferenceRow &reference) {
+  reference.has_horizontal_velocity = false;
+  reference.add_horizontal_velocity_constraint = false;
+  reference.reference_horizontal_velocity_mps =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  reference.horizontal_velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  RefreshBoundaryReferenceValidity(reference);
 }
 
 RtkOutageBoundaryReferenceRow MakeOutageEndPositionVelocityReferenceFromPostResult(
@@ -359,6 +412,53 @@ RtkOutageBoundaryReferenceRow MakeOutageEndPositionVelocityReferenceFromPostResu
     false);
   RemoveAttitudeReference(reference);
   RemoveBiasReference(reference);
+  return reference;
+}
+
+RtkOutageBoundaryReferenceRow
+MakeOutageEndHorizontalPositionVelocityHandoffReferenceFromPostResult(
+  const OfflineRunnerConfig &config,
+  const OfflineRunResult &post_result,
+  const RtkOutageWindowRow &outage,
+  const double target_time_s) {
+  RtkOutageBoundaryReferenceRow reference = MakeBoundaryReferenceFromTrajectory(
+    config,
+    post_result,
+    outage.window_index,
+    outage.end_time_s,
+    "OUTAGE_END_HORIZONTAL_HANDOFF",
+    "POST_RECOVERY_OPTIMIZED_HORIZONTAL_POSITION_VELOCITY_HANDOFF",
+    false);
+  RemoveAttitudeReference(reference);
+  RemoveBiasReference(reference);
+  reference.has_up = false;
+  reference.add_up_constraint = false;
+  reference.reference_up_m = std::numeric_limits<double>::quiet_NaN();
+  reference.up_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  reference.has_vz = false;
+  reference.add_vz_constraint = false;
+  reference.reference_vz_mps = std::numeric_limits<double>::quiet_NaN();
+  reference.vz_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  reference.target_time_s = target_time_s;
+  reference.horizontal_position_velocity_handoff_reference_time_s = outage.end_time_s;
+  reference.horizontal_position_velocity_handoff_sigma_m =
+    config.stage2_horizontal_position_hold_sigma_m;
+  reference.add_horizontal_position_constraint = false;
+  reference.add_horizontal_velocity_constraint = reference.has_horizontal_velocity;
+  reference.has_horizontal_position_velocity_handoff =
+    reference.has_horizontal_position &&
+    reference.has_horizontal_velocity &&
+    reference.reference_horizontal_position_m.allFinite() &&
+    reference.reference_horizontal_velocity_mps.allFinite() &&
+    std::isfinite(reference.target_time_s) &&
+    reference.horizontal_position_velocity_handoff_reference_time_s >
+      reference.target_time_s + kTimeEpsilonS;
+  reference.add_horizontal_position_velocity_handoff_constraint =
+    reference.has_horizontal_position_velocity_handoff;
+  reference.valid =
+    reference.has_horizontal_velocity ||
+    reference.has_horizontal_position_velocity_handoff;
+  reference.skip_reason = reference.valid ? "OK" : "missing_horizontal_handoff_reference";
   return reference;
 }
 
@@ -576,7 +676,22 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
           request_.config,
           *recovery_reference);
       }
+      RemoveHorizontalPositionReference(outage_end_reference);
+      RemoveHorizontalVelocityReference(outage_end_reference);
       outage_boundary_refs.push_back(std::move(outage_end_reference));
+      const std::optional<double> outage_last_kept_time_s =
+        LastKeptOutageStateTime(request_.state_timestamps, outage);
+      if (outage_last_kept_time_s.has_value()) {
+        RtkOutageBoundaryReferenceRow horizontal_handoff_reference =
+          MakeOutageEndHorizontalPositionVelocityHandoffReferenceFromPostResult(
+            request_.config,
+            post_probe_result,
+            outage,
+            *outage_last_kept_time_s);
+        if (horizontal_handoff_reference.valid) {
+          outage_boundary_refs.push_back(std::move(horizontal_handoff_reference));
+        }
+      }
     } else {
       outage_boundary_refs.push_back(MakeTimeOnlyBoundaryReference(
         outage.window_index,
