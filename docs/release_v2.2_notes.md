@@ -42,6 +42,24 @@ The full usage guide is in:
 docs/shared_vertical_reference_workflow.md
 ```
 
+## Promoted Default Parameters
+
+The default configuration now matches the final shared-reference validation
+settings:
+
+```text
+enable_stage_attitude_debug_export=true
+enable_base_graph_tilt_reference_constraint=true
+base_graph_tilt_reference_sigma_rad=0.003
+stage3_vertical_anchor_sigma_m=0.002
+enable_stage3_jump_velocity_smoothness_regularizer=true
+enable_stage3_jump_height_highfreq_deadband=true
+enable_stage3_jump_adaptive_context_envelope=false
+vertical_envelope_gate_sigma_multiple=1
+vertical_envelope_factor_sigma_m=0.01
+vertical_velocity_delta_context_jump_sigma_scale=100
+```
+
 Minimal command sequence:
 
 ```bash

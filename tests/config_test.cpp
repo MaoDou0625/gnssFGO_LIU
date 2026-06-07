@@ -918,6 +918,9 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
   ExpectTrue(config.enable_stage1_yaw_refinement, "default config should refine Stage1 yaw");
   ExpectTrue(config.enable_stage2_velocity_optimization, "default config should enable segmented Stage2");
   ExpectTrue(
+    config.enable_stage_attitude_debug_export,
+    "default config should export stage attitude diagnostics");
+  ExpectTrue(
     config.enable_stage2_vehicle_nhc_constraint,
     "default config should enable Stage2 vehicle NHC constraints");
   ExpectTrue(
@@ -975,8 +978,8 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
       offline_lc_minimal::DegPerHourToRadPerSecond(0.01)) < 1e-18,
     "default gyro bias prior sigma should be 0.01 deg/hour");
   ExpectTrue(
-    config.enable_stage3_jump_adaptive_context_envelope,
-    "default config should enable Stage3 jump context envelopes");
+    !config.enable_stage3_jump_adaptive_context_envelope,
+    "default config should keep Stage3 adaptive jump context envelopes disabled");
   ExpectTrue(
     std::abs(config.stage3_jump_context_velocity_floor_mps) < 1e-15,
     "default Stage3 jump context velocity floor should be zero");
@@ -996,11 +999,23 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
     config.enable_vertical_velocity_delta_context_sigma_scale,
     "default config should enable context-aware vertical velocity delta sigma scaling");
   ExpectTrue(
-    std::abs(config.vertical_velocity_delta_context_jump_sigma_scale - 1000.0) < 1e-15,
-    "default jump-context vertical velocity delta sigma scale should be 1000");
+    std::abs(config.vertical_velocity_delta_context_jump_sigma_scale - 100.0) < 1e-15,
+    "default jump-context vertical velocity delta sigma scale should be 100");
   ExpectTrue(
     std::abs(config.vertical_velocity_delta_context_jump_extra_padding_s - 0.6) < 1e-15,
     "default jump-context vertical velocity delta padding should be 0.6 s");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_gate_sigma_multiple - 1.0) < 1e-15,
+    "default vertical envelope gate should use the final scale100 setting");
+  ExpectTrue(
+    std::abs(config.vertical_envelope_factor_sigma_m - 0.01) < 1e-15,
+    "default vertical envelope factor sigma should use the final scale100 setting");
+  ExpectTrue(
+    config.enable_base_graph_tilt_reference_constraint,
+    "default config should enable the base-graph tilt attitude reference");
+  ExpectTrue(
+    std::abs(config.base_graph_tilt_reference_sigma_rad - 0.003) < 1e-15,
+    "default base-graph tilt reference sigma should be 0.003 rad");
   ExpectTrue(
     !config.vertical_velocity_delta_skip_jump_padding,
     "default config should retain DVZ inside jump padding for v2.0");
