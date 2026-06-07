@@ -19,6 +19,8 @@ namespace {
 
 constexpr double kDistanceEpsilonM = 1.0e-6;
 constexpr double kTimeEpsilonS = 1.0e-9;
+constexpr double kOffsetSmoothingRadiusM = 12.0;
+constexpr double kOffsetHuberScaleM = 0.015;
 
 struct CommonTrajectoryPoint {
   double time_s = 0.0;
@@ -147,6 +149,104 @@ double Median(std::vector<double> values) {
     median = 0.5 * (median + *lower_max);
   }
   return median;
+}
+
+std::vector<double> MedianByBin(const std::vector<std::vector<double>> &values_by_bin) {
+  std::vector<double> medians(values_by_bin.size(), std::numeric_limits<double>::quiet_NaN());
+  for (std::size_t index = 0; index < values_by_bin.size(); ++index) {
+    medians[index] = Median(values_by_bin[index]);
+  }
+  return medians;
+}
+
+std::vector<double> FillFiniteSeriesByInterpolation(
+  std::vector<double> values,
+  const double fallback_value) {
+  std::vector<std::size_t> finite_indices;
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    if (std::isfinite(values[index])) {
+      finite_indices.push_back(index);
+    }
+  }
+  if (finite_indices.empty()) {
+    std::fill(values.begin(), values.end(), fallback_value);
+    return values;
+  }
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    if (std::isfinite(values[index])) {
+      continue;
+    }
+    const auto right_it =
+      std::lower_bound(finite_indices.begin(), finite_indices.end(), index);
+    if (right_it == finite_indices.begin()) {
+      values[index] = values[*right_it];
+    } else if (right_it == finite_indices.end()) {
+      values[index] = values[finite_indices.back()];
+    } else {
+      const std::size_t right = *right_it;
+      const std::size_t left = *(right_it - 1);
+      const double alpha =
+        static_cast<double>(index - left) /
+        std::max(static_cast<double>(right - left), 1.0);
+      values[index] = (1.0 - alpha) * values[left] + alpha * values[right];
+    }
+  }
+  return values;
+}
+
+std::vector<double> SmoothRtkOffset(
+  const std::vector<double> &offset_m,
+  const double grid_spacing_m) {
+  if (offset_m.empty()) {
+    return {};
+  }
+  const double radius_m = std::max(kOffsetSmoothingRadiusM, 4.0 * grid_spacing_m);
+  const double sigma_m = std::max(0.5 * radius_m, grid_spacing_m);
+  const int radius_bins =
+    std::max(1, static_cast<int>(std::ceil(radius_m / grid_spacing_m)));
+  std::vector<double> smoothed(offset_m.size(), std::numeric_limits<double>::quiet_NaN());
+  for (std::size_t index = 0; index < offset_m.size(); ++index) {
+    std::vector<double> local_values;
+    const int begin = std::max(0, static_cast<int>(index) - radius_bins);
+    const int end =
+      std::min(static_cast<int>(offset_m.size()) - 1, static_cast<int>(index) + radius_bins);
+    local_values.reserve(static_cast<std::size_t>(end - begin + 1));
+    for (int candidate = begin; candidate <= end; ++candidate) {
+      if (std::isfinite(offset_m[static_cast<std::size_t>(candidate)])) {
+        local_values.push_back(offset_m[static_cast<std::size_t>(candidate)]);
+      }
+    }
+    const double local_center = Median(local_values);
+    if (!std::isfinite(local_center)) {
+      continue;
+    }
+
+    double weight_sum = 0.0;
+    double weighted_sum = 0.0;
+    for (int candidate = begin; candidate <= end; ++candidate) {
+      const double value = offset_m[static_cast<std::size_t>(candidate)];
+      if (!std::isfinite(value)) {
+        continue;
+      }
+      const double distance_m =
+        std::abs(static_cast<double>(candidate) - static_cast<double>(index)) *
+        grid_spacing_m;
+      const double gaussian_weight =
+        std::exp(-0.5 * std::pow(distance_m / sigma_m, 2.0));
+      const double residual_m = std::abs(value - local_center);
+      const double robust_weight =
+        residual_m <= kOffsetHuberScaleM
+          ? 1.0
+          : kOffsetHuberScaleM / std::max(residual_m, kDistanceEpsilonM);
+      const double weight = gaussian_weight * robust_weight;
+      weight_sum += weight;
+      weighted_sum += weight * value;
+    }
+    if (weight_sum > 0.0) {
+      smoothed[index] = weighted_sum / weight_sum;
+    }
+  }
+  return FillFiniteSeriesByInterpolation(std::move(smoothed), 0.0);
 }
 
 GeoReference MakeCommonGeoReference(
@@ -438,10 +538,7 @@ SharedVerticalReference BuildSharedVerticalReference(
     }
   }
 
-  std::vector<double> rtk_median_by_bin(grid_count, std::numeric_limits<double>::quiet_NaN());
-  for (std::size_t bin = 0; bin < grid_count; ++bin) {
-    rtk_median_by_bin[bin] = Median(rtk_up_by_bin[bin]);
-  }
+  const std::vector<double> rtk_median_by_bin = MedianByBin(rtk_up_by_bin);
 
   for (const auto &member : members) {
     std::vector<double> offset_samples;
@@ -488,21 +585,43 @@ SharedVerticalReference BuildSharedVerticalReference(
     }
   }
 
+  const std::vector<double> nav_median_by_bin = MedianByBin(nav_up_by_bin);
+  const std::vector<double> nav_bridge_by_bin =
+    FillFiniteSeriesByInterpolation(nav_median_by_bin, std::numeric_limits<double>::quiet_NaN());
+  std::vector<double> rtk_offset_by_bin(grid_count, std::numeric_limits<double>::quiet_NaN());
+  for (std::size_t bin = 0; bin < grid_count; ++bin) {
+    if (std::isfinite(rtk_median_by_bin[bin]) &&
+        std::isfinite(nav_bridge_by_bin[bin])) {
+      rtk_offset_by_bin[bin] = rtk_median_by_bin[bin] - nav_bridge_by_bin[bin];
+    }
+  }
+  const std::vector<double> smoothed_offset_by_bin =
+    SmoothRtkOffset(
+      FillFiniteSeriesByInterpolation(std::move(rtk_offset_by_bin), 0.0),
+      request.grid_spacing_m);
+
   result.rows.reserve(grid_count);
   for (std::size_t bin = 0; bin < grid_count; ++bin) {
     SharedVerticalReferenceRow row;
     row.s_m = static_cast<double>(bin) * request.grid_spacing_m;
     row.sigma_m = request.sigma_m;
-    if (std::isfinite(rtk_median_by_bin[bin])) {
-      row.reference_up_m = rtk_median_by_bin[bin];
-      row.source = "RTK";
-      row.rtk_weight = 1.0;
+    if (std::isfinite(nav_bridge_by_bin[bin]) &&
+        bin < smoothed_offset_by_bin.size() &&
+        std::isfinite(smoothed_offset_by_bin[bin])) {
+      row.reference_up_m = nav_bridge_by_bin[bin] + smoothed_offset_by_bin[bin];
+      row.source =
+        std::isfinite(rtk_median_by_bin[bin]) ? "RTK_OFFSET_BRIDGE" : "NAV_BRIDGE_OFFSET";
+      row.rtk_weight = std::isfinite(rtk_median_by_bin[bin]) ? 1.0 : 0.0;
+      row.nav_bridge_weight = 1.0;
       row.sample_count = rtk_up_by_bin[bin].size();
+      if (row.sample_count == 0U) {
+        row.sample_count = nav_up_by_bin[bin].size();
+      }
     } else {
-      row.reference_up_m = Median(nav_up_by_bin[bin]);
-      row.source = std::isfinite(row.reference_up_m) ? "NAV_BRIDGE" : "UNOBSERVED";
-      row.nav_bridge_weight = std::isfinite(row.reference_up_m) ? 1.0 : 0.0;
-      row.sample_count = nav_up_by_bin[bin].size();
+      row.reference_up_m = rtk_median_by_bin[bin];
+      row.source = std::isfinite(row.reference_up_m) ? "RTK_FALLBACK" : "UNOBSERVED";
+      row.rtk_weight = std::isfinite(row.reference_up_m) ? 1.0 : 0.0;
+      row.sample_count = rtk_up_by_bin[bin].size();
     }
     result.rows.push_back(row);
   }

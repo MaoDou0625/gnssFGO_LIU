@@ -126,10 +126,36 @@ void TestSharedReferenceKeepsRtkAndUsesDebiasedBridge() {
   ExpectTrue(reference.rows.size() >= 5U, "shared reference should cover the longest member");
   ExpectNear(reference.rows[0].reference_up_m, 100.0, 0.02, "start should remain RTK dominated");
   ExpectNear(reference.rows[4].reference_up_m, 104.0, 0.02, "end should remain RTK dominated");
-  ExpectTrue(reference.rows[0].source == "RTK", "start source should be RTK");
-  ExpectTrue(reference.rows[4].source == "RTK", "end source should be RTK");
+  ExpectTrue(
+    reference.rows[0].source == "RTK_OFFSET_BRIDGE",
+    "start source should use smoothed RTK bridge");
+  ExpectTrue(
+    reference.rows[4].source == "RTK_OFFSET_BRIDGE",
+    "end source should use smoothed RTK bridge");
   ExpectNear(reference.rows[2].reference_up_m, 102.0, 0.03, "middle should use de-biased Stage2 bridge");
-  ExpectTrue(reference.rows[2].source == "NAV_BRIDGE", "middle source should be nav bridge");
+  ExpectTrue(
+    reference.rows[2].source == "NAV_BRIDGE_OFFSET",
+    "middle source should use interpolated RTK offset over nav bridge");
+}
+
+void TestSharedReferenceSmoothsNoisyRtkBins() {
+  offline_lc_minimal::SharedVerticalReferenceBuildRequest request;
+  request.grid_spacing_m = 1.0;
+  request.sigma_m = 0.02;
+  request.members.push_back(MakeMember("A", 0.0, 0.0));
+  request.members.push_back(MakeMember("B", 0.0, 0.2));
+  request.members.front().gnss_samples.push_back(MakeRtkSample(1.0, 101.0, 1.0));
+  request.members.front().gnss_samples.push_back(MakeRtkSample(2.0, 102.20, 2.0));
+  request.members.front().gnss_samples.push_back(MakeRtkSample(3.0, 103.0, 3.0));
+
+  const auto reference =
+    offline_lc_minimal::BuildSharedVerticalReference(std::move(request));
+
+  ExpectNear(
+    reference.rows[2].reference_up_m,
+    102.0,
+    0.06,
+    "noisy one-bin RTK height should be low-frequency corrected instead of copied");
 }
 
 void TestSharedReferenceRejectsSingleMember() {
@@ -153,6 +179,9 @@ int main() {
     RunTest(
       "TestSharedReferenceKeepsRtkAndUsesDebiasedBridge",
       TestSharedReferenceKeepsRtkAndUsesDebiasedBridge);
+    RunTest(
+      "TestSharedReferenceSmoothsNoisyRtkBins",
+      TestSharedReferenceSmoothsNoisyRtkBins);
     RunTest("TestSharedReferenceRejectsSingleMember", TestSharedReferenceRejectsSingleMember);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';
