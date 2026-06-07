@@ -83,10 +83,10 @@ void TestBuildStage3ReferenceFromSharedVerticalReference() {
     offline_lc_minimal::BuildStage3ReferenceFromSharedVerticalReference(request);
 
   ExpectTrue(reference.rows.size() == stage2.size(), "mapper should create one row per Stage2 state");
-  ExpectNear(reference.rows[0].stage2_lowpass_up_m, 100.0, 1e-9, "first reference should match shared start");
-  ExpectNear(reference.rows[1].stage2_lowpass_up_m, 101.0, 0.02, "middle reference should interpolate by s");
-  ExpectNear(reference.rows[2].stage2_lowpass_up_m, 102.0, 0.02, "last reference should match shared end");
-  ExpectNear(reference.rows[1].lowpass_delta_m, 50.0, 0.02, "delta should be shared minus Stage2 up");
+  ExpectNear(reference.rows[0].stage2_lowpass_up_m, 0.0, 1e-9, "first reference should convert height to local up");
+  ExpectNear(reference.rows[1].stage2_lowpass_up_m, 1.0, 0.02, "middle reference should convert interpolated height");
+  ExpectNear(reference.rows[2].stage2_lowpass_up_m, 2.0, 0.02, "last reference should convert height to local up");
+  ExpectNear(reference.rows[1].lowpass_delta_m, -50.0, 0.02, "delta should be local reference minus Stage2 up");
 }
 
 void TestMapperRejectsMissingOrigin() {

@@ -45,15 +45,15 @@ double LonAtDistance(const double s_m) {
 
 offline_lc_minimal::TrajectoryCsvRow MakeTrajectoryCsvRow(
   const double s_m,
-  const double up_m,
+  const double height_m,
   const double lateral_m = 0.0) {
   offline_lc_minimal::TrajectoryCsvRow row;
   row.trajectory.time_s = s_m;
-  row.trajectory.enu_position_m = Eigen::Vector3d(s_m, lateral_m, up_m);
+  row.trajectory.enu_position_m = Eigen::Vector3d(s_m, lateral_m, height_m - 100.0);
   row.trajectory.enu_velocity_mps = Eigen::Vector3d(1.0, 0.0, 0.0);
   row.lat_rad = kLat0Rad + lateral_m / kEarthRadiusM;
   row.lon_rad = LonAtDistance(s_m);
-  row.h_m = 100.0 + up_m;
+  row.h_m = height_m;
   row.has_geodetic = true;
   return row;
 }

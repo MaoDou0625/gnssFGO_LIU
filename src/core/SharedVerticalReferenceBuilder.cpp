@@ -195,7 +195,7 @@ std::vector<CommonMember> BuildCommonMembers(
       CommonTrajectoryPoint point;
       point.time_s = row.trajectory.time_s;
       point.xy_m = enu.head<2>();
-      point.up_m = row.trajectory.enu_position_m.z();
+      point.up_m = row.h_m;
       member.trajectory.push_back(point);
     }
     if (member.trajectory.size() < 2U) {
@@ -408,6 +408,8 @@ SharedVerticalReference BuildSharedVerticalReference(
       diagnostic.member_id = member.member_id;
       diagnostic.sample_kind = "RTKFIX";
       diagnostic.time_s = sample.time_s - member.config.gnss_time_offset_s;
+      const Eigen::Vector3d enu =
+        geo_reference.Forward(sample.lat_rad, sample.lon_rad, sample.h_m);
       diagnostic.raw_up_m = sample.h_m;
       if (!IsUsableRtkFixForSharedReference(member.config, sample)) {
         diagnostic.used = false;
@@ -415,8 +417,6 @@ SharedVerticalReference BuildSharedVerticalReference(
         result.projection_diagnostics.push_back(diagnostic);
         continue;
       }
-      const Eigen::Vector3d enu =
-        geo_reference.Forward(sample.lat_rad, sample.lon_rad, sample.h_m);
       const SharedReferenceProjection projection =
         ProjectPointToSharedReferenceLine(enu.head<2>(), result.reference_line);
       diagnostic.s_m = projection.s_m;

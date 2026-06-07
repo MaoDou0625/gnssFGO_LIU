@@ -128,12 +128,18 @@ Stage3VerticalReference BuildStage3ReferenceFromSharedVerticalReference(
         *request.shared_reference,
         projection.s_m,
         request.config->stage3_vertical_anchor_sigma_m);
+    if (!std::isfinite(csv_row.h_m)) {
+      throw std::runtime_error(
+        "Stage3 shared reference mapper requires finite h_m in Stage2 trajectory");
+    }
+    const double local_up_minus_height_m =
+      csv_row.trajectory.enu_position_m.z() - csv_row.h_m;
 
     Stage3VerticalReferenceDiagnosticRow row;
     row.state_index = index;
     row.time_s = csv_row.trajectory.time_s;
     row.stage2_up_m = csv_row.trajectory.enu_position_m.z();
-    row.stage2_lowpass_up_m = shared.up_m;
+    row.stage2_lowpass_up_m = shared.up_m + local_up_minus_height_m;
     row.lowpass_delta_m = row.stage2_lowpass_up_m - row.stage2_up_m;
     row.sigma_m = shared.sigma_m;
     row.factor_added = false;

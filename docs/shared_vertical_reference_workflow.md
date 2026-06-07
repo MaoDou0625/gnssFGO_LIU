@@ -50,4 +50,4 @@ python scripts/plot_shared_vertical_reference_profiles.py \
   --output shared_reference/stage3_shared_height_profiles.png
 ```
 
-The Stage3-only runner still uses the normal IMU, vertical jump, and vertical bias factors. It consumes Stage2 as the hold reference for attitude, horizontal position, horizontal velocity, and bias; only the vertical target comes from `z_shared(s)`.
+The shared reference stores group-level absolute height from `trajectory.csv` `h_m` and usable RTKFIX `h_m`. The Stage3-only runner converts that height back into each member's local ENU `up_m` before adding vertical factors. It still uses the normal IMU, vertical jump, and vertical bias factors. It consumes Stage2 as the hold reference for attitude, horizontal position, horizontal velocity, and bias; only the vertical target comes from `z_shared(s)`.

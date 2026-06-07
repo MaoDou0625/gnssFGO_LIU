@@ -119,7 +119,7 @@ def read_track(label: str, path: Path, line: list[ReferenceLinePoint]) -> Track:
     for row in read_csv_rows(path):
         lat_rad = safe_float(row.get("lat_rad"))
         lon_rad = safe_float(row.get("lon_rad"))
-        up_m = safe_float(row.get("up_m"))
+        up_m = safe_float(row.get("h_m"))
         time_s = safe_float(row.get("time_s"))
         if not (math.isfinite(lat_rad) and math.isfinite(lon_rad) and math.isfinite(up_m)):
             continue
