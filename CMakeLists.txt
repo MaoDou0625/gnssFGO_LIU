@@ -119,6 +119,7 @@ add_library(offline_lc_minimal_lib
   src/core/Stage2VelocityOptimizationRunner.cpp
   src/core/Stage2VelocityReference.cpp
   src/core/Stage3HeightOptimizationPolicy.cpp
+  src/core/Stage3SharedReferenceMapper.cpp
   src/core/Stage3JumpContextEnvelopePlanner.cpp
   src/core/Stage3JumpRegularizerConstraintBuilder.cpp
   src/core/Stage3VerticalReferenceConstraintBuilder.cpp
@@ -181,12 +182,21 @@ if(OFFLINE_LC_MINIMAL_BUILD_RUNNER)
     src/shared_vertical_reference_builder/main.cpp
   )
 
+  add_executable(offline_lc_stage3_runner
+    src/stage3_runner/main.cpp
+  )
+
   target_link_libraries(offline_lc_runner
     PRIVATE
       offline_lc_minimal_lib
   )
 
   target_link_libraries(offline_lc_shared_vertical_reference_builder
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(offline_lc_stage3_runner
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -200,6 +210,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_RUNNER)
     )
     set_target_properties(
       offline_lc_shared_vertical_reference_builder
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      offline_lc_stage3_runner
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -304,6 +320,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
 
   add_executable(stage3_vertical_reference_test
     tests/stage3_vertical_reference_test.cpp
+  )
+
+  add_executable(stage3_shared_reference_mapper_test
+    tests/stage3_shared_reference_mapper_test.cpp
   )
 
   target_compile_definitions(config_test
@@ -427,6 +447,11 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(stage3_vertical_reference_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(stage3_shared_reference_mapper_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -572,6 +597,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       stage3_vertical_reference_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      stage3_shared_reference_mapper_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -747,6 +778,13 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
         $<TARGET_FILE:stage3_vertical_reference_test>
     )
+    add_test(
+      NAME stage3_shared_reference_mapper_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:stage3_shared_reference_mapper_test>
+    )
   else()
     add_test(
       NAME vertical_rtk_factors_test
@@ -839,6 +877,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     add_test(
       NAME stage3_vertical_reference_test
       COMMAND $<TARGET_FILE:stage3_vertical_reference_test>
+    )
+    add_test(
+      NAME stage3_shared_reference_mapper_test
+      COMMAND $<TARGET_FILE:stage3_shared_reference_mapper_test>
     )
   endif()
 endif()

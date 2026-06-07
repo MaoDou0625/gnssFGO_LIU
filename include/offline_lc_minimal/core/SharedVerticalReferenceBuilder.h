@@ -30,6 +30,9 @@ struct SharedReferenceLinePoint {
   double s_m = 0.0;
   double east_m = 0.0;
   double north_m = 0.0;
+  double origin_lat_rad = std::numeric_limits<double>::quiet_NaN();
+  double origin_lon_rad = std::numeric_limits<double>::quiet_NaN();
+  double origin_h_m = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct SharedReferenceProjection {

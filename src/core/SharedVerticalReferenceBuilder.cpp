@@ -237,13 +237,17 @@ std::size_t LongestMemberIndex(const std::vector<CommonMember> &members) {
 }
 
 std::vector<SharedReferenceLinePoint> BuildReferenceLine(
-  const std::vector<CommonTrajectoryPoint> &points) {
+  const std::vector<CommonTrajectoryPoint> &points,
+  const GeoReference &geo_reference) {
   std::vector<SharedReferenceLinePoint> line;
   line.reserve(points.size());
   SharedReferenceLinePoint first;
   first.s_m = 0.0;
   first.east_m = points.front().xy_m.x();
   first.north_m = points.front().xy_m.y();
+  first.origin_lat_rad = geo_reference.origin_lat_rad();
+  first.origin_lon_rad = geo_reference.origin_lon_rad();
+  first.origin_h_m = geo_reference.origin_h_m();
   line.push_back(first);
 
   double s_m = 0.0;
@@ -258,6 +262,9 @@ std::vector<SharedReferenceLinePoint> BuildReferenceLine(
     row.s_m = s_m;
     row.east_m = points[index].xy_m.x();
     row.north_m = points[index].xy_m.y();
+    row.origin_lat_rad = geo_reference.origin_lat_rad();
+    row.origin_lon_rad = geo_reference.origin_lon_rad();
+    row.origin_h_m = geo_reference.origin_h_m();
     line.push_back(row);
     previous = points[index].xy_m;
   }
@@ -388,7 +395,7 @@ SharedVerticalReference BuildSharedVerticalReference(
   const std::size_t reference_index = LongestMemberIndex(members);
   SharedVerticalReference result;
   result.reference_member_id = members[reference_index].member_id;
-  result.reference_line = BuildReferenceLine(members[reference_index].trajectory);
+  result.reference_line = BuildReferenceLine(members[reference_index].trajectory, geo_reference);
   const double max_s_m = result.reference_line.back().s_m;
   const std::size_t grid_count =
     static_cast<std::size_t>(std::floor(max_s_m / request.grid_spacing_m)) + 1U;
@@ -527,9 +534,11 @@ void WriteSharedReferenceLineCsv(
     throw std::runtime_error("failed to write shared reference line: " + path.string());
   }
   stream << std::setprecision(17);
-  stream << "s_m,east_m,north_m\n";
+  stream << "s_m,east_m,north_m,origin_lat_rad,origin_lon_rad,origin_h_m\n";
   for (const auto &row : rows) {
-    stream << row.s_m << ',' << row.east_m << ',' << row.north_m << '\n';
+    stream << row.s_m << ',' << row.east_m << ',' << row.north_m << ','
+           << row.origin_lat_rad << ',' << row.origin_lon_rad << ','
+           << row.origin_h_m << '\n';
   }
 }
 
@@ -608,6 +617,9 @@ std::vector<SharedReferenceLinePoint> ReadSharedReferenceLineCsv(
   const std::size_t s_col = RequiredColumn(columns, "s_m");
   const std::size_t east_col = RequiredColumn(columns, "east_m");
   const std::size_t north_col = RequiredColumn(columns, "north_m");
+  const auto origin_lat_it = columns.find("origin_lat_rad");
+  const auto origin_lon_it = columns.find("origin_lon_rad");
+  const auto origin_h_it = columns.find("origin_h_m");
   std::vector<SharedReferenceLinePoint> rows;
   while (std::getline(stream, line)) {
     if (Trim(line).empty()) {
@@ -618,6 +630,13 @@ std::vector<SharedReferenceLinePoint> ReadSharedReferenceLineCsv(
     row.s_m = ParseDouble(fields, s_col, "s_m");
     row.east_m = ParseDouble(fields, east_col, "east_m");
     row.north_m = ParseDouble(fields, north_col, "north_m");
+    if (origin_lat_it != columns.end() &&
+        origin_lon_it != columns.end() &&
+        origin_h_it != columns.end()) {
+      row.origin_lat_rad = ParseDouble(fields, origin_lat_it->second, "origin_lat_rad");
+      row.origin_lon_rad = ParseDouble(fields, origin_lon_it->second, "origin_lon_rad");
+      row.origin_h_m = ParseDouble(fields, origin_h_it->second, "origin_h_m");
+    }
     rows.push_back(row);
   }
   if (rows.size() < 2U) {
