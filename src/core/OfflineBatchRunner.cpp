@@ -1926,6 +1926,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     stage2_lowpass_vertical_reference_.get();
   gnss_request.collect_consistency_records = collect_gnss_consistency;
   gnss_request.dynamic_start_time_s = dynamic_start_time_s;
+  gnss_request.disable_horizontal_factors = active_stage3_vertical_reference != nullptr;
   gnss_request.disable_vertical_factors = active_stage3_vertical_reference != nullptr;
   gnss_request.should_use_sample = [&](const GnssSolutionSample &sample) {
     return ShouldUseGnssFactor(sample, run_result.run_summary);

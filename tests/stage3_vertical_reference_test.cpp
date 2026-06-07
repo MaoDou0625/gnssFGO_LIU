@@ -1034,10 +1034,25 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
   config.stage3_disable_rtk_outage_segmented_batch = true;
   config.enable_rtk_vertical_drift_reference = true;
   config.enable_rtk_vertical_lowpass_reference = true;
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_velocity_delta_3d = true;
   config.enable_rtk_outage_causal_drift_reference = true;
   config.enable_rtk_outage_preoutage_vertical_fence = true;
   config.enable_late_static_detection = true;
+  config.enable_initial_static_rtk_height_reference = true;
+  config.enable_initial_dynamic_static_detection = true;
+  config.enable_initial_dynamic_static_lowpass_protection = true;
+  config.enable_initial_dynamic_static_vz_constraint = true;
   config.enable_vertical_jump_bias = true;
+  config.enable_vertical_jump_segmented_bias = true;
+  config.enable_vertical_jump_spectral_bias_relaxation = true;
+  config.enable_vertical_jump_velocity_ramp_smoothing = true;
+  config.enable_vertical_jump_position_ramp_smoothing = true;
+  config.enable_vertical_jump_velocity_continuity = true;
+  config.enable_vertical_jump_velocity_context_mean = true;
+  config.enable_vertical_jump_context_mean_continuity = true;
+  config.enable_vertical_jump_position_velocity_consistency = true;
+  config.enable_vertical_jump_velocity_height_slope_constraint = true;
   config.enable_attitude_reference_constraint = true;
   config.enable_base_graph_tilt_reference_constraint = true;
   config.enable_stage3_jump_velocity_smoothness_regularizer = true;
@@ -1052,10 +1067,25 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
     bool enable_segmented_batch = false;
     bool enable_rtk_vertical_drift = false;
     bool enable_rtk_vertical_lowpass = false;
+    bool enable_rtk_outage_smoothing = false;
+    bool enable_rtk_outage_velocity_delta_3d = false;
     bool enable_causal_reference = false;
     bool enable_preoutage_fence = false;
     bool enable_late_static = false;
+    bool enable_initial_static_rtk_height = false;
+    bool enable_initial_dynamic_static = false;
+    bool enable_initial_dynamic_static_lowpass = false;
+    bool enable_initial_dynamic_static_vz = false;
     bool enable_vertical_jump_bias = false;
+    bool enable_vertical_jump_segmented_bias = false;
+    bool enable_vertical_jump_spectral = false;
+    bool enable_vertical_jump_velocity_ramp = false;
+    bool enable_vertical_jump_position_ramp = false;
+    bool enable_vertical_jump_velocity_continuity = false;
+    bool enable_vertical_jump_velocity_context_mean = false;
+    bool enable_vertical_jump_context_mean_continuity = false;
+    bool enable_vertical_jump_position_velocity = false;
+    bool enable_vertical_jump_height_slope = false;
     bool enable_body_z_nhc = false;
     bool enable_stage2_vehicle_nhc = false;
     bool enable_attitude_reference = false;
@@ -1083,10 +1113,25 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
       run_config.enable_rtk_outage_segmented_batch,
       run_config.enable_rtk_vertical_drift_reference,
       run_config.enable_rtk_vertical_lowpass_reference,
+      run_config.enable_rtk_outage_smoothing,
+      run_config.enable_rtk_outage_velocity_delta_3d,
       run_config.enable_rtk_outage_causal_drift_reference,
       run_config.enable_rtk_outage_preoutage_vertical_fence,
       run_config.enable_late_static_detection,
+      run_config.enable_initial_static_rtk_height_reference,
+      run_config.enable_initial_dynamic_static_detection,
+      run_config.enable_initial_dynamic_static_lowpass_protection,
+      run_config.enable_initial_dynamic_static_vz_constraint,
       run_config.enable_vertical_jump_bias,
+      run_config.enable_vertical_jump_segmented_bias,
+      run_config.enable_vertical_jump_spectral_bias_relaxation,
+      run_config.enable_vertical_jump_velocity_ramp_smoothing,
+      run_config.enable_vertical_jump_position_ramp_smoothing,
+      run_config.enable_vertical_jump_velocity_continuity,
+      run_config.enable_vertical_jump_velocity_context_mean,
+      run_config.enable_vertical_jump_context_mean_continuity,
+      run_config.enable_vertical_jump_position_velocity_consistency,
+      run_config.enable_vertical_jump_velocity_height_slope_constraint,
       run_config.enable_body_z_nhc_constraint,
       run_config.enable_stage2_vehicle_nhc_constraint,
       run_config.enable_attitude_reference_constraint,
@@ -1132,11 +1177,48 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
   ExpectTrue(!calls[1].enable_segmented_batch, "Stage3 pass should disable RTK outage segmented batch");
   ExpectTrue(!calls[1].enable_rtk_vertical_drift, "Stage3 pass should disable RTK vertical drift reference");
   ExpectTrue(!calls[1].enable_rtk_vertical_lowpass, "Stage3 pass should disable RTK vertical lowpass reference");
+  ExpectTrue(!calls[1].enable_rtk_outage_smoothing, "Stage3 pass should disable RTK outage smoothing");
+  ExpectTrue(!calls[1].enable_rtk_outage_velocity_delta_3d, "Stage3 pass should disable outage 3D velocity delta");
   ExpectTrue(!calls[1].enable_causal_reference, "Stage3 pass should disable causal RTK drift reference");
   ExpectTrue(!calls[1].enable_preoutage_fence, "Stage3 pass should disable pre-outage vertical fence");
   ExpectTrue(!calls[1].enable_late_static, "Stage3 pass should disable late-static raw RTK height anchors");
+  ExpectTrue(!calls[1].enable_initial_static_rtk_height, "Stage3 pass should disable initial static RTK height anchors");
+  ExpectTrue(!calls[1].enable_initial_dynamic_static, "Stage3 pass should disable initial dynamic static detection");
+  ExpectTrue(
+    !calls[1].enable_initial_dynamic_static_lowpass,
+    "Stage3 pass should not protect its final reference with raw initial dynamic static windows");
+  ExpectTrue(
+    !calls[1].enable_initial_dynamic_static_vz,
+    "Stage3 pass should not add initial dynamic static vertical factors");
   ExpectTrue(calls[0].enable_vertical_jump_bias, "Stage2 source pass should keep requested jump bias");
-  ExpectTrue(calls[1].enable_vertical_jump_bias, "Stage3 pass should keep requested jump bias");
+  ExpectTrue(!calls[1].enable_vertical_jump_bias, "Stage3 pass should clear vertical jump bias factors");
+  ExpectTrue(
+    !calls[1].enable_vertical_jump_segmented_bias,
+    "Stage3 pass should clear segmented vertical jump bias factors");
+  ExpectTrue(
+    !calls[1].enable_vertical_jump_spectral,
+    "Stage3 pass should clear spectral vertical jump relaxation");
+  ExpectTrue(
+    !calls[1].enable_vertical_jump_velocity_ramp,
+    "Stage3 pass should clear vertical jump velocity ramp factors");
+  ExpectTrue(
+    !calls[1].enable_vertical_jump_position_ramp,
+    "Stage3 pass should clear vertical jump position ramp factors");
+  ExpectTrue(
+    !calls[1].enable_vertical_jump_velocity_continuity,
+    "Stage3 pass should clear vertical jump velocity continuity factors");
+  ExpectTrue(
+    !calls[1].enable_vertical_jump_velocity_context_mean,
+    "Stage3 pass should clear vertical jump context mean factors");
+  ExpectTrue(
+    !calls[1].enable_vertical_jump_context_mean_continuity,
+    "Stage3 pass should clear vertical jump context mean continuity factors");
+  ExpectTrue(
+    !calls[1].enable_vertical_jump_position_velocity,
+    "Stage3 pass should clear vertical jump position-velocity factors");
+  ExpectTrue(
+    !calls[1].enable_vertical_jump_height_slope,
+    "Stage3 pass should clear vertical jump height-slope factors");
   ExpectTrue(!calls[1].enable_body_z_nhc, "Stage3 pass should keep Stage2 policy's Body-Z NHC disabled");
   ExpectTrue(
     !calls[1].enable_stage2_vehicle_nhc,

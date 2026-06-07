@@ -258,31 +258,42 @@ void GnssFactorBuilder::Build() const {
         std::numeric_limits<double>::quiet_NaN();
     }
 
+    const bool add_horizontal_factor = !request_.disable_horizontal_factors;
+    const bool add_vertical_factor =
+      !request_.disable_vertical_factors && vertical_reference.valid;
     bool factor_used = false;
     if (sync_result.status == StateMeasSyncStatus::kSynchronizedI ||
         sync_result.status == StateMeasSyncStatus::kSynchronizedJ) {
-      AddSynchronizedFactors(
-        sample,
-        sample_index,
-        corrected_time_s,
-        sync_result,
-        sigma_m,
-        vertical_reference,
-        *vertical_policy);
-      factor_used = true;
-      ++request_.run_summary->gnss_synced_factor_count;
+      if (add_horizontal_factor || add_vertical_factor) {
+        AddSynchronizedFactors(
+          sample,
+          sample_index,
+          corrected_time_s,
+          sync_result,
+          sigma_m,
+          vertical_reference,
+          add_horizontal_factor,
+          add_vertical_factor,
+          *vertical_policy);
+        factor_used = true;
+        ++request_.run_summary->gnss_synced_factor_count;
+      }
     } else if (sync_result.status == StateMeasSyncStatus::kInterpolated &&
                request_.config->enable_gp_interpolated_gnss) {
-      AddInterpolatedFactors(
-        sample,
-        sample_index,
-        corrected_time_s,
-        sync_result,
-        sigma_m,
-        vertical_reference,
-        *vertical_policy);
-      factor_used = true;
-      ++request_.run_summary->gnss_interpolated_factor_count;
+      if (add_horizontal_factor || add_vertical_factor) {
+        AddInterpolatedFactors(
+          sample,
+          sample_index,
+          corrected_time_s,
+          sync_result,
+          sigma_m,
+          vertical_reference,
+          add_horizontal_factor,
+          add_vertical_factor,
+          *vertical_policy);
+        factor_used = true;
+        ++request_.run_summary->gnss_interpolated_factor_count;
+      }
     } else if (sync_result.status == StateMeasSyncStatus::kCached) {
       ++request_.run_summary->gnss_cached_count;
     } else {
@@ -310,19 +321,23 @@ void GnssFactorBuilder::AddSynchronizedFactors(
   const StateMeasSyncResult &sync_result,
   const Eigen::Vector3d &sigma_m,
   const GnssVerticalReferenceSelection &vertical_reference,
+  const bool add_horizontal_factor,
+  const bool add_vertical_factor,
   const VerticalConstraintPolicy &vertical_policy) const {
   const std::size_t state_index =
     sync_result.status == StateMeasSyncStatus::kSynchronizedI ? sync_result.key_index_i
                                                               : sync_result.key_index_j;
-  const gtsam::Point2 horizontal_measurement(
-    sample.enu_position_m.x(),
-    sample.enu_position_m.y());
-  const auto horizontal_noise = MakeHorizontalNoiseModel(*request_.config, sigma_m);
-  request_.graph->add(factor::HorizontalPositionFactor(
-    symbol::X(state_index),
-    horizontal_measurement,
-    horizontal_noise));
-  if (request_.disable_vertical_factors || !vertical_reference.valid) {
+  if (add_horizontal_factor) {
+    const gtsam::Point2 horizontal_measurement(
+      sample.enu_position_m.x(),
+      sample.enu_position_m.y());
+    const auto horizontal_noise = MakeHorizontalNoiseModel(*request_.config, sigma_m);
+    request_.graph->add(factor::HorizontalPositionFactor(
+      symbol::X(state_index),
+      horizontal_measurement,
+      horizontal_noise));
+  }
+  if (!add_vertical_factor) {
     return;
   }
   VerticalConstraintPolicyContext context;
@@ -340,6 +355,8 @@ void GnssFactorBuilder::AddInterpolatedFactors(
   const StateMeasSyncResult &sync_result,
   const Eigen::Vector3d &sigma_m,
   const GnssVerticalReferenceSelection &vertical_reference,
+  const bool add_horizontal_factor,
+  const bool add_vertical_factor,
   const VerticalConstraintPolicy &vertical_policy) const {
   const auto qc_model =
     gtsam::noiseModel::Diagonal::Variances(gtsam::Vector6::Constant(kInterpolatorQcVariance));
@@ -347,22 +364,24 @@ void GnssFactorBuilder::AddInterpolatedFactors(
     qc_model,
     sync_result.timestamp_j_s - sync_result.timestamp_i_s,
     sync_result.duration_from_state_i_s);
-  const gtsam::Point2 horizontal_measurement(
-    sample.enu_position_m.x(),
-    sample.enu_position_m.y());
-  const auto horizontal_noise = MakeHorizontalNoiseModel(*request_.config, sigma_m);
-  request_.graph->add(factor::GPInterpolatedHorizontalPositionFactor(
-    symbol::X(sync_result.key_index_i),
-    symbol::V(sync_result.key_index_i),
-    symbol::W(sync_result.key_index_i),
-    symbol::X(sync_result.key_index_j),
-    symbol::V(sync_result.key_index_j),
-    symbol::W(sync_result.key_index_j),
-    horizontal_measurement,
-    gtsam::Vector3::Zero(),
-    horizontal_noise,
-    interpolator));
-  if (request_.disable_vertical_factors || !vertical_reference.valid) {
+  if (add_horizontal_factor) {
+    const gtsam::Point2 horizontal_measurement(
+      sample.enu_position_m.x(),
+      sample.enu_position_m.y());
+    const auto horizontal_noise = MakeHorizontalNoiseModel(*request_.config, sigma_m);
+    request_.graph->add(factor::GPInterpolatedHorizontalPositionFactor(
+      symbol::X(sync_result.key_index_i),
+      symbol::V(sync_result.key_index_i),
+      symbol::W(sync_result.key_index_i),
+      symbol::X(sync_result.key_index_j),
+      symbol::V(sync_result.key_index_j),
+      symbol::W(sync_result.key_index_j),
+      horizontal_measurement,
+      gtsam::Vector3::Zero(),
+      horizontal_noise,
+      interpolator));
+  }
+  if (!add_vertical_factor) {
     return;
   }
   VerticalConstraintPolicyContext context;

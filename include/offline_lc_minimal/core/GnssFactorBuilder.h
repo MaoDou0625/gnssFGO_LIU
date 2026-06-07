@@ -31,6 +31,7 @@ struct GnssFactorBuildRequest {
   const Stage3VerticalReference *stage2_lowpass_vertical_reference = nullptr;
   bool collect_consistency_records = false;
   double dynamic_start_time_s = 0.0;
+  bool disable_horizontal_factors = false;
   bool disable_vertical_factors = false;
 
   std::function<bool(const GnssSolutionSample &sample)> should_use_sample;
@@ -56,6 +57,8 @@ class GnssFactorBuilder {
     const StateMeasSyncResult &sync_result,
     const Eigen::Vector3d &sigma_m,
     const GnssVerticalReferenceSelection &vertical_reference,
+    bool add_horizontal_factor,
+    bool add_vertical_factor,
     const VerticalConstraintPolicy &vertical_policy) const;
   void AddInterpolatedFactors(
     const GnssSolutionSample &sample,
@@ -64,6 +67,8 @@ class GnssFactorBuilder {
     const StateMeasSyncResult &sync_result,
     const Eigen::Vector3d &sigma_m,
     const GnssVerticalReferenceSelection &vertical_reference,
+    bool add_horizontal_factor,
+    bool add_vertical_factor,
     const VerticalConstraintPolicy &vertical_policy) const;
   void UpdateTrajectoryRows(const GnssSolutionSample &sample, const GnssFactorRecord &record) const;
 

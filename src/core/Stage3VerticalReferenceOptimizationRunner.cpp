@@ -4,39 +4,10 @@
 #include <stdexcept>
 #include <utility>
 
-#include "offline_lc_minimal/core/OptimizationStagePolicy.h"
-#include "offline_lc_minimal/core/RtkOutageSegmentationPolicy.h"
+#include "offline_lc_minimal/core/Stage3HeightOptimizationPolicy.h"
 
 namespace offline_lc_minimal {
 namespace {
-
-OfflineRunnerConfig MakeStage2SourceConfig(OfflineRunnerConfig config) {
-  config.enable_stage3_vertical_reference_optimization = false;
-  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
-  config.enable_stage3_jump_velocity_smoothness_regularizer = false;
-  config.enable_stage3_jump_height_highfreq_deadband = false;
-  config.enable_stage3_jump_adaptive_context_envelope = false;
-  return config;
-}
-
-OfflineRunnerConfig MakeStage3Config(OfflineRunnerConfig config) {
-  config = MakeStage2VelocityOptimizationConfig(config);
-  config.enable_stage3_vertical_reference_optimization = false;
-  config.enable_attitude_reference_constraint = false;
-  config.enable_base_graph_tilt_reference_constraint = false;
-  config.enable_stage3_jump_velocity_smoothness_regularizer = false;
-  config.enable_stage3_jump_height_highfreq_deadband = false;
-  config.enable_stage3_jump_adaptive_context_envelope = false;
-  config = DisableRtkOutageSegmentedBatchRecursion(std::move(config));
-  config.enable_rtk_vertical_drift_reference = false;
-  config.enable_rtk_vertical_lowpass_reference = false;
-  config.enable_rtk_outage_causal_drift_reference = false;
-  config.enable_rtk_outage_preoutage_vertical_fence = false;
-  config.enable_late_static_detection = false;
-  config.enable_stage2_vehicle_nhc_constraint = false;
-  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
-  return config;
-}
 
 std::shared_ptr<Stage2VelocityReference> MakeStage2ReferenceFromResult(
   const OfflineRunResult &stage2_result,
@@ -139,7 +110,8 @@ OfflineRunResult Stage3VerticalReferenceOptimizationRunner::Run() const {
     throw std::runtime_error("Stage3 vertical reference optimization requires a run_once callback");
   }
 
-  OfflineRunnerConfig stage2_config = MakeStage2SourceConfig(request_.config);
+  OfflineRunnerConfig stage2_config =
+    MakeStage3HeightReferenceSourceConfig(request_.config);
   OfflineRunResult stage2_result =
     request_.run_once(stage2_config, nullptr, nullptr, request_.dataset);
   if (stage2_result.run_summary.stage1_yaw_refinement_enabled &&
@@ -163,7 +135,8 @@ OfflineRunResult Stage3VerticalReferenceOptimizationRunner::Run() const {
     std::make_shared<Stage3VerticalReference>(
       Stage3VerticalReferenceProfilePlanner(std::move(plan_request)).Plan());
 
-  OfflineRunnerConfig stage3_config = MakeStage3Config(request_.config);
+  OfflineRunnerConfig stage3_config =
+    MakeStage3HeightOptimizationConfig(request_.config);
   OfflineRunResult stage3_result =
     request_.run_once(
       stage3_config,
