@@ -491,11 +491,6 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   const bool enable_stage3_jump_regularizer =
     config.enable_stage3_jump_velocity_smoothness_regularizer ||
     config.enable_stage3_jump_height_highfreq_deadband;
-  if (enable_stage3_jump_regularizer &&
-      !config.enable_stage3_vertical_reference_optimization) {
-    throw std::runtime_error(
-      "Stage3 jump regularizers require Stage3 vertical reference optimization");
-  }
   if (!std::isfinite(config.stage3_jump_velocity_smoothness_deadband_mps) ||
       !std::isfinite(config.stage3_jump_velocity_smoothness_sigma_mps) ||
       config.stage3_jump_velocity_smoothness_deadband_mps < 0.0 ||

@@ -83,10 +83,52 @@ void TestBuildStage3ReferenceFromSharedVerticalReference() {
     offline_lc_minimal::BuildStage3ReferenceFromSharedVerticalReference(request);
 
   ExpectTrue(reference.rows.size() == stage2.size(), "mapper should create one row per Stage2 state");
-  ExpectNear(reference.rows[0].stage2_lowpass_up_m, 0.0, 1e-9, "first reference should convert height to local up");
+  ExpectNear(reference.rows[0].stage2_lowpass_up_m, 0.0, 1e-3, "first reference should convert height to local up");
   ExpectNear(reference.rows[1].stage2_lowpass_up_m, 1.0, 0.02, "middle reference should convert interpolated height");
   ExpectNear(reference.rows[2].stage2_lowpass_up_m, 2.0, 0.02, "last reference should convert height to local up");
   ExpectNear(reference.rows[1].lowpass_delta_m, -50.0, 0.02, "delta should be local reference minus Stage2 up");
+}
+
+void TestMapperPreservesStage2ShortwaveTexture() {
+  const offline_lc_minimal::OfflineRunnerConfig config =
+    offline_lc_minimal::DefaultConfig();
+  std::vector<offline_lc_minimal::TrajectoryCsvRow> stage2;
+  std::vector<offline_lc_minimal::SharedVerticalReferenceRow> shared;
+  constexpr std::size_t kCount = 9U;
+  for (std::size_t index = 0U; index < kCount; ++index) {
+    const double s_m = static_cast<double>(index);
+    const double smooth_up_m = 20.0 + 0.1 * s_m;
+    const double texture_m = (index % 2U) == 0U ? 0.2 : -0.2;
+    stage2.push_back(MakeTrajectoryRow(s_m, smooth_up_m + texture_m));
+    shared.push_back(
+      {s_m, 100.0 + smooth_up_m + 2.0, 0.02, "NAV_BRIDGE", 0.0, 1.0, 1U});
+  }
+  std::vector<offline_lc_minimal::SharedReferenceLinePoint> line{
+    {0.0, 0.0, 0.0, kLat0Rad, kLon0Rad, 100.0},
+    {static_cast<double>(kCount - 1U), static_cast<double>(kCount - 1U), 0.0, kLat0Rad, kLon0Rad, 100.0},
+  };
+
+  offline_lc_minimal::Stage3SharedReferenceMapRequest request;
+  request.config = &config;
+  request.stage2_trajectory = &stage2;
+  request.shared_reference = &shared;
+  request.shared_reference_line = &line;
+  const auto reference =
+    offline_lc_minimal::BuildStage3ReferenceFromSharedVerticalReference(request);
+
+  const std::size_t center_index = 4U;
+  const double shared_local_up_m =
+    shared[center_index].reference_up_m - 100.0;
+  const double preserved_texture_m =
+    reference.rows[center_index].stage2_lowpass_up_m - shared_local_up_m;
+  ExpectTrue(
+    preserved_texture_m > 0.10,
+    "mapper should preserve Stage2 shortwave texture instead of collapsing to shared lowpass height");
+  ExpectNear(
+    reference.rows[center_index].lowpass_delta_m,
+    2.0,
+    0.15,
+    "mapper should apply a low-frequency shared correction");
 }
 
 void TestMapperRejectsMissingOrigin() {
@@ -125,6 +167,9 @@ int main() {
     RunTest(
       "TestBuildStage3ReferenceFromSharedVerticalReference",
       TestBuildStage3ReferenceFromSharedVerticalReference);
+    RunTest(
+      "TestMapperPreservesStage2ShortwaveTexture",
+      TestMapperPreservesStage2ShortwaveTexture);
     RunTest("TestMapperRejectsMissingOrigin", TestMapperRejectsMissingOrigin);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';

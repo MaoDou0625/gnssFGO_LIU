@@ -119,6 +119,7 @@ add_library(offline_lc_minimal_lib
   src/core/Stage2VelocityOptimizationRunner.cpp
   src/core/Stage2VelocityReference.cpp
   src/core/Stage3HeightOptimizationPolicy.cpp
+  src/core/Stage3SharedReferenceDeltaSmoother.cpp
   src/core/Stage3SharedReferenceMapper.cpp
   src/core/Stage3JumpContextEnvelopePlanner.cpp
   src/core/Stage3JumpRegularizerConstraintBuilder.cpp

@@ -61,7 +61,6 @@ OfflineRunnerConfig MakeStage3HeightOptimizationConfig(
   config.enable_stage3_vertical_reference_optimization = false;
 
   DisableRtkDriftAndOutageVerticalReferences(config);
-  DisableStage3LegacyJumpRegularizers(config);
   DisableCompetingAttitudeAndHorizontalSolvers(config);
   DisableRawRtkStaticVerticalPulls(config);
 

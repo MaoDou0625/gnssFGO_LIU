@@ -1236,14 +1236,14 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
     !calls[1].enable_base_graph_tilt_reference,
     "Stage3 pass should not use base-graph tilt as a competing attitude reference");
   ExpectTrue(
-    !calls[1].enable_stage3_jump_velocity_regularizer,
-    "Stage3 pass should not use the legacy Stage3 jump velocity regularizer");
+    calls[1].enable_stage3_jump_velocity_regularizer,
+    "Stage3 pass should keep requested Stage3 jump velocity regularizer");
   ExpectTrue(
-    !calls[1].enable_stage3_jump_height_deadband,
-    "Stage3 pass should not use the legacy Stage3 jump height deadband");
+    calls[1].enable_stage3_jump_height_deadband,
+    "Stage3 pass should keep requested Stage3 jump height deadband");
   ExpectTrue(
-    !calls[1].enable_stage3_jump_adaptive_context,
-    "Stage3 pass should not use the legacy Stage3 jump context envelope");
+    calls[1].enable_stage3_jump_adaptive_context,
+    "Stage3 pass should keep requested Stage3 jump context envelope");
   ExpectTrue(
     !calls[1].stage3_disable_stage2_vehicle_nhc,
     "Stage3 child config should clear wrapper-only vehicle NHC switches");

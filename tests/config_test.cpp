@@ -946,8 +946,8 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
     std::abs(config.stage3_vertical_reference_spline_smooth_lambda - 10000.0) < 1e-12,
     "default Stage3 spline smoothness lambda should match the tuned value");
   ExpectTrue(
-    std::abs(config.stage3_vertical_anchor_sigma_m - 0.005) < 1e-15,
-    "default Stage3 vertical anchor sigma should match the v2.0 release setting");
+    std::abs(config.stage3_vertical_anchor_sigma_m - 0.002) < 1e-15,
+    "default Stage3 vertical anchor sigma should use the texture-preserving tuned setting");
   ExpectTrue(
     config.stage3_disable_stage2_vehicle_nhc_constraint,
     "default Stage3 pass should disable vehicle NHC to keep the vertical reference dominant");
@@ -2736,13 +2736,7 @@ void TestStage3VerticalReferenceConfigValidation() {
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_stage3_jump_velocity_smoothness_regularizer = true;
-  threw = false;
-  try {
-    offline_lc_minimal::ValidateConfig(config);
-  } catch (const std::runtime_error &exception) {
-    threw = std::string(exception.what()).find("Stage3 jump regularizers") != std::string::npos;
-  }
-  ExpectTrue(threw, "Stage3 jump regularizer should require Stage3");
+  offline_lc_minimal::ValidateConfig(config);
 
   config = offline_lc_minimal::DefaultConfig();
   config.stage3_jump_velocity_smoothness_sigma_mps = 0.0;

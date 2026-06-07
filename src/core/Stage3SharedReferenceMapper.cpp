@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "offline_lc_minimal/common/GeoUtils.h"
+#include "offline_lc_minimal/core/Stage3SharedReferenceDeltaSmoother.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -14,6 +15,11 @@ struct InterpolatedSharedReference {
   double up_m = std::numeric_limits<double>::quiet_NaN();
   double sigma_m = std::numeric_limits<double>::quiet_NaN();
   std::string source = "UNSET";
+};
+
+struct MappedSharedReferenceRow {
+  Stage3VerticalReferenceDiagnosticRow row;
+  Stage3SharedReferenceDeltaSample delta_sample;
 };
 
 void ValidateSharedReferenceRows(
@@ -107,7 +113,10 @@ Stage3VerticalReference BuildStage3ReferenceFromSharedVerticalReference(
 
   Stage3VerticalReference reference;
   reference.source_config = std::make_shared<OfflineRunnerConfig>(*request.config);
-  reference.rows.reserve(request.stage2_trajectory->size());
+  std::vector<MappedSharedReferenceRow> mapped_rows;
+  mapped_rows.reserve(request.stage2_trajectory->size());
+  std::vector<Stage3SharedReferenceDeltaSample> delta_samples;
+  delta_samples.reserve(request.stage2_trajectory->size());
   for (std::size_t index = 0; index < request.stage2_trajectory->size(); ++index) {
     const TrajectoryCsvRow &csv_row = (*request.stage2_trajectory)[index];
     if (!csv_row.has_geodetic) {
@@ -132,18 +141,29 @@ Stage3VerticalReference BuildStage3ReferenceFromSharedVerticalReference(
       throw std::runtime_error(
         "Stage3 shared reference mapper requires finite h_m in Stage2 trajectory");
     }
-    const double local_up_minus_height_m =
-      csv_row.trajectory.enu_position_m.z() - csv_row.h_m;
-
     Stage3VerticalReferenceDiagnosticRow row;
     row.state_index = index;
     row.time_s = csv_row.trajectory.time_s;
     row.stage2_up_m = csv_row.trajectory.enu_position_m.z();
-    row.stage2_lowpass_up_m = shared.up_m + local_up_minus_height_m;
-    row.lowpass_delta_m = row.stage2_lowpass_up_m - row.stage2_up_m;
     row.sigma_m = shared.sigma_m;
     row.factor_added = false;
     row.skip_reason = "SHARED_" + shared.source;
+    const Stage3SharedReferenceDeltaSample delta_sample{
+      projection.s_m,
+      shared.up_m - csv_row.h_m};
+    delta_samples.push_back(delta_sample);
+    mapped_rows.push_back(MappedSharedReferenceRow{row, delta_sample});
+  }
+  const std::vector<double> smoothed_delta_m =
+    SmoothStage3SharedReferenceDelta(delta_samples);
+  reference.rows.reserve(mapped_rows.size());
+  for (std::size_t index = 0; index < mapped_rows.size(); ++index) {
+    Stage3VerticalReferenceDiagnosticRow row = mapped_rows[index].row;
+    const double correction_m =
+      index < smoothed_delta_m.size() ? smoothed_delta_m[index]
+                                      : mapped_rows[index].delta_sample.raw_delta_m;
+    row.stage2_lowpass_up_m = row.stage2_up_m + correction_m;
+    row.lowpass_delta_m = correction_m;
     reference.rows.push_back(row);
   }
   return reference;
