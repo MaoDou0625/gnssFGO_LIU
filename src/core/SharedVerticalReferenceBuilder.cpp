@@ -21,6 +21,7 @@ constexpr double kDistanceEpsilonM = 1.0e-6;
 constexpr double kTimeEpsilonS = 1.0e-9;
 constexpr double kOffsetSmoothingRadiusM = 12.0;
 constexpr double kOffsetHuberScaleM = 0.015;
+constexpr double kFinalReferenceSmoothingRadiusM = 4.0;
 
 struct CommonTrajectoryPoint {
   double time_s = 0.0;
@@ -247,6 +248,63 @@ std::vector<double> SmoothRtkOffset(
     }
   }
   return FillFiniteSeriesByInterpolation(std::move(smoothed), 0.0);
+}
+
+void SmoothReferenceRows(
+  std::vector<SharedVerticalReferenceRow> &rows,
+  const double grid_spacing_m) {
+  if (rows.empty()) {
+    return;
+  }
+  const double radius_m =
+    std::max(kFinalReferenceSmoothingRadiusM, 2.0 * grid_spacing_m);
+  const double sigma_m = std::max(0.5 * radius_m, grid_spacing_m);
+  const int radius_bins =
+    std::max(1, static_cast<int>(std::ceil(radius_m / grid_spacing_m)));
+  std::vector<double> smoothed(rows.size(), std::numeric_limits<double>::quiet_NaN());
+  for (std::size_t index = 0; index < rows.size(); ++index) {
+    double weight_sum = 0.0;
+    double weighted_sum = 0.0;
+    double weighted_x_sum = 0.0;
+    double weighted_xx_sum = 0.0;
+    double weighted_xy_sum = 0.0;
+    const int begin = std::max(0, static_cast<int>(index) - radius_bins);
+    const int end =
+      std::min(static_cast<int>(rows.size()) - 1, static_cast<int>(index) + radius_bins);
+    for (int candidate = begin; candidate <= end; ++candidate) {
+      const double value = rows[static_cast<std::size_t>(candidate)].reference_up_m;
+      if (!std::isfinite(value)) {
+        continue;
+      }
+      const double distance_m =
+        std::abs(static_cast<double>(candidate) - static_cast<double>(index)) *
+        grid_spacing_m;
+      const double weight =
+        std::exp(-0.5 * std::pow(distance_m / sigma_m, 2.0));
+      const double x_m =
+        (static_cast<double>(candidate) - static_cast<double>(index)) *
+        grid_spacing_m;
+      weight_sum += weight;
+      weighted_sum += weight * value;
+      weighted_x_sum += weight * x_m;
+      weighted_xx_sum += weight * x_m * x_m;
+      weighted_xy_sum += weight * x_m * value;
+    }
+    if (weight_sum > 0.0) {
+      const double determinant =
+        weight_sum * weighted_xx_sum - weighted_x_sum * weighted_x_sum;
+      smoothed[index] =
+        determinant > kDistanceEpsilonM
+          ? (weighted_sum * weighted_xx_sum -
+             weighted_x_sum * weighted_xy_sum) / determinant
+          : weighted_sum / weight_sum;
+    }
+  }
+  for (std::size_t index = 0; index < rows.size(); ++index) {
+    if (std::isfinite(smoothed[index])) {
+      rows[index].reference_up_m = smoothed[index];
+    }
+  }
 }
 
 GeoReference MakeCommonGeoReference(
@@ -626,6 +684,7 @@ SharedVerticalReference BuildSharedVerticalReference(
     result.rows.push_back(row);
   }
   FillMissingRowsByInterpolation(result.rows);
+  SmoothReferenceRows(result.rows, request.grid_spacing_m);
   return result;
 }
 
