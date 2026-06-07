@@ -15,6 +15,7 @@ Algorithm notes:
 
 - [OFFLINE_IMU_GNSS_CURRENT_VS_ORIGINAL.md](OFFLINE_IMU_GNSS_CURRENT_VS_ORIGINAL.md)
 - [OFFLINE_IMU_GNSS_PRECISION_ENHANCEMENT.md](OFFLINE_IMU_GNSS_PRECISION_ENHANCEMENT.md)
+- [docs/shared_vertical_reference_workflow.md](docs/shared_vertical_reference_workflow.md)
 
 ## Architecture
 
@@ -150,6 +151,17 @@ python scripts/plot_attitude_over_time.py \
 ```
 
 `attitude_over_time.png` uses three subplots for `yaw`, `pitch`, and `roll`.
+
+## Shared Stage3 Height Workflow
+
+For repeated runs of the same road segment, the v2.2 workflow can split the
+pipeline into Stage2, shared distance-domain height reference generation, and
+Stage3-only optimization. This keeps each member's Stage2 attitude, horizontal
+position, horizontal velocity, and bias references, while using one common
+`z_shared(s)` vertical target for all members.
+
+See [docs/shared_vertical_reference_workflow.md](docs/shared_vertical_reference_workflow.md)
+for the manifest format, commands, outputs, and plotting workflow.
 
 ## Notes
 
