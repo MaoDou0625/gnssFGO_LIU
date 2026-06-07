@@ -1043,6 +1043,8 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
   config.enable_initial_dynamic_static_detection = true;
   config.enable_initial_dynamic_static_lowpass_protection = true;
   config.enable_initial_dynamic_static_vz_constraint = true;
+  config.enable_vertical_jump_masked_imu = true;
+  config.enable_vertical_jump_impulse = true;
   config.enable_vertical_jump_bias = true;
   config.enable_vertical_jump_segmented_bias = true;
   config.enable_vertical_jump_spectral_bias_relaxation = true;
@@ -1076,6 +1078,8 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
     bool enable_initial_dynamic_static = false;
     bool enable_initial_dynamic_static_lowpass = false;
     bool enable_initial_dynamic_static_vz = false;
+    bool enable_vertical_jump_masked_imu = false;
+    bool enable_vertical_jump_impulse = false;
     bool enable_vertical_jump_bias = false;
     bool enable_vertical_jump_segmented_bias = false;
     bool enable_vertical_jump_spectral = false;
@@ -1122,6 +1126,8 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
       run_config.enable_initial_dynamic_static_detection,
       run_config.enable_initial_dynamic_static_lowpass_protection,
       run_config.enable_initial_dynamic_static_vz_constraint,
+      run_config.enable_vertical_jump_masked_imu,
+      run_config.enable_vertical_jump_impulse,
       run_config.enable_vertical_jump_bias,
       run_config.enable_vertical_jump_segmented_bias,
       run_config.enable_vertical_jump_spectral_bias_relaxation,
@@ -1191,34 +1197,36 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
     !calls[1].enable_initial_dynamic_static_vz,
     "Stage3 pass should not add initial dynamic static vertical factors");
   ExpectTrue(calls[0].enable_vertical_jump_bias, "Stage2 source pass should keep requested jump bias");
-  ExpectTrue(!calls[1].enable_vertical_jump_bias, "Stage3 pass should clear vertical jump bias factors");
+  ExpectTrue(calls[1].enable_vertical_jump_masked_imu, "Stage3 pass should keep vertical jump IMU masking");
+  ExpectTrue(calls[1].enable_vertical_jump_impulse, "Stage3 pass should keep vertical jump impulse factors");
+  ExpectTrue(calls[1].enable_vertical_jump_bias, "Stage3 pass should keep vertical jump bias factors");
   ExpectTrue(
-    !calls[1].enable_vertical_jump_segmented_bias,
-    "Stage3 pass should clear segmented vertical jump bias factors");
+    calls[1].enable_vertical_jump_segmented_bias,
+    "Stage3 pass should keep segmented vertical jump bias factors");
   ExpectTrue(
-    !calls[1].enable_vertical_jump_spectral,
-    "Stage3 pass should clear spectral vertical jump relaxation");
+    calls[1].enable_vertical_jump_spectral,
+    "Stage3 pass should keep spectral vertical jump relaxation");
   ExpectTrue(
-    !calls[1].enable_vertical_jump_velocity_ramp,
-    "Stage3 pass should clear vertical jump velocity ramp factors");
+    calls[1].enable_vertical_jump_velocity_ramp,
+    "Stage3 pass should keep vertical jump velocity ramp factors");
   ExpectTrue(
-    !calls[1].enable_vertical_jump_position_ramp,
-    "Stage3 pass should clear vertical jump position ramp factors");
+    calls[1].enable_vertical_jump_position_ramp,
+    "Stage3 pass should keep vertical jump position ramp factors");
   ExpectTrue(
-    !calls[1].enable_vertical_jump_velocity_continuity,
-    "Stage3 pass should clear vertical jump velocity continuity factors");
+    calls[1].enable_vertical_jump_velocity_continuity,
+    "Stage3 pass should keep vertical jump velocity continuity factors");
   ExpectTrue(
-    !calls[1].enable_vertical_jump_velocity_context_mean,
-    "Stage3 pass should clear vertical jump context mean factors");
+    calls[1].enable_vertical_jump_velocity_context_mean,
+    "Stage3 pass should keep vertical jump context mean factors");
   ExpectTrue(
-    !calls[1].enable_vertical_jump_context_mean_continuity,
-    "Stage3 pass should clear vertical jump context mean continuity factors");
+    calls[1].enable_vertical_jump_context_mean_continuity,
+    "Stage3 pass should keep vertical jump context mean continuity factors");
   ExpectTrue(
-    !calls[1].enable_vertical_jump_position_velocity,
-    "Stage3 pass should clear vertical jump position-velocity factors");
+    calls[1].enable_vertical_jump_position_velocity,
+    "Stage3 pass should keep vertical jump position-velocity factors");
   ExpectTrue(
-    !calls[1].enable_vertical_jump_height_slope,
-    "Stage3 pass should clear vertical jump height-slope factors");
+    calls[1].enable_vertical_jump_height_slope,
+    "Stage3 pass should keep vertical jump height-slope factors");
   ExpectTrue(!calls[1].enable_body_z_nhc, "Stage3 pass should keep Stage2 policy's Body-Z NHC disabled");
   ExpectTrue(
     !calls[1].enable_stage2_vehicle_nhc,

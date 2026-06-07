@@ -14,21 +14,6 @@ void DisableStage3LegacyJumpRegularizers(OfflineRunnerConfig &config) {
   config.enable_stage3_jump_adaptive_context_envelope = false;
 }
 
-void DisableVerticalJumpFramework(OfflineRunnerConfig &config) {
-  config.enable_vertical_jump_masked_imu = false;
-  config.enable_vertical_jump_impulse = false;
-  config.enable_vertical_jump_bias = false;
-  config.enable_vertical_jump_segmented_bias = false;
-  config.enable_vertical_jump_spectral_bias_relaxation = false;
-  config.enable_vertical_jump_velocity_ramp_smoothing = false;
-  config.enable_vertical_jump_position_ramp_smoothing = false;
-  config.enable_vertical_jump_velocity_continuity = false;
-  config.enable_vertical_jump_velocity_context_mean = false;
-  config.enable_vertical_jump_context_mean_continuity = false;
-  config.enable_vertical_jump_position_velocity_consistency = false;
-  config.enable_vertical_jump_velocity_height_slope_constraint = false;
-}
-
 void DisableRtkDriftAndOutageVerticalReferences(OfflineRunnerConfig &config) {
   config = DisableRtkOutageSegmentedBatchRecursion(std::move(config));
   config.stage3_disable_rtk_outage_segmented_batch = false;
@@ -77,7 +62,6 @@ OfflineRunnerConfig MakeStage3HeightOptimizationConfig(
 
   DisableRtkDriftAndOutageVerticalReferences(config);
   DisableStage3LegacyJumpRegularizers(config);
-  DisableVerticalJumpFramework(config);
   DisableCompetingAttitudeAndHorizontalSolvers(config);
   DisableRawRtkStaticVerticalPulls(config);
 
