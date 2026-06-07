@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -10,7 +11,18 @@
 
 namespace offline_lc_minimal {
 
+struct TrajectoryCsvRow {
+  TrajectoryRow trajectory;
+  double lat_rad = std::numeric_limits<double>::quiet_NaN();
+  double lon_rad = std::numeric_limits<double>::quiet_NaN();
+  double h_m = std::numeric_limits<double>::quiet_NaN();
+  bool has_geodetic = false;
+};
+
 [[nodiscard]] std::vector<TrajectoryRow> ReadTrajectoryCsv(
+  const std::filesystem::path &path);
+
+[[nodiscard]] std::vector<TrajectoryCsvRow> ReadTrajectoryCsvRows(
   const std::filesystem::path &path);
 
 [[nodiscard]] Stage2VelocityReference ReadStage2VelocityReferenceCsv(

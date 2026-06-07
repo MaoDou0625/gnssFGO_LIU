@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -140,7 +141,7 @@ bool HasColumn(const std::size_t column) {
 
 }  // namespace
 
-std::vector<TrajectoryRow> ReadTrajectoryCsv(
+std::vector<TrajectoryCsvRow> ReadTrajectoryCsvRows(
   const std::filesystem::path &path) {
   std::ifstream stream(path);
   if (!stream.is_open()) {
@@ -180,8 +181,11 @@ std::vector<TrajectoryRow> ReadTrajectoryCsv(
   const std::size_t gnss_used_col = OptionalColumn(columns, "gnss_factor_used");
   const std::size_t gnss_fix_col = OptionalColumn(columns, "gnss_fix_type");
   const std::size_t gnss_residual_col = OptionalColumn(columns, "gnss_residual_m");
+  const std::size_t lat_col = OptionalColumn(columns, "lat_rad");
+  const std::size_t lon_col = OptionalColumn(columns, "lon_rad");
+  const std::size_t h_col = OptionalColumn(columns, "h_m");
 
-  std::vector<TrajectoryRow> rows;
+  std::vector<TrajectoryCsvRow> rows;
   double previous_time_s = -std::numeric_limits<double>::infinity();
   while (std::getline(stream, line)) {
     ++line_number;
@@ -189,7 +193,8 @@ std::vector<TrajectoryRow> ReadTrajectoryCsv(
       continue;
     }
     const std::vector<std::string> fields = SplitCsvLine(line);
-    TrajectoryRow row;
+    TrajectoryCsvRow csv_row;
+    TrajectoryRow &row = csv_row.trajectory;
     row.time_s = ParseDoubleField(fields, time_col, "time_s", line_number);
     row.enu_position_m = Eigen::Vector3d(
       ParseDoubleField(fields, east_col, "east_m", line_number),
@@ -221,17 +226,37 @@ std::vector<TrajectoryRow> ReadTrajectoryCsv(
       row.gnss_residual_m =
         ParseDoubleField(fields, gnss_residual_col, "gnss_residual_m", line_number);
     }
+    if (HasColumn(lat_col) && HasColumn(lon_col) && HasColumn(h_col)) {
+      csv_row.lat_rad = ParseDoubleField(fields, lat_col, "lat_rad", line_number);
+      csv_row.lon_rad = ParseDoubleField(fields, lon_col, "lon_rad", line_number);
+      csv_row.h_m = ParseDoubleField(fields, h_col, "h_m", line_number);
+      csv_row.has_geodetic =
+        std::isfinite(csv_row.lat_rad) &&
+        std::isfinite(csv_row.lon_rad) &&
+        std::isfinite(csv_row.h_m);
+    }
     if (!(row.time_s > previous_time_s)) {
       throw std::runtime_error(
         "trajectory CSV times must be strictly increasing at line " +
         std::to_string(line_number));
     }
     previous_time_s = row.time_s;
-    rows.push_back(row);
+    rows.push_back(csv_row);
   }
 
   if (rows.empty()) {
     throw std::runtime_error("trajectory CSV contains no trajectory rows: " + path.string());
+  }
+  return rows;
+}
+
+std::vector<TrajectoryRow> ReadTrajectoryCsv(
+  const std::filesystem::path &path) {
+  const std::vector<TrajectoryCsvRow> csv_rows = ReadTrajectoryCsvRows(path);
+  std::vector<TrajectoryRow> rows;
+  rows.reserve(csv_rows.size());
+  for (const auto &csv_row : csv_rows) {
+    rows.push_back(csv_row.trajectory);
   }
   return rows;
 }

@@ -111,6 +111,7 @@ add_library(offline_lc_minimal_lib
   src/core/Stage1YawRefinementRunner.cpp
   src/core/StageAttitudeDebug.cpp
   src/core/StageAttitudeReference.cpp
+  src/core/SharedVerticalReferenceBuilder.cpp
   src/core/Stage2AttitudeHoldBuilder.cpp
   src/core/Stage2HorizontalHoldBuilder.cpp
   src/core/Stage2LowfreqVerticalReferenceOptimizationRunner.cpp
@@ -176,7 +177,16 @@ if(OFFLINE_LC_MINIMAL_BUILD_RUNNER)
     src/offline_runner/main.cpp
   )
 
+  add_executable(offline_lc_shared_vertical_reference_builder
+    src/shared_vertical_reference_builder/main.cpp
+  )
+
   target_link_libraries(offline_lc_runner
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(offline_lc_shared_vertical_reference_builder
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -184,6 +194,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_RUNNER)
   if(OFFLINE_LC_MINIMAL_RUNTIME_RPATH)
     set_target_properties(
       offline_lc_runner
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      offline_lc_shared_vertical_reference_builder
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -276,6 +292,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
 
   add_executable(stage_attitude_reference_test
     tests/stage_attitude_reference_test.cpp
+  )
+
+  add_executable(shared_vertical_reference_builder_test
+    tests/shared_vertical_reference_builder_test.cpp
   )
 
   add_executable(stage2_velocity_optimization_test
@@ -392,6 +412,11 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
   )
 
   target_link_libraries(stage_attitude_reference_test
+    PRIVATE
+      offline_lc_minimal_lib
+  )
+
+  target_link_libraries(shared_vertical_reference_builder_test
     PRIVATE
       offline_lc_minimal_lib
   )
@@ -529,6 +554,12 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     )
     set_target_properties(
       stage_attitude_reference_test
+      PROPERTIES
+        BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+        INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
+    )
+    set_target_properties(
+      shared_vertical_reference_builder_test
       PROPERTIES
         BUILD_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
         INSTALL_RPATH "${OFFLINE_LC_MINIMAL_RUNTIME_RPATH}"
@@ -696,6 +727,13 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
         $<TARGET_FILE:stage_attitude_reference_test>
     )
     add_test(
+      NAME shared_vertical_reference_builder_test
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        "LD_LIBRARY_PATH=${OFFLINE_LC_MINIMAL_RUNTIME_LD_LIBRARY_PATH}:$ENV{LD_LIBRARY_PATH}"
+        $<TARGET_FILE:shared_vertical_reference_builder_test>
+    )
+    add_test(
       NAME stage2_velocity_optimization_test
       COMMAND
         ${CMAKE_COMMAND} -E env
@@ -789,6 +827,10 @@ if(OFFLINE_LC_MINIMAL_BUILD_TESTS)
     add_test(
       NAME stage_attitude_reference_test
       COMMAND $<TARGET_FILE:stage_attitude_reference_test>
+    )
+    add_test(
+      NAME shared_vertical_reference_builder_test
+      COMMAND $<TARGET_FILE:shared_vertical_reference_builder_test>
     )
     add_test(
       NAME stage2_velocity_optimization_test
