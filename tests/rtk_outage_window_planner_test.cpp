@@ -832,41 +832,62 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
 
   ExpectTrue(calls[2].reference != nullptr, "outage child should receive boundary references");
   const auto &refs = calls[2].reference->boundary_references;
-  ExpectTrue(refs.size() == 3U, "outage child should receive start, vertical end, and horizontal handoff");
+  ExpectTrue(refs.size() == 4U,
+             "outage child should receive start, start vertical handoff, end, and horizontal handoff");
   ExpectTrue(refs[0].boundary_role == "OUTAGE_START", "first outage boundary should be start");
-  ExpectTrue(refs[1].boundary_role == "OUTAGE_END", "second outage boundary should be end");
-  ExpectTrue(refs[2].boundary_role == "OUTAGE_END_HORIZONTAL_HANDOFF",
-             "third outage boundary should be horizontal handoff");
+  ExpectTrue(refs[1].boundary_role == "OUTAGE_START_VERTICAL_HANDOFF",
+             "second outage boundary should hand off pre vertical motion");
+  ExpectTrue(refs[2].boundary_role == "OUTAGE_END", "third outage boundary should be end");
+  ExpectTrue(refs[3].boundary_role == "OUTAGE_END_HORIZONTAL_HANDOFF",
+             "fourth outage boundary should be horizontal handoff");
   ExpectTrue(refs[0].has_attitude && refs[0].add_attitude_constraint,
               "outage start should carry an attitude constraint");
-  ExpectTrue(!refs[1].has_attitude && !refs[1].add_attitude_constraint,
+  ExpectTrue(!refs[0].add_up_constraint,
+              "outage start must not add direct height hold over the dvz handoff");
+  ExpectTrue(refs[1].has_vertical_position_velocity_handoff &&
+               refs[1].add_vertical_position_velocity_handoff_constraint,
+             "outage start should add relative vertical position-velocity handoff");
+  ExpectTrue(std::abs(refs[1].target_time_s - 10.1) < 1e-12,
+             "outage start vertical handoff should target the first kept outage state");
+  ExpectTrue(std::abs(refs[1].vertical_position_velocity_handoff_reference_time_s - 10.0) < 1e-12,
+             "outage start vertical handoff should reference the pre terminal time");
+  ExpectTrue(!refs[2].has_attitude && !refs[2].add_attitude_constraint,
               "outage end post-probe boundary should not carry a post-derived attitude");
-  ExpectTrue(!refs[1].has_ba_z && !refs[1].add_ba_z_constraint,
+  ExpectTrue(!refs[2].has_ba_z && !refs[2].add_ba_z_constraint,
               "outage end post-probe boundary should not carry a post-derived bias");
-  ExpectTrue(refs[1].has_up && refs[1].has_vz,
+  ExpectTrue(refs[2].has_up && refs[2].has_vz,
               "outage end should keep vertical position/velocity reference values from post probe");
-  ExpectTrue(!refs[1].has_horizontal_position && !refs[1].add_horizontal_position_constraint,
+  ExpectTrue(!refs[2].add_up_constraint,
+              "outage end must not directly hold post-probe height");
+  ExpectTrue(refs[2].has_vertical_position_velocity_handoff &&
+               refs[2].add_vertical_position_velocity_handoff_constraint,
+             "outage end should add relative vertical position-velocity handoff");
+  ExpectTrue(std::abs(refs[2].target_time_s - 19.95) < 1e-12,
+             "outage end vertical handoff should target the last kept outage state");
+  ExpectTrue(std::abs(refs[2].vertical_position_velocity_handoff_reference_time_s - 20.0) < 1e-12,
+             "outage end vertical handoff should reference post recovery at outage end");
+  ExpectTrue(!refs[2].has_horizontal_position && !refs[2].add_horizontal_position_constraint,
               "outage end must not copy post-probe horizontal position directly");
-  ExpectTrue(!refs[1].has_horizontal_velocity && !refs[1].add_horizontal_velocity_constraint,
+  ExpectTrue(!refs[2].has_horizontal_velocity && !refs[2].add_horizontal_velocity_constraint,
               "outage end must not copy post-probe horizontal velocity directly");
-  ExpectTrue(refs[2].source_type ==
+  ExpectTrue(refs[3].source_type ==
                "POST_RECOVERY_OPTIMIZED_HORIZONTAL_POSITION_VELOCITY_HANDOFF",
              "horizontal handoff should identify post optimized source");
-  ExpectTrue(std::abs(refs[2].target_time_s - 19.95) < 1e-12,
+  ExpectTrue(std::abs(refs[3].target_time_s - 19.95) < 1e-12,
              "horizontal handoff should target the last kept outage state");
   ExpectTrue(
-    std::abs(refs[2].horizontal_position_velocity_handoff_reference_time_s - 20.0) < 1e-12,
+    std::abs(refs[3].horizontal_position_velocity_handoff_reference_time_s - 20.0) < 1e-12,
     "horizontal handoff should reference post recovery at outage end");
-  ExpectTrue(refs[2].has_horizontal_position && !refs[2].add_horizontal_position_constraint,
+  ExpectTrue(refs[3].has_horizontal_position && !refs[3].add_horizontal_position_constraint,
              "horizontal handoff should carry post position without direct position hold");
-  ExpectTrue(refs[2].has_horizontal_velocity && refs[2].add_horizontal_velocity_constraint,
+  ExpectTrue(refs[3].has_horizontal_velocity && refs[3].add_horizontal_velocity_constraint,
              "horizontal handoff should constrain outage last velocity to post velocity");
-  ExpectTrue(refs[2].has_horizontal_position_velocity_handoff &&
-               refs[2].add_horizontal_position_velocity_handoff_constraint,
+  ExpectTrue(refs[3].has_horizontal_position_velocity_handoff &&
+               refs[3].add_horizontal_position_velocity_handoff_constraint,
              "horizontal handoff should add relative position-velocity consistency");
-  ExpectTrue(std::abs(refs[2].reference_horizontal_velocity_mps.x() - 0.1) < 1e-12,
+  ExpectTrue(std::abs(refs[3].reference_horizontal_velocity_mps.x() - 0.1) < 1e-12,
               "horizontal handoff should receive nonzero east velocity from post probe");
-  ExpectTrue(std::abs(refs[2].reference_horizontal_velocity_mps.y() + 1.4) < 1e-12,
+  ExpectTrue(std::abs(refs[3].reference_horizontal_velocity_mps.y() + 1.4) < 1e-12,
               "horizontal handoff should receive nonzero north velocity from post probe");
   ExpectTrue(std::abs(refs[0].reference_rotation.ypr().x() - 0.4) < 1e-12,
               "outage start attitude must use the pre optimized Rot3 branch");
@@ -880,7 +901,18 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
   ExpectTrue(post_ref.boundary_role == "POST_START",
              "post child boundary should target post start");
   ExpectTrue(post_ref.has_up && post_ref.has_vz,
-             "post child should keep the recovery vertical boundary");
+             "post child should keep a vertical boundary reference");
+  ExpectTrue(!post_ref.add_up_constraint,
+             "post child must not add recovery absolute height at the boundary");
+  ExpectTrue(post_ref.add_vz_constraint,
+             "post child should inherit the outage-last vertical velocity");
+  ExpectTrue(post_ref.has_vertical_position_velocity_handoff &&
+               post_ref.add_vertical_position_velocity_handoff_constraint,
+             "post child should receive outage-last vertical handoff");
+  ExpectTrue(std::abs(post_ref.reference_up_m - 19.95) < 1e-12,
+             "post child vertical handoff must use the last kept outage height");
+  ExpectTrue(std::abs(post_ref.vertical_position_velocity_handoff_reference_time_s - 19.95) < 1e-12,
+             "post child vertical handoff must reference the last kept outage time");
   ExpectTrue(post_ref.has_horizontal_velocity && post_ref.add_horizontal_velocity_constraint,
              "post child should keep the RTK-estimated horizontal velocity");
   ExpectTrue(post_ref.has_attitude && post_ref.add_attitude_constraint,
@@ -978,14 +1010,20 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
              "invalid recovery reference should still run causal pre/outage/post handoff");
   ExpectTrue(calls[1].reference != nullptr, "outage child should receive boundary references");
   const auto &outage_refs = calls[1].reference->boundary_references;
-  ExpectTrue(outage_refs.size() == 2U, "outage child should still receive start and end markers");
+  ExpectTrue(outage_refs.size() == 3U,
+             "outage child should still receive start, start vertical handoff, and end marker");
   ExpectTrue(outage_refs[0].has_attitude && outage_refs[0].add_attitude_constraint,
              "outage start should still use pre attitude");
-  ExpectTrue(outage_refs[1].boundary_role == "OUTAGE_END",
+  ExpectTrue(outage_refs[1].boundary_role == "OUTAGE_START_VERTICAL_HANDOFF",
+             "outage child should keep pre-to-outage vertical handoff without recovery");
+  ExpectTrue(outage_refs[1].has_vertical_position_velocity_handoff &&
+               outage_refs[1].add_vertical_position_velocity_handoff_constraint,
+             "outage start should still use vertical handoff without recovery");
+  ExpectTrue(outage_refs[2].boundary_role == "OUTAGE_END",
              "outage child should receive an outage-end marker");
-  ExpectTrue(!outage_refs[1].has_up && !outage_refs[1].has_vz,
+  ExpectTrue(!outage_refs[2].has_up && !outage_refs[2].has_vz,
              "invalid recovery should not add vertical recovery constraints");
-  ExpectTrue(!outage_refs[1].has_attitude,
+  ExpectTrue(!outage_refs[2].has_attitude,
              "outage end marker should not invent an attitude reference");
 
   ExpectTrue(calls[2].reference != nullptr, "post child should receive a post-start boundary");
@@ -994,8 +1032,13 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
   const auto &post_ref = calls[2].reference->boundary_references.front();
   ExpectTrue(post_ref.boundary_role == "POST_START",
              "post child boundary should target post start");
-  ExpectTrue(!post_ref.has_up && !post_ref.has_vz,
-             "invalid recovery should not add post vertical constraints");
+  ExpectTrue(post_ref.has_up && post_ref.has_vz,
+             "post handoff should still inherit outage-last vertical state without recovery");
+  ExpectTrue(!post_ref.add_up_constraint,
+             "post handoff should not add recovery absolute height without recovery");
+  ExpectTrue(post_ref.has_vertical_position_velocity_handoff &&
+               post_ref.add_vertical_position_velocity_handoff_constraint,
+             "post child should still receive vertical handoff without recovery");
   ExpectTrue(post_ref.has_attitude && post_ref.add_attitude_constraint,
              "post child should still receive IMU-relative handoff attitude");
   ExpectTrue(post_ref.has_ba_z && post_ref.add_ba_z_constraint,

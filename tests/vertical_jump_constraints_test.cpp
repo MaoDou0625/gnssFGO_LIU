@@ -745,9 +745,9 @@ void TestBodyZBiasReestimateBuilderUsesPostStartBazHandoff() {
     "post-start handoff should not add detected bias delta at the boundary");
   ExpectNear(
     segments.front().prior_sigma_mps2,
-    0.001,
+    config.vertical_jump_bias_prior_sigma_mps2,
     1e-12,
-    "post-start reestimate should use boundary ba_z sigma");
+    "post-start reestimate should keep the source-specific ba_z prior sigma");
   for (std::size_t state_index = 0; state_index < state_timestamps.size(); ++state_index) {
     const auto bias = initial_values.at<gtsam::imuBias::ConstantBias>(symbol::B(state_index));
     ExpectNear(

@@ -1604,6 +1604,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.rtk_outage_boundary_baz_factor_count = 0;
   run_result.run_summary.rtk_outage_boundary_horizontal_position_factor_count = 0;
   run_result.run_summary.rtk_outage_boundary_horizontal_velocity_factor_count = 0;
+  run_result.run_summary.rtk_outage_boundary_horizontal_position_velocity_handoff_factor_count = 0;
+  run_result.run_summary.rtk_outage_boundary_vertical_position_velocity_handoff_factor_count = 0;
   run_result.run_summary.rtk_outage_boundary_attitude_factor_count = 0;
   run_result.run_summary.rtk_outage_preoutage_vertical_fence_enabled =
     config_.enable_rtk_outage_preoutage_vertical_fence && causal_reference_result.valid;

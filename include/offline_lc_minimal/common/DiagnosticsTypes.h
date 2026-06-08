@@ -516,6 +516,7 @@ struct RtkOutageBoundaryReferenceRow {
   bool has_horizontal_position = false;
   bool has_horizontal_velocity = false;
   bool has_horizontal_position_velocity_handoff = false;
+  bool has_vertical_position_velocity_handoff = false;
   bool has_attitude = false;
   bool add_up_constraint = false;
   bool add_vz_constraint = false;
@@ -523,6 +524,7 @@ struct RtkOutageBoundaryReferenceRow {
   bool add_horizontal_position_constraint = false;
   bool add_horizontal_velocity_constraint = false;
   bool add_horizontal_position_velocity_handoff_constraint = false;
+  bool add_vertical_position_velocity_handoff_constraint = false;
   bool add_attitude_constraint = false;
   double reference_up_m = std::numeric_limits<double>::quiet_NaN();
   double reference_vz_mps = std::numeric_limits<double>::quiet_NaN();
@@ -540,6 +542,10 @@ struct RtkOutageBoundaryReferenceRow {
   double horizontal_position_velocity_handoff_reference_time_s =
     std::numeric_limits<double>::quiet_NaN();
   double horizontal_position_velocity_handoff_sigma_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_position_velocity_handoff_reference_time_s =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_position_velocity_handoff_sigma_m =
     std::numeric_limits<double>::quiet_NaN();
   double attitude_sigma_rad = std::numeric_limits<double>::quiet_NaN();
   std::string skip_reason = "UNSET";
@@ -593,6 +599,7 @@ struct RtkOutageBoundaryDiagnosticRow {
   bool horizontal_position_factor_added = false;
   bool horizontal_velocity_factor_added = false;
   bool horizontal_position_velocity_handoff_factor_added = false;
+  bool vertical_position_velocity_handoff_factor_added = false;
   bool attitude_factor_added = false;
   std::string attitude_constraint_type = "UNSET";
   Eigen::Vector2d reference_horizontal_position_m =
@@ -620,6 +627,14 @@ struct RtkOutageBoundaryDiagnosticRow {
   double horizontal_position_velocity_handoff_residual_norm_m =
     std::numeric_limits<double>::quiet_NaN();
   double horizontal_position_velocity_handoff_sigma_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_position_velocity_handoff_reference_time_s =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_position_velocity_handoff_dt_s =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_position_velocity_handoff_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double vertical_position_velocity_handoff_sigma_m =
     std::numeric_limits<double>::quiet_NaN();
   double reference_up_m = std::numeric_limits<double>::quiet_NaN();
   double optimized_up_m = std::numeric_limits<double>::quiet_NaN();

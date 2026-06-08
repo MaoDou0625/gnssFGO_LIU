@@ -13,6 +13,7 @@
 #include "offline_lc_minimal/core/GraphTimelineBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryBiasHandoff.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryVerticalHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageBiasContinuityPolicy.h"
 #include "offline_lc_minimal/core/RtkOutageBatchSegmentPlanner.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
@@ -358,7 +359,8 @@ void RefreshBoundaryReferenceValidity(RtkOutageBoundaryReferenceRow &reference) 
   reference.valid =
     reference.has_up || reference.has_vz || reference.has_ba_z ||
     reference.has_horizontal_position || reference.has_horizontal_velocity ||
-    reference.has_horizontal_position_velocity_handoff || reference.has_attitude;
+    reference.has_horizontal_position_velocity_handoff ||
+    reference.has_vertical_position_velocity_handoff || reference.has_attitude;
   if (!reference.valid) {
     reference.skip_reason = "nonfinite_trajectory_reference";
   } else if (reference.skip_reason == "nonfinite_trajectory_reference" ||
@@ -679,14 +681,45 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
     }
 
     std::vector<RtkOutageBoundaryReferenceRow> outage_boundary_refs;
-    outage_boundary_refs.push_back(MakeBoundaryReferenceFromTrajectory(
-      request_.config,
-      pre_result,
-      outage.window_index,
-      outage.start_time_s,
-      "OUTAGE_START",
-      "PRE_TERMINAL",
-      allow_start_ba_z));
+    RtkOutageBoundaryReferenceRow outage_start_reference =
+      MakeBoundaryReferenceFromTrajectory(
+        request_.config,
+        pre_result,
+        outage.window_index,
+        outage.start_time_s,
+        "OUTAGE_START",
+        "PRE_TERMINAL",
+        allow_start_ba_z);
+    DisableDirectRtkOutageBoundaryUpConstraint(outage_start_reference);
+    outage_boundary_refs.push_back(std::move(outage_start_reference));
+    const std::optional<double> outage_first_kept_time_s =
+      FirstKeptOutageStateTime(request_.state_timestamps, outage);
+    if (outage_first_kept_time_s.has_value()) {
+      RtkOutageBoundaryReferenceRow start_vertical_source =
+        MakeBoundaryReferenceFromTrajectory(
+          request_.config,
+          pre_result,
+          outage.window_index,
+          outage.start_time_s,
+          "OUTAGE_START_VERTICAL_HANDOFF",
+          "PRE_TERMINAL_VERTICAL_POSITION_VELOCITY_HANDOFF",
+          false);
+      RtkOutageBoundaryReferenceRow start_vertical_handoff_reference =
+        MakeVerticalPositionVelocityHandoffReference(
+          request_.config,
+          std::move(start_vertical_source),
+          "OUTAGE_START_VERTICAL_HANDOFF",
+          "PRE_TERMINAL_VERTICAL_POSITION_VELOCITY_HANDOFF",
+          *outage_first_kept_time_s,
+          outage.start_time_s,
+          false,
+          "missing_start_vertical_handoff_reference");
+      if (start_vertical_handoff_reference.valid) {
+        outage_boundary_refs.push_back(std::move(start_vertical_handoff_reference));
+      }
+    }
+    const std::optional<double> outage_last_kept_time_s =
+      LastKeptOutageStateTime(request_.state_timestamps, outage);
     if (has_post_probe_result) {
       RtkOutageBoundaryReferenceRow outage_end_reference =
         MakeOutageEndPositionVelocityReferenceFromPostResult(
@@ -700,9 +733,16 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       }
       RemoveHorizontalPositionReference(outage_end_reference);
       RemoveHorizontalVelocityReference(outage_end_reference);
+      if (outage_last_kept_time_s.has_value()) {
+        ConfigureVerticalPositionVelocityHandoff(
+          outage_end_reference,
+          request_.config,
+          *outage_last_kept_time_s,
+          outage.end_time_s,
+          true,
+          "missing_end_vertical_handoff_reference");
+      }
       outage_boundary_refs.push_back(std::move(outage_end_reference));
-      const std::optional<double> outage_last_kept_time_s =
-        LastKeptOutageStateTime(request_.state_timestamps, outage);
       if (outage_last_kept_time_s.has_value()) {
         RtkOutageBoundaryReferenceRow horizontal_handoff_reference =
           MakeOutageEndHorizontalPositionVelocityHandoffReferenceFromPostResult(
@@ -748,6 +788,10 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
         *post_segment,
         request_.dynamic_start_time_s);
     std::vector<RtkOutageBoundaryReferenceRow> post_boundary_refs;
+    const double post_first_time_s =
+      post_config.processing_start_time_s > 0.0
+        ? post_config.processing_start_time_s
+        : outage.end_time_s;
     RtkOutageBoundaryReferenceRow post_start_reference =
       has_valid_recovery_reference
       ? MakePostStartBoundaryReferenceFromRecovery(
@@ -766,9 +810,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
           &outage_result,
           &outage,
           request_.imu_params,
-          post_config.processing_start_time_s > 0.0
-            ? post_config.processing_start_time_s
-            : outage.end_time_s});
+          post_first_time_s});
     AttachRtkOutageBoundaryAttitudeHandoff(
       post_start_handoff,
       post_start_reference);
@@ -778,11 +820,16 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
           &post_config,
           &outage_result,
           &outage,
-          post_config.processing_start_time_s > 0.0
-            ? post_config.processing_start_time_s
-            : outage.end_time_s});
+          post_first_time_s});
     AttachRtkOutageBoundaryBiasHandoff(
       post_start_bias_handoff,
+      post_start_reference);
+    DisableDirectRtkOutageBoundaryUpConstraint(post_start_reference);
+    AttachPostStartVerticalPositionVelocityHandoff(
+      post_config,
+      outage_result,
+      outage,
+      post_first_time_s,
       post_start_reference);
     if (post_start_handoff.valid) {
       post_config.enable_rtk_outage_smoothing = true;

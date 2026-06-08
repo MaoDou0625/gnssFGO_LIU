@@ -43,6 +43,12 @@ bool IsRtkOutageLinked(const BodyZBiasReestimateSegmentRow &segment) {
          segment.source_type == "RTK_OUTAGE";
 }
 
+double ReestimatePriorSigmaMps2(
+  const OfflineRunnerConfig &config,
+  const BodyZBiasReestimateSegmentRow &) {
+  return config.vertical_jump_bias_prior_sigma_mps2;
+}
+
 }  // namespace
 
 BodyZBiasReestimateConstraintBuilder::BodyZBiasReestimateConstraintBuilder(
@@ -100,12 +106,7 @@ void BodyZBiasReestimateConstraintBuilder::Apply() const {
     const auto anchor_bias = request_.initial_values->at<gtsam::imuBias::ConstantBias>(anchor_key);
     const RtkOutageBoundaryReferenceRow *boundary_ba_z_reference =
       PostStartBazReferenceForSegment(segment);
-    segment.prior_sigma_mps2 =
-      boundary_ba_z_reference != nullptr &&
-      std::isfinite(boundary_ba_z_reference->ba_z_sigma_mps2) &&
-      boundary_ba_z_reference->ba_z_sigma_mps2 > 0.0
-        ? boundary_ba_z_reference->ba_z_sigma_mps2
-        : request_.config->vertical_jump_bias_prior_sigma_mps2;
+    segment.prior_sigma_mps2 = ReestimatePriorSigmaMps2(*request_.config, segment);
     segment.reference_ba_z_mps2 =
       boundary_ba_z_reference != nullptr
         ? boundary_ba_z_reference->reference_ba_z_mps2

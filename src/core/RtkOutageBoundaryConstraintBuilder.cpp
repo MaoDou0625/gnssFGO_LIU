@@ -18,6 +18,7 @@
 #include "offline_lc_minimal/factor/HorizontalHoldFactor.h"
 #include "offline_lc_minimal/factor/HorizontalPositionVelocityHandoffFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasPriorFactor.h"
+#include "offline_lc_minimal/factor/VerticalPositionVelocityHandoffFactor.h"
 #include "offline_lc_minimal/factor/VerticalRtkFactors.h"
 #include "offline_lc_minimal/factor/VerticalVelocityPriorFactor.h"
 
@@ -116,6 +117,21 @@ bool CanAddHorizontalPositionVelocityHandoffFactor(
          reference.horizontal_position_velocity_handoff_sigma_m > 0.0;
 }
 
+bool CanAddVerticalPositionVelocityHandoffFactor(
+  const RtkOutageBoundaryReferenceRow &reference,
+  const double state_time_s) {
+  return reference.add_vertical_position_velocity_handoff_constraint &&
+         reference.has_vertical_position_velocity_handoff &&
+         std::isfinite(reference.reference_up_m) &&
+         std::isfinite(reference.reference_vz_mps) &&
+         std::isfinite(reference.vertical_position_velocity_handoff_reference_time_s) &&
+         std::isfinite(state_time_s) &&
+         std::abs(reference.vertical_position_velocity_handoff_reference_time_s -
+                  state_time_s) > 1.0e-12 &&
+         std::isfinite(reference.vertical_position_velocity_handoff_sigma_m) &&
+         reference.vertical_position_velocity_handoff_sigma_m > 0.0;
+}
+
 RtkOutageBoundaryDiagnosticRow MakeDiagnostic(
   const RtkOutageBoundaryReferenceRow &reference,
   const std::size_t state_index,
@@ -137,6 +153,12 @@ RtkOutageBoundaryDiagnosticRow MakeDiagnostic(
     reference.horizontal_position_velocity_handoff_reference_time_s - state_time_s;
   row.horizontal_position_velocity_handoff_sigma_m =
     reference.horizontal_position_velocity_handoff_sigma_m;
+  row.vertical_position_velocity_handoff_reference_time_s =
+    reference.vertical_position_velocity_handoff_reference_time_s;
+  row.vertical_position_velocity_handoff_dt_s =
+    reference.vertical_position_velocity_handoff_reference_time_s - state_time_s;
+  row.vertical_position_velocity_handoff_sigma_m =
+    reference.vertical_position_velocity_handoff_sigma_m;
   row.reference_up_m = reference.reference_up_m;
   row.up_sigma_m = reference.up_sigma_m;
   row.reference_vz_mps = reference.reference_vz_mps;
@@ -298,6 +320,24 @@ void RtkOutageBoundaryConstraintBuilder::Build() const {
       ++request_.run_summary->rtk_outage_boundary_horizontal_position_velocity_handoff_factor_count;
     }
 
+    const bool add_vertical_position_velocity_handoff =
+      CanAddVerticalPositionVelocityHandoffFactor(reference, state_time_s);
+    if (add_vertical_position_velocity_handoff) {
+      const double dt_s =
+        reference.vertical_position_velocity_handoff_reference_time_s - state_time_s;
+      request_.graph->add(factor::VerticalPositionVelocityHandoffFactor(
+        symbol::X(state_index),
+        symbol::V(state_index),
+        reference.reference_up_m,
+        reference.reference_vz_mps,
+        dt_s,
+        gtsam::noiseModel::Isotropic::Sigma(
+          1,
+          reference.vertical_position_velocity_handoff_sigma_m)));
+      diagnostic.vertical_position_velocity_handoff_factor_added = true;
+      ++request_.run_summary->rtk_outage_boundary_vertical_position_velocity_handoff_factor_count;
+    }
+
     const bool add_attitude = CanAddAttitudeFactor(reference);
     if (add_attitude) {
       const bool use_full_relative_handoff =
@@ -333,7 +373,7 @@ void RtkOutageBoundaryConstraintBuilder::Build() const {
 
     if (add_up || add_vz || add_ba_z || add_horizontal_position ||
         add_horizontal_velocity || add_horizontal_position_velocity_handoff ||
-        add_attitude) {
+        add_vertical_position_velocity_handoff || add_attitude) {
       diagnostic.skip_reason = "ADDED";
     } else if (diagnostic.skip_reason == "UNSET" || diagnostic.skip_reason == "OK") {
       diagnostic.skip_reason = "no_enabled_boundary_reference";
@@ -392,6 +432,19 @@ void PopulateRtkOutageBoundaryDiagnostics(
         reference_delta_m - velocity_integrated_delta_m;
       row.horizontal_position_velocity_handoff_residual_norm_m =
         row.horizontal_position_velocity_handoff_residual_m.norm();
+    }
+    if (row.vertical_position_velocity_handoff_factor_added) {
+      const auto pose = optimized_values.at<gtsam::Pose3>(symbol::X(row.target_state_index));
+      const auto velocity =
+        optimized_values.at<gtsam::Vector3>(symbol::V(row.target_state_index));
+      row.optimized_up_m = pose.translation().z();
+      row.optimized_vz_mps = velocity.z();
+      const double reference_delta_m = row.reference_up_m - row.optimized_up_m;
+      const double velocity_integrated_delta_m =
+        0.5 * row.vertical_position_velocity_handoff_dt_s *
+        (row.optimized_vz_mps + row.reference_vz_mps);
+      row.vertical_position_velocity_handoff_residual_m =
+        reference_delta_m - velocity_integrated_delta_m;
     }
     if (row.vz_factor_added) {
       const auto velocity =

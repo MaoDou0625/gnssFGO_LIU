@@ -26,6 +26,7 @@
 #include "offline_lc_minimal/factor/AttitudeReferenceFactor.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
 #include "offline_lc_minimal/factor/HorizontalPositionVelocityHandoffFactor.h"
+#include "offline_lc_minimal/factor/VerticalPositionVelocityHandoffFactor.h"
 #include "offline_lc_minimal/factor/VelocityDeltaFactor.h"
 
 namespace {
@@ -1088,6 +1089,94 @@ void TestBoundaryConstraintBuilderAddsHorizontalPositionVelocityHandoff() {
     "horizontal handoff diagnostics should report residual norm");
 }
 
+void TestBoundaryConstraintBuilderAddsVerticalPositionVelocityHandoff() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_boundary_constraints = true;
+  config.vertical_position_velocity_consistency_sigma_m = 0.001;
+
+  const std::vector<double> timestamps{0.0, 1.0, 2.0};
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> references(1U);
+  references.front().window_index = 4U;
+  references.front().boundary_role = "POST_START";
+  references.front().source_type = "POST_START_VERTICAL_POSITION_VELOCITY_HANDOFF";
+  references.front().target_time_s = 1.0;
+  references.front().valid = true;
+  references.front().has_up = true;
+  references.front().has_vz = true;
+  references.front().has_vertical_position_velocity_handoff = true;
+  references.front().add_up_constraint = false;
+  references.front().add_vz_constraint = false;
+  references.front().add_vertical_position_velocity_handoff_constraint = true;
+  references.front().reference_up_m = 2.0;
+  references.front().reference_vz_mps = 3.0;
+  references.front().vertical_position_velocity_handoff_reference_time_s = 0.5;
+  references.front().vertical_position_velocity_handoff_sigma_m =
+    config.vertical_position_velocity_consistency_sigma_m;
+  references.front().skip_reason = "OK";
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::RtkOutageBoundaryDiagnosticRow> diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.boundary_references = &references;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 1U, "vertical handoff should add one boundary factor");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<
+      offline_lc_minimal::factor::VerticalPositionVelocityHandoffFactor>(graph.at(0)).get() !=
+      nullptr,
+    "boundary factor should be a vertical position-velocity handoff");
+  ExpectTrue(
+    summary.rtk_outage_boundary_vertical_position_velocity_handoff_factor_count == 1U,
+    "vertical handoff factor count is wrong");
+  ExpectTrue(diagnostics.size() == 1U, "vertical handoff should emit one diagnostic");
+  ExpectNear(
+    diagnostics.front().vertical_position_velocity_handoff_dt_s,
+    -0.5,
+    1.0e-12,
+    "vertical handoff diagnostic should report signed reference dt");
+  ExpectTrue(!diagnostics.front().up_factor_added,
+             "vertical handoff must not add a direct height hold");
+
+  gtsam::Values matching_values;
+  gtsam::Values shifted_values;
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    matching_values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(
+        gtsam::Rot3::Identity(),
+        gtsam::Point3(0.0, 0.0, index == 1U ? 3.0 : 0.0)));
+    matching_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(0.0, 0.0, index == 1U ? 1.0 : 0.0));
+    shifted_values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(
+        gtsam::Rot3::Identity(),
+        gtsam::Point3(0.0, 0.0, index == 1U ? 3.2 : 0.0)));
+    shifted_values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(0.0, 0.0, index == 1U ? 1.0 : 0.0));
+  }
+
+  ExpectNear(graph.error(matching_values), 0.0, 1.0e-12,
+             "matching vertical handoff state should have zero error");
+  ExpectTrue(graph.error(shifted_values) > 1.0,
+             "vertical handoff should penalize position-velocity mismatch");
+  offline_lc_minimal::PopulateRtkOutageBoundaryDiagnostics(
+    shifted_values,
+    diagnostics);
+  ExpectTrue(
+    std::abs(diagnostics.front().vertical_position_velocity_handoff_residual_m) > 0.1,
+    "vertical handoff diagnostics should report residual");
+}
+
 void TestBoundaryConstraintBuilderSplitsTiltAndYawWhenBaseTiltReferenceIsEnabled() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_rtk_outage_boundary_constraints = true;
@@ -1607,6 +1696,9 @@ int main() {
     RunTest(
       "TestBoundaryConstraintBuilderAddsHorizontalPositionVelocityHandoff",
       TestBoundaryConstraintBuilderAddsHorizontalPositionVelocityHandoff);
+    RunTest(
+      "TestBoundaryConstraintBuilderAddsVerticalPositionVelocityHandoff",
+      TestBoundaryConstraintBuilderAddsVerticalPositionVelocityHandoff);
     RunTest(
       "TestBoundaryConstraintBuilderSplitsTiltAndYawWhenBaseTiltReferenceIsEnabled",
       TestBoundaryConstraintBuilderSplitsTiltAndYawWhenBaseTiltReferenceIsEnabled);
