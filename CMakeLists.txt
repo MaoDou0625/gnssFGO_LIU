@@ -88,6 +88,7 @@ add_library(offline_lc_minimal_lib
   src/core/RtkOutageBatchSegmentPlanner.cpp
   src/core/RtkOutageBoundaryAttitudeHandoff.cpp
   src/core/RtkOutageBoundaryAttitudeReference.cpp
+  src/core/RtkOutageBoundaryBiasHandoff.cpp
   src/core/RtkOutageBoundaryConstraintBuilder.cpp
   src/core/RtkOutageCausalReferenceBuilder.cpp
   src/core/RtkOutagePreOutageVerticalFenceBuilder.cpp

@@ -12,6 +12,7 @@
 
 #include "offline_lc_minimal/core/GraphTimelineBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeHandoff.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryBiasHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageBiasContinuityPolicy.h"
 #include "offline_lc_minimal/core/RtkOutageBatchSegmentPlanner.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
@@ -748,6 +749,18 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
             : outage.end_time_s});
     AttachRtkOutageBoundaryAttitudeHandoff(
       post_start_handoff,
+      post_start_reference);
+    const RtkOutageBoundaryBiasHandoffResult post_start_bias_handoff =
+      BuildRtkOutageBoundaryBiasHandoff(
+        RtkOutageBoundaryBiasHandoffRequest{
+          &post_config,
+          &outage_result,
+          &outage,
+          post_config.processing_start_time_s > 0.0
+            ? post_config.processing_start_time_s
+            : outage.end_time_s});
+    AttachRtkOutageBoundaryBiasHandoff(
+      post_start_bias_handoff,
       post_start_reference);
     if (post_start_handoff.valid) {
       post_config.enable_rtk_outage_smoothing = true;

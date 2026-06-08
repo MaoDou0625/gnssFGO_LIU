@@ -9,9 +9,11 @@
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/navigation/CombinedImuFactor.h>
+#include <gtsam/navigation/ImuBias.h>
 
 #include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeHandoff.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryBiasHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageBiasContinuityPolicy.h"
 #include "offline_lc_minimal/core/RtkOutageBatchSegmentPlanner.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
@@ -477,12 +479,16 @@ offline_lc_minimal::TrajectoryRow MakeTrajectoryRowWithHorizontalState(
 offline_lc_minimal::ReferenceNodeState MakeReferenceNodeState(
   const double time_s,
   const double up_m,
-  const double yaw_rad) {
+  const double yaw_rad,
+  const double ba_z_mps2 = 0.0) {
   offline_lc_minimal::ReferenceNodeState state;
   state.time_s = time_s;
   state.pose = gtsam::Pose3(
     gtsam::Rot3::Ypr(yaw_rad, 0.0, 0.0),
     gtsam::Point3(0.0, 0.0, up_m));
+  state.bias = gtsam::imuBias::ConstantBias(
+    gtsam::Vector3(0.0, 0.0, ba_z_mps2),
+    gtsam::Vector3::Zero());
   return state;
 }
 
@@ -787,7 +793,7 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
           MakeTrajectoryRow(child_config.processing_end_time_s, 1.0)};
         result.optimized_reference_states = {
           MakeReferenceNodeState(0.0, 0.0, 0.2),
-          MakeReferenceNodeState(outage.end_time_s - 0.05, 19.95, 0.7),
+          MakeReferenceNodeState(outage.end_time_s - 0.05, 19.95, 0.7, 0.123),
           MakeReferenceNodeState(outage.end_time_s, 20.0, 0.7)};
       }
       return result;
@@ -876,6 +882,10 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
              "post child should keep the RTK-estimated horizontal velocity");
   ExpectTrue(post_ref.has_attitude && post_ref.add_attitude_constraint,
              "post child should receive IMU-relative handoff attitude");
+  ExpectTrue(post_ref.has_ba_z && post_ref.add_ba_z_constraint,
+             "post child should receive outage-last ba_z handoff");
+  ExpectTrue(std::abs(post_ref.reference_ba_z_mps2 - 0.123) < 1e-12,
+             "post child ba_z handoff must come from the last kept outage state");
   ExpectTrue(post_ref.source_type == offline_lc_minimal::kPostStartImuRelativeHandoffSource,
              "post child attitude source should be IMU-relative handoff");
   ExpectTrue(std::abs(post_ref.reference_rotation.ypr().x() - 0.7) < 1e-12,
@@ -948,7 +958,7 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
           MakeTrajectoryRow(outage.end_time_s, 1.0)};
         result.optimized_reference_states = {
           MakeReferenceNodeState(0.0, 0.0, 0.2),
-          MakeReferenceNodeState(outage.end_time_s - 0.05, 19.95, 0.7),
+          MakeReferenceNodeState(outage.end_time_s - 0.05, 19.95, 0.7, -0.045),
           MakeReferenceNodeState(outage.end_time_s, 20.0, 0.7)};
       } else {
         result.trajectory = {
@@ -984,6 +994,10 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
              "invalid recovery should not add post vertical constraints");
   ExpectTrue(post_ref.has_attitude && post_ref.add_attitude_constraint,
              "post child should still receive IMU-relative handoff attitude");
+  ExpectTrue(post_ref.has_ba_z && post_ref.add_ba_z_constraint,
+             "post child should still receive outage-last ba_z handoff");
+  ExpectTrue(std::abs(post_ref.reference_ba_z_mps2 + 0.045) < 1e-12,
+             "post child ba_z handoff should not depend on recovery RTK validity");
   ExpectTrue(post_ref.source_type == offline_lc_minimal::kPostStartImuRelativeHandoffSource,
              "post child attitude source should be IMU-relative handoff");
   ExpectTrue(std::abs(post_ref.reference_rotation.ypr().x() - 0.7) < 1e-12,

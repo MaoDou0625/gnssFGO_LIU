@@ -15,6 +15,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeHandoff.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryBiasHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeReference.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryConstraintBuilder.h"
@@ -1337,6 +1338,81 @@ void TestBoundaryAttitudeHandoffUsesOutageLastPlusImuDelta() {
     "matching post start attitude should have zero handoff residual");
 }
 
+void TestBoundaryBiasHandoffUsesOutageLastBias() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_boundary_baz_sigma_mps2 = 2.0e-4;
+
+  offline_lc_minimal::OfflineRunResult outage_result;
+  outage_result.optimized_reference_states.resize(3U);
+  outage_result.optimized_reference_states[0].time_s = 0.0;
+  outage_result.optimized_reference_states[0].bias =
+    gtsam::imuBias::ConstantBias(
+      gtsam::Vector3(0.0, 0.0, 0.01),
+      gtsam::Vector3::Zero());
+  outage_result.optimized_reference_states[1].time_s = 0.5;
+  outage_result.optimized_reference_states[1].bias =
+    gtsam::imuBias::ConstantBias(
+      gtsam::Vector3(0.0, 0.0, -0.123),
+      gtsam::Vector3::Zero());
+  outage_result.optimized_reference_states[2].time_s = 1.0;
+  outage_result.optimized_reference_states[2].bias =
+    gtsam::imuBias::ConstantBias(
+      gtsam::Vector3(0.0, 0.0, 0.5),
+      gtsam::Vector3::Zero());
+
+  offline_lc_minimal::RtkOutageWindowRow outage;
+  outage.window_index = 4U;
+  outage.start_time_s = 0.0;
+  outage.end_time_s = 1.0;
+
+  const auto handoff =
+    offline_lc_minimal::BuildRtkOutageBoundaryBiasHandoff(
+      offline_lc_minimal::RtkOutageBoundaryBiasHandoffRequest{
+        &config,
+        &outage_result,
+        &outage,
+        1.0});
+
+  ExpectTrue(handoff.valid, "ba_z handoff should be valid");
+  ExpectTrue(handoff.boundary_reference.boundary_role == "POST_START",
+             "ba_z handoff should target post start");
+  ExpectNear(
+    handoff.boundary_reference.reference_ba_z_mps2,
+    -0.123,
+    1.0e-12,
+    "ba_z handoff must use the last kept outage state before post start");
+  ExpectNear(
+    handoff.boundary_reference.ba_z_sigma_mps2,
+    config.rtk_outage_boundary_baz_sigma_mps2,
+    1.0e-12,
+    "ba_z handoff should use the configured boundary sigma");
+
+  offline_lc_minimal::RtkOutageBoundaryReferenceRow post_reference;
+  post_reference.source_type =
+    offline_lc_minimal::kPostStartImuRelativeHandoffSource;
+  post_reference.boundary_role = "POST_START";
+  post_reference.target_time_s = 1.0;
+  post_reference.valid = true;
+  post_reference.has_up = true;
+  post_reference.add_up_constraint = true;
+  post_reference.reference_up_m = 12.0;
+  offline_lc_minimal::AttachRtkOutageBoundaryBiasHandoff(
+    handoff,
+    post_reference);
+  ExpectTrue(post_reference.source_type ==
+               offline_lc_minimal::kPostStartImuRelativeHandoffSource,
+             "attitude handoff source should be preserved when adding ba_z");
+  ExpectTrue(post_reference.has_up && post_reference.add_up_constraint,
+             "attaching ba_z handoff should preserve recovery up constraint");
+  ExpectTrue(post_reference.has_ba_z && post_reference.add_ba_z_constraint,
+             "post reference should get a ba_z constraint");
+  ExpectNear(
+    post_reference.reference_ba_z_mps2,
+    -0.123,
+    1.0e-12,
+    "attached post reference should carry outage-last ba_z");
+}
+
 offline_lc_minimal::GnssSolutionSample MakeCausalReferenceSample(
   const double time_s,
   const double up_m) {
@@ -1500,6 +1576,9 @@ int main() {
     RunTest(
       "TestBoundaryAttitudeHandoffUsesOutageLastPlusImuDelta",
       TestBoundaryAttitudeHandoffUsesOutageLastPlusImuDelta);
+    RunTest(
+      "TestBoundaryBiasHandoffUsesOutageLastBias",
+      TestBoundaryBiasHandoffUsesOutageLastBias);
     RunTest(
       "TestCausalReferenceBuilderUsesPrefixBaseConfig",
       TestCausalReferenceBuilderUsesPrefixBaseConfig);
