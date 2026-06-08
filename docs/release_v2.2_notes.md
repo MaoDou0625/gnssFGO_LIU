@@ -33,6 +33,8 @@ and bias behavior, while Stage3 uses a common absolute height target.
   a pure shared-height refinement instead of a nested Stage1/Stage2 rerun.
 - Added plotting and validation support for shared-reference profiles and IRI
   comparison.
+- Added a detailed Stage1-Stage3 pipeline and module catalog:
+  `docs/stage1_to_stage3_pipeline_and_modules.md`.
 
 ## Usage
 
@@ -40,6 +42,12 @@ The full usage guide is in:
 
 ```text
 docs/shared_vertical_reference_workflow.md
+```
+
+The detailed Stage1-Stage3 flow and module/default-parameter reference is in:
+
+```text
+docs/stage1_to_stage3_pipeline_and_modules.md
 ```
 
 ## Promoted Default Parameters
