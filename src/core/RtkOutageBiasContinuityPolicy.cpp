@@ -93,15 +93,10 @@ RtkOutageBiasContinuityPolicy::Build() const {
       row.threshold_ug = threshold_ug;
       row.max_abs_detected_delta_ug =
         has_delta ? max_abs_delta_ug : std::numeric_limits<double>::quiet_NaN();
-      if (overlaps_reestimate || exceeds_threshold) {
-        row.ba_z_continuity_allowed = false;
-        row.reset_reason = exceeds_threshold
-          ? "delta_threshold_exceeded"
-          : "reestimate_segment_overlap";
-      } else {
-        row.ba_z_continuity_allowed = true;
-        row.reset_reason = "NONE";
-      }
+      row.ba_z_continuity_allowed = true;
+      row.reset_reason = exceeds_threshold
+        ? "delta_threshold_exceeded_continuity_preserved"
+        : "NONE";
       rows.push_back(row);
     }
   }

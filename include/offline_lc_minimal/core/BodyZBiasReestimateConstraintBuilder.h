@@ -15,6 +15,7 @@ struct BodyZBiasReestimateConstraintBuildRequest {
   const OfflineRunnerConfig *config = nullptr;
   const std::vector<double> *state_timestamps = nullptr;
   std::vector<BodyZBiasReestimateSegmentRow> *segments = nullptr;
+  const std::vector<RtkOutageBoundaryReferenceRow> *boundary_references = nullptr;
   const std::vector<VerticalJumpImuIntervalRecord> *imu_intervals = nullptr;
   gtsam::NonlinearFactorGraph *graph = nullptr;
   gtsam::Values *initial_values = nullptr;
@@ -32,6 +33,8 @@ class BodyZBiasReestimateConstraintBuilder {
     const BodyZBiasReestimateSegmentRow &segment) const;
   [[nodiscard]] const BodyZBiasReestimateSegmentRow *SegmentForState(
     std::size_t state_index) const;
+  [[nodiscard]] const RtkOutageBoundaryReferenceRow *PostStartBazReferenceForSegment(
+    const BodyZBiasReestimateSegmentRow &segment) const;
   [[nodiscard]] long long SegmentIndexForState(std::size_t state_index) const;
   [[nodiscard]] bool CrossesReestimateBoundary(const VerticalJumpImuIntervalRecord &interval) const;
   [[nodiscard]] bool BoundaryTouchesRtkOutageSegment(

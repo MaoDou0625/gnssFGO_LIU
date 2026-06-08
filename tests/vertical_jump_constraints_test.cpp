@@ -687,6 +687,77 @@ void TestBodyZBiasReestimateBuilderBreaksBoundaryAndAddsWeakPrior() {
   ExpectNear(outside_bias.accelerometer().z(), 0.10, 1e-12, "outside ba_z should be preserved");
 }
 
+void TestBodyZBiasReestimateBuilderUsesPostStartBazHandoff() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_jump_bias_prior_sigma_mps2 = 0.05;
+
+  const std::vector<double> state_timestamps{10.0, 10.5, 11.0};
+  const std::vector<offline_lc_minimal::VerticalJumpImuIntervalRecord> intervals;
+  std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> segments;
+  offline_lc_minimal::BodyZBiasReestimateSegmentRow segment;
+  segment.segment_index = 0;
+  segment.source_type = "ROAD_HIGH_NOISE";
+  segment.start_time_s = 10.0;
+  segment.end_time_s = 11.0;
+  segment.duration_s = 1.0;
+  segment.detected_bias_delta_mps2 = 0.02;
+  segments.push_back(segment);
+
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> boundary_references(1U);
+  boundary_references.front().boundary_role = "POST_START";
+  boundary_references.front().target_time_s = 10.0;
+  boundary_references.front().has_ba_z = true;
+  boundary_references.front().add_ba_z_constraint = true;
+  boundary_references.front().reference_ba_z_mps2 = -0.03;
+  boundary_references.front().ba_z_sigma_mps2 = 0.001;
+
+  gtsam::NonlinearFactorGraph graph;
+  gtsam::Values initial_values;
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    initial_values.insert(
+      symbol::B(index),
+      gtsam::imuBias::ConstantBias(
+        gtsam::Vector3(0.01, -0.02, 0.10),
+        gtsam::Vector3(0.001, -0.002, 0.003)));
+  }
+  offline_lc_minimal::RunSummary summary;
+
+  offline_lc_minimal::BodyZBiasReestimateConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.segments = &segments;
+  request.boundary_references = &boundary_references;
+  request.imu_intervals = &intervals;
+  request.graph = &graph;
+  request.initial_values = &initial_values;
+  request.run_summary = &summary;
+  offline_lc_minimal::BodyZBiasReestimateConstraintBuilder(std::move(request)).Apply();
+
+  ExpectNear(
+    segments.front().reference_ba_z_mps2,
+    -0.03,
+    1e-12,
+    "post-start reestimate should use outage-last ba_z as reference");
+  ExpectNear(
+    segments.front().prior_target_ba_z_mps2,
+    -0.03,
+    1e-12,
+    "post-start handoff should not add detected bias delta at the boundary");
+  ExpectNear(
+    segments.front().prior_sigma_mps2,
+    0.001,
+    1e-12,
+    "post-start reestimate should use boundary ba_z sigma");
+  for (std::size_t state_index = 0; state_index < state_timestamps.size(); ++state_index) {
+    const auto bias = initial_values.at<gtsam::imuBias::ConstantBias>(symbol::B(state_index));
+    ExpectNear(
+      bias.accelerometer().z(),
+      -0.03,
+      1e-12,
+      "post segment ba_z initial value should inherit the handoff");
+  }
+}
+
 void TestVerticalAccelBiasGmSkipsBiasReestimateBoundaries() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_global_acc_bias = true;
@@ -2378,6 +2449,9 @@ int main() {
     RunTest(
       "TestBodyZBiasReestimateBuilderBreaksBoundaryAndAddsWeakPrior",
       TestBodyZBiasReestimateBuilderBreaksBoundaryAndAddsWeakPrior);
+    RunTest(
+      "TestBodyZBiasReestimateBuilderUsesPostStartBazHandoff",
+      TestBodyZBiasReestimateBuilderUsesPostStartBazHandoff);
     RunTest(
       "TestVerticalAccelBiasGmSkipsBiasReestimateBoundaries",
       TestVerticalAccelBiasGmSkipsBiasReestimateBoundaries);

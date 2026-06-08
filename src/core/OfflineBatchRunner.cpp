@@ -1913,6 +1913,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     bias_reestimate_request.config = &config_;
     bias_reestimate_request.state_timestamps = &state_timestamps;
     bias_reestimate_request.segments = &run_result.body_z_bias_reestimate_segments;
+    if (active_stage2_reference != nullptr &&
+        !active_stage2_reference->boundary_references.empty()) {
+      bias_reestimate_request.boundary_references =
+        &active_stage2_reference->boundary_references;
+    }
     bias_reestimate_request.imu_intervals = &vertical_jump_imu_interval_records;
     bias_reestimate_request.graph = &graph_with_gnss;
     bias_reestimate_request.initial_values = &optimization_initial_values;

@@ -379,7 +379,7 @@ void TestRecoveryReferenceSkipsWhenSamplesAreInsufficient() {
              "skip reason should explain insufficient recovery support");
 }
 
-void TestBiasContinuityPolicyBreaksForLargeReestimateWindow() {
+void TestBiasContinuityPolicyPreservesOutageBoundariesForReestimateWindow() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.rtk_outage_baz_continuity_break_delta_threshold_mps2 =
     offline_lc_minimal::MicroGToMps2(1000.0);
@@ -405,9 +405,10 @@ void TestBiasContinuityPolicyBreaksForLargeReestimateWindow() {
     offline_lc_minimal::RtkOutageBiasContinuityPolicy(std::move(request)).Build();
   ExpectTrue(rows.size() == 2U, "policy should emit start and end boundary rows");
   for (const auto &row : rows) {
-    ExpectTrue(!row.ba_z_continuity_allowed, "large reestimate should break ba_z continuity");
-    ExpectTrue(row.reset_reason == "delta_threshold_exceeded",
-               "policy should report the threshold reset reason");
+    ExpectTrue(row.ba_z_continuity_allowed, "outage boundaries should keep ba_z continuity");
+    ExpectTrue(row.overlaps_reestimate_segment, "policy should still report reestimate overlap");
+    ExpectTrue(row.reset_reason == "delta_threshold_exceeded_continuity_preserved",
+               "policy should report that a large delta was preserved across the boundary");
   }
 }
 
@@ -1194,8 +1195,8 @@ int main() {
       "TestRecoveryReferenceSkipsWhenSamplesAreInsufficient",
       TestRecoveryReferenceSkipsWhenSamplesAreInsufficient);
     RunTest(
-      "TestBiasContinuityPolicyBreaksForLargeReestimateWindow",
-      TestBiasContinuityPolicyBreaksForLargeReestimateWindow);
+      "TestBiasContinuityPolicyPreservesOutageBoundariesForReestimateWindow",
+      TestBiasContinuityPolicyPreservesOutageBoundariesForReestimateWindow);
     RunTest(
       "TestBatchSegmentPlannerSplitsFirstPlannedOutage",
       TestBatchSegmentPlannerSplitsFirstPlannedOutage);

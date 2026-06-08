@@ -14,6 +14,7 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include "offline_lc_minimal/common/Config.h"
+#include "offline_lc_minimal/common/Units.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryBiasHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
@@ -1413,6 +1414,48 @@ void TestBoundaryBiasHandoffUsesOutageLastBias() {
     "attached post reference should carry outage-last ba_z");
 }
 
+void TestBoundaryBiasHandoffUsesGmScaleSigmaWhenEnabled() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_vertical_acc_bias_gm_process = true;
+  config.vertical_acc_bias_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(0.1);
+  config.rtk_outage_boundary_baz_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(50.0);
+
+  offline_lc_minimal::OfflineRunResult outage_result;
+  outage_result.optimized_reference_states.resize(2U);
+  outage_result.optimized_reference_states[0].time_s = 0.0;
+  outage_result.optimized_reference_states[0].bias =
+    gtsam::imuBias::ConstantBias(
+      gtsam::Vector3(0.0, 0.0, 0.01),
+      gtsam::Vector3::Zero());
+  outage_result.optimized_reference_states[1].time_s = 0.5;
+  outage_result.optimized_reference_states[1].bias =
+    gtsam::imuBias::ConstantBias(
+      gtsam::Vector3(0.0, 0.0, -0.02),
+      gtsam::Vector3::Zero());
+
+  offline_lc_minimal::RtkOutageWindowRow outage;
+  outage.window_index = 4U;
+  outage.start_time_s = 0.0;
+  outage.end_time_s = 1.0;
+
+  const auto handoff =
+    offline_lc_minimal::BuildRtkOutageBoundaryBiasHandoff(
+      offline_lc_minimal::RtkOutageBoundaryBiasHandoffRequest{
+        &config,
+        &outage_result,
+        &outage,
+        1.0});
+
+  ExpectTrue(handoff.valid, "ba_z handoff should be valid");
+  ExpectNear(
+    handoff.boundary_reference.ba_z_sigma_mps2,
+    config.vertical_acc_bias_sigma_mps2,
+    1.0e-12,
+    "ba_z handoff should use GM-scale sigma when GM process is enabled");
+}
+
 offline_lc_minimal::GnssSolutionSample MakeCausalReferenceSample(
   const double time_s,
   const double up_m) {
@@ -1579,6 +1622,9 @@ int main() {
     RunTest(
       "TestBoundaryBiasHandoffUsesOutageLastBias",
       TestBoundaryBiasHandoffUsesOutageLastBias);
+    RunTest(
+      "TestBoundaryBiasHandoffUsesGmScaleSigmaWhenEnabled",
+      TestBoundaryBiasHandoffUsesGmScaleSigmaWhenEnabled);
     RunTest(
       "TestCausalReferenceBuilderUsesPrefixBaseConfig",
       TestCausalReferenceBuilderUsesPrefixBaseConfig);

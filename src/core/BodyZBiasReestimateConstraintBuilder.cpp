@@ -20,6 +20,7 @@ namespace {
 namespace symbol = gtsam::symbol_shorthand;
 
 constexpr double kTimeEpsilonS = 1.0e-9;
+constexpr double kBoundaryTimeToleranceS = 1.0e-6;
 
 bool ContainsTime(
   const BodyZBiasReestimateSegmentRow &segment,
@@ -70,10 +71,6 @@ void BodyZBiasReestimateConstraintBuilder::Apply() const {
       [](const BodyZBiasReestimateSegmentRow &segment) {
         return IsRtkOutageLinked(segment);
       }));
-  const auto prior_noise = gtsam::noiseModel::Isotropic::Sigma(
-    1,
-    request_.config->vertical_jump_bias_prior_sigma_mps2);
-
   for (auto &segment : *request_.segments) {
     segment.start_state_index = -1;
     segment.end_state_index = -1;
@@ -93,7 +90,6 @@ void BodyZBiasReestimateConstraintBuilder::Apply() const {
     segment.start_state_index = static_cast<long long>(state_indices.front());
     segment.end_state_index = static_cast<long long>(state_indices.back());
     segment.anchor_state_index = static_cast<long long>(state_indices.front());
-    segment.prior_sigma_mps2 = request_.config->vertical_jump_bias_prior_sigma_mps2;
 
     if (!std::isfinite(segment.detected_bias_delta_mps2)) {
       segment.skip_reason = "MISSING_DETECTED_BIAS";
@@ -102,9 +98,21 @@ void BodyZBiasReestimateConstraintBuilder::Apply() const {
 
     const gtsam::Key anchor_key = symbol::B(state_indices.front());
     const auto anchor_bias = request_.initial_values->at<gtsam::imuBias::ConstantBias>(anchor_key);
-    segment.reference_ba_z_mps2 = anchor_bias.accelerometer().z();
+    const RtkOutageBoundaryReferenceRow *boundary_ba_z_reference =
+      PostStartBazReferenceForSegment(segment);
+    segment.prior_sigma_mps2 =
+      boundary_ba_z_reference != nullptr &&
+      std::isfinite(boundary_ba_z_reference->ba_z_sigma_mps2) &&
+      boundary_ba_z_reference->ba_z_sigma_mps2 > 0.0
+        ? boundary_ba_z_reference->ba_z_sigma_mps2
+        : request_.config->vertical_jump_bias_prior_sigma_mps2;
+    segment.reference_ba_z_mps2 =
+      boundary_ba_z_reference != nullptr
+        ? boundary_ba_z_reference->reference_ba_z_mps2
+        : anchor_bias.accelerometer().z();
     segment.prior_target_ba_z_mps2 =
-      segment.reference_ba_z_mps2 + segment.detected_bias_delta_mps2;
+      segment.reference_ba_z_mps2 +
+      (boundary_ba_z_reference != nullptr ? 0.0 : segment.detected_bias_delta_mps2);
 
     for (const std::size_t state_index : state_indices) {
       const gtsam::Key bias_key = symbol::B(state_index);
@@ -116,6 +124,9 @@ void BodyZBiasReestimateConstraintBuilder::Apply() const {
       ++request_.run_summary->body_z_bias_reestimate_initialized_state_count;
     }
 
+    const auto prior_noise = gtsam::noiseModel::Isotropic::Sigma(
+      1,
+      segment.prior_sigma_mps2);
     request_.graph->add(factor::VerticalAccelBiasPriorFactor(
       anchor_key,
       segment.prior_target_ba_z_mps2,
@@ -181,6 +192,29 @@ const BodyZBiasReestimateSegmentRow *BodyZBiasReestimateConstraintBuilder::Segme
   for (const auto &segment : *request_.segments) {
     if (ContainsTime(segment, time_s)) {
       return &segment;
+    }
+  }
+  return nullptr;
+}
+
+const RtkOutageBoundaryReferenceRow *
+BodyZBiasReestimateConstraintBuilder::PostStartBazReferenceForSegment(
+  const BodyZBiasReestimateSegmentRow &segment) const {
+  if (request_.boundary_references == nullptr ||
+      !std::isfinite(segment.start_time_s)) {
+    return nullptr;
+  }
+  for (const auto &reference : *request_.boundary_references) {
+    if (reference.boundary_role != "POST_START" ||
+        !reference.has_ba_z ||
+        !reference.add_ba_z_constraint ||
+        !std::isfinite(reference.target_time_s) ||
+        !std::isfinite(reference.reference_ba_z_mps2)) {
+      continue;
+    }
+    if (std::abs(reference.target_time_s - segment.start_time_s) <=
+        kBoundaryTimeToleranceS) {
+      return &reference;
     }
   }
   return nullptr;
