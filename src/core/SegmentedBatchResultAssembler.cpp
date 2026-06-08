@@ -189,6 +189,9 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.reference_node_trajectory.clear();
   assembled.imu_propagated_reference_states.clear();
   assembled.optimized_reference_states.clear();
+  assembled.seed_body_z_acc_diagnostics.clear();
+  assembled.body_z_seed_jump_windows.clear();
+  assembled.body_z_seed_bias_windows.clear();
   assembled.gnss_factor_records.clear();
   assembled.gnss_consistency_records.clear();
   assembled.vertical_envelope_diagnostics.clear();
@@ -328,6 +331,27 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       include_end,
       [](const ReferenceNodeState &row) { return row.time_s; });
     AppendRowsInSegment(
+      assembled.seed_body_z_acc_diagnostics,
+      piece.result.seed_body_z_acc_diagnostics,
+      splice_segment,
+      include_start,
+      include_end,
+      [](const BodyZSeedImuDiagnosticRow &row) { return row.time_s; });
+    AppendRowsInSegment(
+      assembled.body_z_seed_jump_windows,
+      piece.result.body_z_seed_jump_windows,
+      splice_segment,
+      include_start,
+      include_end,
+      [](const BodyZSeedJumpWindowRow &row) { return row.center_time_s; });
+    AppendRowsInSegment(
+      assembled.body_z_seed_bias_windows,
+      piece.result.body_z_seed_bias_windows,
+      splice_segment,
+      include_start,
+      include_end,
+      [](const BodyZSeedJumpWindowRow &row) { return row.center_time_s; });
+    AppendRowsInSegment(
       assembled.gnss_factor_records,
       piece.result.gnss_factor_records,
       splice_segment,
@@ -460,13 +484,6 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   }
 
   assembled.run_summary.rtk_outage_segmented_batch_enabled = true;
-  assembled.run_summary.road_noise_state_baz_reestimate_enabled =
-    std::any_of(
-      request_.pieces.begin(),
-      request_.pieces.end(),
-      [](const SegmentedBatchResultPiece &piece) {
-        return piece.result.run_summary.road_noise_state_baz_reestimate_enabled;
-      });
   assembled.run_summary.road_noise_state_segment_count =
     assembled.road_noise_state_segments.size();
   assembled.run_summary.road_noise_state_high_segment_count =
@@ -476,6 +493,8 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       [](const RoadNoiseStateSegmentRow &segment) {
         return segment.state == "HIGH_NOISE";
       }));
+  assembled.run_summary.road_noise_state_baz_reestimate_enabled =
+    assembled.run_summary.road_noise_state_high_segment_count > 0U;
   assembled.run_summary.rtk_outage_batch_segment_count =
     assembled.rtk_outage_batch_segments.size();
   assembled.run_summary.rtk_outage_segmented_batch_run_count =
@@ -501,6 +520,11 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.run_summary.rtk_outage_attitude_hold_factor_count = 0;
   assembled.run_summary.rtk_outage_relative_attitude_factor_count = 0;
   assembled.run_summary.rtk_outage_velocity_delta_3d_factor_count = 0;
+  assembled.run_summary.body_z_bias_reestimate_segment_count = 0;
+  assembled.run_summary.body_z_bias_reestimate_boundary_break_count = 0;
+  assembled.run_summary.body_z_bias_reestimate_prior_factor_count = 0;
+  assembled.run_summary.body_z_bias_reestimate_initialized_state_count = 0;
+  assembled.run_summary.body_z_bias_reestimate_gm_skipped_count = 0;
   assembled.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad =
     std::numeric_limits<double>::quiet_NaN();
   assembled.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad =
@@ -602,6 +626,16 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       piece.result.run_summary.rtk_outage_relative_attitude_factor_count;
     assembled.run_summary.rtk_outage_velocity_delta_3d_factor_count +=
       piece.result.run_summary.rtk_outage_velocity_delta_3d_factor_count;
+    assembled.run_summary.body_z_bias_reestimate_segment_count +=
+      piece.result.run_summary.body_z_bias_reestimate_segment_count;
+    assembled.run_summary.body_z_bias_reestimate_boundary_break_count +=
+      piece.result.run_summary.body_z_bias_reestimate_boundary_break_count;
+    assembled.run_summary.body_z_bias_reestimate_prior_factor_count +=
+      piece.result.run_summary.body_z_bias_reestimate_prior_factor_count;
+    assembled.run_summary.body_z_bias_reestimate_initialized_state_count +=
+      piece.result.run_summary.body_z_bias_reestimate_initialized_state_count;
+    assembled.run_summary.body_z_bias_reestimate_gm_skipped_count +=
+      piece.result.run_summary.body_z_bias_reestimate_gm_skipped_count;
     if (std::isfinite(piece.result.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad)) {
       assembled.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad =
         std::isfinite(assembled.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad)
