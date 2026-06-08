@@ -553,6 +553,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       std::move(passthrough_config),
       request_.stage2_reference,
       nullptr,
+      request_.road_noise_state_reference,
       request_.dataset);
   }
 
@@ -579,6 +580,24 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       OfflineRunResult assembled =
         SegmentedBatchResultAssembler(std::move(assemble_request)).Assemble();
       assembled.rtk_outage_recovery_references = recovery_references;
+      if (request_.road_noise_state_reference != nullptr &&
+          !request_.road_noise_state_reference->empty()) {
+        assembled.road_noise_state_segments =
+          request_.road_noise_state_reference->Clip(
+            request_.dynamic_start_time_s,
+            request_.processing_end_time_s);
+        assembled.run_summary.road_noise_state_segment_count =
+          assembled.road_noise_state_segments.size();
+        assembled.run_summary.road_noise_state_high_segment_count =
+          static_cast<std::size_t>(std::count_if(
+            assembled.road_noise_state_segments.begin(),
+            assembled.road_noise_state_segments.end(),
+            [](const RoadNoiseStateSegmentRow &segment) {
+              return segment.state == "HIGH_NOISE";
+            }));
+        assembled.run_summary.road_noise_state_baz_reestimate_enabled =
+          assembled.run_summary.road_noise_state_high_segment_count > 0U;
+      }
       return assembled;
     };
 
@@ -593,6 +612,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
         std::move(child_config),
         std::move(child_stage2_reference),
         nullptr,
+        request_.road_noise_state_reference,
         request_.dataset);
     };
 
@@ -653,6 +673,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
           std::move(post_probe_reference),
           std::move(post_probe_boundary_refs)),
         nullptr,
+        request_.road_noise_state_reference,
         request_.dataset);
       has_post_probe_result = true;
     }
@@ -715,6 +736,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       std::move(outage_config),
       WithBoundaryReferences(std::move(outage_reference), std::move(outage_boundary_refs)),
       nullptr,
+      request_.road_noise_state_reference,
       request_.dataset);
 
     OfflineRunnerConfig post_config =
@@ -770,6 +792,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       std::move(post_config),
       WithBoundaryReferences(std::move(post_reference), std::move(post_boundary_refs)),
       nullptr,
+      request_.road_noise_state_reference,
       request_.dataset);
     if (post_start_handoff.valid) {
       PopulateRtkOutageBoundaryAttitudeHandoffDiagnostic(
@@ -818,6 +841,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
         std::move(child_config),
         std::move(child_stage2_reference),
         nullptr,
+        request_.road_noise_state_reference,
         request_.dataset);
     pieces.push_back(SegmentedBatchResultPiece{segment, std::move(child_result)});
   }

@@ -9,6 +9,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/RunResultTypes.h"
+#include "offline_lc_minimal/core/RoadNoiseStateReference.h"
 #include "offline_lc_minimal/core/Stage1OutageLateralVelocityEnvelopeEstimator.h"
 #include "offline_lc_minimal/core/Stage2VelocityReference.h"
 
@@ -18,6 +19,7 @@ using SegmentedBatchRunOnce = std::function<OfflineRunResult(
   OfflineRunnerConfig,
   std::shared_ptr<const Stage2VelocityReference>,
   std::shared_ptr<const Stage1OutageBodyYEnvelopeReference>,
+  std::shared_ptr<const RoadNoiseStateReference>,
   DataSet)>;
 
 struct RtkOutageSegmentedBatchRunRequest {
@@ -25,6 +27,7 @@ struct RtkOutageSegmentedBatchRunRequest {
   OfflineRunnerConfig config;
   DataSet dataset;
   std::shared_ptr<const Stage2VelocityReference> stage2_reference;
+  std::shared_ptr<const RoadNoiseStateReference> road_noise_state_reference;
   std::vector<RtkOutageWindowRow> outage_windows;
   std::vector<BodyZBiasReestimateSegmentRow> bias_reestimate_segments;
   std::vector<GnssFactorRecord> gnss_factor_records;

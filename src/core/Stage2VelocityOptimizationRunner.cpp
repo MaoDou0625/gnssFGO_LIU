@@ -136,6 +136,12 @@ std::optional<OfflineRunResult> TryRunSegmentedStage2(
   segmented_request.stage2_reference = std::move(reference);
   segmented_request.outage_windows = stage1_result.rtk_outage_windows;
   segmented_request.bias_reestimate_segments = stage1_result.body_z_bias_reestimate_segments;
+  if (request.config.enable_road_noise_state_baz_reestimate &&
+      !stage1_result.road_noise_state_segments.empty()) {
+    segmented_request.road_noise_state_reference =
+      std::make_shared<RoadNoiseStateReference>(
+        stage1_result.road_noise_state_segments);
+  }
   segmented_request.gnss_factor_records = stage1_result.gnss_factor_records;
   segmented_request.state_timestamps = std::move(state_timestamps);
   auto imu_params =
@@ -187,7 +193,12 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
                                const OfflineRunnerConfig &config,
                                std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> body_y_reference,
                                DataSet dataset) {
-    return request_.run_once(config, nullptr, std::move(body_y_reference), std::move(dataset));
+    return request_.run_once(
+      config,
+      nullptr,
+      std::move(body_y_reference),
+      nullptr,
+      std::move(dataset));
   };
   OfflineRunResult stage1_result =
     Stage1YawRefinementRunner(std::move(stage1_request)).Run();
@@ -226,7 +237,12 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
                                               const OfflineRunnerConfig &config,
                                               std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> reference,
                                               DataSet dataset) {
-        return request_.run_once(config, nullptr, std::move(reference), std::move(dataset));
+        return request_.run_once(
+          config,
+          nullptr,
+          std::move(reference),
+          nullptr,
+          std::move(dataset));
       };
       stage1_result =
         Stage1YawRefinementRunner(std::move(constrained_stage1_request)).Run();
@@ -276,7 +292,7 @@ OfflineRunResult Stage2VelocityOptimizationRunner::Run() const {
   }
 
   OfflineRunResult stage2_result =
-    request_.run_once(stage2_config, reference, nullptr, request_.dataset);
+    request_.run_once(stage2_config, reference, nullptr, nullptr, request_.dataset);
   CopyStage1Summary(stage1_result, stage2_result);
   stage2_result.run_summary.stage2_velocity_optimization_enabled = true;
   return stage2_result;

@@ -607,6 +607,7 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
   request.run_once = [&](offline_lc_minimal::OfflineRunnerConfig child_config,
                          std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference>,
                          std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
+                         std::shared_ptr<const offline_lc_minimal::RoadNoiseStateReference>,
                          offline_lc_minimal::DataSet) {
     offline_lc_minimal::ValidateConfig(child_config);
     calls.push_back(Call{
@@ -754,6 +755,7 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
     [&](offline_lc_minimal::OfflineRunnerConfig child_config,
         std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> stage2_reference,
         std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
+        std::shared_ptr<const offline_lc_minimal::RoadNoiseStateReference>,
         offline_lc_minimal::DataSet) {
       calls.push_back(Call{
         child_config.processing_start_time_s,
@@ -936,6 +938,7 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
     [&](offline_lc_minimal::OfflineRunnerConfig child_config,
         std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> stage2_reference,
         std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
+        std::shared_ptr<const offline_lc_minimal::RoadNoiseStateReference>,
         offline_lc_minimal::DataSet) {
       calls.push_back(Call{
         child_config.processing_start_time_s,

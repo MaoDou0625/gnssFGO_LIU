@@ -5,6 +5,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Types.h"
+#include "offline_lc_minimal/core/RoadNoiseStateReference.h"
 #include "offline_lc_minimal/core/Stage1OutageLateralVelocityEnvelopeEstimator.h"
 #include "offline_lc_minimal/core/Stage2VelocityReference.h"
 
@@ -14,6 +15,7 @@ using Stage2RunOnce = std::function<OfflineRunResult(
   const OfflineRunnerConfig &,
   std::shared_ptr<const Stage2VelocityReference>,
   std::shared_ptr<const Stage1OutageBodyYEnvelopeReference>,
+  std::shared_ptr<const RoadNoiseStateReference>,
   DataSet)>;
 
 struct Stage2VelocityOptimizationRequest {

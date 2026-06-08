@@ -104,6 +104,7 @@ add_library(offline_lc_minimal_lib
   src/core/RtkOutageWindowPlanner.cpp
   src/core/RoadNoiseBiasReestimatePlanner.cpp
   src/core/RoadNoiseStateEstimator.cpp
+  src/core/RoadNoiseStateReference.cpp
   src/core/RtkVerticalDriftGateWeighting.cpp
   src/core/RtkVerticalDriftReferenceEstimator.cpp
   src/core/RtkVerticalLowpassReferenceFilter.cpp

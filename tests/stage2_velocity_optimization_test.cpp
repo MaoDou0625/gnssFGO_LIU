@@ -686,6 +686,7 @@ void TestStage2SkipsStrongReferenceWhenStage1ReferenceInvalid() {
                        const offline_lc_minimal::OfflineRunnerConfig &run_config,
                        std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> stage2_reference,
                        std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
+                       std::shared_ptr<const offline_lc_minimal::RoadNoiseStateReference>,
                        offline_lc_minimal::DataSet) {
     calls.push_back(CallRecord{
       stage2_reference != nullptr,
@@ -748,6 +749,7 @@ void TestStage2RunsConstrainedStage1BeforeSegmentedStage2() {
                        const offline_lc_minimal::OfflineRunnerConfig &run_config,
                        std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> stage2_reference,
                        std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference> body_y_reference,
+                       std::shared_ptr<const offline_lc_minimal::RoadNoiseStateReference>,
                        offline_lc_minimal::DataSet) {
     calls.push_back(CallRecord{
       stage2_reference != nullptr,
@@ -851,6 +853,7 @@ void TestSegmentedStage2RunsStandalonePreAndGlobalReferenceChildren() {
   request.run_once = [&](const offline_lc_minimal::OfflineRunnerConfig &run_config,
                          std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> reference,
                          std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
+                         std::shared_ptr<const offline_lc_minimal::RoadNoiseStateReference>,
                          offline_lc_minimal::DataSet) {
     calls.push_back(CallRecord{
       run_config.enable_stage1_yaw_refinement,
@@ -1046,6 +1049,7 @@ void TestSegmentedStage2SlicesRotationNativeReferenceWithoutTrajectoryRows() {
                        offline_lc_minimal::OfflineRunnerConfig run_config,
                        std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> child_reference,
                        std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
+                       std::shared_ptr<const offline_lc_minimal::RoadNoiseStateReference>,
                        offline_lc_minimal::DataSet) {
     calls.push_back(CallRecord{
       child_reference != nullptr,

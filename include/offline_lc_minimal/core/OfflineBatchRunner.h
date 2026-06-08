@@ -8,6 +8,7 @@
 #include "offline_lc_minimal/core/Stage1OutageLateralVelocityEnvelopeEstimator.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceProfilePlanner.h"
 #include "offline_lc_minimal/core/Stage2VelocityReference.h"
+#include "offline_lc_minimal/core/RoadNoiseStateReference.h"
 
 namespace offline_lc_minimal {
 
@@ -31,7 +32,8 @@ class OfflineBatchRunner {
     std::shared_ptr<const Stage2VelocityReference> stage2_reference,
     std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference,
     std::shared_ptr<const Stage3VerticalReference> stage3_vertical_reference,
-    std::shared_ptr<const Stage3VerticalReference> stage2_lowpass_vertical_reference);
+    std::shared_ptr<const Stage3VerticalReference> stage2_lowpass_vertical_reference,
+    std::shared_ptr<const RoadNoiseStateReference> road_noise_state_reference = nullptr);
 
   [[nodiscard]] OfflineRunResult Run(DataSet dataset) const;
   [[nodiscard]] const OfflineRunnerConfig &config() const { return config_; }
@@ -65,6 +67,7 @@ class OfflineBatchRunner {
   std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference_;
   std::shared_ptr<const Stage3VerticalReference> stage3_vertical_reference_;
   std::shared_ptr<const Stage3VerticalReference> stage2_lowpass_vertical_reference_;
+  std::shared_ptr<const RoadNoiseStateReference> road_noise_state_reference_;
 };
 
 }  // namespace offline_lc_minimal

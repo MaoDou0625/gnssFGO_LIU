@@ -6,6 +6,7 @@
 
 #include "offline_lc_minimal/core/RoadNoiseBiasReestimatePlanner.h"
 #include "offline_lc_minimal/core/RoadNoiseStateEstimator.h"
+#include "offline_lc_minimal/core/RoadNoiseStateReference.h"
 
 namespace {
 
@@ -124,6 +125,47 @@ void TestRoadNoiseBiasReestimatePlannerUsesOnlyHighNoiseSegments() {
   ExpectNear(segments.front().detected_bias_delta_mps2, 0.0, 0.0, "road-state planner should not inject body-z delta");
 }
 
+void TestRoadNoiseStateReferenceClipsGlobalTimeline() {
+  std::vector<offline_lc_minimal::RoadNoiseStateSegmentRow> road_segments(3U);
+  road_segments[0].segment_index = 0U;
+  road_segments[0].state = "LOW_NOISE";
+  road_segments[0].start_time_s = 0.0;
+  road_segments[0].end_time_s = 10.0;
+  road_segments[1].segment_index = 1U;
+  road_segments[1].state = "HIGH_NOISE";
+  road_segments[1].start_time_s = 10.0;
+  road_segments[1].end_time_s = 22.0;
+  road_segments[1].source = "BODY_Z_HIGH_FREQ_RMS";
+  road_segments[2].segment_index = 2U;
+  road_segments[2].state = "LOW_NOISE";
+  road_segments[2].start_time_s = 22.0;
+  road_segments[2].end_time_s = 32.0;
+
+  const offline_lc_minimal::RoadNoiseStateReference reference(
+    std::move(road_segments));
+  const std::vector<offline_lc_minimal::RoadNoiseStateSegmentRow> clipped =
+    reference.Clip(8.0, 24.0);
+
+  ExpectNear(static_cast<double>(clipped.size()), 3.0, 0.0, "clip should preserve overlapping states");
+  ExpectTrue(clipped[0].state == "LOW_NOISE", "first clipped state is wrong");
+  ExpectNear(clipped[0].start_time_s, 8.0, 1e-12, "first clipped start is wrong");
+  ExpectNear(clipped[0].end_time_s, 10.0, 1e-12, "first clipped end is wrong");
+  ExpectTrue(clipped[1].state == "HIGH_NOISE", "second clipped state is wrong");
+  ExpectNear(clipped[1].start_time_s, 10.0, 1e-12, "high-noise clipped start is wrong");
+  ExpectNear(clipped[1].end_time_s, 22.0, 1e-12, "high-noise clipped end is wrong");
+  ExpectTrue(clipped[1].source == "BODY_Z_HIGH_FREQ_RMS_GLOBAL_CLIPPED",
+             "clipped source should identify the global reference");
+  const offline_lc_minimal::RoadNoiseStateReference clipped_reference(clipped);
+  const std::vector<offline_lc_minimal::RoadNoiseStateSegmentRow> reclipped =
+    clipped_reference.Clip(9.0, 23.0);
+  ExpectTrue(
+    reclipped[1].source == "BODY_Z_HIGH_FREQ_RMS_GLOBAL_CLIPPED",
+    "reclipping should not duplicate the global source suffix");
+  ExpectTrue(clipped[2].state == "LOW_NOISE", "third clipped state is wrong");
+  ExpectNear(clipped[2].start_time_s, 22.0, 1e-12, "last clipped start is wrong");
+  ExpectNear(clipped[2].end_time_s, 24.0, 1e-12, "last clipped end is wrong");
+}
+
 }  // namespace
 
 int main() {
@@ -133,5 +175,8 @@ int main() {
   RunTest(
     "TestRoadNoiseBiasReestimatePlannerUsesOnlyHighNoiseSegments",
     TestRoadNoiseBiasReestimatePlannerUsesOnlyHighNoiseSegments);
+  RunTest(
+    "TestRoadNoiseStateReferenceClipsGlobalTimeline",
+    TestRoadNoiseStateReferenceClipsGlobalTimeline);
   return 0;
 }

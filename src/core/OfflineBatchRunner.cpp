@@ -242,12 +242,14 @@ OfflineBatchRunner::OfflineBatchRunner(
   std::shared_ptr<const Stage2VelocityReference> stage2_reference,
   std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference,
   std::shared_ptr<const Stage3VerticalReference> stage3_vertical_reference,
-  std::shared_ptr<const Stage3VerticalReference> stage2_lowpass_vertical_reference)
+  std::shared_ptr<const Stage3VerticalReference> stage2_lowpass_vertical_reference,
+  std::shared_ptr<const RoadNoiseStateReference> road_noise_state_reference)
     : config_(std::move(config)),
       stage2_reference_(std::move(stage2_reference)),
       stage1_body_y_reference_(std::move(stage1_body_y_reference)),
       stage3_vertical_reference_(std::move(stage3_vertical_reference)),
-      stage2_lowpass_vertical_reference_(std::move(stage2_lowpass_vertical_reference)) {}
+      stage2_lowpass_vertical_reference_(std::move(stage2_lowpass_vertical_reference)),
+      road_noise_state_reference_(std::move(road_noise_state_reference)) {}
 
 double OfflineBatchRunner::CorrectedGnssTime(const GnssSolutionSample &sample) const {
   return sample.time_s - config_.gnss_time_offset_s;
@@ -434,7 +436,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     Stage2LowfreqVerticalReferenceOptimizationRequest request;
     request.config = config_;
     request.dataset = std::move(dataset);
-    request.run_once = [](
+    auto road_noise_state_reference = road_noise_state_reference_;
+    request.run_once = [road_noise_state_reference](
                          const OfflineRunnerConfig &config,
                          std::shared_ptr<const Stage3VerticalReference> lowpass_reference,
                          DataSet run_dataset) {
@@ -443,7 +446,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         nullptr,
         nullptr,
         nullptr,
-        std::move(lowpass_reference)).Run(std::move(run_dataset));
+        std::move(lowpass_reference),
+        road_noise_state_reference).Run(std::move(run_dataset));
     };
     return Stage2LowfreqVerticalReferenceOptimizationRunner(std::move(request)).Run();
   }
@@ -453,7 +457,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     Stage3VerticalReferenceOptimizationRequest request;
     request.config = config_;
     request.dataset = std::move(dataset);
-    request.run_once = [](
+    auto road_noise_state_reference = road_noise_state_reference_;
+    request.run_once = [road_noise_state_reference](
                          const OfflineRunnerConfig &config,
                          std::shared_ptr<const Stage2VelocityReference> stage2_reference,
                          std::shared_ptr<const Stage3VerticalReference> stage3_vertical_reference,
@@ -462,26 +467,36 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         config,
         std::move(stage2_reference),
         nullptr,
-        std::move(stage3_vertical_reference)).Run(std::move(run_dataset));
+        std::move(stage3_vertical_reference),
+        nullptr,
+        road_noise_state_reference).Run(std::move(run_dataset));
     };
     return Stage3VerticalReferenceOptimizationRunner(std::move(request)).Run();
   }
   if (config_.enable_stage2_velocity_optimization && stage2_reference_ == nullptr) {
     auto stage2_lowpass_vertical_reference = stage2_lowpass_vertical_reference_;
+    auto inherited_road_noise_state_reference = road_noise_state_reference_;
     Stage2VelocityOptimizationRequest request;
     request.config = config_;
     request.dataset = std::move(dataset);
-    request.run_once = [stage2_lowpass_vertical_reference](
+    request.run_once = [
+                         stage2_lowpass_vertical_reference,
+                         inherited_road_noise_state_reference](
                          const OfflineRunnerConfig &config,
                          std::shared_ptr<const Stage2VelocityReference> stage2_reference,
                          std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference,
+                         std::shared_ptr<const RoadNoiseStateReference> road_noise_state_reference,
                          DataSet run_dataset) {
+      if (road_noise_state_reference == nullptr) {
+        road_noise_state_reference = inherited_road_noise_state_reference;
+      }
       return OfflineBatchRunner(
         config,
         std::move(stage2_reference),
         std::move(stage1_body_y_reference),
         nullptr,
-        stage2_lowpass_vertical_reference).Run(std::move(run_dataset));
+        stage2_lowpass_vertical_reference,
+        std::move(road_noise_state_reference)).Run(std::move(run_dataset));
     };
     return Stage2VelocityOptimizationRunner(std::move(request)).Run();
   }
@@ -490,7 +505,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     request.config = config_;
     request.dataset = std::move(dataset);
     request.body_y_envelope_reference = stage1_body_y_reference_;
-    request.run_once = [](
+    auto road_noise_state_reference = road_noise_state_reference_;
+    request.run_once = [road_noise_state_reference](
                          const OfflineRunnerConfig &config,
                          std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference,
                          DataSet run_dataset) {
@@ -498,7 +514,9 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         config,
         nullptr,
         std::move(stage1_body_y_reference),
-        nullptr).Run(std::move(run_dataset));
+        nullptr,
+        nullptr,
+        road_noise_state_reference).Run(std::move(run_dataset));
     };
     return Stage1YawRefinementRunner(std::move(request)).Run();
   }
@@ -1212,12 +1230,18 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.body_z_seed_bias_windows = body_z_result.bias_windows;
     run_result.attitude_reference_states = body_z_result.seed_reference_states;
     if (config_.enable_road_noise_state_baz_reestimate) {
-      RoadNoiseStateEstimatorRequest road_noise_request;
-      road_noise_request.config = &config_;
-      road_noise_request.signal = &body_z_result.detection.signal;
-      road_noise_request.jump_windows = &run_result.body_z_seed_jump_windows;
-      run_result.road_noise_state_segments =
-        RoadNoiseStateEstimator(std::move(road_noise_request)).Estimate();
+      if (road_noise_state_reference_ != nullptr &&
+          !road_noise_state_reference_->empty()) {
+        run_result.road_noise_state_segments =
+          road_noise_state_reference_->Clip(dynamic_start_time_s, end_time_s);
+      } else {
+        RoadNoiseStateEstimatorRequest road_noise_request;
+        road_noise_request.config = &config_;
+        road_noise_request.signal = &body_z_result.detection.signal;
+        road_noise_request.jump_windows = &run_result.body_z_seed_jump_windows;
+        run_result.road_noise_state_segments =
+          RoadNoiseStateEstimator(std::move(road_noise_request)).Estimate();
+      }
     }
     if (config_.enable_stage_attitude_debug_export) {
       RecordStageAttitudeDebugRows(
@@ -1380,6 +1404,16 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     segmented_request.stage2_reference = stage2_reference_;
     segmented_request.outage_windows = planned_rtk_outage_windows;
     segmented_request.bias_reestimate_segments = run_result.body_z_bias_reestimate_segments;
+    std::shared_ptr<const RoadNoiseStateReference> road_noise_state_reference =
+      road_noise_state_reference_;
+    if (road_noise_state_reference == nullptr &&
+        config_.enable_road_noise_state_baz_reestimate &&
+        !run_result.road_noise_state_segments.empty()) {
+      road_noise_state_reference =
+        std::make_shared<RoadNoiseStateReference>(
+          run_result.road_noise_state_segments);
+    }
+    segmented_request.road_noise_state_reference = road_noise_state_reference;
     segmented_request.state_timestamps = state_timestamps;
     segmented_request.imu_params = imu_params;
     segmented_request.dynamic_start_time_s = dynamic_start_time_s;
@@ -1389,13 +1423,15 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
                                    OfflineRunnerConfig segment_config,
                                    std::shared_ptr<const Stage2VelocityReference> stage2_reference,
                                    std::shared_ptr<const Stage1OutageBodyYEnvelopeReference> stage1_body_y_reference,
+                                   std::shared_ptr<const RoadNoiseStateReference> road_noise_state_reference,
                                    DataSet segment_dataset) {
       return OfflineBatchRunner(
         std::move(segment_config),
         std::move(stage2_reference),
         std::move(stage1_body_y_reference),
         nullptr,
-        stage2_lowpass_vertical_reference).Run(std::move(segment_dataset));
+        stage2_lowpass_vertical_reference,
+        std::move(road_noise_state_reference)).Run(std::move(segment_dataset));
     };
     return RtkOutageSegmentedBatchRunner(std::move(segmented_request)).Run();
   }
