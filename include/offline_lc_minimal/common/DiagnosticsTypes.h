@@ -133,6 +133,22 @@ struct BodyZSeedJumpWindowRow {
   double delta_vz_init_mps = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct RoadNoiseStateSegmentRow {
+  std::size_t segment_index = 0;
+  std::string state = "LOW_NOISE";
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double duration_s = std::numeric_limits<double>::quiet_NaN();
+  double mean_noise_rms_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double low_noise_center_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double high_noise_center_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double low_threshold_mps2 = std::numeric_limits<double>::quiet_NaN();
+  double high_threshold_mps2 = std::numeric_limits<double>::quiet_NaN();
+  std::size_t window_count = 0;
+  std::string source = "BODY_Z_HIGH_FREQ_RMS";
+  std::string skip_reason = "ADDED";
+};
+
 struct BodyZBiasReestimateSegmentRow {
   std::size_t segment_index = 0;
   std::string source_type = "BODY_Z_BIAS";

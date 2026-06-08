@@ -68,6 +68,11 @@ void ResultWriter::WriteOutputs(
       output_path / "body_z_seed_bias_windows.csv",
       result.body_z_seed_bias_windows);
   }
+  if (!result.road_noise_state_segments.empty()) {
+    WriteRoadNoiseStateSegmentsCsv(
+      output_path / "road_noise_state_segments.csv",
+      result.road_noise_state_segments);
+  }
   if (!result.body_z_bias_reestimate_segments.empty()) {
     WriteBodyZBiasReestimateSegmentsCsv(
       output_path / "body_z_bias_reestimate_segments.csv",

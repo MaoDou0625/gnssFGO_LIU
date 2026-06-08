@@ -212,6 +212,7 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.vertical_state_corrections.clear();
   assembled.attitude_reference_diagnostics.clear();
   assembled.relative_yaw_reference_diagnostics.clear();
+  assembled.road_noise_state_segments.clear();
   assembled.body_z_bias_reestimate_segments.clear();
   assembled.stage2_mount_leakage_diagnostics.clear();
   assembled.stage2_vehicle_nhc_state_diagnostics.clear();
@@ -447,6 +448,7 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       include_end,
       [](const Stage2VehicleNHCStateDiagnosticRow &row) { return row.time_s; });
 
+    AppendAll(assembled.road_noise_state_segments, piece.result.road_noise_state_segments);
     AppendAll(assembled.body_z_bias_reestimate_segments, piece.result.body_z_bias_reestimate_segments);
     AppendAllWithSegmentLabel(
       assembled.stage2_mount_leakage_diagnostics,
@@ -458,6 +460,22 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   }
 
   assembled.run_summary.rtk_outage_segmented_batch_enabled = true;
+  assembled.run_summary.road_noise_state_baz_reestimate_enabled =
+    std::any_of(
+      request_.pieces.begin(),
+      request_.pieces.end(),
+      [](const SegmentedBatchResultPiece &piece) {
+        return piece.result.run_summary.road_noise_state_baz_reestimate_enabled;
+      });
+  assembled.run_summary.road_noise_state_segment_count =
+    assembled.road_noise_state_segments.size();
+  assembled.run_summary.road_noise_state_high_segment_count =
+    static_cast<std::size_t>(std::count_if(
+      assembled.road_noise_state_segments.begin(),
+      assembled.road_noise_state_segments.end(),
+      [](const RoadNoiseStateSegmentRow &segment) {
+        return segment.state == "HIGH_NOISE";
+      }));
   assembled.run_summary.rtk_outage_batch_segment_count =
     assembled.rtk_outage_batch_segments.size();
   assembled.run_summary.rtk_outage_segmented_batch_run_count =

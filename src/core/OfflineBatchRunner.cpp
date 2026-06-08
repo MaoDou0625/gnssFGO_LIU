@@ -48,6 +48,8 @@
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageSegmentedBatchRunner.h"
 #include "offline_lc_minimal/core/RtkOutageSmoothingConstraintBuilder.h"
+#include "offline_lc_minimal/core/RoadNoiseBiasReestimatePlanner.h"
+#include "offline_lc_minimal/core/RoadNoiseStateEstimator.h"
 #include "offline_lc_minimal/core/ResidualContributionAnalyzer.h"
 #include "offline_lc_minimal/core/RtkVelocityConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageWindowPlanner.h"
@@ -1209,6 +1211,14 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.body_z_seed_jump_windows = body_z_result.jump_windows;
     run_result.body_z_seed_bias_windows = body_z_result.bias_windows;
     run_result.attitude_reference_states = body_z_result.seed_reference_states;
+    if (config_.enable_road_noise_state_baz_reestimate) {
+      RoadNoiseStateEstimatorRequest road_noise_request;
+      road_noise_request.config = &config_;
+      road_noise_request.signal = &body_z_result.detection.signal;
+      road_noise_request.jump_windows = &run_result.body_z_seed_jump_windows;
+      run_result.road_noise_state_segments =
+        RoadNoiseStateEstimator(std::move(road_noise_request)).Estimate();
+    }
     if (config_.enable_stage_attitude_debug_export) {
       RecordStageAttitudeDebugRows(
         "body_z_seed",
@@ -1219,13 +1229,35 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   if (has_stage2_reference_timeline) {
     run_result.attitude_reference_states = stage2_fixed_reference_states;
   }
-  run_result.body_z_bias_reestimate_segments = PlanBodyZBiasReestimateSegments(
-    run_result.body_z_seed_bias_windows,
-    run_result.body_z_seed_jump_windows,
-    BodyZBiasReestimatePlannerOptions{
-      config_.vertical_velocity_delta_jump_padding_s,
-      config_.vertical_jump_segmented_bias_min_segment_s,
-      config_.body_z_long_bias_min_duration_s});
+  const bool use_road_noise_baz_reestimate =
+    config_.enable_road_noise_state_baz_reestimate &&
+    !run_result.road_noise_state_segments.empty();
+  if (use_road_noise_baz_reestimate) {
+    run_result.body_z_bias_reestimate_segments =
+      PlanRoadNoiseBiasReestimateSegments(
+        run_result.road_noise_state_segments,
+        RoadNoiseBiasReestimatePlannerOptions{
+          config_.road_noise_state_min_segment_s});
+  } else {
+    run_result.body_z_bias_reestimate_segments = PlanBodyZBiasReestimateSegments(
+      run_result.body_z_seed_bias_windows,
+      run_result.body_z_seed_jump_windows,
+      BodyZBiasReestimatePlannerOptions{
+        config_.vertical_velocity_delta_jump_padding_s,
+        config_.vertical_jump_segmented_bias_min_segment_s,
+        config_.body_z_long_bias_min_duration_s});
+  }
+  run_result.run_summary.road_noise_state_baz_reestimate_enabled =
+    use_road_noise_baz_reestimate;
+  run_result.run_summary.road_noise_state_segment_count =
+    run_result.road_noise_state_segments.size();
+  run_result.run_summary.road_noise_state_high_segment_count =
+    static_cast<std::size_t>(std::count_if(
+      run_result.road_noise_state_segments.begin(),
+      run_result.road_noise_state_segments.end(),
+      [](const RoadNoiseStateSegmentRow &segment) {
+        return segment.state == "HIGH_NOISE";
+      }));
 
   std::vector<RtkOutageWindowRow> planned_rtk_outage_windows;
   std::vector<BodyZSeedJumpWindowRow> nhc_constraint_windows =
@@ -1248,7 +1280,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     nhc_constraint_windows = BuildRtkOutageNHCWindows(
       run_result.body_z_seed_jump_windows,
       planned_rtk_outage_windows);
-    if (config_.enable_rtk_outage_baz_reestimate) {
+    if (config_.enable_rtk_outage_baz_reestimate &&
+        !use_road_noise_baz_reestimate) {
       run_result.body_z_bias_reestimate_segments =
         PlanRtkOutageBazReestimateSegments(
           run_result.body_z_bias_reestimate_segments,

@@ -274,6 +274,35 @@ void WriteBodyZSeedJumpWindowCsv(
   }
 }
 
+void WriteRoadNoiseStateSegmentsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RoadNoiseStateSegmentRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "segment_index,state,start_time_s,end_time_s,duration_s,mean_noise_rms_mps2,"
+       "low_noise_center_mps2,high_noise_center_mps2,low_threshold_mps2,high_threshold_mps2,"
+       "window_count,source,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.segment_index << ','
+           << row.state << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.duration_s << ','
+           << row.mean_noise_rms_mps2 << ','
+           << row.low_noise_center_mps2 << ','
+           << row.high_noise_center_mps2 << ','
+           << row.low_threshold_mps2 << ','
+           << row.high_threshold_mps2 << ','
+           << row.window_count << ','
+           << row.source << ','
+           << row.skip_reason << '\n';
+  }
+}
+
 void WriteBodyZBiasReestimateSegmentsCsv(
   const std::filesystem::path &path,
   const std::vector<BodyZBiasReestimateSegmentRow> &rows) {

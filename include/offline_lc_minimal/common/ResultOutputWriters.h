@@ -33,6 +33,10 @@ void WriteBodyZSeedJumpWindowCsv(
   const std::filesystem::path &path,
   const std::vector<BodyZSeedJumpWindowRow> &rows);
 
+void WriteRoadNoiseStateSegmentsCsv(
+  const std::filesystem::path &path,
+  const std::vector<RoadNoiseStateSegmentRow> &rows);
+
 void WriteBodyZBiasReestimateSegmentsCsv(
   const std::filesystem::path &path,
   const std::vector<BodyZBiasReestimateSegmentRow> &rows);

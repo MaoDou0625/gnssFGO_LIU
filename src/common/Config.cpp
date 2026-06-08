@@ -232,7 +232,13 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.body_z_jump_redundant_padding_s < 0.0 ||
       config.body_z_jump_merge_gap_s < 0.0 ||
       config.body_z_jump_merge_max_duration_s < 0.0 ||
-      config.body_z_long_bias_min_duration_s < 0.0) {
+      config.body_z_long_bias_min_duration_s < 0.0 ||
+      config.road_noise_state_window_s <= 0.0 ||
+      config.road_noise_state_stride_s <= 0.0 ||
+      config.road_noise_state_min_segment_s < 0.0 ||
+      config.road_noise_state_hysteresis_ratio < 0.0 ||
+      config.road_noise_state_hysteresis_ratio >= 0.5 ||
+      config.road_noise_state_min_sample_count <= 0) {
     throw std::runtime_error("body-z jump detector gap and padding settings must be non-negative");
   }
   if (config.body_z_jump_threshold_ratio <= 0.0 ||
@@ -1074,6 +1080,18 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.body_z_long_bias_min_duration_s = config.body_z_jump_merge_max_duration_s;
   } else if (normalized_key == "body_z_long_bias_min_duration_s") {
     config.body_z_long_bias_min_duration_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_road_noise_state_baz_reestimate") {
+    config.enable_road_noise_state_baz_reestimate = ParseBool(normalized_value);
+  } else if (normalized_key == "road_noise_state_window_s") {
+    config.road_noise_state_window_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "road_noise_state_stride_s") {
+    config.road_noise_state_stride_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "road_noise_state_min_sample_count") {
+    config.road_noise_state_min_sample_count = ParseInt(normalized_value);
+  } else if (normalized_key == "road_noise_state_min_segment_s") {
+    config.road_noise_state_min_segment_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "road_noise_state_hysteresis_ratio") {
+    config.road_noise_state_hysteresis_ratio = ParseDouble(normalized_value);
   } else if (normalized_key == "body_z_jump_min_score_mps") {
     config.body_z_jump_min_score_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "body_z_jump_min_separation_s") {
@@ -1929,6 +1947,13 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "body_z_jump_merge_gap_s=" << config.body_z_jump_merge_gap_s << '\n'
     << "body_z_jump_merge_max_duration_s=" << config.body_z_jump_merge_max_duration_s << '\n'
     << "body_z_long_bias_min_duration_s=" << config.body_z_long_bias_min_duration_s << '\n'
+    << "enable_road_noise_state_baz_reestimate="
+    << (config.enable_road_noise_state_baz_reestimate ? "true" : "false") << '\n'
+    << "road_noise_state_window_s=" << config.road_noise_state_window_s << '\n'
+    << "road_noise_state_stride_s=" << config.road_noise_state_stride_s << '\n'
+    << "road_noise_state_min_sample_count=" << config.road_noise_state_min_sample_count << '\n'
+    << "road_noise_state_min_segment_s=" << config.road_noise_state_min_segment_s << '\n'
+    << "road_noise_state_hysteresis_ratio=" << config.road_noise_state_hysteresis_ratio << '\n'
     << "body_z_jump_min_score_mps=" << config.body_z_jump_min_score_mps << '\n'
     << "body_z_jump_min_separation_s=" << config.body_z_jump_min_separation_s << '\n'
     << "body_z_jump_max_window_duration_s=" << config.body_z_jump_max_window_duration_s << '\n'

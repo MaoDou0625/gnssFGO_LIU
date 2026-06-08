@@ -61,6 +61,12 @@ struct OfflineRunnerConfig {
   double body_z_jump_merge_gap_s = 0.0;
   double body_z_jump_merge_max_duration_s = 0.0;
   double body_z_long_bias_min_duration_s = 10.0;
+  bool enable_road_noise_state_baz_reestimate = true;
+  double road_noise_state_window_s = 3.0;
+  double road_noise_state_stride_s = 1.0;
+  int road_noise_state_min_sample_count = 20;
+  double road_noise_state_min_segment_s = 10.0;
+  double road_noise_state_hysteresis_ratio = 0.10;
   double body_z_jump_min_score_mps = 0.008;
   double body_z_jump_min_separation_s = 0.50;
   double body_z_jump_max_window_duration_s = 1.50;

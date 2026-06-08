@@ -1141,6 +1141,12 @@ void TestBodyZJumpDetectionFlagLoads() {
   offline_lc_minimal::OverrideConfigField(config, "enable_base_graph_tilt_reference_constraint", "true");
   offline_lc_minimal::OverrideConfigField(config, "base_graph_tilt_reference_sigma_rad", "0.004");
   offline_lc_minimal::OverrideConfigField(config, "body_z_long_bias_min_duration_s", "12.5");
+  offline_lc_minimal::OverrideConfigField(config, "enable_road_noise_state_baz_reestimate", "true");
+  offline_lc_minimal::OverrideConfigField(config, "road_noise_state_window_s", "4.0");
+  offline_lc_minimal::OverrideConfigField(config, "road_noise_state_stride_s", "0.5");
+  offline_lc_minimal::OverrideConfigField(config, "road_noise_state_min_sample_count", "12");
+  offline_lc_minimal::OverrideConfigField(config, "road_noise_state_min_segment_s", "8.0");
+  offline_lc_minimal::OverrideConfigField(config, "road_noise_state_hysteresis_ratio", "0.12");
   ExpectTrue(config.enable_body_z_jump_detection, "new body-z detection flag should load");
   ExpectTrue(
     std::abs(config.attitude_reference_relative_yaw_sigma_rad - 0.02) < 1e-15,
@@ -1154,6 +1160,24 @@ void TestBodyZJumpDetectionFlagLoads() {
   ExpectTrue(
     std::abs(config.body_z_long_bias_min_duration_s - 12.5) < 1e-15,
     "long body-z bias window threshold should parse");
+  ExpectTrue(
+    config.enable_road_noise_state_baz_reestimate,
+    "road-noise ba_z reestimate flag should parse");
+  ExpectTrue(
+    std::abs(config.road_noise_state_window_s - 4.0) < 1e-15,
+    "road-noise window should parse");
+  ExpectTrue(
+    std::abs(config.road_noise_state_stride_s - 0.5) < 1e-15,
+    "road-noise stride should parse");
+  ExpectTrue(
+    config.road_noise_state_min_sample_count == 12,
+    "road-noise min sample count should parse");
+  ExpectTrue(
+    std::abs(config.road_noise_state_min_segment_s - 8.0) < 1e-15,
+    "road-noise min segment duration should parse");
+  ExpectTrue(
+    std::abs(config.road_noise_state_hysteresis_ratio - 0.12) < 1e-15,
+    "road-noise hysteresis ratio should parse");
 }
 
 void TestBodyZRequiresGnssAfterOverrides() {
