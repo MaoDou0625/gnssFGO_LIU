@@ -977,8 +977,8 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
     "horizontal handoff should reference post recovery at outage end");
   ExpectTrue(refs[3].has_horizontal_position && !refs[3].add_horizontal_position_constraint,
              "horizontal handoff should carry post position without direct position hold");
-  ExpectTrue(refs[3].has_horizontal_velocity && refs[3].add_horizontal_velocity_constraint,
-             "horizontal handoff should constrain outage last velocity to post velocity");
+  ExpectTrue(refs[3].has_horizontal_velocity && !refs[3].add_horizontal_velocity_constraint,
+             "horizontal handoff should not directly copy post velocity onto outage last");
   ExpectTrue(refs[3].has_horizontal_position_velocity_handoff &&
                refs[3].add_horizontal_position_velocity_handoff_constraint,
              "horizontal handoff should add relative position-velocity consistency");
@@ -1036,7 +1036,19 @@ void TestSegmentedBatchRunnerExtendsHorizontalHandoffAcrossRecoveryGuard() {
     {30.0, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()}};
   request.outage_windows = {outage};
   request.gnss_factor_records = {used_recovery_fix};
-  request.state_timestamps = {0.0, 2.0, 8.0, 10.1, 15.0, 19.95, 20.0, 20.2, 20.45, 20.5, 30.0};
+  request.state_timestamps = {
+    0.0,
+    2.0,
+    8.0,
+    10.1,
+    15.0,
+    19.90,
+    19.95,
+    20.0,
+    20.2,
+    20.45,
+    20.5,
+    30.0};
   auto stage2_reference = std::make_shared<offline_lc_minimal::Stage2VelocityReference>();
   for (const double time_s : request.state_timestamps) {
     stage2_reference->trajectory.push_back(MakeTrajectoryRowWithHorizontalState(
@@ -1141,23 +1153,25 @@ void TestSegmentedBatchRunnerExtendsHorizontalHandoffAcrossRecoveryGuard() {
         std::abs(reference.horizontal_position_velocity_handoff_reference_time_s - 20.5) < 1e-12,
         "guard handoff should reference the first actually used RTKFIX state");
       ExpectTrue(reference.has_horizontal_velocity &&
-                   reference.add_horizontal_velocity_constraint,
-                 "guard handoff should carry post-first horizontal velocity");
+                   !reference.add_horizontal_velocity_constraint,
+                 "guard handoff should carry post-first horizontal velocity without direct copy");
       ExpectTrue(reference.has_horizontal_position_velocity_handoff &&
                    reference.add_horizontal_position_velocity_handoff_constraint,
                  "guard handoff should add position-velocity consistency");
     }
   }
 
-  ExpectTrue(horizontal_handoff_targets.size() == 4U,
-             "horizontal handoff should cover original end guard states plus last kept state");
-  ExpectTrue(std::abs(horizontal_handoff_targets[0] - 19.95) < 1e-12,
+  ExpectTrue(horizontal_handoff_targets.size() == 5U,
+             "horizontal handoff should cover the end guard window plus last kept state");
+  ExpectTrue(std::abs(horizontal_handoff_targets[0] - 19.90) < 1e-12,
+             "guard handoff should include the second-to-last state before the original outage end");
+  ExpectTrue(std::abs(horizontal_handoff_targets[1] - 19.95) < 1e-12,
              "guard handoff should include the state before the original outage end");
-  ExpectTrue(std::abs(horizontal_handoff_targets[1] - 20.0) < 1e-12,
+  ExpectTrue(std::abs(horizontal_handoff_targets[2] - 20.0) < 1e-12,
              "guard handoff should include the original outage end state");
-  ExpectTrue(std::abs(horizontal_handoff_targets[2] - 20.2) < 1e-12,
+  ExpectTrue(std::abs(horizontal_handoff_targets[3] - 20.2) < 1e-12,
              "guard handoff should include the recovery guard interior state");
-  ExpectTrue(std::abs(horizontal_handoff_targets[3] - 20.45) < 1e-12,
+  ExpectTrue(std::abs(horizontal_handoff_targets[4] - 20.45) < 1e-12,
              "guard handoff should include the last kept state before post first");
 }
 

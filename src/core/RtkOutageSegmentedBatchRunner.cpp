@@ -453,7 +453,7 @@ MakeOutageEndHorizontalPositionVelocityHandoffReferenceFromPostResult(
   reference.horizontal_position_velocity_handoff_sigma_m =
     config.stage2_horizontal_position_hold_sigma_m;
   reference.add_horizontal_position_constraint = false;
-  reference.add_horizontal_velocity_constraint = reference.has_horizontal_velocity;
+  reference.add_horizontal_velocity_constraint = false;
   reference.has_horizontal_position_velocity_handoff =
     reference.has_horizontal_position &&
     reference.has_horizontal_velocity &&
@@ -735,7 +735,9 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
         request_.state_timestamps,
         request_.gnss_factor_records,
         outage,
-        handoff_outage);
+        handoff_outage,
+        request_.config.state_frequency_hz,
+        request_.config.rtk_outage_attitude_guard_duration_s);
     for (const double target_time_s : horizontal_handoff_target_times) {
       RtkOutageBoundaryReferenceRow horizontal_handoff_reference =
         MakeOutageEndHorizontalPositionVelocityHandoffReferenceFromPostResult(
@@ -760,6 +762,8 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
         request_.dynamic_start_time_s));
     ApplyOutageEndHorizontalHandoffToStage2Reference(
       *outage_reference,
+      request_.dataset,
+      request_.imu_params,
       post_result,
       handoff_outage.end_time_s,
       horizontal_handoff_target_times,

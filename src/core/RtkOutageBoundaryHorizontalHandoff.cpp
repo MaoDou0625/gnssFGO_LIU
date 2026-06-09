@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <optional>
+
+#include "offline_lc_minimal/core/ImuIntegrationUtils.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -79,6 +82,12 @@ const TrajectoryRow *NearestTrajectoryRow(
     : &right;
 }
 
+double StatePeriodS(const double state_frequency_hz) {
+  return state_frequency_hz > 0.0 && std::isfinite(state_frequency_hz)
+    ? 1.0 / state_frequency_hz
+    : 0.0;
+}
+
 template <typename Row>
 Row *NearestMutableRow(std::vector<Row> &rows, const double time_s) {
   if (rows.empty() || !std::isfinite(time_s)) {
@@ -103,13 +112,53 @@ Row *NearestMutableRow(std::vector<Row> &rows, const double time_s) {
     : &(*upper);
 }
 
+Eigen::Vector2d ImuBackPropagatedHorizontalVelocity(
+  const DataSet &dataset,
+  const boost::shared_ptr<gtsam::PreintegratedCombinedMeasurements::Params> &imu_params,
+  const ReferenceNodeState &target_state,
+  const Eigen::Vector2d &post_horizontal_velocity_mps,
+  const double post_first_time_s) {
+  if (imu_params == nullptr ||
+      dataset.imu_samples.empty() ||
+      !std::isfinite(target_state.time_s) ||
+      post_first_time_s <= target_state.time_s + kTimeEpsilonS) {
+    return post_horizontal_velocity_mps;
+  }
+  try {
+    const ImuWindowIntegration imu_window = IntegrateImuWindow(
+      dataset.imu_samples,
+      target_state.time_s,
+      post_first_time_s,
+      imu_params,
+      target_state.bias);
+    const gtsam::NavState target_nav_state(
+      target_state.pose,
+      target_state.velocity);
+    const gtsam::NavState predicted_post_state =
+      imu_window.preintegrated_measurements.predict(
+        target_nav_state,
+        target_state.bias);
+    const gtsam::Vector3 delta_v_mps =
+      predicted_post_state.v() - target_state.velocity;
+    if (!delta_v_mps.allFinite()) {
+      return post_horizontal_velocity_mps;
+    }
+    return post_horizontal_velocity_mps -
+      Eigen::Vector2d(delta_v_mps.x(), delta_v_mps.y());
+  } catch (const std::exception &) {
+    return post_horizontal_velocity_mps;
+  }
+}
+
 }  // namespace
 
 std::vector<double> OutageEndHorizontalHandoffTargetTimes(
   const std::vector<double> &state_timestamps,
   const std::vector<GnssFactorRecord> &gnss_factor_records,
   const RtkOutageWindowRow &source_outage,
-  const RtkOutageWindowRow &handoff_outage) {
+  const RtkOutageWindowRow &handoff_outage,
+  const double state_frequency_hz,
+  const double handoff_guard_duration_s) {
   std::vector<double> target_times;
   if (state_timestamps.empty() ||
       !std::isfinite(source_outage.start_time_s) ||
@@ -135,6 +184,26 @@ std::vector<double> OutageEndHorizontalHandoffTargetTimes(
       target_times.push_back(time_s);
     }
   };
+
+  const double state_period_s = StatePeriodS(state_frequency_hz);
+  const double minimum_end_guard_duration_s =
+    state_period_s > 0.0 ? 2.0 * state_period_s : 0.0;
+  const double configured_end_guard_duration_s =
+    handoff_guard_duration_s > 0.0 && std::isfinite(handoff_guard_duration_s)
+      ? handoff_guard_duration_s
+      : 0.0;
+  const double end_guard_duration_s =
+    std::max(minimum_end_guard_duration_s, configured_end_guard_duration_s);
+  const double original_end_guard_start_s =
+    source_outage.end_time_s - end_guard_duration_s;
+  if (end_guard_duration_s > 0.0) {
+    for (const double time_s : state_timestamps) {
+      if (time_s >= original_end_guard_start_s - kTimeEpsilonS &&
+          time_s < handoff_outage.end_time_s - kTimeEpsilonS) {
+        append_unique(time_s);
+      }
+    }
+  }
 
   const auto original_end_lower = std::lower_bound(
     state_timestamps.begin(),
@@ -193,6 +262,8 @@ std::shared_ptr<Stage2VelocityReference> MutableStage2ReferenceCopy(
 
 void ApplyOutageEndHorizontalHandoffToStage2Reference(
   Stage2VelocityReference &reference,
+  const DataSet &dataset,
+  const boost::shared_ptr<gtsam::PreintegratedCombinedMeasurements::Params> &imu_params,
   const OfflineRunResult &post_result,
   const double post_first_time_s,
   const std::vector<double> &target_times,
@@ -222,8 +293,21 @@ void ApplyOutageEndHorizontalHandoffToStage2Reference(
       continue;
     }
     const double dt_s = post_first_time_s - target_time_s;
+    ReferenceNodeState *state =
+      NearestMutableRow(reference.reference_states, target_time_s);
+    const bool state_matches =
+      state != nullptr &&
+      std::abs(state->time_s - target_time_s) <= match_tolerance_s;
+    const Eigen::Vector2d target_velocity_mps = state_matches
+      ? ImuBackPropagatedHorizontalVelocity(
+          dataset,
+          imu_params,
+          *state,
+          post_velocity_mps,
+          post_first_time_s)
+      : post_velocity_mps;
     const Eigen::Vector2d target_position_m =
-      post_position_m - post_velocity_mps * dt_s;
+      post_position_m - 0.5 * dt_s * (target_velocity_mps + post_velocity_mps);
 
     if (TrajectoryRow *row =
           NearestMutableRow(reference.trajectory, target_time_s);
@@ -231,14 +315,11 @@ void ApplyOutageEndHorizontalHandoffToStage2Reference(
         std::abs(row->time_s - target_time_s) <= match_tolerance_s) {
       row->enu_position_m.x() = target_position_m.x();
       row->enu_position_m.y() = target_position_m.y();
-      row->enu_velocity_mps.x() = post_velocity_mps.x();
-      row->enu_velocity_mps.y() = post_velocity_mps.y();
+      row->enu_velocity_mps.x() = target_velocity_mps.x();
+      row->enu_velocity_mps.y() = target_velocity_mps.y();
     }
 
-    if (ReferenceNodeState *state =
-          NearestMutableRow(reference.reference_states, target_time_s);
-        state != nullptr &&
-        std::abs(state->time_s - target_time_s) <= match_tolerance_s) {
+    if (state_matches) {
       const gtsam::Point3 old_translation = state->pose.translation();
       state->pose = gtsam::Pose3(
         state->pose.rotation(),
@@ -246,8 +327,8 @@ void ApplyOutageEndHorizontalHandoffToStage2Reference(
           target_position_m.x(),
           target_position_m.y(),
           old_translation.z()));
-      state->velocity.x() = post_velocity_mps.x();
-      state->velocity.y() = post_velocity_mps.y();
+      state->velocity.x() = target_velocity_mps.x();
+      state->velocity.y() = target_velocity_mps.y();
     }
   }
 }
