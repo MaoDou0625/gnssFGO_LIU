@@ -518,6 +518,11 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
     throw std::runtime_error(
       "Stage3 Stage2 vertical increment hold sigmas must be finite and positive");
   }
+  if (!std::isfinite(config.stage3_stage2_jump_shape_sigma_m) ||
+      config.stage3_stage2_jump_shape_sigma_m <= 0.0) {
+    throw std::runtime_error(
+      "Stage3 Stage2 jump shape hold sigma must be finite and positive");
+  }
   if (config.enable_stage3_jump_adaptive_context_envelope &&
       !enable_stage3_jump_regularizer) {
     throw std::runtime_error(
@@ -1362,6 +1367,12 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
   } else if (normalized_key == "stage3_stage2_vertical_increment_jump_sigma_m") {
     config.stage3_stage2_vertical_increment_jump_sigma_m =
       ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_stage3_stage2_jump_shape_hold") {
+    config.enable_stage3_stage2_jump_shape_hold =
+      ParseBool(normalized_value);
+  } else if (normalized_key == "stage3_stage2_jump_shape_sigma_m") {
+    config.stage3_stage2_jump_shape_sigma_m =
+      ParseDouble(normalized_value);
   } else if (normalized_key == "enable_stage3_jump_adaptive_context_envelope") {
     config.enable_stage3_jump_adaptive_context_envelope =
       ParseBool(normalized_value);
@@ -2157,6 +2168,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.stage3_stage2_vertical_increment_sigma_m << '\n'
     << "stage3_stage2_vertical_increment_jump_sigma_m="
     << config.stage3_stage2_vertical_increment_jump_sigma_m << '\n'
+    << "enable_stage3_stage2_jump_shape_hold="
+    << (config.enable_stage3_stage2_jump_shape_hold ? "true" : "false") << '\n'
+    << "stage3_stage2_jump_shape_sigma_m="
+    << config.stage3_stage2_jump_shape_sigma_m << '\n'
     << "enable_stage3_jump_adaptive_context_envelope="
     << (config.enable_stage3_jump_adaptive_context_envelope ? "true" : "false") << '\n'
     << "stage3_jump_context_window_s="

@@ -349,6 +349,25 @@ struct Stage3Stage2IncrementHoldDiagnosticRow {
   std::string skip_reason = "UNSET";
 };
 
+struct Stage3Stage2JumpShapeHoldDiagnosticRow {
+  std::size_t window_index = 0;
+  std::size_t source_window_count = 0;
+  std::size_t anchor_state_index = 0;
+  std::size_t state_index = 0;
+  double anchor_time_s = std::numeric_limits<double>::quiet_NaN();
+  double time_s = std::numeric_limits<double>::quiet_NaN();
+  double dt_s = std::numeric_limits<double>::quiet_NaN();
+  double stage2_anchor_up_m = std::numeric_limits<double>::quiet_NaN();
+  double stage2_up_m = std::numeric_limits<double>::quiet_NaN();
+  double reference_relative_z_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_relative_z_m = std::numeric_limits<double>::quiet_NaN();
+  double residual_m = std::numeric_limits<double>::quiet_NaN();
+  double sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double normalized_residual = std::numeric_limits<double>::quiet_NaN();
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+};
+
 struct Stage3JumpContextEnvelopeProfileRow {
   std::size_t profile_index = 0;
   std::size_t window_index = 0;

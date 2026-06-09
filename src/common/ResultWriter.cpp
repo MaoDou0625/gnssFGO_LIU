@@ -285,6 +285,11 @@ void ResultWriter::WriteOutputs(
       output_path / "stage3_stage2_increment_hold_diagnostics.csv",
       result.stage3_stage2_increment_hold_diagnostics);
   }
+  if (!result.stage3_stage2_jump_shape_hold_diagnostics.empty()) {
+    WriteStage3Stage2JumpShapeHoldDiagnosticsCsv(
+      output_path / "stage3_stage2_jump_shape_hold_diagnostics.csv",
+      result.stage3_stage2_jump_shape_hold_diagnostics);
+  }
   if (!result.stage3_jump_context_envelope_profiles.empty()) {
     WriteStage3JumpContextEnvelopeProfilesCsv(
       output_path / "stage3_jump_context_envelope_profiles.csv",

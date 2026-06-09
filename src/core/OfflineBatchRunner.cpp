@@ -64,6 +64,7 @@
 #include "offline_lc_minimal/core/Stage2VelocityReference.h"
 #include "offline_lc_minimal/core/Stage3JumpRegularizerConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3Stage2IncrementHoldConstraintBuilder.h"
+#include "offline_lc_minimal/core/Stage3Stage2JumpShapeHoldConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceTimelineAligner.h"
@@ -2072,6 +2073,19 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
         &run_result.stage3_stage2_increment_hold_diagnostics;
       Stage3Stage2IncrementHoldConstraintBuilder(
         std::move(increment_hold_request)).Build();
+
+      Stage3Stage2JumpShapeHoldConstraintBuildRequest jump_shape_request;
+      jump_shape_request.config = &config_;
+      jump_shape_request.state_timestamps = &state_timestamps;
+      jump_shape_request.stage2_reference = active_stage2_reference;
+      jump_shape_request.jump_windows = &run_result.body_z_seed_jump_windows;
+      jump_shape_request.dynamic_start_index = graph_timeline.dynamic_start_index;
+      jump_shape_request.graph = &graph_with_gnss;
+      jump_shape_request.run_summary = &run_result.run_summary;
+      jump_shape_request.diagnostics =
+        &run_result.stage3_stage2_jump_shape_hold_diagnostics;
+      Stage3Stage2JumpShapeHoldConstraintBuilder(
+        std::move(jump_shape_request)).Build();
     }
   }
 
@@ -2381,6 +2395,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateStage3Stage2IncrementHoldDiagnostics(
     optimized_values,
     run_result.stage3_stage2_increment_hold_diagnostics,
+    run_result.run_summary);
+  PopulateStage3Stage2JumpShapeHoldDiagnostics(
+    optimized_values,
+    run_result.stage3_stage2_jump_shape_hold_diagnostics,
     run_result.run_summary);
   PopulateInitialDynamicStaticDiagnostics(
     optimized_values,

@@ -329,6 +329,15 @@ struct RunSummary {
     std::numeric_limits<double>::quiet_NaN();
   double stage3_stage2_vertical_increment_max_abs_residual_m =
     std::numeric_limits<double>::quiet_NaN();
+  bool stage3_stage2_jump_shape_hold_enabled = false;
+  std::size_t stage3_stage2_jump_shape_factor_count = 0;
+  std::size_t stage3_stage2_jump_shape_skipped_count = 0;
+  double stage3_stage2_jump_shape_sigma_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_stage2_jump_shape_mean_abs_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
+  double stage3_stage2_jump_shape_max_abs_residual_m =
+    std::numeric_limits<double>::quiet_NaN();
   bool stage3_jump_adaptive_context_envelope_enabled = false;
   std::size_t stage3_jump_context_envelope_profile_count = 0;
   std::size_t stage3_jump_context_envelope_fallback_count = 0;
@@ -909,6 +918,18 @@ struct RunSummary {
         << stage3_stage2_vertical_increment_mean_abs_residual_m << '\n'
         << "stage3_stage2_vertical_increment_max_abs_residual_m="
         << stage3_stage2_vertical_increment_max_abs_residual_m << '\n'
+        << "stage3_stage2_jump_shape_hold_enabled="
+        << (stage3_stage2_jump_shape_hold_enabled ? "true" : "false") << '\n'
+        << "stage3_stage2_jump_shape_factor_count="
+        << stage3_stage2_jump_shape_factor_count << '\n'
+        << "stage3_stage2_jump_shape_skipped_count="
+        << stage3_stage2_jump_shape_skipped_count << '\n'
+        << "stage3_stage2_jump_shape_sigma_m="
+        << stage3_stage2_jump_shape_sigma_m << '\n'
+        << "stage3_stage2_jump_shape_mean_abs_residual_m="
+        << stage3_stage2_jump_shape_mean_abs_residual_m << '\n'
+        << "stage3_stage2_jump_shape_max_abs_residual_m="
+        << stage3_stage2_jump_shape_max_abs_residual_m << '\n'
         << "stage3_jump_adaptive_context_envelope_enabled="
         << (stage3_jump_adaptive_context_envelope_enabled ? "true" : "false") << '\n'
         << "stage3_jump_context_envelope_profile_count="
@@ -1175,6 +1196,8 @@ struct OfflineRunResult {
   std::vector<Stage3JumpRegularizerDiagnosticRow> stage3_jump_regularizer_diagnostics;
   std::vector<Stage3Stage2IncrementHoldDiagnosticRow>
     stage3_stage2_increment_hold_diagnostics;
+  std::vector<Stage3Stage2JumpShapeHoldDiagnosticRow>
+    stage3_stage2_jump_shape_hold_diagnostics;
   std::vector<Stage3JumpContextEnvelopeProfileRow> stage3_jump_context_envelope_profiles;
   std::vector<VerticalJumpMaskedImuDiagnosticRow> vertical_jump_masked_imu_diagnostics;
   std::vector<VerticalJumpImpulseDiagnosticRow> vertical_jump_impulse_diagnostics;

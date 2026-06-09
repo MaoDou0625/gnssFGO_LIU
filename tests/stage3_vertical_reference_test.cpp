@@ -17,6 +17,7 @@
 #include "offline_lc_minimal/core/Stage2LowfreqVerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage3JumpRegularizerConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3Stage2IncrementHoldConstraintBuilder.h"
+#include "offline_lc_minimal/core/Stage3Stage2JumpShapeHoldConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceProfilePlanner.h"
@@ -809,6 +810,86 @@ void TestStage3Stage2IncrementHoldAddsAdjacentDeltaFactors() {
     0.02,
     1.0e-12,
     "summary should report max increment residual");
+}
+
+void TestStage3Stage2JumpShapeHoldAnchorsWindowRelativeHeights() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_velocity_delta_jump_padding_s = 0.0;
+  config.enable_stage3_stage2_jump_shape_hold = true;
+  config.stage3_stage2_jump_shape_sigma_m = 0.001;
+
+  const std::vector<double> state_timestamps{0.0, 1.0, 2.0, 3.0, 4.0};
+  offline_lc_minimal::Stage2VelocityReference stage2_reference;
+  stage2_reference.trajectory = MakeTrajectory(state_timestamps.size(), 0.0);
+  const std::vector<double> stage2_up_m{10.0, 10.10, 10.30, 10.25, 10.40};
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    stage2_reference.trajectory[index].time_s = state_timestamps[index];
+    stage2_reference.trajectory[index].enu_position_m.z() = stage2_up_m[index];
+  }
+
+  std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows(1U);
+  jump_windows.front().start_time_s = 1.0;
+  jump_windows.front().end_time_s = 4.0;
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::Stage3Stage2JumpShapeHoldDiagnosticRow> diagnostics;
+  offline_lc_minimal::Stage3Stage2JumpShapeHoldConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.stage2_reference = &stage2_reference;
+  request.jump_windows = &jump_windows;
+  request.dynamic_start_index = 0U;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::Stage3Stage2JumpShapeHoldConstraintBuilder(
+    std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 3U, "jump shape hold should add anchor-relative factors");
+  ExpectTrue(diagnostics.size() == 3U, "jump shape hold should diagnose each relative factor");
+  ExpectTrue(
+    summary.stage3_stage2_jump_shape_factor_count == 3U,
+    "jump shape summary should count factors");
+  ExpectTrue(
+    diagnostics[0].anchor_state_index == 1U && diagnostics[0].state_index == 2U,
+    "first jump shape factor should anchor to the first state in the jump window");
+  ExpectNear(
+    diagnostics[0].reference_relative_z_m,
+    0.20,
+    1.0e-12,
+    "jump shape reference should use Stage2 height relative to the window anchor");
+  ExpectNear(
+    diagnostics[0].sigma_m,
+    0.001,
+    1.0e-12,
+    "jump shape factor should use configured sigma");
+
+  gtsam::Values optimized_values;
+  optimized_values.insert(gtsam::symbol_shorthand::X(1), MakePose(5.000));
+  optimized_values.insert(gtsam::symbol_shorthand::X(2), MakePose(5.205));
+  optimized_values.insert(gtsam::symbol_shorthand::X(3), MakePose(5.151));
+  optimized_values.insert(gtsam::symbol_shorthand::X(4), MakePose(5.297));
+  offline_lc_minimal::PopulateStage3Stage2JumpShapeHoldDiagnostics(
+    optimized_values,
+    diagnostics,
+    summary);
+
+  ExpectNear(
+    diagnostics[0].optimized_relative_z_m,
+    0.205,
+    1.0e-12,
+    "jump shape optimized relative height should be reported");
+  ExpectNear(
+    diagnostics[0].residual_m,
+    0.005,
+    1.0e-12,
+    "jump shape residual should be optimized relative height minus Stage2 relative height");
+  ExpectNear(
+    summary.stage3_stage2_jump_shape_max_abs_residual_m,
+    0.005,
+    1.0e-12,
+    "jump shape summary should report max residual");
 }
 
 void TestStage3JumpAdaptiveContextEnvelopeUsesNearbyFluctuation() {
@@ -1754,6 +1835,9 @@ int main() {
     RunTest(
       "TestStage3Stage2IncrementHoldAddsAdjacentDeltaFactors",
       TestStage3Stage2IncrementHoldAddsAdjacentDeltaFactors);
+    RunTest(
+      "TestStage3Stage2JumpShapeHoldAnchorsWindowRelativeHeights",
+      TestStage3Stage2JumpShapeHoldAnchorsWindowRelativeHeights);
     RunTest(
       "TestStage3JumpAdaptiveContextEnvelopeUsesNearbyFluctuation",
       TestStage3JumpAdaptiveContextEnvelopeUsesNearbyFluctuation);

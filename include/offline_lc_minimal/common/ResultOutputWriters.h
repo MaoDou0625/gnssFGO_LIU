@@ -182,6 +182,10 @@ void WriteStage3Stage2IncrementHoldDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<Stage3Stage2IncrementHoldDiagnosticRow> &rows);
 
+void WriteStage3Stage2JumpShapeHoldDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage3Stage2JumpShapeHoldDiagnosticRow> &rows);
+
 void WriteStage3JumpContextEnvelopeProfilesCsv(
   const std::filesystem::path &path,
   const std::vector<Stage3JumpContextEnvelopeProfileRow> &rows);

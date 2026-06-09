@@ -982,6 +982,12 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
     std::abs(config.stage3_stage2_vertical_increment_jump_sigma_m - 0.004) < 1e-15,
     "default Stage3 Stage2 jump increment sigma should be 4 mm");
   ExpectTrue(
+    config.enable_stage3_stage2_jump_shape_hold,
+    "default config should enable Stage3 Stage2 jump shape hold");
+  ExpectTrue(
+    std::abs(config.stage3_stage2_jump_shape_sigma_m - 0.001) < 1e-15,
+    "default Stage3 Stage2 jump shape sigma should be 1 mm");
+  ExpectTrue(
     std::abs(
       config.bias_gyro_prior_sigma -
       offline_lc_minimal::DegPerHourToRadPerSecond(0.01)) < 1e-18,
@@ -2011,6 +2017,12 @@ void TestStage3VerticalReferenceConfigValidation() {
     std::abs(config.stage3_stage2_vertical_increment_jump_sigma_m - 0.004) < 1e-15,
     "Stage3 Stage2 increment jump sigma should default to 0.004 m");
   ExpectTrue(
+    config.enable_stage3_stage2_jump_shape_hold,
+    "Stage3 Stage2 jump shape hold should default on");
+  ExpectTrue(
+    std::abs(config.stage3_stage2_jump_shape_sigma_m - 0.001) < 1e-15,
+    "Stage3 Stage2 jump shape sigma should default to 0.001 m");
+  ExpectTrue(
     !config.enable_stage3_jump_adaptive_context_envelope,
     "Stage3 jump adaptive context envelope should default off");
   ExpectTrue(
@@ -2222,6 +2234,14 @@ void TestStage3VerticalReferenceConfigValidation() {
     "0.0035");
   offline_lc_minimal::OverrideConfigField(
     config,
+    "enable_stage3_stage2_jump_shape_hold",
+    "false");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "stage3_stage2_jump_shape_sigma_m",
+    "0.00075");
+  offline_lc_minimal::OverrideConfigField(
+    config,
     "enable_stage3_jump_adaptive_context_envelope",
     "true");
   offline_lc_minimal::OverrideConfigField(
@@ -2394,6 +2414,12 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(
     std::abs(config.stage3_stage2_vertical_increment_jump_sigma_m - 0.0035) < 1e-15,
     "Stage3 Stage2 jump increment sigma should parse");
+  ExpectTrue(
+    !config.enable_stage3_stage2_jump_shape_hold,
+    "Stage3 Stage2 jump shape hold flag should parse");
+  ExpectTrue(
+    std::abs(config.stage3_stage2_jump_shape_sigma_m - 0.00075) < 1e-15,
+    "Stage3 Stage2 jump shape sigma should parse");
   ExpectTrue(
     config.enable_stage3_jump_adaptive_context_envelope,
     "Stage3 jump adaptive context envelope flag should parse");
@@ -2569,6 +2595,14 @@ void TestStage3VerticalReferenceConfigValidation() {
     serialized.find("stage3_stage2_vertical_increment_jump_sigma_m=0.0035") !=
       std::string::npos,
     "Stage3 Stage2 jump increment sigma should be serialized");
+  ExpectTrue(
+    serialized.find("enable_stage3_stage2_jump_shape_hold=false") !=
+      std::string::npos,
+    "Stage3 Stage2 jump shape hold flag should be serialized");
+  ExpectTrue(
+    serialized.find("stage3_stage2_jump_shape_sigma_m=0.00075") !=
+      std::string::npos,
+    "Stage3 Stage2 jump shape sigma should be serialized");
   ExpectTrue(
     serialized.find("enable_stage3_jump_adaptive_context_envelope=true") != std::string::npos,
     "Stage3 jump adaptive context flag should be serialized");
@@ -2859,6 +2893,18 @@ void TestStage3VerticalReferenceConfigValidation() {
       std::string::npos;
   }
   ExpectTrue(threw, "non-positive Stage3 Stage2 increment sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.stage3_stage2_jump_shape_sigma_m = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw =
+      std::string(exception.what()).find("jump shape hold sigma") !=
+      std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive Stage3 Stage2 jump shape sigma should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   config.enable_stage3_jump_adaptive_context_envelope = true;

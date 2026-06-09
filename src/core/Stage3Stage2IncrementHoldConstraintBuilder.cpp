@@ -1,6 +1,5 @@
 #include "offline_lc_minimal/core/Stage3Stage2IncrementHoldConstraintBuilder.h"
 
-#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -11,108 +10,13 @@
 #include <gtsam/linear/NoiseModel.h>
 
 #include "offline_lc_minimal/core/BodyZJumpConstraintWindowPlanner.h"
+#include "offline_lc_minimal/core/Stage3Stage2HeightReferenceUtils.h"
 #include "offline_lc_minimal/factor/Stage2VerticalIncrementHoldFactor.h"
 
 namespace offline_lc_minimal {
 namespace {
 
 namespace symbol = gtsam::symbol_shorthand;
-
-constexpr double kTimeEpsilonS = 1.0e-9;
-
-struct TimedUpSample {
-  double time_s = std::numeric_limits<double>::quiet_NaN();
-  double up_m = std::numeric_limits<double>::quiet_NaN();
-};
-
-bool IntervalsOverlap(
-  const double left_start_s,
-  const double left_end_s,
-  const double right_start_s,
-  const double right_end_s) {
-  return left_start_s <= right_end_s + kTimeEpsilonS &&
-         right_start_s <= left_end_s + kTimeEpsilonS;
-}
-
-std::vector<TimedUpSample> BuildSortedStage2UpSamples(
-  const Stage2VelocityReference &reference) {
-  std::vector<TimedUpSample> samples;
-  samples.reserve(reference.trajectory.size());
-  for (const auto &row : reference.trajectory) {
-    const double up_m = row.enu_position_m.z();
-    if (!std::isfinite(row.time_s) || !std::isfinite(up_m)) {
-      continue;
-    }
-    samples.push_back(TimedUpSample{row.time_s, up_m});
-  }
-  std::sort(
-    samples.begin(),
-    samples.end(),
-    [](const TimedUpSample &lhs, const TimedUpSample &rhs) {
-      return lhs.time_s < rhs.time_s;
-    });
-  samples.erase(
-    std::unique(
-      samples.begin(),
-      samples.end(),
-      [](const TimedUpSample &lhs, const TimedUpSample &rhs) {
-        return std::abs(lhs.time_s - rhs.time_s) <= kTimeEpsilonS;
-      }),
-    samples.end());
-  return samples;
-}
-
-bool HasCoverage(
-  const std::vector<TimedUpSample> &samples,
-  const double time_s) {
-  return !samples.empty() &&
-         time_s + kTimeEpsilonS >= samples.front().time_s &&
-         time_s <= samples.back().time_s + kTimeEpsilonS;
-}
-
-double InterpolateUpAt(
-  const std::vector<TimedUpSample> &samples,
-  const double time_s) {
-  if (!HasCoverage(samples, time_s)) {
-    return std::numeric_limits<double>::quiet_NaN();
-  }
-  if (samples.size() == 1U) {
-    return samples.front().up_m;
-  }
-  const auto upper = std::lower_bound(
-    samples.begin(),
-    samples.end(),
-    time_s,
-    [](const TimedUpSample &sample, const double target_time_s) {
-      return sample.time_s < target_time_s;
-    });
-  if (upper == samples.begin()) {
-    return samples.front().up_m;
-  }
-  if (upper == samples.end()) {
-    return samples.back().up_m;
-  }
-  const auto &rhs = *upper;
-  const auto &lhs = *(upper - 1);
-  const double dt_s = rhs.time_s - lhs.time_s;
-  if (dt_s <= 0.0 || !std::isfinite(dt_s)) {
-    return std::numeric_limits<double>::quiet_NaN();
-  }
-  const double alpha = std::clamp((time_s - lhs.time_s) / dt_s, 0.0, 1.0);
-  return (1.0 - alpha) * lhs.up_m + alpha * rhs.up_m;
-}
-
-bool IntervalOverlapsJumpWindow(
-  const std::vector<BodyZJumpConstraintWindow> &windows,
-  const double start_time_s,
-  const double end_time_s) {
-  return std::any_of(
-    windows.begin(),
-    windows.end(),
-    [start_time_s, end_time_s](const BodyZJumpConstraintWindow &window) {
-      return IntervalsOverlap(start_time_s, end_time_s, window.start_time_s, window.end_time_s);
-    });
-}
 
 void InitializeSummary(
   const OfflineRunnerConfig &config,
@@ -157,7 +61,7 @@ void Stage3Stage2IncrementHoldConstraintBuilder::Build() const {
     return;
   }
 
-  const std::vector<TimedUpSample> stage2_samples =
+  const std::vector<TimedStage2UpSample> stage2_samples =
     BuildSortedStage2UpSamples(*request_.stage2_reference);
   if (stage2_samples.empty()) {
     ++request_.run_summary->stage3_stage2_vertical_increment_skipped_count;
@@ -203,8 +107,8 @@ void Stage3Stage2IncrementHoldConstraintBuilder::Build() const {
       continue;
     }
 
-    row.stage2_up_i_m = InterpolateUpAt(stage2_samples, start_time_s);
-    row.stage2_up_j_m = InterpolateUpAt(stage2_samples, end_time_s);
+    row.stage2_up_i_m = InterpolateStage2UpAt(stage2_samples, start_time_s);
+    row.stage2_up_j_m = InterpolateStage2UpAt(stage2_samples, end_time_s);
     if (!std::isfinite(row.stage2_up_i_m) || !std::isfinite(row.stage2_up_j_m)) {
       row.skip_reason = "STAGE2_REFERENCE_UNAVAILABLE";
       ++request_.run_summary->stage3_stage2_vertical_increment_skipped_count;

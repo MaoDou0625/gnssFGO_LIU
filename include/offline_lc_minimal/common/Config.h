@@ -187,6 +187,8 @@ struct OfflineRunnerConfig {
   bool enable_stage3_stage2_vertical_increment_hold = false;
   double stage3_stage2_vertical_increment_sigma_m = 0.002;
   double stage3_stage2_vertical_increment_jump_sigma_m = 0.004;
+  bool enable_stage3_stage2_jump_shape_hold = true;
+  double stage3_stage2_jump_shape_sigma_m = 0.001;
   bool enable_stage3_jump_adaptive_context_envelope = false;
   double stage3_jump_context_window_s = 2.0;
   int stage3_jump_context_min_sample_count = 20;

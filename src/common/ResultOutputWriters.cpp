@@ -1822,6 +1822,39 @@ void WriteStage3Stage2IncrementHoldDiagnosticsCsv(
   }
 }
 
+void WriteStage3Stage2JumpShapeHoldDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage3Stage2JumpShapeHoldDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "window_index,source_window_count,anchor_state_index,state_index,"
+       "anchor_time_s,time_s,dt_s,stage2_anchor_up_m,stage2_up_m,"
+       "reference_relative_z_m,optimized_relative_z_m,residual_m,sigma_m,"
+       "normalized_residual,factor_added,skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.window_index << ','
+           << row.source_window_count << ','
+           << row.anchor_state_index << ','
+           << row.state_index << ','
+           << row.anchor_time_s << ','
+           << row.time_s << ','
+           << row.dt_s << ','
+           << row.stage2_anchor_up_m << ','
+           << row.stage2_up_m << ','
+           << row.reference_relative_z_m << ','
+           << row.optimized_relative_z_m << ','
+           << row.residual_m << ','
+           << row.sigma_m << ','
+           << row.normalized_residual << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << '\n';
+  }
+}
+
 void WriteStage3JumpContextEnvelopeProfilesCsv(
   const std::filesystem::path &path,
   const std::vector<Stage3JumpContextEnvelopeProfileRow> &rows) {
