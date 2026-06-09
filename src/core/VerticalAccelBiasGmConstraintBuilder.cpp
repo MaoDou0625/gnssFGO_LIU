@@ -8,7 +8,9 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/NoiseModel.h>
 
+#include "offline_lc_minimal/core/BodyZBiasReestimateSourcePolicy.h"
 #include "offline_lc_minimal/core/InitialStaticBiasConstraintBuilder.h"
+#include "offline_lc_minimal/factor/VerticalAccelBiasLocalContinuityFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasGmTransitionFactor.h"
 
 namespace offline_lc_minimal {
@@ -38,6 +40,17 @@ long long SegmentIndexForTime(
     }
   }
   return -1;
+}
+
+const BodyZBiasReestimateSegmentRow *SegmentForTime(
+  const std::vector<BodyZBiasReestimateSegmentRow> &segments,
+  const double time_s) {
+  for (const auto &segment : segments) {
+    if (ContainsTime(segment, time_s)) {
+      return &segment;
+    }
+  }
+  return nullptr;
 }
 
 double PositiveOverlapDurationS(
@@ -121,6 +134,14 @@ void VerticalAccelBiasGmConstraintBuilder::Build() const {
       dt_s,
       record.is_initial_static_interval,
       stability_entry);
+    if (IsInsideGlobalGmDecoupledSegment(record)) {
+      request_.graph->add(factor::VerticalAccelBiasLocalContinuityFactor(
+        symbol::B(record.state_index_i),
+        symbol::B(record.state_index_j),
+        gtsam::noiseModel::Isotropic::Sigma(1, sigma_mps2)));
+      ++request_.run_summary->body_z_bias_reestimate_local_gm_factor_count;
+      continue;
+    }
     request_.graph->add(factor::VerticalAccelBiasGmTransitionFactor(
       symbol::B(record.state_index_i),
       symbol::B(record.state_index_j),
@@ -162,6 +183,23 @@ bool VerticalAccelBiasGmConstraintBuilder::CrossesBiasReestimateBoundary(
     }
   }
   return false;
+}
+
+bool VerticalAccelBiasGmConstraintBuilder::IsInsideGlobalGmDecoupledSegment(
+  const VerticalAccelBiasGmTransitionRecord &record) const {
+  if (request_.bias_reestimate_segments == nullptr ||
+      request_.bias_reestimate_segments->empty()) {
+    return false;
+  }
+
+  const auto &segments = *request_.bias_reestimate_segments;
+  const BodyZBiasReestimateSegmentRow *start_segment =
+    SegmentForTime(segments, record.start_time_s);
+  const BodyZBiasReestimateSegmentRow *end_segment =
+    SegmentForTime(segments, record.end_time_s);
+  return start_segment != nullptr &&
+         start_segment == end_segment &&
+         DecouplesVerticalGmFromGlobalBias(*start_segment);
 }
 
 double VerticalAccelBiasGmConstraintBuilder::TransitionSigmaMps2(

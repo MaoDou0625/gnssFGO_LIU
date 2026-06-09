@@ -50,6 +50,9 @@ class VerticalAccelBiasGmConstraintBuilder {
   [[nodiscard]] bool CrossesBiasReestimateBoundary(
     const VerticalAccelBiasGmTransitionRecord &record) const;
 
+  [[nodiscard]] bool IsInsideGlobalGmDecoupledSegment(
+    const VerticalAccelBiasGmTransitionRecord &record) const;
+
   VerticalAccelBiasGmConstraintBuildRequest request_;
 };
 

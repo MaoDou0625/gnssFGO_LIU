@@ -24,6 +24,7 @@
 #include "offline_lc_minimal/factor/VerticalJumpImpulseVelocityFactor.h"
 #include "offline_lc_minimal/factor/VerticalJumpBiasVelocityFactor.h"
 #include "offline_lc_minimal/factor/BazContinuityBreakCombinedImuFactor.h"
+#include "offline_lc_minimal/factor/VerticalAccelBiasLocalContinuityFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasPriorFactor.h"
 #include "offline_lc_minimal/factor/VerticalMaskedCombinedImuFactor.h"
 #include "offline_lc_minimal/factor/VerticalPositionRampFactor.h"
@@ -794,6 +795,59 @@ void TestVerticalAccelBiasGmSkipsBiasReestimateBoundaries() {
     2.0,
     0.0,
     "GM boundary skip count is wrong");
+}
+
+void TestVerticalAccelBiasGmSkipsRoadHighNoiseSegments() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_global_acc_bias = true;
+  config.enable_vertical_acc_bias_gm_process = true;
+  config.vertical_acc_bias_sigma_mps2 = 0.01;
+
+  const std::vector<offline_lc_minimal::VerticalAccelBiasGmTransitionRecord> records{
+    {0, 1, 0.0, 0.5, false},
+    {1, 2, 0.5, 1.0, false},
+    {2, 3, 1.0, 1.5, false},
+    {3, 4, 1.5, 2.0, false},
+  };
+  std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> segments;
+  offline_lc_minimal::BodyZBiasReestimateSegmentRow segment;
+  segment.segment_index = 0;
+  segment.source_type = "ROAD_HIGH_NOISE";
+  segment.start_time_s = 0.5;
+  segment.end_time_s = 1.5;
+  segments.push_back(segment);
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  offline_lc_minimal::VerticalAccelBiasGmConstraintBuildRequest request;
+  request.config = &config;
+  request.records = &records;
+  request.bias_reestimate_segments = &segments;
+  request.global_acc_bias_key = gtsam::Symbol('a', 0);
+  request.graph = &graph;
+  request.run_summary = &summary;
+  offline_lc_minimal::VerticalAccelBiasGmConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(
+    static_cast<double>(graph.size()),
+    2.0,
+    0.0,
+    "road high-noise interior intervals should get local ba_z continuity factors");
+  ExpectNear(
+    static_cast<double>(summary.body_z_bias_reestimate_gm_skipped_count),
+    2.0,
+    0.0,
+    "road high-noise boundary GM skip count is wrong");
+  ExpectNear(
+    static_cast<double>(summary.body_z_bias_reestimate_local_gm_factor_count),
+    2.0,
+    0.0,
+    "road high-noise local GM factor count is wrong");
+  ExpectTrue(
+    boost::dynamic_pointer_cast<
+      offline_lc_minimal::factor::VerticalAccelBiasLocalContinuityFactor>(
+      graph.at(0)) != nullptr,
+    "road high-noise should use local ba_z continuity instead of global GM");
 }
 
 void TestVerticalJumpImpulseVelocityFactor() {
@@ -2455,6 +2509,9 @@ int main() {
     RunTest(
       "TestVerticalAccelBiasGmSkipsBiasReestimateBoundaries",
       TestVerticalAccelBiasGmSkipsBiasReestimateBoundaries);
+    RunTest(
+      "TestVerticalAccelBiasGmSkipsRoadHighNoiseSegments",
+      TestVerticalAccelBiasGmSkipsRoadHighNoiseSegments);
     RunTest("TestVerticalJumpImpulseVelocityFactor", TestVerticalJumpImpulseVelocityFactor);
     RunTest("TestVerticalJumpBiasVelocityFactor", TestVerticalJumpBiasVelocityFactor);
     RunTest(

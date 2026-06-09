@@ -526,6 +526,7 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.run_summary.body_z_bias_reestimate_prior_factor_count = 0;
   assembled.run_summary.body_z_bias_reestimate_initialized_state_count = 0;
   assembled.run_summary.body_z_bias_reestimate_gm_skipped_count = 0;
+  assembled.run_summary.body_z_bias_reestimate_local_gm_factor_count = 0;
   assembled.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad =
     std::numeric_limits<double>::quiet_NaN();
   assembled.run_summary.rtk_outage_relative_attitude_max_abs_residual_rad =
@@ -639,6 +640,8 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       piece.result.run_summary.body_z_bias_reestimate_initialized_state_count;
     assembled.run_summary.body_z_bias_reestimate_gm_skipped_count +=
       piece.result.run_summary.body_z_bias_reestimate_gm_skipped_count;
+    assembled.run_summary.body_z_bias_reestimate_local_gm_factor_count +=
+      piece.result.run_summary.body_z_bias_reestimate_local_gm_factor_count;
     if (std::isfinite(piece.result.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad)) {
       assembled.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad =
         std::isfinite(assembled.run_summary.rtk_outage_attitude_hold_max_abs_residual_rad)

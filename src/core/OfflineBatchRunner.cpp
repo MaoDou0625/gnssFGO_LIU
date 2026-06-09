@@ -1846,6 +1846,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.body_z_bias_reestimate_prior_factor_count = 0;
   run_result.run_summary.body_z_bias_reestimate_initialized_state_count = 0;
   run_result.run_summary.body_z_bias_reestimate_gm_skipped_count = 0;
+  run_result.run_summary.body_z_bias_reestimate_local_gm_factor_count = 0;
   run_result.run_summary.vertical_jump_spectral_bias_relaxation_enabled = false;
   run_result.run_summary.vertical_jump_spectral_relaxed_segment_count = 0;
   run_result.run_summary.vertical_jump_spectral_max_response_ratio =

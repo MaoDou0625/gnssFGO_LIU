@@ -61,6 +61,7 @@ add_library(offline_lc_minimal_lib
   src/core/InitialStaticConstraintBuilder.cpp
   src/core/BodyZBiasReestimateConstraintBuilder.cpp
   src/core/BodyZBiasReestimatePlanner.cpp
+  src/core/BodyZBiasReestimateSourcePolicy.cpp
   src/core/BodyZBidirectionalJumpDetector.cpp
   src/core/BodyZHorizontalLeakageEstimator.cpp
   src/core/BodyZJumpConstraintWindowPlanner.cpp

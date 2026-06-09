@@ -355,6 +355,7 @@ struct RunSummary {
   std::size_t body_z_bias_reestimate_prior_factor_count = 0;
   std::size_t body_z_bias_reestimate_initialized_state_count = 0;
   std::size_t body_z_bias_reestimate_gm_skipped_count = 0;
+  std::size_t body_z_bias_reestimate_local_gm_factor_count = 0;
   bool road_noise_state_baz_reestimate_enabled = false;
   std::size_t road_noise_state_segment_count = 0;
   std::size_t road_noise_state_high_segment_count = 0;
@@ -933,6 +934,8 @@ struct RunSummary {
         << body_z_bias_reestimate_initialized_state_count << '\n'
         << "body_z_bias_reestimate_gm_skipped_count="
         << body_z_bias_reestimate_gm_skipped_count << '\n'
+        << "body_z_bias_reestimate_local_gm_factor_count="
+        << body_z_bias_reestimate_local_gm_factor_count << '\n'
         << "road_noise_state_baz_reestimate_enabled="
         << (road_noise_state_baz_reestimate_enabled ? "true" : "false") << '\n'
         << "road_noise_state_segment_count="
