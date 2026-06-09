@@ -331,6 +331,24 @@ struct Stage3JumpRegularizerDiagnosticRow {
   double residual = std::numeric_limits<double>::quiet_NaN();
 };
 
+struct Stage3Stage2IncrementHoldDiagnosticRow {
+  std::size_t state_index_i = 0;
+  std::size_t state_index_j = 0;
+  double start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double end_time_s = std::numeric_limits<double>::quiet_NaN();
+  double dt_s = std::numeric_limits<double>::quiet_NaN();
+  double stage2_up_i_m = std::numeric_limits<double>::quiet_NaN();
+  double stage2_up_j_m = std::numeric_limits<double>::quiet_NaN();
+  double reference_delta_z_m = std::numeric_limits<double>::quiet_NaN();
+  double optimized_delta_z_m = std::numeric_limits<double>::quiet_NaN();
+  double residual_m = std::numeric_limits<double>::quiet_NaN();
+  double sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double normalized_residual = std::numeric_limits<double>::quiet_NaN();
+  bool in_jump_padding = false;
+  bool factor_added = false;
+  std::string skip_reason = "UNSET";
+};
+
 struct Stage3JumpContextEnvelopeProfileRow {
   std::size_t profile_index = 0;
   std::size_t window_index = 0;

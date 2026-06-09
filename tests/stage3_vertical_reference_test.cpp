@@ -16,12 +16,14 @@
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/core/Stage2LowfreqVerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage3JumpRegularizerConstraintBuilder.h"
+#include "offline_lc_minimal/core/Stage3Stage2IncrementHoldConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceProfilePlanner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceTimelineAligner.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
 #include "offline_lc_minimal/factor/VerticalRtkFactors.h"
+#include "offline_lc_minimal/factor/Stage2VerticalIncrementHoldFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaDeadbandFactor.h"
 
 namespace {
@@ -618,6 +620,31 @@ void TestVerticalVelocityDeltaDeadbandFactor() {
   ExpectNear(h(0, 2), 1.0, 1.0e-12, "outside velocity envelope Jacobian should be active");
 }
 
+void TestStage2VerticalIncrementHoldFactor() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(1, 0.01);
+  offline_lc_minimal::factor::Stage2VerticalIncrementHoldFactor factor(
+    gtsam::symbol_shorthand::X(0),
+    gtsam::symbol_shorthand::X(1),
+    0.25,
+    noise);
+
+  const gtsam::Vector zero_error =
+    factor.evaluateError(MakePose(10.0), MakePose(10.25));
+  ExpectNear(
+    zero_error[0],
+    0.0,
+    1.0e-12,
+    "Stage2 increment hold should have zero residual when delta z matches");
+
+  const gtsam::Vector residual =
+    factor.evaluateError(MakePose(10.0), MakePose(10.30));
+  ExpectNear(
+    residual[0],
+    0.05,
+    1.0e-12,
+    "Stage2 increment hold residual should be optimized minus reference dz");
+}
+
 void TestStage3JumpRegularizerAddsOnlyJumpWindowFactors() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_nhc_constraint = false;
@@ -696,6 +723,92 @@ void TestStage3JumpRegularizerAddsOnlyJumpWindowFactors() {
     0.002,
     1.0e-12,
     "height regularizer should report deadband overflow residual");
+}
+
+void TestStage3Stage2IncrementHoldAddsAdjacentDeltaFactors() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_velocity_delta_jump_padding_s = 0.0;
+  config.enable_stage3_stage2_vertical_increment_hold = true;
+  config.stage3_stage2_vertical_increment_sigma_m = 0.002;
+  config.stage3_stage2_vertical_increment_jump_sigma_m = 0.005;
+
+  const std::vector<double> state_timestamps{0.0, 1.0, 2.0, 3.0};
+  offline_lc_minimal::Stage2VelocityReference stage2_reference;
+  stage2_reference.trajectory = MakeTrajectory(state_timestamps.size(), 0.0);
+  const std::vector<double> stage2_up_m{10.0, 10.10, 10.15, 10.20};
+  for (std::size_t index = 0; index < state_timestamps.size(); ++index) {
+    stage2_reference.trajectory[index].time_s = state_timestamps[index];
+    stage2_reference.trajectory[index].enu_position_m.z() = stage2_up_m[index];
+  }
+
+  std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows(1U);
+  jump_windows.front().start_time_s = 1.25;
+  jump_windows.front().end_time_s = 1.75;
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::Stage3Stage2IncrementHoldDiagnosticRow> diagnostics;
+  offline_lc_minimal::Stage3Stage2IncrementHoldConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &state_timestamps;
+  request.stage2_reference = &stage2_reference;
+  request.jump_windows = &jump_windows;
+  request.dynamic_start_index = 0U;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::Stage3Stage2IncrementHoldConstraintBuilder(
+    std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 3U, "increment hold should add one factor per adjacent interval");
+  ExpectTrue(diagnostics.size() == 3U, "increment hold should diagnose each interval");
+  ExpectTrue(
+    summary.stage3_stage2_vertical_increment_factor_count == 3U,
+    "increment hold summary should count factors");
+  ExpectNear(
+    diagnostics[0].reference_delta_z_m,
+    0.10,
+    1.0e-12,
+    "first increment reference should come from Stage2 delta z");
+  ExpectNear(
+    diagnostics[0].sigma_m,
+    0.002,
+    1.0e-12,
+    "normal increment should use the normal sigma");
+  ExpectTrue(
+    diagnostics[1].in_jump_padding,
+    "interval crossing the jump window should use jump padding sigma");
+  ExpectNear(
+    diagnostics[1].sigma_m,
+    0.005,
+    1.0e-12,
+    "jump increment should use the jump sigma");
+
+  gtsam::Values optimized_values;
+  optimized_values.insert(gtsam::symbol_shorthand::X(0), MakePose(10.0));
+  optimized_values.insert(gtsam::symbol_shorthand::X(1), MakePose(10.10));
+  optimized_values.insert(gtsam::symbol_shorthand::X(2), MakePose(10.17));
+  optimized_values.insert(gtsam::symbol_shorthand::X(3), MakePose(10.22));
+  offline_lc_minimal::PopulateStage3Stage2IncrementHoldDiagnostics(
+    optimized_values,
+    diagnostics,
+    summary);
+
+  ExpectNear(
+    diagnostics[1].optimized_delta_z_m,
+    0.07,
+    1.0e-12,
+    "optimized delta should be reported");
+  ExpectNear(
+    diagnostics[1].residual_m,
+    0.02,
+    1.0e-12,
+    "diagnostic residual should be optimized delta minus Stage2 delta");
+  ExpectNear(
+    summary.stage3_stage2_vertical_increment_max_abs_residual_m,
+    0.02,
+    1.0e-12,
+    "summary should report max increment residual");
 }
 
 void TestStage3JumpAdaptiveContextEnvelopeUsesNearbyFluctuation() {
@@ -1626,8 +1739,14 @@ int main() {
       "TestVerticalVelocityDeltaDeadbandFactor",
       TestVerticalVelocityDeltaDeadbandFactor);
     RunTest(
+      "TestStage2VerticalIncrementHoldFactor",
+      TestStage2VerticalIncrementHoldFactor);
+    RunTest(
       "TestStage3JumpRegularizerAddsOnlyJumpWindowFactors",
       TestStage3JumpRegularizerAddsOnlyJumpWindowFactors);
+    RunTest(
+      "TestStage3Stage2IncrementHoldAddsAdjacentDeltaFactors",
+      TestStage3Stage2IncrementHoldAddsAdjacentDeltaFactors);
     RunTest(
       "TestStage3JumpAdaptiveContextEnvelopeUsesNearbyFluctuation",
       TestStage3JumpAdaptiveContextEnvelopeUsesNearbyFluctuation);

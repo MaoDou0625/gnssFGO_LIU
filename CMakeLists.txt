@@ -130,6 +130,7 @@ add_library(offline_lc_minimal_lib
   src/core/Stage3SharedReferenceMapper.cpp
   src/core/Stage3JumpContextEnvelopePlanner.cpp
   src/core/Stage3JumpRegularizerConstraintBuilder.cpp
+  src/core/Stage3Stage2IncrementHoldConstraintBuilder.cpp
   src/core/Stage3VerticalReferenceConstraintBuilder.cpp
   src/core/Stage3VerticalReferenceOptimizationRunner.cpp
   src/core/Stage3VerticalReferenceProfilePlanner.cpp

@@ -178,6 +178,10 @@ void WriteStage3JumpRegularizerDiagnosticsCsv(
   const std::filesystem::path &path,
   const std::vector<Stage3JumpRegularizerDiagnosticRow> &rows);
 
+void WriteStage3Stage2IncrementHoldDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage3Stage2IncrementHoldDiagnosticRow> &rows);
+
 void WriteStage3JumpContextEnvelopeProfilesCsv(
   const std::filesystem::path &path,
   const std::vector<Stage3JumpContextEnvelopeProfileRow> &rows);

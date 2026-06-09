@@ -96,6 +96,9 @@ struct ResidualAccumulator {
       Contains(factor_type, "VerticalEnvelopeCenterPullFactor")) {
     return "vertical_position_reference";
   }
+  if (Contains(factor_type, "Stage2VerticalIncrementHoldFactor")) {
+    return "stage3_stage2_increment_hold";
+  }
   if (Contains(factor_type, "VerticalJump") ||
       Contains(factor_type, "VerticalVelocityRampFactor") ||
       Contains(factor_type, "VerticalVelocityHeightSlopeFactor") ||

@@ -63,6 +63,7 @@
 #include "offline_lc_minimal/core/Stage2VelocityOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage2VelocityReference.h"
 #include "offline_lc_minimal/core/Stage3JumpRegularizerConstraintBuilder.h"
+#include "offline_lc_minimal/core/Stage3Stage2IncrementHoldConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceConstraintBuilder.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceOptimizationRunner.h"
 #include "offline_lc_minimal/core/Stage3VerticalReferenceTimelineAligner.h"
@@ -1887,6 +1888,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.stage2_vehicle_nhc_state_diagnostics.clear();
   run_result.stage3_vertical_reference_diagnostics.clear();
   run_result.stage3_jump_regularizer_diagnostics.clear();
+  run_result.stage3_stage2_increment_hold_diagnostics.clear();
   run_result.stage3_jump_context_envelope_profiles.clear();
   run_result.vertical_jump_masked_imu_diagnostics.clear();
   run_result.vertical_jump_impulse_diagnostics.clear();
@@ -2049,6 +2051,21 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       &run_result.stage3_jump_context_envelope_profiles;
     Stage3JumpRegularizerConstraintBuilder(
       std::move(jump_regularizer_request)).Build();
+
+    if (active_stage2_reference != nullptr) {
+      Stage3Stage2IncrementHoldConstraintBuildRequest increment_hold_request;
+      increment_hold_request.config = &config_;
+      increment_hold_request.state_timestamps = &state_timestamps;
+      increment_hold_request.stage2_reference = active_stage2_reference;
+      increment_hold_request.jump_windows = &run_result.body_z_seed_jump_windows;
+      increment_hold_request.dynamic_start_index = graph_timeline.dynamic_start_index;
+      increment_hold_request.graph = &graph_with_gnss;
+      increment_hold_request.run_summary = &run_result.run_summary;
+      increment_hold_request.diagnostics =
+        &run_result.stage3_stage2_increment_hold_diagnostics;
+      Stage3Stage2IncrementHoldConstraintBuilder(
+        std::move(increment_hold_request)).Build();
+    }
   }
 
   if (!run_result.initial_dynamic_static_windows.empty()) {
@@ -2353,6 +2370,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   PopulateStage3JumpRegularizerDiagnostics(
     optimized_values,
     run_result.stage3_jump_regularizer_diagnostics,
+    run_result.run_summary);
+  PopulateStage3Stage2IncrementHoldDiagnostics(
+    optimized_values,
+    run_result.stage3_stage2_increment_hold_diagnostics,
     run_result.run_summary);
   PopulateInitialDynamicStaticDiagnostics(
     optimized_values,

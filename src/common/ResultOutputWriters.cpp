@@ -1790,6 +1790,38 @@ void WriteStage3JumpRegularizerDiagnosticsCsv(
   }
 }
 
+void WriteStage3Stage2IncrementHoldDiagnosticsCsv(
+  const std::filesystem::path &path,
+  const std::vector<Stage3Stage2IncrementHoldDiagnosticRow> &rows) {
+  std::ofstream stream(path);
+  if (!stream.is_open()) {
+    throw std::runtime_error("failed to write " + path.filename().string());
+  }
+  stream << std::setprecision(17);
+  stream
+    << "state_index_i,state_index_j,start_time_s,end_time_s,dt_s,"
+       "stage2_up_i_m,stage2_up_j_m,reference_delta_z_m,optimized_delta_z_m,"
+       "residual_m,sigma_m,normalized_residual,in_jump_padding,factor_added,"
+       "skip_reason\n";
+  for (const auto &row : rows) {
+    stream << row.state_index_i << ','
+           << row.state_index_j << ','
+           << row.start_time_s << ','
+           << row.end_time_s << ','
+           << row.dt_s << ','
+           << row.stage2_up_i_m << ','
+           << row.stage2_up_j_m << ','
+           << row.reference_delta_z_m << ','
+           << row.optimized_delta_z_m << ','
+           << row.residual_m << ','
+           << row.sigma_m << ','
+           << row.normalized_residual << ','
+           << (row.in_jump_padding ? 1 : 0) << ','
+           << (row.factor_added ? 1 : 0) << ','
+           << row.skip_reason << '\n';
+  }
+}
+
 void WriteStage3JumpContextEnvelopeProfilesCsv(
   const std::filesystem::path &path,
   const std::vector<Stage3JumpContextEnvelopeProfileRow> &rows) {
