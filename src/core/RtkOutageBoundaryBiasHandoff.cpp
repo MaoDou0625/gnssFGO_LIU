@@ -10,20 +10,6 @@ namespace {
 
 constexpr double kTimeEpsilonS = 1.0e-9;
 
-double ResolvePostStartBazSigmaMps2(
-  const OfflineRunnerConfig &config,
-  const double fallback_sigma_mps2) {
-  double sigma_mps2 = fallback_sigma_mps2;
-  if (config.enable_vertical_acc_bias_gm_process &&
-      std::isfinite(config.vertical_acc_bias_sigma_mps2) &&
-      config.vertical_acc_bias_sigma_mps2 > 0.0) {
-    sigma_mps2 = std::min(
-      sigma_mps2,
-      config.vertical_acc_bias_sigma_mps2);
-  }
-  return sigma_mps2;
-}
-
 const ReferenceNodeState *FindLastKeptOutageState(
   const std::vector<ReferenceNodeState> &states,
   const RtkOutageWindowRow &window,
@@ -76,6 +62,20 @@ RtkOutageBoundaryBiasHandoffResult MakeSkippedResult(
 
 }  // namespace
 
+double ResolveRtkOutageBoundaryBazHandoffSigmaMps2(
+  const OfflineRunnerConfig &config,
+  const double fallback_sigma_mps2) {
+  double sigma_mps2 = fallback_sigma_mps2;
+  if (config.enable_vertical_acc_bias_gm_process &&
+      std::isfinite(config.vertical_acc_bias_sigma_mps2) &&
+      config.vertical_acc_bias_sigma_mps2 > 0.0) {
+    sigma_mps2 = std::min(
+      sigma_mps2,
+      config.vertical_acc_bias_sigma_mps2);
+  }
+  return sigma_mps2;
+}
+
 RtkOutageBoundaryBiasHandoffResult BuildRtkOutageBoundaryBiasHandoff(
   const RtkOutageBoundaryBiasHandoffRequest &request) {
   if (request.config == nullptr || request.outage_result == nullptr ||
@@ -119,7 +119,7 @@ RtkOutageBoundaryBiasHandoffResult BuildRtkOutageBoundaryBiasHandoff(
   result.boundary_reference.add_ba_z_constraint = true;
   result.boundary_reference.reference_ba_z_mps2 = reference_ba_z_mps2;
   result.boundary_reference.ba_z_sigma_mps2 =
-    ResolvePostStartBazSigmaMps2(
+    ResolveRtkOutageBoundaryBazHandoffSigmaMps2(
       *request.config,
       request.config->rtk_outage_boundary_baz_sigma_mps2);
   result.boundary_reference.valid = true;

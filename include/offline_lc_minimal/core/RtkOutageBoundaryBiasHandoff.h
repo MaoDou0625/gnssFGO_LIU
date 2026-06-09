@@ -27,6 +27,10 @@ struct RtkOutageBoundaryBiasHandoffResult {
 BuildRtkOutageBoundaryBiasHandoff(
   const RtkOutageBoundaryBiasHandoffRequest &request);
 
+[[nodiscard]] double ResolveRtkOutageBoundaryBazHandoffSigmaMps2(
+  const OfflineRunnerConfig &config,
+  double fallback_sigma_mps2);
+
 void AttachRtkOutageBoundaryBiasHandoff(
   const RtkOutageBoundaryBiasHandoffResult &handoff,
   RtkOutageBoundaryReferenceRow &reference);
