@@ -17,6 +17,7 @@
 #include "offline_lc_minimal/core/RtkOutageBatchSegmentPlanner.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageSegmentationPolicy.h"
+#include "offline_lc_minimal/core/RtkOutageTerminalVelocityReference.h"
 #include "offline_lc_minimal/core/SegmentedBatchResultAssembler.h"
 #include "offline_lc_minimal/core/StageAttitudeReference.h"
 
@@ -601,6 +602,16 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       bias_policy,
       outage.window_index,
       "OUTAGE_END");
+    const RtkOutageWindowRow *outage_source_outage =
+      FindSourceOutage(request_.outage_windows, *outage_segment);
+    OfflineRunnerConfig outage_config =
+      MakeChildConfig(request_.config, request_.base_config, *outage_segment, outage_source_outage);
+    std::shared_ptr<const Stage2VelocityReference> outage_reference =
+      SliceStage2ReferenceForSegment(
+        request_.stage2_reference,
+        outage_config,
+        *outage_segment,
+        request_.dynamic_start_time_s);
     RtkOutageBoundaryReferenceRow outage_end_reference =
       MakeOutageEndPositionVelocityReferenceFromPostResult(
         request_.config,
@@ -613,17 +624,36 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
         *recovery_reference);
     }
     outage_boundary_refs.push_back(std::move(outage_end_reference));
-
-    const RtkOutageWindowRow *outage_source_outage =
-      FindSourceOutage(request_.outage_windows, *outage_segment);
-    OfflineRunnerConfig outage_config =
-      MakeChildConfig(request_.config, request_.base_config, *outage_segment, outage_source_outage);
-    std::shared_ptr<const Stage2VelocityReference> outage_reference =
-      SliceStage2ReferenceForSegment(
-        request_.stage2_reference,
-        outage_config,
-        *outage_segment,
-        request_.dynamic_start_time_s);
+    if (outage_reference != nullptr) {
+      const RtkOutageBoundaryReferenceRow post_first_boundary_reference =
+        outage_boundary_refs.back();
+      const std::optional<RtkOutageBoundaryReferenceRow> terminal_velocity_reference =
+        BuildRtkOutageTerminalVelocityReference(
+          RtkOutageTerminalVelocityReferenceRequest{
+            &request_.config,
+            &request_.state_timestamps,
+            &outage_reference->reference_states,
+            &request_.dataset.imu_samples,
+            request_.imu_params,
+            &handoff_outage,
+            &post_first_boundary_reference});
+      if (terminal_velocity_reference.has_value()) {
+        outage_boundary_refs.push_back(*terminal_velocity_reference);
+      }
+      const std::optional<RtkOutageBoundaryReferenceRow> terminal_vertical_handoff_reference =
+        BuildRtkOutageTerminalVerticalHandoffReference(
+          RtkOutageTerminalVelocityReferenceRequest{
+            &request_.config,
+            &request_.state_timestamps,
+            &outage_reference->reference_states,
+            &request_.dataset.imu_samples,
+            request_.imu_params,
+            &handoff_outage,
+            &post_first_boundary_reference});
+      if (terminal_vertical_handoff_reference.has_value()) {
+        outage_boundary_refs.push_back(*terminal_vertical_handoff_reference);
+      }
+    }
     OfflineRunResult outage_result = request_.run_once(
       std::move(outage_config),
       WithBoundaryReferences(std::move(outage_reference), std::move(outage_boundary_refs)),

@@ -1128,12 +1128,18 @@ void TestSegmentedBatchRunnerUsesPostFirstBoundaryWithoutHorizontalHandoff() {
   const auto &refs = calls[2].reference->boundary_references;
   std::size_t horizontal_handoff_count = 0U;
   const offline_lc_minimal::RtkOutageBoundaryReferenceRow *outage_end_reference = nullptr;
+  const offline_lc_minimal::RtkOutageBoundaryReferenceRow *terminal_velocity_reference = nullptr;
+  const offline_lc_minimal::RtkOutageBoundaryReferenceRow *terminal_vertical_handoff_reference = nullptr;
   for (const auto &reference : refs) {
     if (reference.boundary_role == "OUTAGE_END_HORIZONTAL_HANDOFF") {
       ++horizontal_handoff_count;
     }
     if (reference.boundary_role == "OUTAGE_END") {
       outage_end_reference = &reference;
+    } else if (reference.boundary_role == "OUTAGE_END_TERMINAL_VELOCITY") {
+      terminal_velocity_reference = &reference;
+    } else if (reference.boundary_role == "OUTAGE_END_TERMINAL_VERTICAL_HANDOFF") {
+      terminal_vertical_handoff_reference = &reference;
     }
   }
 
@@ -1149,6 +1155,39 @@ void TestSegmentedBatchRunnerUsesPostFirstBoundaryWithoutHorizontalHandoff() {
   ExpectTrue(outage_end_reference->has_horizontal_position &&
                outage_end_reference->add_horizontal_position_constraint,
              "outage end boundary should constrain duplicated post-first position");
+  ExpectTrue(terminal_velocity_reference != nullptr,
+             "outage child should receive a terminal velocity reference for the final kept outage state");
+  ExpectTrue(std::abs(terminal_velocity_reference->target_time_s - 20.45) < 1e-12,
+             "terminal velocity reference should target the final kept outage state");
+  ExpectTrue(terminal_velocity_reference->has_horizontal_velocity &&
+               terminal_velocity_reference->add_horizontal_velocity_constraint,
+             "terminal velocity reference should constrain final kept outage horizontal velocity");
+  ExpectTrue(terminal_velocity_reference->has_vz &&
+               terminal_velocity_reference->add_vz_constraint,
+             "terminal velocity reference should constrain final kept outage vertical velocity");
+  ExpectTrue(
+    terminal_velocity_reference->source_type == "POST_FIRST_MINUS_IMU_DELTA",
+    "terminal velocity reference should use the IMU delta when IMU coverage is available");
+  ExpectTrue(
+    std::abs(
+      terminal_velocity_reference->horizontal_velocity_sigma_mps -
+      config.rtk_outage_velocity_delta_3d_sigma_mps) < 1e-15,
+    "terminal velocity reference should use the outage velocity-delta sigma");
+  ExpectTrue(terminal_vertical_handoff_reference != nullptr,
+             "outage child should receive a terminal vertical position-velocity handoff");
+  ExpectTrue(std::abs(terminal_vertical_handoff_reference->target_time_s - 20.45) < 1e-12,
+             "terminal vertical handoff should target the final kept outage state");
+  ExpectTrue(
+    std::abs(
+      terminal_vertical_handoff_reference->vertical_position_velocity_handoff_reference_time_s -
+      20.5) < 1e-12,
+    "terminal vertical handoff should reference the post-first boundary time");
+  ExpectTrue(
+    terminal_vertical_handoff_reference->has_vertical_position_velocity_handoff &&
+      terminal_vertical_handoff_reference->add_vertical_position_velocity_handoff_constraint,
+    "terminal vertical handoff should add the existing z position-velocity consistency factor");
+  ExpectTrue(!terminal_vertical_handoff_reference->add_vz_constraint,
+             "terminal vertical handoff should not reuse post velocity as a direct out-last prior");
 }
 
 void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {

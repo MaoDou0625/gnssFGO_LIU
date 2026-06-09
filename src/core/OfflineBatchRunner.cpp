@@ -2189,6 +2189,8 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     &base_graph_optimized_reference_states;
   rtk_outage_recovery_request.tilt_reference_source = "base_graph_optimized";
   rtk_outage_recovery_request.velocity_delta_records = &velocity_delta_records;
+  rtk_outage_recovery_request.vertical_velocity_delta_records =
+    &vertical_velocity_delta_records;
   rtk_outage_recovery_request.graph = &graph_with_gnss;
   rtk_outage_recovery_request.run_summary = &run_result.run_summary;
   rtk_outage_recovery_request.attitude_diagnostics =

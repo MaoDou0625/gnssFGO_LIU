@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -31,6 +32,56 @@ bool ContainsInterval(
   const double inner_end_s) {
   return inner_start_s + kTimeEpsilonS >= outer_start_s &&
          inner_end_s <= outer_end_s + kTimeEpsilonS;
+}
+
+double ClampedVerticalVelocityDeltaTarget(
+  const OfflineRunnerConfig &config,
+  const VerticalVelocityDeltaPropagationRecord &record) {
+  const double dt_s = record.end_time_s - record.start_time_s;
+  if (dt_s <= 0.0 || !std::isfinite(dt_s) ||
+      !std::isfinite(record.target_delta_vz_mps)) {
+    return record.target_delta_vz_mps;
+  }
+  const double limit_mps = config.vertical_velocity_delta_target_acc_limit_mps2 * dt_s;
+  return std::clamp(record.target_delta_vz_mps, -limit_mps, limit_mps);
+}
+
+std::optional<double> MatchingVerticalVelocityDeltaTarget(
+  const OfflineRunnerConfig &config,
+  const std::vector<VerticalVelocityDeltaPropagationRecord> *records,
+  const VelocityDeltaPropagationRecord &target_record) {
+  if (records == nullptr) {
+    return std::nullopt;
+  }
+  const auto match = std::find_if(
+    records->begin(),
+    records->end(),
+    [&target_record](const VerticalVelocityDeltaPropagationRecord &record) {
+      return record.state_index_i == target_record.state_index_i &&
+             record.state_index_j == target_record.state_index_j &&
+             std::abs(record.start_time_s - target_record.start_time_s) <= kTimeEpsilonS &&
+             std::abs(record.end_time_s - target_record.end_time_s) <= kTimeEpsilonS;
+    });
+  if (match == records->end()) {
+    return std::nullopt;
+  }
+  const double target_delta_vz_mps = ClampedVerticalVelocityDeltaTarget(config, *match);
+  return std::isfinite(target_delta_vz_mps)
+    ? std::optional<double>(target_delta_vz_mps)
+    : std::nullopt;
+}
+
+VelocityDeltaPropagationRecord BuildConsistentVelocityDeltaRecord(
+  const OfflineRunnerConfig &config,
+  const std::vector<VerticalVelocityDeltaPropagationRecord> *vertical_records,
+  const VelocityDeltaPropagationRecord &record) {
+  VelocityDeltaPropagationRecord adjusted = record;
+  const std::optional<double> vertical_target =
+    MatchingVerticalVelocityDeltaTarget(config, vertical_records, record);
+  if (vertical_target.has_value()) {
+    adjusted.target_delta_v_mps.z() = *vertical_target;
+  }
+  return adjusted;
 }
 
 std::size_t FirstStateIndexAtOrAfter(
@@ -409,18 +460,23 @@ void RtkOutageRecoveryConstraintBuilder::Build() const {
               record.end_time_s)) {
           continue;
         }
-        if (!record.target_delta_v_mps.allFinite()) {
+        const VelocityDeltaPropagationRecord adjusted_record =
+          BuildConsistentVelocityDeltaRecord(
+            *request_.config,
+            request_.vertical_velocity_delta_records,
+            record);
+        if (!adjusted_record.target_delta_v_mps.allFinite()) {
           continue;
         }
         request_.graph->add(factor::VelocityDeltaFactor(
-          symbol::V(record.state_index_i),
-          symbol::V(record.state_index_j),
-          record.target_delta_v_mps,
+          symbol::V(adjusted_record.state_index_i),
+          symbol::V(adjusted_record.state_index_j),
+          adjusted_record.target_delta_v_mps,
           velocity_noise));
         ++request_.run_summary->rtk_outage_velocity_delta_3d_factor_count;
         request_.velocity_diagnostics->push_back(MakeVelocityDeltaDiagnostic(
           window.window_index,
-          record,
+          adjusted_record,
           request_.config->rtk_outage_velocity_delta_3d_sigma_mps));
       }
     }

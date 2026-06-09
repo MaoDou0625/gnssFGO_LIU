@@ -99,6 +99,7 @@ add_library(offline_lc_minimal_lib
   src/core/RtkOutageSegmentedBatchRunner.cpp
   src/core/RtkOutageSegmentationPolicy.cpp
   src/core/RtkOutageSmoothingConstraintBuilder.cpp
+  src/core/RtkOutageTerminalVelocityReference.cpp
   src/core/ResidualContributionAnalyzer.cpp
   src/core/RtkHeadingAlignmentEstimator.cpp
   src/core/RtkVelocityConstraintBuilder.cpp

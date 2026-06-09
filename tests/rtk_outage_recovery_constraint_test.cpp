@@ -260,6 +260,67 @@ void TestBuilderAddsOutageAttitudeAndVelocityConstraints() {
     "3D velocity delta residual should be zero for matching velocities");
 }
 
+void TestOutageVelocityDeltaUsesVerticalClampedVzTarget() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_attitude_hold = false;
+  config.enable_rtk_outage_velocity_delta_3d = true;
+  config.rtk_outage_velocity_delta_3d_sigma_mps = 0.20;
+  config.vertical_velocity_delta_target_acc_limit_mps2 = 0.25;
+
+  const std::vector<double> timestamps{0.0, 1.0, 2.0, 3.0, 4.0};
+  const std::vector<offline_lc_minimal::RtkOutageWindowRow> windows{MakeWindow()};
+  const auto velocity_records = MakeVelocityRecords();
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord>
+    vertical_velocity_records{
+      {1U, 2U, 1.0, 2.0, 2.0, 0.0},
+      {2U, 3U, 2.0, 3.0, -2.0, 0.0},
+    };
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::RtkOutageVelocityDelta3dDiagnosticRow> velocity_diagnostics;
+
+  offline_lc_minimal::RtkOutageRecoveryConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.outage_windows = &windows;
+  request.velocity_delta_records = &velocity_records;
+  request.vertical_velocity_delta_records = &vertical_velocity_records;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.velocity_diagnostics = &velocity_diagnostics;
+  offline_lc_minimal::RtkOutageRecoveryConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 2U, "only the two outage velocity factors should be added");
+  ExpectTrue(summary.rtk_outage_velocity_delta_3d_factor_count == 2U,
+             "3D velocity delta should still cover outage intervals");
+  ExpectTrue(velocity_diagnostics.size() == 2U,
+             "velocity diagnostics should reflect the adjusted target");
+
+  const auto first_factor =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::VelocityDeltaFactor>(graph.at(0));
+  const auto second_factor =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::VelocityDeltaFactor>(graph.at(1));
+  ExpectTrue(first_factor.get() != nullptr, "first outage velocity factor should be present");
+  ExpectTrue(second_factor.get() != nullptr, "second outage velocity factor should be present");
+  ExpectNear(first_factor->targetDeltaVMps().x(), 1.0, 1.0e-12,
+             "x target should come from the 3D IMU propagation");
+  ExpectNear(first_factor->targetDeltaVMps().y(), -2.0, 1.0e-12,
+             "y target should come from the 3D IMU propagation");
+  ExpectNear(first_factor->targetDeltaVMps().z(), 0.25, 1.0e-12,
+             "z target should use the clamped vertical dvz target");
+  ExpectNear(second_factor->targetDeltaVMps().x(), -0.25, 1.0e-12,
+             "x target should come from the 3D IMU propagation");
+  ExpectNear(second_factor->targetDeltaVMps().y(), 0.75, 1.0e-12,
+             "y target should come from the 3D IMU propagation");
+  ExpectNear(second_factor->targetDeltaVMps().z(), -0.25, 1.0e-12,
+             "z target should use the clamped vertical dvz target");
+  ExpectNear(velocity_diagnostics[0].target_delta_v_mps.z(), 0.25, 1.0e-12,
+             "diagnostic z target should match the factor target");
+  ExpectNear(velocity_diagnostics[1].target_delta_v_mps.z(), -0.25, 1.0e-12,
+             "diagnostic z target should match the factor target");
+}
+
 void TestBuilderSplitsOutageTiltAndYawWhenBaseTiltReferenceIsEnabled() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_rtk_outage_smoothing = true;
@@ -1659,6 +1720,9 @@ int main() {
     RunTest(
       "TestBuilderAddsOutageAttitudeAndVelocityConstraints",
       TestBuilderAddsOutageAttitudeAndVelocityConstraints);
+    RunTest(
+      "TestOutageVelocityDeltaUsesVerticalClampedVzTarget",
+      TestOutageVelocityDeltaUsesVerticalClampedVzTarget);
     RunTest(
       "TestBuilderSplitsOutageTiltAndYawWhenBaseTiltReferenceIsEnabled",
       TestBuilderSplitsOutageTiltAndYawWhenBaseTiltReferenceIsEnabled);

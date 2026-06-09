@@ -10,6 +10,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Types.h"
+#include "offline_lc_minimal/core/VerticalMotionConstraintBuilder.h"
 
 namespace offline_lc_minimal {
 
@@ -30,6 +31,7 @@ struct RtkOutageRecoveryConstraintBuildRequest {
   const std::vector<ReferenceNodeState> *tilt_reference_states = nullptr;
   std::string tilt_reference_source = "reference_states";
   const std::vector<VelocityDeltaPropagationRecord> *velocity_delta_records = nullptr;
+  const std::vector<VerticalVelocityDeltaPropagationRecord> *vertical_velocity_delta_records = nullptr;
   gtsam::NonlinearFactorGraph *graph = nullptr;
   RunSummary *run_summary = nullptr;
   std::vector<RtkOutageAttitudeHoldDiagnosticRow> *attitude_diagnostics = nullptr;
