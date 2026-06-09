@@ -451,6 +451,103 @@ void TestBatchSegmentPlannerSplitsFirstPlannedOutage() {
   ExpectTrue(segments[1].vertical_boundary_jump_allowed, "boundary jump flag should be retained");
 }
 
+void TestBatchSegmentPlannerStartsPostAtFirstRecoveryRtkFixState() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_segmented_batch = true;
+  config.rtk_outage_segmented_batch_max_outages = 1;
+
+  std::vector<offline_lc_minimal::RtkOutageWindowRow> outages(1U);
+  outages.front().window_index = 8U;
+  outages.front().pre_anchor_state_index = 3U;
+  outages.front().post_anchor_state_index = 5U;
+  outages.front().start_time_s = 10.0;
+  outages.front().end_time_s = 20.0;
+  outages.front().skip_reason = "PLANNED";
+
+  std::vector<offline_lc_minimal::RtkOutageRecoveryReferenceRow> recovery_references(1U);
+  recovery_references.front().window_index = 8U;
+  recovery_references.front().valid_fix_sample_count = 3U;
+  recovery_references.front().first_sample_time_s = 20.0;
+
+  const std::vector<double> state_timestamps{
+    0.0, 2.0, 8.0, 10.1, 15.0, 19.95, 20.2, 30.0};
+
+  offline_lc_minimal::RtkOutageBatchSegmentPlanRequest request;
+  request.config = &config;
+  request.outage_windows = &outages;
+  request.recovery_references = &recovery_references;
+  request.state_timestamps = &state_timestamps;
+  request.dynamic_start_time_s = 2.0;
+  request.final_end_time_s = 30.0;
+
+  const std::vector<offline_lc_minimal::RtkOutageBatchSegmentRow> segments =
+    offline_lc_minimal::RtkOutageBatchSegmentPlanner(std::move(request)).Plan();
+
+  ExpectTrue(segments.size() == 3U, "recovery RTKFIX should keep pre/outage/post segments");
+  ExpectTrue(std::abs(segments[1].end_time_s - 20.0) < 1e-12,
+             "outage should extend to the first RTKFIX boundary");
+  ExpectTrue(std::abs(segments[2].start_time_s - 20.0) < 1e-12,
+             "post should start at the first RTKFIX boundary, not a no-RTK frame");
+}
+
+void TestBatchSegmentPlannerPrefersFirstUsedRtkFixFactor() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_segmented_batch = true;
+  config.rtk_outage_segmented_batch_max_outages = 1;
+
+  std::vector<offline_lc_minimal::RtkOutageWindowRow> outages(1U);
+  outages.front().window_index = 9U;
+  outages.front().pre_anchor_state_index = 3U;
+  outages.front().post_anchor_state_index = 5U;
+  outages.front().start_time_s = 10.0;
+  outages.front().end_time_s = 20.0;
+  outages.front().skip_reason = "PLANNED";
+
+  std::vector<offline_lc_minimal::RtkOutageRecoveryReferenceRow> recovery_references(1U);
+  recovery_references.front().window_index = 9U;
+  recovery_references.front().valid_fix_sample_count = 3U;
+  recovery_references.front().first_sample_time_s = 20.0;
+
+  std::vector<offline_lc_minimal::GnssFactorRecord> gnss_factor_records(2U);
+  gnss_factor_records[0].corrected_time_s = 20.0;
+  gnss_factor_records[0].factor_used = true;
+  gnss_factor_records[0].gnss_fix_type = offline_lc_minimal::GnssFixType::kRtkFix;
+  gnss_factor_records[0].sync_status =
+    offline_lc_minimal::StateMeasSyncStatus::kSynchronizedJ;
+  gnss_factor_records[0].state_time_i_s = 19.95;
+  gnss_factor_records[0].state_time_j_s = 20.0;
+  gnss_factor_records[1].corrected_time_s = 20.5;
+  gnss_factor_records[1].factor_used = true;
+  gnss_factor_records[1].gnss_fix_type = offline_lc_minimal::GnssFixType::kRtkFix;
+  gnss_factor_records[1].sync_status =
+    offline_lc_minimal::StateMeasSyncStatus::kSynchronizedI;
+  gnss_factor_records[1].state_time_i_s = 20.5;
+  gnss_factor_records[1].state_time_j_s = 20.55;
+
+  const std::vector<double> state_timestamps{
+    0.0, 2.0, 8.0, 10.1, 15.0, 20.0, 20.5, 30.0};
+
+  offline_lc_minimal::RtkOutageBatchSegmentPlanRequest request;
+  request.config = &config;
+  request.outage_windows = &outages;
+  request.gnss_factor_records = &gnss_factor_records;
+  request.recovery_references = &recovery_references;
+  request.state_timestamps = &state_timestamps;
+  request.dynamic_start_time_s = 2.0;
+  request.final_end_time_s = 30.0;
+
+  const std::vector<offline_lc_minimal::RtkOutageBatchSegmentRow> segments =
+    offline_lc_minimal::RtkOutageBatchSegmentPlanner(std::move(request)).Plan();
+
+  ExpectTrue(segments.size() == 3U, "used RTKFIX factor should keep pre/outage/post segments");
+  ExpectTrue(std::abs(segments[1].end_time_s - 20.5) < 1e-12,
+             "outage should extend to the first actually used RTKFIX factor");
+  ExpectTrue(std::abs(segments[2].start_time_s - 20.5) < 1e-12,
+             "post should start at the first actually used RTKFIX factor");
+}
+
 offline_lc_minimal::TrajectoryRow MakeTrajectoryRow(
   const double time_s,
   const double up_m,
@@ -777,7 +874,8 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
         result.optimized_reference_states = {
           MakeReferenceNodeState(0.0, 0.0, 0.1),
           MakeReferenceNodeState(outage.start_time_s, 10.0, 0.4)};
-      } else if (child_config.processing_start_time_s >= outage.end_time_s - 1.0e-9) {
+      } else if (child_config.processing_end_time_s > outage.end_time_s + 1.0e-9 &&
+                 child_config.processing_start_time_s >= outage.end_time_s - 0.1) {
         result.trajectory = {
           MakeTrajectoryRowWithHorizontalState(
             outage.end_time_s,
@@ -817,8 +915,12 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
   ExpectTrue(calls[1].reference != nullptr, "post child should receive a boundary carrier");
   ExpectTrue(calls[1].reference->boundary_references.empty(),
              "post child should run like a normal post segment without special recovery boundary");
+  ExpectTrue(std::abs(calls[1].processing_start_time_s - 20.0) < 1e-12,
+             "post child should start from the original outage end as GNSS sync support");
 
   ExpectTrue(calls[2].reference != nullptr, "outage child should receive boundary references");
+  ExpectTrue(std::abs(calls[2].processing_end_time_s - 20.0) < 1e-12,
+             "outage child should end at the first RTKFIX boundary");
   const auto &refs = calls[2].reference->boundary_references;
   ExpectTrue(refs.size() == 4U,
              "outage child should receive start, start vertical handoff, end, and horizontal handoff");
@@ -947,7 +1049,8 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
         result.optimized_reference_states = {
           MakeReferenceNodeState(0.0, 0.0, 0.1),
           MakeReferenceNodeState(outage.start_time_s, 10.0, 0.4)};
-      } else if (child_config.processing_start_time_s < outage.end_time_s - 1.0e-9) {
+      } else if (child_config.processing_end_time_s <= outage.end_time_s + 1.0e-9 ||
+                 child_config.processing_start_time_s < outage.end_time_s - 0.1) {
         result.trajectory = {
           MakeTrajectoryRow(0.0, 0.0),
           MakeTrajectoryRow(outage.end_time_s - 0.05, 0.95),
@@ -1007,13 +1110,13 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
   outage.segment_role = "RTK_OUTAGE";
   outage.source_outage_window_index = 0;
   outage.start_time_s = 10.0;
-  outage.end_time_s = 20.0;
+  outage.end_time_s = 19.95;
   outage.planned = true;
   offline_lc_minimal::RtkOutageBatchSegmentRow post;
   post.segment_index = 2U;
   post.segment_role = "POST_RTK_VALID";
   post.source_outage_window_index = 0;
-  post.start_time_s = 20.0;
+  post.start_time_s = 19.95;
   post.end_time_s = 30.0;
   post.planned = true;
 
@@ -1186,6 +1289,12 @@ int main() {
     RunTest(
       "TestBatchSegmentPlannerSplitsFirstPlannedOutage",
       TestBatchSegmentPlannerSplitsFirstPlannedOutage);
+    RunTest(
+      "TestBatchSegmentPlannerStartsPostAtFirstRecoveryRtkFixState",
+      TestBatchSegmentPlannerStartsPostAtFirstRecoveryRtkFixState);
+    RunTest(
+      "TestBatchSegmentPlannerPrefersFirstUsedRtkFixFactor",
+      TestBatchSegmentPlannerPrefersFirstUsedRtkFixFactor);
     RunTest(
       "TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales",
       TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales);

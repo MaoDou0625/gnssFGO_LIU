@@ -73,14 +73,14 @@ OfflineRunnerConfig MakeChildConfig(
   config.processing_end_time_s = segment.end_time_s;
 
   if (segment.segment_role == "RTK_OUTAGE") {
-    if (source_outage != nullptr) {
-      config.processing_start_time_s = 0.0;
-      config.processing_end_time_s = source_outage->end_time_s;
-    }
+    config.processing_start_time_s = 0.0;
+    config.processing_end_time_s = segment.end_time_s;
     config.enable_late_static_detection = false;
   } else if (segment.segment_role == "POST_RTK_VALID") {
-    if (source_outage != nullptr) {
+    if (source_outage != nullptr && std::isfinite(source_outage->end_time_s)) {
       config.processing_start_time_s = source_outage->end_time_s;
+    } else {
+      config.processing_start_time_s = segment.start_time_s;
     }
     config.enable_rtk_outage_smoothing = false;
     config.enable_initial_static_subgraph = false;
@@ -529,9 +529,20 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
     throw std::runtime_error("RtkOutageSegmentedBatchRunner received an invalid processing window");
   }
 
+  std::vector<RtkOutageRecoveryReferenceRow> recovery_references;
+  if (request_.config.enable_rtk_outage_smoothing) {
+    recovery_references = BuildRecoveryReferences(
+      request_.config,
+      request_.dataset,
+      request_.gnss_factor_records,
+      request_.outage_windows);
+  }
+
   RtkOutageBatchSegmentPlanRequest plan_request;
   plan_request.config = &request_.config;
   plan_request.outage_windows = &request_.outage_windows;
+  plan_request.gnss_factor_records = &request_.gnss_factor_records;
+  plan_request.recovery_references = &recovery_references;
   plan_request.state_timestamps = &request_.state_timestamps;
   plan_request.dynamic_start_time_s = request_.dynamic_start_time_s;
   plan_request.final_end_time_s = request_.processing_end_time_s;
@@ -547,15 +558,6 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       nullptr,
       request_.road_noise_state_reference,
       request_.dataset);
-  }
-
-  std::vector<RtkOutageRecoveryReferenceRow> recovery_references;
-  if (request_.config.enable_rtk_outage_boundary_constraints) {
-    recovery_references = BuildRecoveryReferences(
-      request_.config,
-      request_.dataset,
-      request_.gnss_factor_records,
-      request_.outage_windows);
   }
 
   const auto assemble_pieces =
@@ -625,6 +627,8 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
 
   if (can_run_boundary_handoff) {
     const RtkOutageWindowRow &outage = *source_outage;
+    RtkOutageWindowRow handoff_outage = outage;
+    handoff_outage.end_time_s = post_segment->start_time_s;
     const RtkOutageRecoveryReferenceRow *recovery_reference =
       FindRecoveryReference(recovery_references, outage.window_index);
 
@@ -697,7 +701,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       }
     }
     const std::optional<double> outage_last_kept_time_s =
-      LastKeptOutageStateTime(request_.state_timestamps, outage);
+      LastKeptOutageStateTime(request_.state_timestamps, handoff_outage);
     const bool allow_end_ba_z = AllowsRtkOutageBazContinuity(
       bias_policy,
       outage.window_index,
@@ -706,7 +710,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       MakeOutageEndPositionVelocityReferenceFromPostResult(
         request_.config,
         post_result,
-        outage,
+        handoff_outage,
         allow_end_ba_z);
     if (!outage_end_reference.valid && recovery_reference != nullptr) {
       outage_end_reference = MakeOutageEndBoundaryReferenceFromRecovery(
@@ -720,7 +724,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
         outage_end_reference,
         request_.config,
         *outage_last_kept_time_s,
-        outage.end_time_s,
+        handoff_outage.end_time_s,
         true,
         "missing_end_vertical_handoff_reference");
     }
@@ -728,10 +732,10 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
     if (outage_last_kept_time_s.has_value()) {
       RtkOutageBoundaryReferenceRow horizontal_handoff_reference =
         MakeOutageEndHorizontalPositionVelocityHandoffReferenceFromPostResult(
-          request_.config,
-          post_result,
-          outage,
-          *outage_last_kept_time_s);
+        request_.config,
+        post_result,
+        handoff_outage,
+        *outage_last_kept_time_s);
       if (horizontal_handoff_reference.valid) {
         outage_boundary_refs.push_back(std::move(horizontal_handoff_reference));
       }

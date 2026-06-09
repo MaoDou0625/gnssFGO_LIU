@@ -114,39 +114,6 @@ void AppendRowsInSegmentWithSegmentLabel(
   }
 }
 
-const RtkOutageWindowRow *FindSourceOutage(
-  const std::vector<RtkOutageWindowRow> &outage_windows,
-  const RtkOutageBatchSegmentRow &segment) {
-  if (segment.source_outage_window_index < 0) {
-    return nullptr;
-  }
-  const auto it = std::find_if(
-    outage_windows.begin(),
-    outage_windows.end(),
-    [&](const RtkOutageWindowRow &row) {
-      return static_cast<long long>(row.window_index) ==
-             segment.source_outage_window_index;
-    });
-  return it == outage_windows.end() ? nullptr : &(*it);
-}
-
-RtkOutageBatchSegmentRow EffectiveSpliceSegment(
-  const RtkOutageBatchSegmentRow &segment,
-  const std::vector<RtkOutageWindowRow> &outage_windows) {
-  RtkOutageBatchSegmentRow effective_segment = segment;
-  const RtkOutageWindowRow *source_outage =
-    FindSourceOutage(outage_windows, segment);
-  if (source_outage == nullptr) {
-    return effective_segment;
-  }
-  if (segment.segment_role == "POST_RTK_VALID") {
-    effective_segment.start_time_s = source_outage->end_time_s;
-  } else if (segment.segment_role == "RTK_OUTAGE") {
-    effective_segment.end_time_s = source_outage->end_time_s;
-  }
-  return effective_segment;
-}
-
 std::vector<RtkOutageBatchSegmentRow> CollectSegments(
   const std::vector<SegmentedBatchResultPiece> &pieces) {
   std::vector<RtkOutageBatchSegmentRow> segments;
@@ -298,84 +265,82 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
 
   for (std::size_t piece_index = 0; piece_index < request_.pieces.size(); ++piece_index) {
     const auto &piece = request_.pieces[piece_index];
-    const RtkOutageBatchSegmentRow splice_segment =
-      EffectiveSpliceSegment(piece.segment, request_.outage_windows);
     const bool include_start = IncludeSegmentStart(piece.segment, piece_index);
     const bool include_end = IncludeSegmentEnd(piece.segment);
     AppendRowsInSegment(
       assembled.trajectory,
       piece.result.trajectory,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const TrajectoryRow &row) { return row.time_s; });
     AppendRowsInSegment(
       assembled.reference_node_trajectory,
       piece.result.reference_node_trajectory,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const ReferenceNodeRow &row) { return row.time_s; });
     AppendRowsInSegment(
       assembled.imu_propagated_reference_states,
       piece.result.imu_propagated_reference_states,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const ReferenceNodeState &row) { return row.time_s; });
     AppendRowsInSegment(
       assembled.optimized_reference_states,
       piece.result.optimized_reference_states,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const ReferenceNodeState &row) { return row.time_s; });
     AppendRowsInSegment(
       assembled.seed_body_z_acc_diagnostics,
       piece.result.seed_body_z_acc_diagnostics,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const BodyZSeedImuDiagnosticRow &row) { return row.time_s; });
     AppendRowsInSegment(
       assembled.body_z_seed_jump_windows,
       piece.result.body_z_seed_jump_windows,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const BodyZSeedJumpWindowRow &row) { return row.center_time_s; });
     AppendRowsInSegment(
       assembled.body_z_seed_bias_windows,
       piece.result.body_z_seed_bias_windows,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const BodyZSeedJumpWindowRow &row) { return row.center_time_s; });
     AppendRowsInSegment(
       assembled.gnss_factor_records,
       piece.result.gnss_factor_records,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const GnssFactorRecord &row) { return row.corrected_time_s; });
     AppendRowsInSegment(
       assembled.gnss_consistency_records,
       piece.result.gnss_consistency_records,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const GnssConsistencyRecord &row) { return row.corrected_time_s; });
     AppendRowsInSegment(
       assembled.vertical_envelope_diagnostics,
       piece.result.vertical_envelope_diagnostics,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const VerticalEnvelopeDiagnosticRow &row) { return row.corrected_time_s; });
     AppendRowsInSegment(
       assembled.rtk_vertical_drift_reference_diagnostics,
       piece.result.rtk_vertical_drift_reference_diagnostics,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const RtkVerticalDriftReferenceDiagnosticRow &row) { return row.time_s; });
@@ -383,7 +348,7 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       AppendRowsInSegment(
         assembled.late_static_feature_diagnostics,
         piece.result.late_static_feature_diagnostics,
-        splice_segment,
+        piece.segment,
         include_start,
         include_end,
         [](const LateStaticFeatureDiagnosticRow &row) { return row.window_center_time_s; });
@@ -393,7 +358,7 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
         AppendRowsInSegment(
           assembled.initial_dynamic_static_feature_diagnostics,
           piece.result.initial_dynamic_static_feature_diagnostics,
-          splice_segment,
+          piece.segment,
           include_start,
           include_end,
           [](const LateStaticFeatureDiagnosticRow &row) { return row.window_center_time_s; });
@@ -408,28 +373,28 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
     AppendRowsInSegment(
       assembled.rtk_outage_causal_nav_reference_diagnostics,
       piece.result.rtk_outage_causal_nav_reference_diagnostics,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const RtkOutageCausalNavReferenceRow &row) { return row.time_s; });
     AppendRowsInSegment(
       assembled.rtk_velocity_diagnostics,
       piece.result.rtk_velocity_diagnostics,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const RtkVelocityDiagnosticRow &row) { return row.corrected_time_s; });
     AppendRowsInSegment(
       assembled.vertical_velocity_delta_diagnostics,
       piece.result.vertical_velocity_delta_diagnostics,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const VerticalVelocityDeltaDiagnosticRow &row) { return row.start_time_s; });
     AppendRowsInSegment(
       assembled.vertical_motion_adaptive_reweighting_diagnostics,
       piece.result.vertical_motion_adaptive_reweighting_diagnostics,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const VerticalMotionAdaptiveReweightingDiagnosticRow &row) {
@@ -438,7 +403,7 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
     AppendRowsInSegment(
       assembled.vertical_position_velocity_consistency_diagnostics,
       piece.result.vertical_position_velocity_consistency_diagnostics,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const VerticalPositionVelocityConsistencyDiagnosticRow &row) {
@@ -447,27 +412,27 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
     AppendRowsInSegment(
       assembled.vertical_state_corrections,
       piece.result.vertical_state_corrections,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const VerticalStateCorrectionRow &row) { return row.corrected_time_s; });
     AppendRowsInSegment(
       assembled.attitude_reference_diagnostics,
       piece.result.attitude_reference_diagnostics,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const AttitudeReferenceDiagnosticRow &row) { return row.time_s; });
     AppendEdgesInSegment(
       assembled.relative_yaw_reference_diagnostics,
       piece.result.relative_yaw_reference_diagnostics,
-      splice_segment,
+      piece.segment,
       [](const RelativeYawReferenceDiagnosticRow &row) { return row.time_i_s; },
       [](const RelativeYawReferenceDiagnosticRow &row) { return row.time_j_s; });
     AppendRowsInSegmentWithSegmentLabel(
       assembled.stage2_vehicle_nhc_state_diagnostics,
       piece.result.stage2_vehicle_nhc_state_diagnostics,
-      splice_segment,
+      piece.segment,
       include_start,
       include_end,
       [](const Stage2VehicleNHCStateDiagnosticRow &row) { return row.time_s; });

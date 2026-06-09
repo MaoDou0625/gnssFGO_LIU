@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -10,6 +11,7 @@ namespace offline_lc_minimal {
 namespace {
 
 constexpr double kTimeEpsilonS = 1.0e-9;
+constexpr double kRecoveryStateAlignmentToleranceS = 5.0e-3;
 
 bool IsPlannedOutage(const RtkOutageWindowRow &window) {
   return (window.skip_reason == "PLANNED" || window.skip_reason == "ADDED") &&
@@ -53,6 +55,120 @@ double BoundaryTimeFromStateIndex(
   return std::isfinite(state_time_s) ? state_time_s : fallback_time_s;
 }
 
+const RtkOutageRecoveryReferenceRow *FindRecoveryReference(
+  const std::vector<RtkOutageRecoveryReferenceRow> *rows,
+  const std::size_t window_index) {
+  if (rows == nullptr) {
+    return nullptr;
+  }
+  const auto it = std::find_if(
+    rows->begin(),
+    rows->end(),
+    [&](const RtkOutageRecoveryReferenceRow &row) {
+      return row.window_index == window_index;
+    });
+  return it == rows->end() ? nullptr : &(*it);
+}
+
+std::optional<double> NearestStateTime(
+  const std::vector<double> *state_timestamps,
+  const double target_time_s) {
+  if (state_timestamps == nullptr || state_timestamps->empty() ||
+      !std::isfinite(target_time_s)) {
+    return std::nullopt;
+  }
+  const auto right =
+    std::lower_bound(state_timestamps->begin(), state_timestamps->end(), target_time_s);
+  if (right == state_timestamps->begin()) {
+    return std::isfinite(state_timestamps->front())
+      ? std::optional<double>(state_timestamps->front())
+      : std::nullopt;
+  }
+  if (right == state_timestamps->end()) {
+    return std::isfinite(state_timestamps->back())
+      ? std::optional<double>(state_timestamps->back())
+      : std::nullopt;
+  }
+  const auto left = std::prev(right);
+  const double left_time_s = *left;
+  const double right_time_s = *right;
+  if (!std::isfinite(left_time_s)) {
+    return std::isfinite(right_time_s) ? std::optional<double>(right_time_s) : std::nullopt;
+  }
+  if (!std::isfinite(right_time_s)) {
+    return left_time_s;
+  }
+  return std::abs(left_time_s - target_time_s) <=
+         std::abs(right_time_s - target_time_s)
+    ? left_time_s
+    : right_time_s;
+}
+
+std::optional<double> RecoveryFirstFixBoundaryTime(
+  const RtkOutageBatchSegmentPlanRequest &request,
+  const RtkOutageWindowRow &outage) {
+  const RtkOutageRecoveryReferenceRow *reference =
+    FindRecoveryReference(request.recovery_references, outage.window_index);
+  if (reference == nullptr ||
+      reference->valid_fix_sample_count == 0U ||
+      !std::isfinite(reference->first_sample_time_s)) {
+    return std::nullopt;
+  }
+  const std::optional<double> nearest_state_time_s =
+    NearestStateTime(request.state_timestamps, reference->first_sample_time_s);
+  if (nearest_state_time_s.has_value() &&
+      std::abs(*nearest_state_time_s - reference->first_sample_time_s) <=
+        kRecoveryStateAlignmentToleranceS) {
+    return nearest_state_time_s;
+  }
+  return reference->first_sample_time_s;
+}
+
+double SynchronizedFactorStateTime(const GnssFactorRecord &record) {
+  if (record.sync_status == StateMeasSyncStatus::kSynchronizedI &&
+      std::isfinite(record.state_time_i_s)) {
+    return record.state_time_i_s;
+  }
+  if (record.sync_status == StateMeasSyncStatus::kSynchronizedJ &&
+      std::isfinite(record.state_time_j_s)) {
+    return record.state_time_j_s;
+  }
+  return record.corrected_time_s;
+}
+
+std::optional<double> FirstUsedRtkFixBoundaryTime(
+  const RtkOutageBatchSegmentPlanRequest &request,
+  const RtkOutageWindowRow &outage) {
+  if (request.gnss_factor_records == nullptr) {
+    return std::nullopt;
+  }
+  const double recovery_factor_start_time_s =
+    outage.end_time_s +
+    (request.config != nullptr
+      ? std::max(request.config->state_meas_sync_upper_bound_s, kTimeEpsilonS)
+      : kTimeEpsilonS);
+  const GnssFactorRecord *first_record = nullptr;
+  for (const auto &record : *request.gnss_factor_records) {
+    if (!record.factor_used ||
+        record.gnss_fix_type != GnssFixType::kRtkFix ||
+        !std::isfinite(record.corrected_time_s) ||
+        record.corrected_time_s < recovery_factor_start_time_s) {
+      continue;
+    }
+    if (first_record == nullptr ||
+        record.corrected_time_s < first_record->corrected_time_s) {
+      first_record = &record;
+    }
+  }
+  if (first_record == nullptr) {
+    return std::nullopt;
+  }
+  const double boundary_time_s = SynchronizedFactorStateTime(*first_record);
+  return std::isfinite(boundary_time_s)
+    ? std::optional<double>(boundary_time_s)
+    : std::nullopt;
+}
+
 }  // namespace
 
 RtkOutageBatchSegmentPlanner::RtkOutageBatchSegmentPlanner(
@@ -91,13 +207,18 @@ std::vector<RtkOutageBatchSegmentRow> RtkOutageBatchSegmentPlanner::Plan() const
     request_.state_timestamps,
     outage.post_anchor_state_index,
     outage.end_time_s);
+  const std::optional<double> first_used_rtkfix_boundary_time_s =
+    FirstUsedRtkFixBoundaryTime(request_, outage);
+  const std::optional<double> recovery_first_fix_boundary_time_s =
+    RecoveryFirstFixBoundaryTime(request_, outage);
   const double pre_end_s = std::clamp(
     outage_start_boundary_s,
     request_.dynamic_start_time_s,
     request_.final_end_time_s);
   const double outage_start_s = pre_end_s;
   const double outage_end_s = std::clamp(
-    outage_end_boundary_s,
+    first_used_rtkfix_boundary_time_s.value_or(
+      recovery_first_fix_boundary_time_s.value_or(outage_end_boundary_s)),
     outage_start_s,
     request_.final_end_time_s);
   const double post_start_s = outage_end_s;

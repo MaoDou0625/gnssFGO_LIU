@@ -10,6 +10,8 @@ namespace offline_lc_minimal {
 struct RtkOutageBatchSegmentPlanRequest {
   const OfflineRunnerConfig *config = nullptr;
   const std::vector<RtkOutageWindowRow> *outage_windows = nullptr;
+  const std::vector<GnssFactorRecord> *gnss_factor_records = nullptr;
+  const std::vector<RtkOutageRecoveryReferenceRow> *recovery_references = nullptr;
   const std::vector<double> *state_timestamps = nullptr;
   double dynamic_start_time_s = 0.0;
   double final_end_time_s = 0.0;

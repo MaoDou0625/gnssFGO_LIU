@@ -187,7 +187,21 @@ RtkOutageRecoveryReferenceBuilder::Build() const {
         row.fit_end_time_s);
     }
 
+    std::sort(
+      samples.begin(),
+      samples.end(),
+      [](const FitSample &left, const FitSample &right) {
+        return left.time_s < right.time_s;
+      });
     row.valid_fix_sample_count = samples.size();
+    if (!samples.empty()) {
+      row.first_sample_time_s = samples.front().time_s;
+      row.last_sample_time_s = samples.back().time_s;
+      row.first_sample_up_m = samples.front().enu_position_m.z();
+      row.last_sample_up_m = samples.back().enu_position_m.z();
+      row.first_sample_horizontal_position_m = samples.front().enu_position_m.head<2>();
+      row.last_sample_horizontal_position_m = samples.back().enu_position_m.head<2>();
+    }
     if (samples.size() <
         static_cast<std::size_t>(request_.config->rtk_outage_recovery_reference_min_fix_samples)) {
       row.skip_reason = "insufficient_rtkfix_samples";
@@ -195,18 +209,6 @@ RtkOutageRecoveryReferenceBuilder::Build() const {
       continue;
     }
 
-    std::sort(
-      samples.begin(),
-      samples.end(),
-      [](const FitSample &left, const FitSample &right) {
-        return left.time_s < right.time_s;
-      });
-    row.first_sample_time_s = samples.front().time_s;
-    row.last_sample_time_s = samples.back().time_s;
-    row.first_sample_up_m = samples.front().enu_position_m.z();
-    row.last_sample_up_m = samples.back().enu_position_m.z();
-    row.first_sample_horizontal_position_m = samples.front().enu_position_m.head<2>();
-    row.last_sample_horizontal_position_m = samples.back().enu_position_m.head<2>();
     Eigen::Vector3d reference_position_m =
       Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
     Eigen::Vector3d reference_velocity_mps =
