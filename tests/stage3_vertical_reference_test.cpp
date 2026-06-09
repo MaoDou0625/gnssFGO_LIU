@@ -86,6 +86,8 @@ double RelativeRotationAngleRad(
 
 void TestProfilePlannerBuildsFiniteZeroPhaseLowpass() {
   auto config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_smoothing_method =
+    offline_lc_minimal::Stage3VerticalReferenceSmoothingMethod::kLowpass;
   config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
   config.stage3_vertical_anchor_sigma_m = 0.015;
   const auto trajectory = MakeTrajectory(21U, 0.05);
@@ -165,6 +167,8 @@ void TestProfilePlannerBuildsSplineBaselineReference() {
 
 void TestProfilePlannerCanHoldInitialDynamicStaticReference() {
   auto config = offline_lc_minimal::DefaultConfig();
+  config.stage3_vertical_reference_smoothing_method =
+    offline_lc_minimal::Stage3VerticalReferenceSmoothingMethod::kLowpass;
   config.stage3_vertical_reference_lowpass_cutoff_hz = 0.05;
   config.enable_stage3_initial_dynamic_static_reference_hold = true;
   config.stage3_initial_dynamic_static_reference_hold_duration_s = 2.0;
@@ -1579,6 +1583,7 @@ void TestStage2LowfreqRunnerRunsRawSourceThenLowpassStage2() {
   config.enable_stage2_lowfreq_vertical_reference_optimization = true;
   config.enable_stage2_velocity_optimization = true;
   config.enable_stage3_vertical_reference_optimization = false;
+  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
   config.stage2_lowfreq_vertical_reference_source =
     offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass;
   config.gnss_vertical_reference_source =
@@ -1765,6 +1770,7 @@ void TestStage2LowfreqRunnerRelaxesContextDvzScalesOnce() {
   config.enable_stage2_lowfreq_vertical_reference_optimization = true;
   config.enable_stage2_velocity_optimization = true;
   config.enable_stage3_vertical_reference_optimization = false;
+  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
   config.stage2_lowfreq_vertical_reference_source =
     offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass;
   config.gnss_vertical_reference_source =

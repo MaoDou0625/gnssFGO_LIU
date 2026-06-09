@@ -51,4 +51,11 @@ OfflineRunnerConfig MakeStage2VelocityOptimizationConfig(const OfflineRunnerConf
   return stage_config;
 }
 
+OfflineRunnerConfig DisableStage3VerticalReferenceOptimization(
+  OfflineRunnerConfig config) {
+  config.enable_stage3_vertical_reference_optimization = false;
+  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
+  return config;
+}
+
 }  // namespace offline_lc_minimal

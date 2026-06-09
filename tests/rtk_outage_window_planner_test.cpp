@@ -635,6 +635,8 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_stage2_velocity_optimization = true;
   config.enable_stage2_lowfreq_vertical_reference_optimization = true;
+  config.enable_stage3_vertical_reference_optimization = false;
+  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
   config.stage2_lowfreq_vertical_reference_source =
     offline_lc_minimal::GnssVerticalReferenceSource::kStage2Lowpass;
   config.gnss_vertical_reference_source =

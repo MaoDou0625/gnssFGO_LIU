@@ -154,11 +154,14 @@ python scripts/plot_attitude_over_time.py \
 
 ## Shared Stage3 Height Workflow
 
-For repeated runs of the same road segment, the v2.2 workflow can split the
+For repeated runs of the same road segment, the v2.3 workflow can split the
 pipeline into Stage2, shared distance-domain height reference generation, and
 Stage3-only optimization. This keeps each member's Stage2 attitude, horizontal
 position, horizontal velocity, and bias references, while using one common
 `z_shared(s)` vertical target for all members.
+
+See [docs/stage2_stage3_default_v2.3_workflow.md](docs/stage2_stage3_default_v2.3_workflow.md)
+for the current default parameters, diagnostics, and IRI validation method.
 
 See [docs/shared_vertical_reference_workflow.md](docs/shared_vertical_reference_workflow.md)
 for the manifest format, commands, outputs, and plotting workflow.

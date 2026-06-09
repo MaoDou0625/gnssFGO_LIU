@@ -10,4 +10,7 @@ namespace offline_lc_minimal {
 [[nodiscard]] OfflineRunnerConfig MakeStage2VelocityOptimizationConfig(
   const OfflineRunnerConfig &config);
 
+[[nodiscard]] OfflineRunnerConfig DisableStage3VerticalReferenceOptimization(
+  OfflineRunnerConfig config);
+
 }  // namespace offline_lc_minimal

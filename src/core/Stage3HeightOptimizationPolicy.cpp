@@ -62,8 +62,7 @@ void ApplyLowFrequencyStage2DeltaPolicy(OfflineRunnerConfig &config) {
 
 OfflineRunnerConfig MakeStage3HeightReferenceSourceConfig(
   OfflineRunnerConfig config) {
-  config.enable_stage3_vertical_reference_optimization = false;
-  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
+  config = DisableStage3VerticalReferenceOptimization(std::move(config));
   DisableStage3LegacyJumpRegularizers(config);
   return config;
 }
@@ -71,7 +70,7 @@ OfflineRunnerConfig MakeStage3HeightReferenceSourceConfig(
 OfflineRunnerConfig MakeStage3HeightOptimizationConfig(
   OfflineRunnerConfig config) {
   config = MakeStage2VelocityOptimizationConfig(config);
-  config.enable_stage3_vertical_reference_optimization = false;
+  config = DisableStage3VerticalReferenceOptimization(std::move(config));
 
   DisableRtkDriftAndOutageVerticalReferences(config);
   DisableCompetingAttitudeAndHorizontalSolvers(config);

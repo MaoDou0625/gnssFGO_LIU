@@ -1,0 +1,110 @@
+# offline_lc_minimal v2.3
+
+## Summary
+
+`v2.3` promotes the currently validated Stage2/Stage3 height workflow to the
+system default. The default behavior now keeps Stage2 as the source of attitude,
+horizontal position, horizontal velocity, and bias continuity, while Stage3 only
+performs low-frequency absolute-height correction.
+
+The release also aligns the C++ fallback defaults in
+`include/offline_lc_minimal/common/Config.h` with `config/default_offline.cfg`.
+This matters for command-line or test paths that construct `DefaultConfig()`
+without loading the default cfg file.
+
+## Default Stage2/Stage3 Policy
+
+Stage2 is enabled by default:
+
+```text
+enable_stage2_velocity_optimization=true
+enable_stage2_vehicle_nhc_constraint=true
+```
+
+Stage3 is enabled by default and uses the low-frequency shared-height strategy:
+
+```text
+enable_stage3_vertical_reference_optimization=true
+stage3_vertical_reference_smoothing_method=spline_baseline
+stage3_vertical_reference_lowpass_cutoff_hz=0.01
+stage3_vertical_anchor_sigma_m=0.001
+stage3_disable_stage2_vehicle_nhc_constraint=true
+```
+
+The final Stage3 pass keeps `Stage3 - Stage2` low-frequency:
+
+```text
+enable_stage3_stage2_vertical_increment_hold=true
+stage3_stage2_vertical_increment_sigma_m=0.0002
+stage3_stage2_vertical_increment_jump_sigma_m=0.0005
+enable_stage3_stage2_jump_shape_hold=true
+stage3_stage2_jump_shape_sigma_m=0.0005
+```
+
+The older Stage3 jump regularizers remain disabled by default:
+
+```text
+enable_stage3_jump_velocity_smoothness_regularizer=false
+enable_stage3_jump_height_highfreq_deadband=false
+enable_stage3_jump_adaptive_context_envelope=false
+```
+
+## Detailed Workflow Document
+
+The detailed operating guide is:
+
+```text
+docs/stage2_stage3_default_v2.3_workflow.md
+```
+
+It documents:
+
+- the Stage2-only flow;
+- shared distance-domain height-reference generation;
+- Stage3-only consumption of the shared reference;
+- default parameters and enabled modules;
+- diagnostic files to inspect;
+- the recommended `IRI(stage2 - stage3)` validation method.
+
+## Validation
+
+Build and full test suite:
+
+```bash
+wsl bash -lc 'cd /mnt/d/Code/offline_lc_minimal && cmake --build build -j4'
+wsl bash -lc 'cd /mnt/d/Code/offline_lc_minimal && LD_LIBRARY_PATH=/home/xunyi/.local/offline_lc_minimal/gtsam/lib ctest --test-dir build --output-on-failure'
+```
+
+The rtk_err_11 validation outputs are under:
+
+```text
+runs/road_noise_state_verify_20260609/132613_stage3_lowfreq_delta_policy_default
+runs/road_noise_state_verify_20260609/181436_stage3_lowfreq_delta_policy_default
+runs/road_noise_state_verify_20260609/stage2_stage3_iri_lowfreq_delta_policy_default
+runs/road_noise_state_verify_20260609/stage2_stage3_height_lowfreq_delta_policy_default
+```
+
+Measured `IRI(stage2 - stage3)`:
+
+```text
+dataset  20 m mm/m  50 m mm/m
+132613   0.2123     0.2026
+181436   0.2025     0.1967
+```
+
+For comparison, the previous non-low-frequency Stage3 delta strategy produced:
+
+```text
+dataset  20 m mm/m  50 m mm/m
+132613   1.8756     1.9397
+181436   1.2108     1.2533
+```
+
+## Notes
+
+- Stage3 still keeps the vertical jump/bias framework because IMU vertical
+  artifacts are still present.
+- Stage3 should not reinterpret attitude, horizontal position, or horizontal
+  velocity. Those remain inherited from Stage2.
+- The shared reference is a low-frequency absolute-height target, not raw RTK
+  scatter copied into the optimizer.

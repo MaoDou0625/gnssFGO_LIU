@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <utility>
 
+#include "offline_lc_minimal/core/OptimizationStagePolicy.h"
+
 namespace offline_lc_minimal {
 namespace {
 
@@ -11,7 +13,7 @@ OfflineRunnerConfig MakeSourceConfig(OfflineRunnerConfig config) {
   config.enable_stage2_lowfreq_vertical_reference_optimization = false;
   config.enable_stage2_lowfreq_final_dvz_relaxation = false;
   config.enable_stage2_lowfreq_final_hold_relaxation = false;
-  config.enable_stage3_vertical_reference_optimization = false;
+  config = DisableStage3VerticalReferenceOptimization(std::move(config));
   config.gnss_vertical_reference_source = GnssVerticalReferenceSource::kRawRtk;
   config.enable_rtk_vertical_lowpass_reference = false;
   return config;
@@ -45,7 +47,7 @@ void ApplyFinalHoldRelaxation(OfflineRunnerConfig &config) {
 }
 
 OfflineRunnerConfig MakeFinalConfig(OfflineRunnerConfig config) {
-  config.enable_stage3_vertical_reference_optimization = false;
+  config = DisableStage3VerticalReferenceOptimization(std::move(config));
   config.gnss_vertical_reference_source =
     config.stage2_lowfreq_vertical_reference_source;
   ApplyFinalDvzRelaxation(config);

@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "offline_lc_minimal/core/GraphTimelineBuilder.h"
+#include "offline_lc_minimal/core/OptimizationStagePolicy.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryBiasHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryVerticalHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageBiasContinuityPolicy.h"
@@ -67,7 +68,7 @@ OfflineRunnerConfig MakeStandalonePrefixChildConfig(
   config.enable_stage2_lowfreq_vertical_reference_optimization = false;
   config.enable_stage2_lowfreq_final_dvz_relaxation = false;
   config.enable_stage2_lowfreq_final_hold_relaxation = false;
-  config.enable_stage3_vertical_reference_optimization = false;
+  config = DisableStage3VerticalReferenceOptimization(std::move(config));
   if (config.gnss_vertical_reference_source !=
       GnssVerticalReferenceSource::kRtkDriftLowpass) {
     config.enable_rtk_vertical_lowpass_reference = false;

@@ -1895,15 +1895,15 @@ void TestGnssPreOutageQualityOverrideConfigValidation() {
 void TestStage3VerticalReferenceConfigValidation() {
   auto config = offline_lc_minimal::DefaultConfig();
   ExpectTrue(
-    !config.enable_stage3_vertical_reference_optimization,
-    "Stage3 should be disabled by default");
+    config.enable_stage3_vertical_reference_optimization,
+    "Stage3 should be enabled by default");
   ExpectTrue(
-    std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.05) < 1e-15,
-    "Stage3 default cutoff should be 0.05 Hz");
+    std::abs(config.stage3_vertical_reference_lowpass_cutoff_hz - 0.01) < 1e-15,
+    "Stage3 default cutoff should be 0.01 Hz");
   ExpectTrue(
     config.stage3_vertical_reference_smoothing_method ==
-      offline_lc_minimal::Stage3VerticalReferenceSmoothingMethod::kLowpass,
-    "Stage3 default smoothing method should preserve lowpass behavior");
+      offline_lc_minimal::Stage3VerticalReferenceSmoothingMethod::kSplineBaseline,
+    "Stage3 default smoothing method should use spline baseline behavior");
   ExpectTrue(
     std::abs(config.stage3_vertical_reference_spline_knot_spacing_m - 1.0) < 1e-15,
     "Stage3 default spline knot spacing should be 1 m");
@@ -1932,8 +1932,8 @@ void TestStage3VerticalReferenceConfigValidation() {
       1e-15,
     "Stage3 terminal static vertical speed threshold should default to 0.005 m/s");
   ExpectTrue(
-    std::abs(config.stage3_vertical_anchor_sigma_m - 0.015) < 1e-15,
-    "Stage3 default anchor sigma should be 0.015 m");
+    std::abs(config.stage3_vertical_anchor_sigma_m - 0.001) < 1e-15,
+    "Stage3 default anchor sigma should be 0.001 m");
   ExpectTrue(
     !config.enable_stage3_initial_dynamic_static_reference_hold,
     "Stage3 initial dynamic static reference hold should default off");
@@ -1987,41 +1987,41 @@ void TestStage3VerticalReferenceConfigValidation() {
     config.stage3_disable_rtk_outage_segmented_batch,
     "Stage3 segmented-batch compatibility flag should default to true");
   ExpectTrue(
-    !config.stage3_disable_stage2_vehicle_nhc_constraint,
-    "Stage3 should keep final-pass vehicle NHC enabled by default");
+    config.stage3_disable_stage2_vehicle_nhc_constraint,
+    "Stage3 wrapper should disable final-pass vehicle NHC by default");
   ExpectTrue(
     !config.enable_stage3_jump_velocity_smoothness_regularizer,
     "Stage3 jump velocity smoothness regularizer should default off");
   ExpectTrue(
-    std::abs(config.stage3_jump_velocity_smoothness_deadband_mps - 0.02) < 1e-15,
-    "Stage3 jump velocity smoothness deadband should default to 0.02 m/s");
+    std::abs(config.stage3_jump_velocity_smoothness_deadband_mps - 0.008) < 1e-15,
+    "Stage3 jump velocity smoothness deadband should default to 0.008 m/s");
   ExpectTrue(
-    std::abs(config.stage3_jump_velocity_smoothness_sigma_mps - 0.02) < 1e-15,
-    "Stage3 jump velocity smoothness sigma should default to 0.02 m/s");
+    std::abs(config.stage3_jump_velocity_smoothness_sigma_mps - 0.005) < 1e-15,
+    "Stage3 jump velocity smoothness sigma should default to 0.005 m/s");
   ExpectTrue(
     !config.enable_stage3_jump_height_highfreq_deadband,
     "Stage3 jump height highfreq deadband should default off");
   ExpectTrue(
-    std::abs(config.stage3_jump_height_highfreq_deadband_m - 0.002) < 1e-15,
-    "Stage3 jump height highfreq deadband should default to 0.002 m");
+    std::abs(config.stage3_jump_height_highfreq_deadband_m - 0.00085) < 1e-15,
+    "Stage3 jump height highfreq deadband should default to 0.00085 m");
   ExpectTrue(
-    std::abs(config.stage3_jump_height_highfreq_sigma_m - 0.004) < 1e-15,
-    "Stage3 jump height highfreq sigma should default to 0.004 m");
+    std::abs(config.stage3_jump_height_highfreq_sigma_m - 0.0012) < 1e-15,
+    "Stage3 jump height highfreq sigma should default to 0.0012 m");
   ExpectTrue(
-    !config.enable_stage3_stage2_vertical_increment_hold,
-    "Stage3 Stage2 increment hold should default off");
+    config.enable_stage3_stage2_vertical_increment_hold,
+    "Stage3 Stage2 increment hold should default on");
   ExpectTrue(
-    std::abs(config.stage3_stage2_vertical_increment_sigma_m - 0.002) < 1e-15,
-    "Stage3 Stage2 increment sigma should default to 0.002 m");
+    std::abs(config.stage3_stage2_vertical_increment_sigma_m - 0.0002) < 1e-15,
+    "Stage3 Stage2 increment sigma should default to 0.0002 m");
   ExpectTrue(
-    std::abs(config.stage3_stage2_vertical_increment_jump_sigma_m - 0.004) < 1e-15,
-    "Stage3 Stage2 increment jump sigma should default to 0.004 m");
+    std::abs(config.stage3_stage2_vertical_increment_jump_sigma_m - 0.0005) < 1e-15,
+    "Stage3 Stage2 increment jump sigma should default to 0.0005 m");
   ExpectTrue(
     config.enable_stage3_stage2_jump_shape_hold,
     "Stage3 Stage2 jump shape hold should default on");
   ExpectTrue(
-    std::abs(config.stage3_stage2_jump_shape_sigma_m - 0.001) < 1e-15,
-    "Stage3 Stage2 jump shape sigma should default to 0.001 m");
+    std::abs(config.stage3_stage2_jump_shape_sigma_m - 0.0005) < 1e-15,
+    "Stage3 Stage2 jump shape sigma should default to 0.0005 m");
   ExpectTrue(
     !config.enable_stage3_jump_adaptive_context_envelope,
     "Stage3 jump adaptive context envelope should default off");
@@ -2044,17 +2044,17 @@ void TestStage3VerticalReferenceConfigValidation() {
     !config.stage3_jump_context_preserve_local_center,
     "Stage3 jump context should default to lowpass-centered references");
   ExpectTrue(
-    std::abs(config.stage3_jump_context_velocity_floor_mps - 0.005) < 1e-15,
-    "Stage3 jump context velocity floor should default to 0.005 m/s");
+    std::abs(config.stage3_jump_context_velocity_floor_mps) < 1e-15,
+    "Stage3 jump context velocity floor should default to zero");
   ExpectTrue(
-    std::abs(config.stage3_jump_context_height_floor_m - 0.001) < 1e-15,
-    "Stage3 jump context height floor should default to 1 mm");
+    std::abs(config.stage3_jump_context_height_floor_m) < 1e-15,
+    "Stage3 jump context height floor should default to zero");
   ExpectTrue(
-    std::abs(config.stage3_jump_context_velocity_cap_mps - 0.05) < 1e-15,
-    "Stage3 jump context velocity cap should default to 0.05 m/s");
+    std::abs(config.stage3_jump_context_velocity_cap_mps - 0.008) < 1e-15,
+    "Stage3 jump context velocity cap should default to 0.008 m/s");
   ExpectTrue(
-    std::abs(config.stage3_jump_context_height_cap_m - 0.006) < 1e-15,
-    "Stage3 jump context height cap should default to 6 mm");
+    std::abs(config.stage3_jump_context_height_cap_m - 0.00085) < 1e-15,
+    "Stage3 jump context height cap should default to 0.85 mm");
 
   offline_lc_minimal::OverrideConfigField(
     config,
@@ -2847,6 +2847,7 @@ void TestStage3VerticalReferenceConfigValidation() {
   ExpectTrue(threw, "Stage3 should require Stage2 to be enabled");
 
   config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage3_vertical_reference_optimization = false;
   config.stage3_disable_stage2_vehicle_nhc_constraint = true;
   threw = false;
   try {
@@ -2994,6 +2995,8 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
     config,
     "enable_stage2_lowfreq_vertical_reference_optimization",
     "true");
+  config.enable_stage3_vertical_reference_optimization = false;
+  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
   offline_lc_minimal::OverrideConfigField(
     config,
     "enable_stage2_velocity_optimization",
@@ -3194,6 +3197,8 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
   config = offline_lc_minimal::DefaultConfig();
   config.enable_stage2_velocity_optimization = true;
   config.enable_stage2_lowfreq_vertical_reference_optimization = true;
+  config.enable_stage3_vertical_reference_optimization = false;
+  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
   config.stage2_lowfreq_vertical_reference_source =
     offline_lc_minimal::GnssVerticalReferenceSource::kRawRtk;
   threw = false;
@@ -3259,6 +3264,8 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
   config = offline_lc_minimal::DefaultConfig();
   config.enable_stage2_velocity_optimization = true;
   config.enable_stage2_lowfreq_vertical_reference_optimization = true;
+  config.enable_stage3_vertical_reference_optimization = false;
+  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
   config.enable_stage2_lowfreq_final_dvz_relaxation = true;
   config.stage2_lowfreq_final_dvz_sigma_scale = 0.5;
   threw = false;
@@ -3297,6 +3304,8 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
   config = offline_lc_minimal::DefaultConfig();
   config.enable_stage2_velocity_optimization = true;
   config.enable_stage2_lowfreq_vertical_reference_optimization = true;
+  config.enable_stage3_vertical_reference_optimization = false;
+  config.stage3_disable_stage2_vehicle_nhc_constraint = false;
   config.enable_stage2_lowfreq_final_hold_relaxation = true;
   config.stage2_lowfreq_final_horizontal_velocity_hold_sigma_scale = 0.5;
   threw = false;
