@@ -450,6 +450,42 @@ void TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors() {
              "summary horizontal velocity hold count is wrong");
 }
 
+void TestStage2HorizontalHoldBuilderSkipsHorizontalHoldInsideOutageBoundaries() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_stage2_velocity_optimization = true;
+  config.stage2_horizontal_position_hold_sigma_m = 1e-4;
+  config.stage2_horizontal_velocity_hold_sigma_mps = 1e-4;
+  const std::vector<double> timestamps{0.0, 1.0, 2.0, 3.0, 4.0};
+  const auto reference_states = MakeReferenceStates(timestamps.size());
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> boundary_references(2U);
+  boundary_references[0].window_index = 7U;
+  boundary_references[0].boundary_role = "OUTAGE_START";
+  boundary_references[0].target_time_s = 1.0;
+  boundary_references[0].valid = true;
+  boundary_references[1].window_index = 7U;
+  boundary_references[1].boundary_role = "OUTAGE_END";
+  boundary_references[1].target_time_s = 3.0;
+  boundary_references[1].valid = true;
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+
+  offline_lc_minimal::Stage2HorizontalHoldBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.reference_states = &reference_states;
+  request.boundary_references = &boundary_references;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  offline_lc_minimal::Stage2HorizontalHoldBuilder(std::move(request)).Build();
+
+  ExpectTrue(summary.stage2_horizontal_position_hold_factor_count == 2U,
+             "outage horizontal suppression should keep position holds only outside the boundary");
+  ExpectTrue(summary.stage2_horizontal_velocity_hold_factor_count == 2U,
+             "outage horizontal suppression should keep velocity holds only outside the boundary");
+  ExpectTrue(graph.size() == 4U,
+             "graph should contain only non-outage horizontal position and velocity holds");
+}
+
 void TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_stage2_velocity_optimization = true;
@@ -511,7 +547,7 @@ void TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma() {
              "stage2 global velocity factors should be added");
 }
 
-void TestStage2PolicyDisablesRtkVelocityAndAttitudeReference() {
+void TestStage2PolicyPreservesOutageVelocityDeltaAndDisablesDirectVelocity() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_stage1_yaw_refinement = true;
   config.enable_stage2_velocity_optimization = true;
@@ -532,8 +568,8 @@ void TestStage2PolicyDisablesRtkVelocityAndAttitudeReference() {
              "stage2 should disable attitude reference");
   ExpectTrue(!stage2_config.enable_rtk_velocity_constraint,
              "stage2 should not enable RTK horizontal velocity");
-  ExpectTrue(!stage2_config.enable_rtk_outage_velocity_delta_3d,
-             "stage2 should disable outage 3D velocity delta");
+  ExpectTrue(stage2_config.enable_rtk_outage_velocity_delta_3d,
+             "stage2 should preserve outage 3D velocity delta");
   ExpectTrue(!stage2_config.enable_body_z_nhc_constraint,
              "stage2 should disable old body-z NHC");
   ExpectTrue(!stage2_config.enable_body_z_nhc_horizontal_leakage_correction,
@@ -1133,8 +1169,13 @@ int main() {
     RunTest("TestStage2AttitudeHoldBuilderAddsOneFactorPerState", TestStage2AttitudeHoldBuilderAddsOneFactorPerState);
     RunTest("TestStage2HorizontalHoldFactorsIgnoreVerticalAndAttitude", TestStage2HorizontalHoldFactorsIgnoreVerticalAndAttitude);
     RunTest("TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors", TestStage2HorizontalHoldBuilderAddsPositionAndVelocityFactors);
+    RunTest(
+      "TestStage2HorizontalHoldBuilderSkipsHorizontalHoldInsideOutageBoundaries",
+      TestStage2HorizontalHoldBuilderSkipsHorizontalHoldInsideOutageBoundaries);
     RunTest("TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma", TestStage2VehicleNHCLabelsGlobalWindowsAndUsesGlobalSigma);
-    RunTest("TestStage2PolicyDisablesRtkVelocityAndAttitudeReference", TestStage2PolicyDisablesRtkVelocityAndAttitudeReference);
+    RunTest(
+      "TestStage2PolicyPreservesOutageVelocityDeltaAndDisablesDirectVelocity",
+      TestStage2PolicyPreservesOutageVelocityDeltaAndDisablesDirectVelocity);
     RunTest("TestFixedAxisBodyYVelocityEnvelopeFactorDeadband", TestFixedAxisBodyYVelocityEnvelopeFactorDeadband);
     RunTest(
       "TestStage1OutageBodyYEnvelopeEstimatorStatsAndSkips",

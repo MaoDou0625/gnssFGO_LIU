@@ -923,14 +923,12 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
   ExpectTrue(std::abs(calls[2].processing_end_time_s - 20.0) < 1e-12,
              "outage child should end at the first RTKFIX boundary");
   const auto &refs = calls[2].reference->boundary_references;
-  ExpectTrue(refs.size() == 4U,
-             "outage child should receive start, start vertical handoff, end, and horizontal handoff");
+  ExpectTrue(refs.size() == 3U,
+             "outage child should receive start, start vertical handoff, and post-first end");
   ExpectTrue(refs[0].boundary_role == "OUTAGE_START", "first outage boundary should be start");
   ExpectTrue(refs[1].boundary_role == "OUTAGE_START_VERTICAL_HANDOFF",
              "second outage boundary should hand off pre vertical motion");
   ExpectTrue(refs[2].boundary_role == "OUTAGE_END", "third outage boundary should be end");
-  ExpectTrue(refs[3].boundary_role == "OUTAGE_END_HORIZONTAL_HANDOFF",
-             "fourth outage boundary should be horizontal handoff");
   ExpectTrue(refs[0].has_attitude && refs[0].add_attitude_constraint,
               "outage start should carry an attitude constraint");
   ExpectTrue(
@@ -954,43 +952,26 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
     "outage end ba_z continuity should use the GM-scale handoff sigma");
   ExpectTrue(refs[2].has_up && refs[2].has_vz,
               "outage end should keep vertical position/velocity reference values from post probe");
-  ExpectTrue(!refs[2].add_up_constraint,
-              "outage end must not directly hold post-probe height");
-  ExpectTrue(refs[2].has_vertical_position_velocity_handoff &&
-               refs[2].add_vertical_position_velocity_handoff_constraint,
-             "outage end should add relative vertical position-velocity handoff");
-  ExpectTrue(std::abs(refs[2].target_time_s - 19.95) < 1e-12,
-             "outage end vertical handoff should target the last kept outage state");
-  ExpectTrue(std::abs(refs[2].vertical_position_velocity_handoff_reference_time_s - 20.0) < 1e-12,
-             "outage end vertical handoff should reference post recovery at outage end");
-  ExpectTrue(!refs[2].has_horizontal_position && !refs[2].add_horizontal_position_constraint,
-              "outage end must not copy post-probe horizontal position directly");
-  ExpectTrue(!refs[2].has_horizontal_velocity && !refs[2].add_horizontal_velocity_constraint,
-              "outage end must not copy post-probe horizontal velocity directly");
-  ExpectTrue(refs[3].source_type ==
-               "POST_RECOVERY_OPTIMIZED_HORIZONTAL_POSITION_VELOCITY_HANDOFF",
-             "horizontal handoff should identify post optimized source");
-  ExpectTrue(std::abs(refs[3].target_time_s - 19.95) < 1e-12,
-             "horizontal handoff should target the last kept outage state");
-  ExpectTrue(
-    std::abs(refs[3].horizontal_position_velocity_handoff_reference_time_s - 20.0) < 1e-12,
-    "horizontal handoff should reference post recovery at outage end");
-  ExpectTrue(refs[3].has_horizontal_position && !refs[3].add_horizontal_position_constraint,
-             "horizontal handoff should carry post position without direct position hold");
-  ExpectTrue(refs[3].has_horizontal_velocity && !refs[3].add_horizontal_velocity_constraint,
-             "horizontal handoff should not directly copy post velocity onto outage last");
-  ExpectTrue(refs[3].has_horizontal_position_velocity_handoff &&
-               refs[3].add_horizontal_position_velocity_handoff_constraint,
-             "horizontal handoff should add relative position-velocity consistency");
-  ExpectTrue(std::abs(refs[3].reference_horizontal_velocity_mps.x() - 0.1) < 1e-12,
-              "horizontal handoff should receive nonzero east velocity from post probe");
-  ExpectTrue(std::abs(refs[3].reference_horizontal_velocity_mps.y() + 1.4) < 1e-12,
-              "horizontal handoff should receive nonzero north velocity from post probe");
+  ExpectTrue(refs[2].add_up_constraint && refs[2].add_vz_constraint,
+             "outage end should directly close to the duplicated post-first vertical state");
+  ExpectTrue(!refs[2].has_vertical_position_velocity_handoff &&
+               !refs[2].add_vertical_position_velocity_handoff_constraint,
+             "outage end should not rewrite the target to a vertical handoff state");
+  ExpectTrue(std::abs(refs[2].target_time_s - 20.0) < 1e-12,
+             "outage end should target the first used RTK boundary state");
+  ExpectTrue(refs[2].has_horizontal_position && refs[2].add_horizontal_position_constraint,
+              "outage end should constrain the duplicated post-first horizontal position");
+  ExpectTrue(refs[2].has_horizontal_velocity && refs[2].add_horizontal_velocity_constraint,
+              "outage end should constrain the duplicated post-first horizontal velocity");
+  ExpectTrue(std::abs(refs[2].reference_horizontal_velocity_mps.x() - 0.1) < 1e-12,
+              "outage end should receive nonzero east velocity from post probe");
+  ExpectTrue(std::abs(refs[2].reference_horizontal_velocity_mps.y() + 1.4) < 1e-12,
+              "outage end should receive nonzero north velocity from post probe");
   ExpectTrue(std::abs(refs[0].reference_rotation.ypr().x() - 0.4) < 1e-12,
               "outage start attitude must use the pre optimized Rot3 branch");
 }
 
-void TestSegmentedBatchRunnerExtendsHorizontalHandoffAcrossRecoveryGuard() {
+void TestSegmentedBatchRunnerUsesPostFirstBoundaryWithoutHorizontalHandoff() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_rtk_outage_smoothing = true;
   config.enable_rtk_outage_segmented_batch = true;
@@ -1138,41 +1119,36 @@ void TestSegmentedBatchRunnerExtendsHorizontalHandoffAcrossRecoveryGuard() {
     corrected_guard_state != calls[2].reference->reference_states.end(),
     "outage reference should retain the recovery guard state");
   ExpectTrue(
-    std::abs(corrected_guard_state->velocity.y() + 1.4) < 1e-12,
-    "outage guard Stage2 reference should inherit post-first horizontal velocity");
+    std::abs(corrected_guard_state->velocity.y()) < 1e-12,
+    "outage guard Stage2 reference should not be overwritten by post-first velocity");
   ExpectTrue(
-    std::abs(corrected_guard_state->pose.translation().y() - (-6.28)) < 1e-12,
-    "outage guard Stage2 reference should back-propagate post-first horizontal position");
+    std::abs(corrected_guard_state->pose.translation().y()) < 1e-12,
+    "outage guard Stage2 reference should not back-propagate post-first position");
 
   const auto &refs = calls[2].reference->boundary_references;
-  std::vector<double> horizontal_handoff_targets;
+  std::size_t horizontal_handoff_count = 0U;
+  const offline_lc_minimal::RtkOutageBoundaryReferenceRow *outage_end_reference = nullptr;
   for (const auto &reference : refs) {
     if (reference.boundary_role == "OUTAGE_END_HORIZONTAL_HANDOFF") {
-      horizontal_handoff_targets.push_back(reference.target_time_s);
-      ExpectTrue(
-        std::abs(reference.horizontal_position_velocity_handoff_reference_time_s - 20.5) < 1e-12,
-        "guard handoff should reference the first actually used RTKFIX state");
-      ExpectTrue(reference.has_horizontal_velocity &&
-                   !reference.add_horizontal_velocity_constraint,
-                 "guard handoff should carry post-first horizontal velocity without direct copy");
-      ExpectTrue(reference.has_horizontal_position_velocity_handoff &&
-                   reference.add_horizontal_position_velocity_handoff_constraint,
-                 "guard handoff should add position-velocity consistency");
+      ++horizontal_handoff_count;
+    }
+    if (reference.boundary_role == "OUTAGE_END") {
+      outage_end_reference = &reference;
     }
   }
 
-  ExpectTrue(horizontal_handoff_targets.size() == 5U,
-             "horizontal handoff should cover the end guard window plus last kept state");
-  ExpectTrue(std::abs(horizontal_handoff_targets[0] - 19.90) < 1e-12,
-             "guard handoff should include the second-to-last state before the original outage end");
-  ExpectTrue(std::abs(horizontal_handoff_targets[1] - 19.95) < 1e-12,
-             "guard handoff should include the state before the original outage end");
-  ExpectTrue(std::abs(horizontal_handoff_targets[2] - 20.0) < 1e-12,
-             "guard handoff should include the original outage end state");
-  ExpectTrue(std::abs(horizontal_handoff_targets[3] - 20.2) < 1e-12,
-             "guard handoff should include the recovery guard interior state");
-  ExpectTrue(std::abs(horizontal_handoff_targets[4] - 20.45) < 1e-12,
-             "guard handoff should include the last kept state before post first");
+  ExpectTrue(horizontal_handoff_count == 0U,
+             "outage child should not receive horizontal handoff references");
+  ExpectTrue(outage_end_reference != nullptr,
+             "outage child should receive a post-first OUTAGE_END boundary");
+  ExpectTrue(std::abs(outage_end_reference->target_time_s - 20.5) < 1e-12,
+             "outage end boundary should target the first actually used RTKFIX state");
+  ExpectTrue(outage_end_reference->has_horizontal_velocity &&
+               outage_end_reference->add_horizontal_velocity_constraint,
+             "outage end boundary should constrain duplicated post-first velocity");
+  ExpectTrue(outage_end_reference->has_horizontal_position &&
+               outage_end_reference->add_horizontal_position_constraint,
+             "outage end boundary should constrain duplicated post-first position");
 }
 
 void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
@@ -1263,8 +1239,8 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
              "post child should not receive outage-derived handoff constraints");
   ExpectTrue(calls[2].reference != nullptr, "outage child should receive boundary references");
   const auto &outage_refs = calls[2].reference->boundary_references;
-  ExpectTrue(outage_refs.size() == 4U,
-             "outage child should receive start, start vertical handoff, end, and horizontal handoff");
+  ExpectTrue(outage_refs.size() == 3U,
+             "outage child should receive start, start vertical handoff, and post-derived end");
   ExpectTrue(outage_refs[0].has_attitude && outage_refs[0].add_attitude_constraint,
              "outage start should still use pre attitude");
   ExpectTrue(outage_refs[1].boundary_role == "OUTAGE_START_VERTICAL_HANDOFF",
@@ -1275,12 +1251,20 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
   ExpectTrue(outage_refs[2].boundary_role == "OUTAGE_END",
              "outage child should receive a post-derived outage-end reference");
   ExpectTrue(outage_refs[2].has_up && outage_refs[2].has_vz,
-             "outage end should inherit vertical state from independent post");
+              "outage end should inherit vertical state from independent post");
   ExpectTrue(!outage_refs[2].has_attitude,
-             "outage end reference should not invent an attitude reference");
-  ExpectTrue(outage_refs[2].has_vertical_position_velocity_handoff &&
-               outage_refs[2].add_vertical_position_velocity_handoff_constraint,
-             "outage end should still use post-derived vertical handoff without recovery");
+              "outage end reference should not invent an attitude reference");
+  ExpectTrue(outage_refs[2].add_up_constraint && outage_refs[2].add_vz_constraint,
+             "outage end should directly constrain the duplicated post-first vertical state");
+  ExpectTrue(!outage_refs[2].has_vertical_position_velocity_handoff &&
+               !outage_refs[2].add_vertical_position_velocity_handoff_constraint,
+              "outage end should not create a vertical handoff without recovery");
+  ExpectTrue(outage_refs[2].has_horizontal_position &&
+               outage_refs[2].add_horizontal_position_constraint,
+             "outage end should constrain duplicated post-first horizontal position");
+  ExpectTrue(outage_refs[2].has_horizontal_velocity &&
+               outage_refs[2].add_horizontal_velocity_constraint,
+             "outage end should constrain duplicated post-first horizontal velocity");
 }
 
 void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
@@ -1488,8 +1472,8 @@ int main() {
       "TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timeline",
       TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timeline);
     RunTest(
-      "TestSegmentedBatchRunnerExtendsHorizontalHandoffAcrossRecoveryGuard",
-      TestSegmentedBatchRunnerExtendsHorizontalHandoffAcrossRecoveryGuard);
+      "TestSegmentedBatchRunnerUsesPostFirstBoundaryWithoutHorizontalHandoff",
+      TestSegmentedBatchRunnerUsesPostFirstBoundaryWithoutHorizontalHandoff);
     RunTest(
       "TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference",
       TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference);

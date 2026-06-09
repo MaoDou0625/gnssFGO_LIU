@@ -2291,6 +2291,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     horizontal_hold_request.config = &config_;
     horizontal_hold_request.state_timestamps = &state_timestamps;
     horizontal_hold_request.reference_states = &stage2_fixed_reference_states;
+    if (active_stage2_reference != nullptr &&
+        !active_stage2_reference->boundary_references.empty()) {
+      horizontal_hold_request.boundary_references =
+        &active_stage2_reference->boundary_references;
+    }
     horizontal_hold_request.graph = &graph_with_gnss;
     horizontal_hold_request.run_summary = &run_result.run_summary;
     Stage2HorizontalHoldBuilder(std::move(horizontal_hold_request)).Build();

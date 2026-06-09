@@ -42,7 +42,6 @@ OfflineRunnerConfig MakeStage2VelocityOptimizationConfig(const OfflineRunnerConf
 
   stage_config.enable_attitude_reference_constraint = false;
   stage_config.enable_rtk_velocity_constraint = false;
-  stage_config.enable_rtk_outage_velocity_delta_3d = false;
 
   stage_config.enable_body_z_nhc_constraint = false;
   stage_config.enable_body_z_nhc_horizontal_leakage_correction = false;

@@ -5,6 +5,7 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
 #include "offline_lc_minimal/common/Config.h"
+#include "offline_lc_minimal/common/DiagnosticsTypes.h"
 #include "offline_lc_minimal/common/Types.h"
 
 namespace offline_lc_minimal {
@@ -13,6 +14,7 @@ struct Stage2HorizontalHoldBuildRequest {
   const OfflineRunnerConfig *config = nullptr;
   const std::vector<double> *state_timestamps = nullptr;
   const std::vector<ReferenceNodeState> *reference_states = nullptr;
+  const std::vector<RtkOutageBoundaryReferenceRow> *boundary_references = nullptr;
   gtsam::NonlinearFactorGraph *graph = nullptr;
   RunSummary *run_summary = nullptr;
 };

@@ -285,7 +285,7 @@ struct OfflineRunnerConfig {
   double rtk_outage_absolute_attitude_sigma_rad = 1.0e-3;
   double rtk_outage_relative_attitude_sigma_rad = 1.0e-3;
   bool enable_rtk_outage_velocity_delta_3d = true;
-  double rtk_outage_velocity_delta_3d_sigma_mps = 0.20;
+  double rtk_outage_velocity_delta_3d_sigma_mps = 0.02;
   bool enable_rtk_velocity_constraint = false;
   double rtk_velocity_window_s = 1.0;
   double rtk_velocity_horizontal_sigma_mps = 0.25;

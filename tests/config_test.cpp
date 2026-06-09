@@ -1117,8 +1117,8 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
     "default outage relative attitude sigma should match phase32");
   ExpectTrue(config.enable_rtk_outage_velocity_delta_3d, "default config should enable outage 3D velocity delta");
   ExpectTrue(
-    std::abs(config.rtk_outage_velocity_delta_3d_sigma_mps - 0.20) < 1e-15,
-    "default outage 3D velocity sigma should match v1.4 default");
+    std::abs(config.rtk_outage_velocity_delta_3d_sigma_mps - 0.02) < 1e-15,
+    "default outage 3D velocity sigma should keep outage boundary speeds IMU-continuous");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
