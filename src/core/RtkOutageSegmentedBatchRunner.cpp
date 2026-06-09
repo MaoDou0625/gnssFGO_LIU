@@ -12,6 +12,7 @@
 
 #include "offline_lc_minimal/core/GraphTimelineBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryBiasHandoff.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryHorizontalHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryVerticalHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageBiasContinuityPolicy.h"
 #include "offline_lc_minimal/core/RtkOutageBatchSegmentPlanner.h"
@@ -729,13 +730,19 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
         "missing_end_vertical_handoff_reference");
     }
     outage_boundary_refs.push_back(std::move(outage_end_reference));
-    if (outage_last_kept_time_s.has_value()) {
+    const std::vector<double> horizontal_handoff_target_times =
+      OutageEndHorizontalHandoffTargetTimes(
+        request_.state_timestamps,
+        request_.gnss_factor_records,
+        outage,
+        handoff_outage);
+    for (const double target_time_s : horizontal_handoff_target_times) {
       RtkOutageBoundaryReferenceRow horizontal_handoff_reference =
         MakeOutageEndHorizontalPositionVelocityHandoffReferenceFromPostResult(
-        request_.config,
-        post_result,
-        handoff_outage,
-        *outage_last_kept_time_s);
+          request_.config,
+          post_result,
+          handoff_outage,
+          target_time_s);
       if (horizontal_handoff_reference.valid) {
         outage_boundary_refs.push_back(std::move(horizontal_handoff_reference));
       }
@@ -745,12 +752,18 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       FindSourceOutage(request_.outage_windows, *outage_segment);
     OfflineRunnerConfig outage_config =
       MakeChildConfig(request_.config, request_.base_config, *outage_segment, outage_source_outage);
-    std::shared_ptr<const Stage2VelocityReference> outage_reference =
-      SliceStage2ReferenceForSegment(
+    std::shared_ptr<Stage2VelocityReference> outage_reference =
+      MutableStage2ReferenceCopy(SliceStage2ReferenceForSegment(
         request_.stage2_reference,
         outage_config,
         *outage_segment,
-        request_.dynamic_start_time_s);
+        request_.dynamic_start_time_s));
+    ApplyOutageEndHorizontalHandoffToStage2Reference(
+      *outage_reference,
+      post_result,
+      handoff_outage.end_time_s,
+      horizontal_handoff_target_times,
+      outage_config.state_frequency_hz);
     OfflineRunResult outage_result = request_.run_once(
       std::move(outage_config),
       WithBoundaryReferences(std::move(outage_reference), std::move(outage_boundary_refs)),

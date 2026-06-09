@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -989,6 +990,177 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
               "outage start attitude must use the pre optimized Rot3 branch");
 }
 
+void TestSegmentedBatchRunnerExtendsHorizontalHandoffAcrossRecoveryGuard() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_smoothing = true;
+  config.enable_rtk_outage_segmented_batch = true;
+  config.enable_rtk_outage_boundary_constraints = true;
+  config.rtk_outage_segmented_batch_max_outages = 1;
+  config.rtk_outage_segmented_batch_allow_vertical_boundary_jump = true;
+  config.rtk_outage_recovery_reference_min_fix_samples = 3;
+  config.required_best_sol_status_code = 1;
+  config.state_meas_sync_upper_bound_s = 0.02;
+
+  offline_lc_minimal::RtkOutageWindowRow outage;
+  outage.window_index = 15U;
+  outage.pre_anchor_state_index = 3U;
+  outage.post_anchor_state_index = 5U;
+  outage.start_time_s = 10.0;
+  outage.end_time_s = 20.0;
+  outage.skip_reason = "PLANNED";
+
+  offline_lc_minimal::GnssFactorRecord used_recovery_fix;
+  used_recovery_fix.corrected_time_s = 20.5;
+  used_recovery_fix.factor_used = true;
+  used_recovery_fix.gnss_fix_type = offline_lc_minimal::GnssFixType::kRtkFix;
+  used_recovery_fix.sync_status = offline_lc_minimal::StateMeasSyncStatus::kSynchronizedI;
+  used_recovery_fix.state_time_i_s = 20.5;
+  used_recovery_fix.state_time_j_s = 20.55;
+
+  struct Call {
+    double processing_start_time_s = 0.0;
+    double processing_end_time_s = 0.0;
+    std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> reference;
+  };
+  std::vector<Call> calls;
+
+  offline_lc_minimal::RtkOutageSegmentedBatchRunRequest request;
+  request.base_config = config;
+  request.config = config;
+  request.dataset.gnss_samples = {
+    MakeRecoverySampleEnu(20.0, 1, 5.0, -6.0, 100.0),
+    MakeRecoverySampleEnu(20.5, 1, 5.05, -6.7, 100.05),
+    MakeRecoverySampleEnu(21.0, 1, 5.10, -7.4, 100.10)};
+  request.dataset.imu_samples = {
+    {0.0, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()},
+    {30.0, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()}};
+  request.outage_windows = {outage};
+  request.gnss_factor_records = {used_recovery_fix};
+  request.state_timestamps = {0.0, 2.0, 8.0, 10.1, 15.0, 19.95, 20.0, 20.2, 20.45, 20.5, 30.0};
+  auto stage2_reference = std::make_shared<offline_lc_minimal::Stage2VelocityReference>();
+  for (const double time_s : request.state_timestamps) {
+    stage2_reference->trajectory.push_back(MakeTrajectoryRowWithHorizontalState(
+      time_s,
+      Eigen::Vector2d::Zero(),
+      0.0,
+      Eigen::Vector2d::Zero()));
+    stage2_reference->reference_states.push_back(MakeReferenceNodeState(time_s, 0.0, 0.0));
+  }
+  request.stage2_reference = stage2_reference;
+  request.imu_params = MakeTestImuParams();
+  request.dynamic_start_time_s = 2.0;
+  request.processing_end_time_s = 30.0;
+  request.run_once =
+    [&](offline_lc_minimal::OfflineRunnerConfig child_config,
+        std::shared_ptr<const offline_lc_minimal::Stage2VelocityReference> stage2_reference,
+        std::shared_ptr<const offline_lc_minimal::Stage1OutageBodyYEnvelopeReference>,
+        std::shared_ptr<const offline_lc_minimal::RoadNoiseStateReference>,
+        offline_lc_minimal::DataSet) {
+      calls.push_back(Call{
+        child_config.processing_start_time_s,
+        child_config.processing_end_time_s,
+        stage2_reference});
+
+      offline_lc_minimal::OfflineRunResult result;
+      if (child_config.processing_end_time_s <= outage.start_time_s + 1.0e-9) {
+        result.trajectory = {
+          MakeTrajectoryRow(0.0, 0.0, 2.0),
+          MakeTrajectoryRow(outage.start_time_s, 10.0, 2.0)};
+        result.optimized_reference_states = {
+          MakeReferenceNodeState(0.0, 0.0, 0.1),
+          MakeReferenceNodeState(outage.start_time_s, 10.0, 0.4)};
+      } else if (child_config.processing_end_time_s > outage.end_time_s + 1.0e-9 &&
+                 child_config.processing_start_time_s >= outage.end_time_s - 0.1) {
+        result.trajectory = {
+          MakeTrajectoryRowWithHorizontalState(
+            outage.end_time_s,
+            Eigen::Vector2d(5.0, -6.0),
+            20.0,
+            Eigen::Vector2d(0.1, -1.4),
+            2.5),
+          MakeTrajectoryRowWithHorizontalState(
+            20.5,
+            Eigen::Vector2d(5.05, -6.7),
+            20.05,
+            Eigen::Vector2d(0.1, -1.4),
+            2.5),
+          MakeTrajectoryRowWithHorizontalState(
+            child_config.processing_end_time_s,
+            Eigen::Vector2d(6.0, -20.0),
+            30.0,
+            Eigen::Vector2d(0.1, -1.4),
+            2.5)};
+        result.optimized_reference_states = {
+          MakeReferenceNodeState(outage.end_time_s, 20.0, -0.3),
+          MakeReferenceNodeState(20.5, 20.05, -0.2),
+          MakeReferenceNodeState(child_config.processing_end_time_s, 30.0, -0.1)};
+      } else {
+        result.trajectory = {
+          MakeTrajectoryRow(0.0, 0.0),
+          MakeTrajectoryRow(20.45, 0.95),
+          MakeTrajectoryRow(child_config.processing_end_time_s, 1.0)};
+        result.optimized_reference_states = {
+          MakeReferenceNodeState(0.0, 0.0, 0.2),
+          MakeReferenceNodeState(20.45, 19.95, 0.7, 0.123),
+          MakeReferenceNodeState(20.5, 20.0, 0.7)};
+      }
+      return result;
+    };
+
+  (void)offline_lc_minimal::RtkOutageSegmentedBatchRunner(std::move(request)).Run();
+
+  ExpectTrue(calls.size() == 3U,
+             "extended recovery guard should still run pre, post, and outage children");
+  ExpectTrue(std::abs(calls[1].processing_start_time_s - 20.0) < 1e-12,
+             "post child should still start from the original outage end as sync support");
+  ExpectTrue(std::abs(calls[2].processing_end_time_s - 20.5) < 1e-12,
+             "outage child should end at the first actually used RTKFIX state");
+  ExpectTrue(calls[2].reference != nullptr, "outage child should receive boundary references");
+  const auto corrected_guard_state = std::find_if(
+    calls[2].reference->reference_states.begin(),
+    calls[2].reference->reference_states.end(),
+    [](const offline_lc_minimal::ReferenceNodeState &state) {
+      return std::abs(state.time_s - 20.2) < 1e-12;
+    });
+  ExpectTrue(
+    corrected_guard_state != calls[2].reference->reference_states.end(),
+    "outage reference should retain the recovery guard state");
+  ExpectTrue(
+    std::abs(corrected_guard_state->velocity.y() + 1.4) < 1e-12,
+    "outage guard Stage2 reference should inherit post-first horizontal velocity");
+  ExpectTrue(
+    std::abs(corrected_guard_state->pose.translation().y() - (-6.28)) < 1e-12,
+    "outage guard Stage2 reference should back-propagate post-first horizontal position");
+
+  const auto &refs = calls[2].reference->boundary_references;
+  std::vector<double> horizontal_handoff_targets;
+  for (const auto &reference : refs) {
+    if (reference.boundary_role == "OUTAGE_END_HORIZONTAL_HANDOFF") {
+      horizontal_handoff_targets.push_back(reference.target_time_s);
+      ExpectTrue(
+        std::abs(reference.horizontal_position_velocity_handoff_reference_time_s - 20.5) < 1e-12,
+        "guard handoff should reference the first actually used RTKFIX state");
+      ExpectTrue(reference.has_horizontal_velocity &&
+                   reference.add_horizontal_velocity_constraint,
+                 "guard handoff should carry post-first horizontal velocity");
+      ExpectTrue(reference.has_horizontal_position_velocity_handoff &&
+                   reference.add_horizontal_position_velocity_handoff_constraint,
+                 "guard handoff should add position-velocity consistency");
+    }
+  }
+
+  ExpectTrue(horizontal_handoff_targets.size() == 4U,
+             "horizontal handoff should cover original end guard states plus last kept state");
+  ExpectTrue(std::abs(horizontal_handoff_targets[0] - 19.95) < 1e-12,
+             "guard handoff should include the state before the original outage end");
+  ExpectTrue(std::abs(horizontal_handoff_targets[1] - 20.0) < 1e-12,
+             "guard handoff should include the original outage end state");
+  ExpectTrue(std::abs(horizontal_handoff_targets[2] - 20.2) < 1e-12,
+             "guard handoff should include the recovery guard interior state");
+  ExpectTrue(std::abs(horizontal_handoff_targets[3] - 20.45) < 1e-12,
+             "guard handoff should include the last kept state before post first");
+}
+
 void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_rtk_outage_smoothing = true;
@@ -1301,6 +1473,9 @@ int main() {
     RunTest(
       "TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timeline",
       TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timeline);
+    RunTest(
+      "TestSegmentedBatchRunnerExtendsHorizontalHandoffAcrossRecoveryGuard",
+      TestSegmentedBatchRunnerExtendsHorizontalHandoffAcrossRecoveryGuard);
     RunTest(
       "TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference",
       TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference);
