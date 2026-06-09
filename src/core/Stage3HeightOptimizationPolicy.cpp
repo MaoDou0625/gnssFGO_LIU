@@ -45,6 +45,19 @@ void DisableRawRtkStaticVerticalPulls(OfflineRunnerConfig &config) {
   config.enable_initial_dynamic_static_vz_constraint = false;
 }
 
+void ApplyLowFrequencyStage2DeltaPolicy(OfflineRunnerConfig &config) {
+  config.stage3_vertical_reference_constraint_mode =
+    Stage3VerticalReferenceConstraintMode::kGaussian;
+  config.stage3_vertical_anchor_sigma_m = 0.001;
+
+  config.enable_stage3_stage2_vertical_increment_hold = true;
+  config.stage3_stage2_vertical_increment_sigma_m = 0.0002;
+  config.stage3_stage2_vertical_increment_jump_sigma_m = 0.0005;
+
+  config.enable_stage3_stage2_jump_shape_hold = true;
+  config.stage3_stage2_jump_shape_sigma_m = 0.0005;
+}
+
 }  // namespace
 
 OfflineRunnerConfig MakeStage3HeightReferenceSourceConfig(
@@ -63,6 +76,8 @@ OfflineRunnerConfig MakeStage3HeightOptimizationConfig(
   DisableRtkDriftAndOutageVerticalReferences(config);
   DisableCompetingAttitudeAndHorizontalSolvers(config);
   DisableRawRtkStaticVerticalPulls(config);
+  DisableStage3LegacyJumpRegularizers(config);
+  ApplyLowFrequencyStage2DeltaPolicy(config);
 
   return config;
 }

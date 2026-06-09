@@ -136,7 +136,7 @@ Optional overrides:
   --shared-reference runs/shared_reference/shared_vertical_reference.csv \
   --shared-reference-line runs/shared_reference/shared_reference_line.csv \
   --output-dir runs/member_a_stage3_shared \
-  --set stage3_vertical_anchor_sigma_m=0.002 \
+  --set stage3_vertical_anchor_sigma_m=0.001 \
   --verbose
 ```
 
@@ -145,8 +145,12 @@ Stage3-only behavior:
 - raw GNSS factors are disabled by the Stage3 height optimization policy;
 - Stage2 attitude, horizontal position, horizontal velocity, and bias are held
   as references;
-- the vertical target comes from `z_shared(s)` after projecting each Stage2
-  state to the shared reference line;
+- the vertical target is `Stage2 + lowfreq(z_shared - Stage2)` after projecting
+  each Stage2 state to the shared reference line, so the Stage2 short-wave height
+  texture is preserved while the absolute correction stays low-frequency;
+- the final pass uses a Gaussian Stage3 anchor plus Stage2 vertical increment
+  and jump-shape inheritance; this keeps `Stage3 - Stage2` low-frequency for IRI
+  instead of allowing millimeter-scale high-frequency residual spikes;
 - IMU, vertical jump, vertical velocity, and vertical bias factors remain in the
   optimization.
 

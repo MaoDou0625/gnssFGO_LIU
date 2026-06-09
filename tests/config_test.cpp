@@ -949,14 +949,14 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
     std::abs(config.stage3_vertical_reference_spline_smooth_lambda - 10000.0) < 1e-12,
     "default Stage3 spline smoothness lambda should match the tuned value");
   ExpectTrue(
-    std::abs(config.stage3_vertical_anchor_sigma_m - 0.002) < 1e-15,
-    "default Stage3 vertical anchor sigma should use the texture-preserving tuned setting");
+    std::abs(config.stage3_vertical_anchor_sigma_m - 0.001) < 1e-15,
+    "default Stage3 vertical anchor sigma should strongly hold the low-frequency delta reference");
   ExpectTrue(
     config.stage3_disable_stage2_vehicle_nhc_constraint,
     "default Stage3 pass should disable vehicle NHC to keep the vertical reference dominant");
   ExpectTrue(
-    config.enable_stage3_jump_velocity_smoothness_regularizer,
-    "default config should enable Stage3 jump velocity regularization");
+    !config.enable_stage3_jump_velocity_smoothness_regularizer,
+    "default config should disable legacy Stage3 jump velocity regularization");
   ExpectTrue(
     std::abs(config.stage3_jump_velocity_smoothness_deadband_mps - 0.008) < 1e-15,
     "default Stage3 jump velocity deadband should be 8 mm/s");
@@ -964,8 +964,8 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
     std::abs(config.stage3_jump_velocity_smoothness_sigma_mps - 0.005) < 1e-15,
     "default Stage3 jump velocity sigma should be 5 mm/s");
   ExpectTrue(
-    config.enable_stage3_jump_height_highfreq_deadband,
-    "default config should enable Stage3 jump height high-frequency deadband");
+    !config.enable_stage3_jump_height_highfreq_deadband,
+    "default config should disable legacy Stage3 jump height high-frequency deadband");
   ExpectTrue(
     std::abs(config.stage3_jump_height_highfreq_deadband_m - 0.00085) < 1e-15,
     "default Stage3 jump height deadband should be 0.85 mm");
@@ -973,20 +973,20 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
     std::abs(config.stage3_jump_height_highfreq_sigma_m - 0.0012) < 1e-15,
     "default Stage3 jump height sigma should be 1.2 mm");
   ExpectTrue(
-    !config.enable_stage3_stage2_vertical_increment_hold,
-    "default config should keep Stage3 Stage2 increment hold disabled");
+    config.enable_stage3_stage2_vertical_increment_hold,
+    "default config should enable Stage3 Stage2 increment hold");
   ExpectTrue(
-    std::abs(config.stage3_stage2_vertical_increment_sigma_m - 0.002) < 1e-15,
-    "default Stage3 Stage2 increment sigma should be 2 mm");
+    std::abs(config.stage3_stage2_vertical_increment_sigma_m - 0.0002) < 1e-15,
+    "default Stage3 Stage2 increment sigma should be 0.2 mm");
   ExpectTrue(
-    std::abs(config.stage3_stage2_vertical_increment_jump_sigma_m - 0.004) < 1e-15,
-    "default Stage3 Stage2 jump increment sigma should be 4 mm");
+    std::abs(config.stage3_stage2_vertical_increment_jump_sigma_m - 0.0005) < 1e-15,
+    "default Stage3 Stage2 jump increment sigma should be 0.5 mm");
   ExpectTrue(
     config.enable_stage3_stage2_jump_shape_hold,
     "default config should enable Stage3 Stage2 jump shape hold");
   ExpectTrue(
-    std::abs(config.stage3_stage2_jump_shape_sigma_m - 0.001) < 1e-15,
-    "default Stage3 Stage2 jump shape sigma should be 1 mm");
+    std::abs(config.stage3_stage2_jump_shape_sigma_m - 0.0005) < 1e-15,
+    "default Stage3 Stage2 jump shape sigma should be 0.5 mm");
   ExpectTrue(
     std::abs(
       config.bias_gyro_prior_sigma -

@@ -59,10 +59,15 @@ settings:
 enable_stage_attitude_debug_export=true
 enable_base_graph_tilt_reference_constraint=true
 base_graph_tilt_reference_sigma_rad=0.003
-stage3_vertical_anchor_sigma_m=0.002
-enable_stage3_jump_velocity_smoothness_regularizer=true
-enable_stage3_jump_height_highfreq_deadband=true
+stage3_vertical_anchor_sigma_m=0.001
+enable_stage3_jump_velocity_smoothness_regularizer=false
+enable_stage3_jump_height_highfreq_deadband=false
 enable_stage3_jump_adaptive_context_envelope=false
+enable_stage3_stage2_vertical_increment_hold=true
+stage3_stage2_vertical_increment_sigma_m=0.0002
+stage3_stage2_vertical_increment_jump_sigma_m=0.0005
+enable_stage3_stage2_jump_shape_hold=true
+stage3_stage2_jump_shape_sigma_m=0.0005
 vertical_envelope_gate_sigma_multiple=1
 vertical_envelope_factor_sigma_m=0.01
 vertical_velocity_delta_context_jump_sigma_scale=100
@@ -160,5 +165,8 @@ runs/rtk_err_11_shared_vertical_20260607/stage3_final_iri_segments
   still uses it because IMU vertical artifacts remain part of the problem.
 - The shared reference is low-frequency and group-level. It should not be
   interpreted as raw RTK height scatter copied into the optimizer.
+- Stage3-only maps the shared height to `Stage2 + lowfreq(z_shared - Stage2)`.
+  The final pass then uses a tight Gaussian height anchor plus Stage2 increment
+  and jump-shape inheritance so `Stage3 - Stage2` remains low-frequency for IRI.
 - Stage3-only is intentionally independent from the Stage1/Stage2 execution
   path; rerun Stage2 first whenever the Stage2 configuration changes.

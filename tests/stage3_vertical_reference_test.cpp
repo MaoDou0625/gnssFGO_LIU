@@ -1299,6 +1299,14 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
     bool enable_stage3_jump_height_deadband = false;
     bool enable_stage3_jump_adaptive_context = false;
     bool stage3_disable_stage2_vehicle_nhc = false;
+    offline_lc_minimal::Stage3VerticalReferenceConstraintMode stage3_constraint_mode =
+      offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope;
+    double stage3_anchor_sigma_m = 0.0;
+    bool enable_stage3_stage2_increment_hold = false;
+    double stage3_stage2_increment_sigma_m = 0.0;
+    double stage3_stage2_increment_jump_sigma_m = 0.0;
+    bool enable_stage3_stage2_jump_shape_hold = false;
+    double stage3_stage2_jump_shape_sigma_m = 0.0;
     bool has_stage2_reference = false;
     bool has_stage3_reference = false;
   };
@@ -1347,6 +1355,13 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
       run_config.enable_stage3_jump_height_highfreq_deadband,
       run_config.enable_stage3_jump_adaptive_context_envelope,
       run_config.stage3_disable_stage2_vehicle_nhc_constraint,
+      run_config.stage3_vertical_reference_constraint_mode,
+      run_config.stage3_vertical_anchor_sigma_m,
+      run_config.enable_stage3_stage2_vertical_increment_hold,
+      run_config.stage3_stage2_vertical_increment_sigma_m,
+      run_config.stage3_stage2_vertical_increment_jump_sigma_m,
+      run_config.enable_stage3_stage2_jump_shape_hold,
+      run_config.stage3_stage2_jump_shape_sigma_m,
       static_cast<bool>(stage2_reference),
       static_cast<bool>(stage3_reference)});
 
@@ -1437,17 +1452,47 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
     !calls[1].enable_base_graph_tilt_reference,
     "Stage3 pass should not use base-graph tilt as a competing attitude reference");
   ExpectTrue(
-    calls[1].enable_stage3_jump_velocity_regularizer,
-    "Stage3 pass should keep requested Stage3 jump velocity regularizer");
+    !calls[1].enable_stage3_jump_velocity_regularizer,
+    "Stage3 pass should disable legacy Stage3 jump velocity regularizer");
   ExpectTrue(
-    calls[1].enable_stage3_jump_height_deadband,
-    "Stage3 pass should keep requested Stage3 jump height deadband");
+    !calls[1].enable_stage3_jump_height_deadband,
+    "Stage3 pass should disable legacy Stage3 jump height deadband");
   ExpectTrue(
-    calls[1].enable_stage3_jump_adaptive_context,
-    "Stage3 pass should keep requested Stage3 jump context envelope");
+    !calls[1].enable_stage3_jump_adaptive_context,
+    "Stage3 pass should disable legacy Stage3 jump context envelope");
   ExpectTrue(
     !calls[1].stage3_disable_stage2_vehicle_nhc,
     "Stage3 child config should clear wrapper-only vehicle NHC switches");
+  ExpectTrue(
+    calls[1].stage3_constraint_mode ==
+      offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kGaussian,
+    "Stage3 pass should force gaussian low-frequency delta anchors");
+  ExpectNear(
+    calls[1].stage3_anchor_sigma_m,
+    0.001,
+    1.0e-15,
+    "Stage3 pass should force the validated low-frequency delta anchor sigma");
+  ExpectTrue(
+    calls[1].enable_stage3_stage2_increment_hold,
+    "Stage3 pass should force Stage2 vertical increment inheritance");
+  ExpectNear(
+    calls[1].stage3_stage2_increment_sigma_m,
+    0.0002,
+    1.0e-15,
+    "Stage3 pass should force the validated normal increment sigma");
+  ExpectNear(
+    calls[1].stage3_stage2_increment_jump_sigma_m,
+    0.0005,
+    1.0e-15,
+    "Stage3 pass should force the validated jump increment sigma");
+  ExpectTrue(
+    calls[1].enable_stage3_stage2_jump_shape_hold,
+    "Stage3 pass should keep Stage2 jump shape inheritance enabled");
+  ExpectNear(
+    calls[1].stage3_stage2_jump_shape_sigma_m,
+    0.0005,
+    1.0e-15,
+    "Stage3 pass should force the validated jump shape sigma");
   ExpectTrue(calls[1].has_stage2_reference, "Stage3 pass should receive Stage2 reference");
   ExpectTrue(calls[1].has_stage3_reference, "Stage3 pass should receive Stage3 reference");
   ExpectTrue(
