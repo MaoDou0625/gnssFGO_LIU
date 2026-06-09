@@ -26,6 +26,36 @@ namespace {
 
 constexpr double kTimeEpsilonS = 1.0e-9;
 
+bool IntervalsOverlap(
+  const double lhs_start_s,
+  const double lhs_end_s,
+  const double rhs_start_s,
+  const double rhs_end_s) {
+  if (!std::isfinite(lhs_start_s) || !std::isfinite(lhs_end_s) ||
+      !std::isfinite(rhs_start_s) || !std::isfinite(rhs_end_s)) {
+    return false;
+  }
+  return lhs_start_s <= rhs_end_s + kTimeEpsilonS &&
+         rhs_start_s <= lhs_end_s + kTimeEpsilonS;
+}
+
+std::vector<BodyZBiasReestimateSegmentRow> ClipBodyZBiasSegmentsToTimeline(
+  const std::vector<BodyZBiasReestimateSegmentRow> &segments,
+  const double start_time_s,
+  const double end_time_s) {
+  std::vector<BodyZBiasReestimateSegmentRow> clipped;
+  for (const auto &segment : segments) {
+    if (IntervalsOverlap(
+          segment.start_time_s,
+          segment.end_time_s,
+          start_time_s,
+          end_time_s)) {
+      clipped.push_back(segment);
+    }
+  }
+  return clipped;
+}
+
 bool IsStandalonePrefixSegment(const RtkOutageBatchSegmentRow &segment) {
   return segment.segment_role == "PRE_RTK_VALID";
 }
@@ -192,6 +222,13 @@ std::shared_ptr<const Stage2VelocityReference> SliceStage2ReferenceForSegment(
     target_timestamps.end(),
     dynamic_timestamps.begin(),
     dynamic_timestamps.end());
+  if (!target_timestamps.empty()) {
+    sliced->body_z_bias_reestimate_segments =
+      ClipBodyZBiasSegmentsToTimeline(
+        reference->body_z_bias_reestimate_segments,
+        target_timestamps.front(),
+        target_timestamps.back());
+  }
 
   sliced->trajectory.reserve(target_timestamps.size());
   sliced->reference_states.reserve(target_timestamps.size());

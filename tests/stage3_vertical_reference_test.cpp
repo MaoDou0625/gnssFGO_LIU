@@ -1010,6 +1010,10 @@ void TestTimelineAlignerResamplesSegmentedStage2Reference() {
     stage2_reference.trajectory[index].enu_velocity_mps.z() = static_cast<double>(index);
     stage2_reference.trajectory[index].bias_acc.z() = 0.1 * static_cast<double>(index);
   }
+  offline_lc_minimal::BodyZBiasReestimateSegmentRow bias_segment;
+  bias_segment.start_time_s = 1.0;
+  bias_segment.end_time_s = 4.0;
+  stage2_reference.body_z_bias_reestimate_segments.push_back(bias_segment);
 
   offline_lc_minimal::Stage3VerticalReference stage3_reference;
   for (std::size_t index = 0; index < stage2_reference.trajectory.size(); ++index) {
@@ -1037,6 +1041,9 @@ void TestTimelineAlignerResamplesSegmentedStage2Reference() {
   ExpectTrue(
     aligned.stage3_reference.rows.size() == target_timestamps.size(),
     "aligned Stage3 reference should match target timeline size");
+  ExpectTrue(
+    aligned.stage2_reference.body_z_bias_reestimate_segments.size() == 1U,
+    "aligned Stage2 reference should preserve Stage2 bias reestimate segments");
   ExpectNear(
     aligned.stage2_reference.trajectory[1].enu_position_m.z(),
     5.0,

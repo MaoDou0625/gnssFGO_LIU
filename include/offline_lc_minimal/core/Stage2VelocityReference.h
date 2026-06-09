@@ -15,6 +15,7 @@ struct Stage2VelocityReference {
   std::vector<TrajectoryRow> trajectory;
   std::vector<ReferenceNodeState> reference_states;
   std::vector<RtkOutageBoundaryReferenceRow> boundary_references;
+  std::vector<BodyZBiasReestimateSegmentRow> body_z_bias_reestimate_segments;
   std::shared_ptr<const OfflineRunnerConfig> source_config;
 };
 

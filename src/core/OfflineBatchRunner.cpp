@@ -1254,10 +1254,17 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   if (has_stage2_reference_timeline) {
     run_result.attitude_reference_states = stage2_fixed_reference_states;
   }
+  const bool use_external_body_z_bias_reestimate_segments =
+    active_stage2_reference != nullptr &&
+    !active_stage2_reference->body_z_bias_reestimate_segments.empty();
   const bool use_road_noise_baz_reestimate =
+    !use_external_body_z_bias_reestimate_segments &&
     config_.enable_road_noise_state_baz_reestimate &&
     !run_result.road_noise_state_segments.empty();
-  if (use_road_noise_baz_reestimate) {
+  if (use_external_body_z_bias_reestimate_segments) {
+    run_result.body_z_bias_reestimate_segments =
+      active_stage2_reference->body_z_bias_reestimate_segments;
+  } else if (use_road_noise_baz_reestimate) {
     run_result.body_z_bias_reestimate_segments =
       PlanRoadNoiseBiasReestimateSegments(
         run_result.road_noise_state_segments,

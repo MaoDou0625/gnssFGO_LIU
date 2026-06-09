@@ -14,6 +14,7 @@
 #include "offline_lc_minimal/core/SharedVerticalReferenceBuilder.h"
 #include "offline_lc_minimal/core/Stage3HeightOptimizationPolicy.h"
 #include "offline_lc_minimal/core/Stage3SharedReferenceMapper.h"
+#include "offline_lc_minimal/io/BodyZBiasReestimateCsvReader.h"
 #include "offline_lc_minimal/io/TextDatasetLoader.h"
 #include "offline_lc_minimal/io/TrajectoryCsvReader.h"
 
@@ -121,6 +122,13 @@ std::shared_ptr<Stage2VelocityReference> LoadStage2Reference(
         std::make_shared<OfflineRunnerConfig>(config)));
   if (reference->trajectory.empty() && reference->reference_states.empty()) {
     throw std::runtime_error("Stage2 trajectory did not produce any reference states");
+  }
+  const std::filesystem::path stage2_dir = path.parent_path();
+  const std::filesystem::path bias_reestimate_path =
+    stage2_dir / "body_z_bias_reestimate_segments.csv";
+  if (std::filesystem::exists(bias_reestimate_path)) {
+    reference->body_z_bias_reestimate_segments =
+      ReadBodyZBiasReestimateSegmentCsv(bias_reestimate_path);
   }
   return reference;
 }
