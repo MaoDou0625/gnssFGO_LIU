@@ -3595,15 +3595,38 @@ void TestStage2LowfreqExperimentConfigLoads() {
 
 void TestAccelerometerBiasUgConfigParsing() {
   auto config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "imu_sigma_acc_ug", "100.0");
+  offline_lc_minimal::OverrideConfigField(config, "bias_acc_sigma_ug", "1.5");
+  offline_lc_minimal::OverrideConfigField(config, "bias_acc_prior_sigma_ug", "200.0");
   offline_lc_minimal::OverrideConfigField(config, "vertical_acc_bias_sigma_ug", "10.0");
   offline_lc_minimal::OverrideConfigField(config, "vertical_velocity_delta_bias_sigma_ug", "12.0");
   offline_lc_minimal::OverrideConfigField(config, "global_acc_bias_tie_sigma_ug", "0.5");
   offline_lc_minimal::OverrideConfigField(config, "global_acc_bias_tie_sigma_xy_ug", "0.25");
+  offline_lc_minimal::OverrideConfigField(config, "segment_feedback_acc_sigma_ug", "2.0");
+  offline_lc_minimal::OverrideConfigField(config, "error_state_acc_bias_sigma_ug", "3.0");
+  offline_lc_minimal::OverrideConfigField(config, "initial_static_specific_force_sigma_ug", "4.0");
+  offline_lc_minimal::OverrideConfigField(
+    config, "initial_static_vertical_specific_force_sigma_ug", "5.0");
   offline_lc_minimal::OverrideConfigField(config, "initial_static_vertical_bias_global_tie_sigma_ug", "0.05");
   offline_lc_minimal::OverrideConfigField(config, "initial_static_vertical_bias_gm_sigma_ug", "0.02");
+  offline_lc_minimal::OverrideConfigField(config, "vertical_velocity_delta_acc_sigma_ug", "6.0");
+  offline_lc_minimal::OverrideConfigField(config, "vertical_jump_bias_prior_sigma_ug", "7.0");
+  offline_lc_minimal::OverrideConfigField(
+    config, "vertical_jump_segmented_bias_slope_merge_threshold_ug", "8.0");
+  offline_lc_minimal::OverrideConfigField(
+    config, "vertical_jump_spectral_bias_prior_max_sigma_ug", "9.0");
   offline_lc_minimal::OverrideConfigField(config, "enable_vertical_velocity_delta_bias_aware_target", "true");
   offline_lc_minimal::OverrideConfigField(config, "enable_vertical_velocity_delta_initial_static_constraint", "true");
 
+  ExpectTrue(
+    std::abs(config.imu_sigma_acc - offline_lc_minimal::MicroGToMps2(100.0)) < 1e-15,
+    "IMU accelerometer sigma should parse from ug");
+  ExpectTrue(
+    std::abs(config.bias_acc_sigma - offline_lc_minimal::MicroGToMps2(1.5)) < 1e-15,
+    "accelerometer bias sigma should parse from ug");
+  ExpectTrue(
+    std::abs(config.bias_acc_prior_sigma - offline_lc_minimal::MicroGToMps2(200.0)) < 1e-15,
+    "accelerometer bias prior sigma should parse from ug");
   ExpectTrue(
     std::abs(config.vertical_acc_bias_sigma_mps2 - offline_lc_minimal::MicroGToMps2(10.0)) < 1e-15,
     "vertical acc bias sigma should parse from ug");
@@ -3618,6 +3641,20 @@ void TestAccelerometerBiasUgConfigParsing() {
     std::abs(config.global_acc_bias_tie_sigma_xy_mps2 - offline_lc_minimal::MicroGToMps2(0.25)) < 1e-15,
     "global planar acc bias tie sigma should parse from ug");
   ExpectTrue(
+    std::abs(config.segment_feedback_acc_sigma_mps2 - offline_lc_minimal::MicroGToMps2(2.0)) < 1e-15,
+    "segment feedback accelerometer sigma should parse from ug");
+  ExpectTrue(
+    std::abs(config.error_state_acc_bias_sigma_mps2 - offline_lc_minimal::MicroGToMps2(3.0)) < 1e-15,
+    "error-state accelerometer bias sigma should parse from ug");
+  ExpectTrue(
+    std::abs(config.initial_static_specific_force_sigma_mps2 -
+             offline_lc_minimal::MicroGToMps2(4.0)) < 1e-15,
+    "initial static specific-force sigma should parse from ug");
+  ExpectTrue(
+    std::abs(config.initial_static_vertical_specific_force_sigma_mps2 -
+             offline_lc_minimal::MicroGToMps2(5.0)) < 1e-15,
+    "initial static vertical specific-force sigma should parse from ug");
+  ExpectTrue(
     std::abs(config.initial_static_vertical_bias_global_tie_sigma_mps2 -
              offline_lc_minimal::MicroGToMps2(0.05)) < 1e-15,
     "static vertical bias global tie sigma should parse from ug");
@@ -3625,19 +3662,75 @@ void TestAccelerometerBiasUgConfigParsing() {
     std::abs(config.initial_static_vertical_bias_gm_sigma_mps2 -
              offline_lc_minimal::MicroGToMps2(0.02)) < 1e-15,
     "static vertical bias GM sigma should parse from ug");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_acc_sigma_mps2 -
+             offline_lc_minimal::MicroGToMps2(6.0)) < 1e-15,
+    "vertical velocity delta acceleration sigma should parse from ug");
+  ExpectTrue(
+    std::abs(config.vertical_jump_bias_prior_sigma_mps2 -
+             offline_lc_minimal::MicroGToMps2(7.0)) < 1e-15,
+    "vertical jump bias prior sigma should parse from ug");
+  ExpectTrue(
+    std::abs(config.vertical_jump_segmented_bias_slope_merge_threshold_mps2 -
+             offline_lc_minimal::MicroGToMps2(8.0)) < 1e-15,
+    "vertical jump segmented bias slope merge threshold should parse from ug");
+  ExpectTrue(
+    std::abs(config.vertical_jump_spectral_bias_prior_max_sigma_mps2 -
+             offline_lc_minimal::MicroGToMps2(9.0)) < 1e-15,
+    "vertical jump spectral bias max sigma should parse from ug");
   ExpectTrue(config.enable_vertical_velocity_delta_bias_aware_target, "bias-aware dvz target flag should parse");
   ExpectTrue(
     config.enable_vertical_velocity_delta_initial_static_constraint,
     "initial static dvz constraint flag should parse");
+
+  auto legacy_config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(legacy_config, "imu_sigma_acc_mps2", "0.12");
+  offline_lc_minimal::OverrideConfigField(legacy_config, "bias_acc_sigma", "0.003");
+  offline_lc_minimal::OverrideConfigField(
+    legacy_config, "vertical_jump_bias_prior_sigma_mps2", "0.004");
+  ExpectTrue(std::abs(legacy_config.imu_sigma_acc - 0.12) < 1e-15,
+             "explicit m/s^2 IMU accelerometer sigma should remain supported");
+  ExpectTrue(std::abs(legacy_config.bias_acc_sigma - 0.003) < 1e-15,
+             "legacy unitless accelerometer bias sigma should remain m/s^2-compatible");
+  ExpectTrue(std::abs(legacy_config.vertical_jump_bias_prior_sigma_mps2 - 0.004) < 1e-15,
+             "explicit m/s^2 vertical jump bias prior should remain supported");
+
+  const std::string serialized = offline_lc_minimal::ConfigToString(config);
+  ExpectTrue(serialized.find("imu_sigma_acc_ug=") != std::string::npos,
+             "serialized config should write IMU accelerometer sigma in ug");
+  ExpectTrue(serialized.find("bias_acc_sigma_ug=") != std::string::npos,
+             "serialized config should write accelerometer bias sigma in ug");
+  ExpectTrue(serialized.find("bias_acc_prior_sigma_ug=") != std::string::npos,
+             "serialized config should write accelerometer bias prior sigma in ug");
+  ExpectTrue(serialized.find("segment_feedback_acc_sigma_ug=") != std::string::npos,
+             "serialized config should write segment feedback accelerometer sigma in ug");
+  ExpectTrue(serialized.find("error_state_acc_bias_sigma_ug=") != std::string::npos,
+             "serialized config should write error-state accelerometer bias sigma in ug");
+  ExpectTrue(serialized.find("vertical_velocity_delta_acc_sigma_ug=") != std::string::npos,
+             "serialized config should write vertical velocity delta acceleration sigma in ug");
+  ExpectTrue(serialized.find("vertical_jump_bias_prior_sigma_ug=") != std::string::npos,
+             "serialized config should write vertical jump bias prior sigma in ug");
+  ExpectTrue(serialized.find("imu_sigma_acc=") == std::string::npos,
+             "serialized config should not write the legacy unitless IMU accelerometer sigma key");
+  ExpectTrue(serialized.find("bias_acc_sigma=") == std::string::npos,
+             "serialized config should not write the legacy unitless accelerometer bias sigma key");
+  ExpectTrue(serialized.find("bias_acc_prior_sigma=") == std::string::npos,
+             "serialized config should not write the legacy unitless accelerometer bias prior key");
 }
 
 void TestGyroBiasDegPerHourConfigParsing() {
   auto config = offline_lc_minimal::DefaultConfig();
+  offline_lc_minimal::OverrideConfigField(config, "imu_sigma_gyro_dph", "400.0");
   offline_lc_minimal::OverrideConfigField(config, "bias_gyro_sigma_dph", "2.0");
   offline_lc_minimal::OverrideConfigField(config, "bias_gyro_prior_sigma_dph", "0.01");
   offline_lc_minimal::OverrideConfigField(config, "global_gyro_bias_tie_sigma_dph", "0.02");
+  offline_lc_minimal::OverrideConfigField(config, "segment_feedback_gyro_sigma_dph", "0.5");
   offline_lc_minimal::OverrideConfigField(config, "error_state_gyro_bias_sigma_dph", "3.0");
+  offline_lc_minimal::OverrideConfigField(config, "initial_static_zaru_sigma_dph", "4.0");
 
+  ExpectTrue(
+    std::abs(config.imu_sigma_gyro - offline_lc_minimal::DegPerHourToRadPerSecond(400.0)) < 1e-18,
+    "IMU gyro sigma should parse from deg/hour");
   ExpectTrue(
     std::abs(config.bias_gyro_sigma - offline_lc_minimal::DegPerHourToRadPerSecond(2.0)) < 1e-18,
     "gyro bias sigma should parse from deg/hour");
@@ -3650,10 +3743,22 @@ void TestGyroBiasDegPerHourConfigParsing() {
              offline_lc_minimal::DegPerHourToRadPerSecond(0.02)) < 1e-18,
     "global gyro bias tie sigma should parse from deg/hour");
   ExpectTrue(
+    std::abs(config.segment_feedback_gyro_sigma_radps -
+             offline_lc_minimal::DegPerHourToRadPerSecond(0.5)) < 1e-18,
+    "segment feedback gyro sigma should parse from deg/hour");
+  ExpectTrue(
     std::abs(config.error_state_gyro_bias_sigma_radps -
              offline_lc_minimal::DegPerHourToRadPerSecond(3.0)) < 1e-18,
     "error-state gyro bias sigma should parse from deg/hour");
+  ExpectTrue(
+    std::abs(config.initial_static_zaru_sigma_radps -
+             offline_lc_minimal::DegPerHourToRadPerSecond(4.0)) < 1e-18,
+    "initial static ZARU sigma should parse from deg/hour");
 
+  offline_lc_minimal::OverrideConfigField(config, "imu_sigma_gyro_radps", "1e-3");
+  ExpectTrue(
+    std::abs(config.imu_sigma_gyro - 1e-3) < 1e-18,
+    "explicit rad/s IMU gyro sigma should remain supported");
   offline_lc_minimal::OverrideConfigField(config, "bias_gyro_prior_sigma_radps", "1e-6");
   ExpectTrue(
     std::abs(config.bias_gyro_prior_sigma - 1e-6) < 1e-18,
@@ -3665,6 +3770,9 @@ void TestGyroBiasDegPerHourConfigParsing() {
 
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
   ExpectTrue(
+    serialized.find("imu_sigma_gyro_dph=") != std::string::npos,
+    "serialized config should write IMU gyro sigma in deg/hour");
+  ExpectTrue(
     serialized.find("bias_gyro_prior_sigma_dph=") != std::string::npos,
     "serialized config should write gyro bias prior sigma in deg/hour");
   ExpectTrue(
@@ -3674,8 +3782,20 @@ void TestGyroBiasDegPerHourConfigParsing() {
     serialized.find("error_state_gyro_bias_sigma_dph=") != std::string::npos,
     "serialized config should write error-state gyro bias sigma in deg/hour");
   ExpectTrue(
+    serialized.find("segment_feedback_gyro_sigma_dph=") != std::string::npos,
+    "serialized config should write segment feedback gyro sigma in deg/hour");
+  ExpectTrue(
+    serialized.find("initial_static_zaru_sigma_dph=") != std::string::npos,
+    "serialized config should write initial static ZARU sigma in deg/hour");
+  ExpectTrue(
+    serialized.find("imu_sigma_gyro=") == std::string::npos,
+    "serialized config should not write the legacy unitless IMU gyro sigma key");
+  ExpectTrue(
     serialized.find("bias_gyro_prior_sigma=") == std::string::npos,
     "serialized config should not write the legacy unitless gyro bias prior key");
+  ExpectTrue(
+    serialized.find("segment_feedback_gyro_sigma_radps=") == std::string::npos,
+    "serialized config should not write the explicit rad/s segment feedback gyro sigma key");
 }
 
 void TestVerticalJumpConfigValidation() {

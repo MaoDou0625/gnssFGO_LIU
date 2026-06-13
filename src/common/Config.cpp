@@ -1022,20 +1022,32 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.state_meas_sync_upper_bound_s = ParseDouble(normalized_value);
   } else if (normalized_key == "gravity_mps2") {
     config.gravity_mps2 = ParseDouble(normalized_value);
-  } else if (normalized_key == "imu_sigma_acc") {
+  } else if (normalized_key == "imu_sigma_acc_ug") {
+    config.imu_sigma_acc = MicroGToMps2(ParseDouble(normalized_value));
+  } else if (normalized_key == "imu_sigma_acc_mps2" ||
+             normalized_key == "imu_sigma_acc") {
     config.imu_sigma_acc = ParseDouble(normalized_value);
-  } else if (normalized_key == "imu_sigma_gyro") {
+  } else if (normalized_key == "imu_sigma_gyro_dph") {
+    config.imu_sigma_gyro = DegPerHourToRadPerSecond(ParseDouble(normalized_value));
+  } else if (normalized_key == "imu_sigma_gyro_radps" ||
+             normalized_key == "imu_sigma_gyro") {
     config.imu_sigma_gyro = ParseDouble(normalized_value);
   } else if (normalized_key == "integration_sigma") {
     config.integration_sigma = ParseDouble(normalized_value);
-  } else if (normalized_key == "bias_acc_sigma") {
+  } else if (normalized_key == "bias_acc_sigma_ug") {
+    config.bias_acc_sigma = MicroGToMps2(ParseDouble(normalized_value));
+  } else if (normalized_key == "bias_acc_sigma_mps2" ||
+             normalized_key == "bias_acc_sigma") {
     config.bias_acc_sigma = ParseDouble(normalized_value);
   } else if (normalized_key == "bias_gyro_sigma_dph") {
     config.bias_gyro_sigma = DegPerHourToRadPerSecond(ParseDouble(normalized_value));
   } else if (normalized_key == "bias_gyro_sigma_radps" ||
              normalized_key == "bias_gyro_sigma") {
     config.bias_gyro_sigma = ParseDouble(normalized_value);
-  } else if (normalized_key == "bias_acc_prior_sigma") {
+  } else if (normalized_key == "bias_acc_prior_sigma_ug") {
+    config.bias_acc_prior_sigma = MicroGToMps2(ParseDouble(normalized_value));
+  } else if (normalized_key == "bias_acc_prior_sigma_mps2" ||
+             normalized_key == "bias_acc_prior_sigma") {
     config.bias_acc_prior_sigma = ParseDouble(normalized_value);
   } else if (normalized_key == "bias_gyro_prior_sigma_dph") {
     config.bias_gyro_prior_sigma = DegPerHourToRadPerSecond(ParseDouble(normalized_value));
@@ -1134,8 +1146,13 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.segment_feedback_velocity_gain = ParseDouble(normalized_value);
   } else if (normalized_key == "segment_feedback_position_gain") {
     config.segment_feedback_position_gain = ParseDouble(normalized_value);
+  } else if (normalized_key == "segment_feedback_acc_sigma_ug") {
+    config.segment_feedback_acc_sigma_mps2 = MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "segment_feedback_acc_sigma_mps2") {
     config.segment_feedback_acc_sigma_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "segment_feedback_gyro_sigma_dph") {
+    config.segment_feedback_gyro_sigma_radps =
+      DegPerHourToRadPerSecond(ParseDouble(normalized_value));
   } else if (normalized_key == "segment_feedback_gyro_sigma_radps") {
     config.segment_feedback_gyro_sigma_radps = ParseDouble(normalized_value);
   } else if (normalized_key == "error_state_rotation_sigma_rad") {
@@ -1144,6 +1161,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.error_state_position_sigma_m = ParseDouble(normalized_value);
   } else if (normalized_key == "error_state_velocity_sigma_mps") {
     config.error_state_velocity_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "error_state_acc_bias_sigma_ug") {
+    config.error_state_acc_bias_sigma_mps2 = MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "error_state_acc_bias_sigma_mps2") {
     config.error_state_acc_bias_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "error_state_gyro_bias_sigma_dph") {
@@ -1418,14 +1437,23 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_initial_static_zupt_zaru = ParseBool(normalized_value);
   } else if (normalized_key == "initial_static_zupt_velocity_sigma_mps") {
     config.initial_static_zupt_velocity_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "initial_static_zaru_sigma_dph") {
+    config.initial_static_zaru_sigma_radps =
+      DegPerHourToRadPerSecond(ParseDouble(normalized_value));
   } else if (normalized_key == "initial_static_zaru_sigma_radps") {
     config.initial_static_zaru_sigma_radps = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_initial_static_zero_specific_force") {
     config.enable_initial_static_zero_specific_force = ParseBool(normalized_value);
   } else if (normalized_key == "enable_initial_static_vertical_specific_force") {
     config.enable_initial_static_vertical_specific_force = ParseBool(normalized_value);
+  } else if (normalized_key == "initial_static_specific_force_sigma_ug") {
+    config.initial_static_specific_force_sigma_mps2 =
+      MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "initial_static_specific_force_sigma_mps2") {
     config.initial_static_specific_force_sigma_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "initial_static_vertical_specific_force_sigma_ug") {
+    config.initial_static_vertical_specific_force_sigma_mps2 =
+      MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "initial_static_vertical_specific_force_sigma_mps2") {
     config.initial_static_vertical_specific_force_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_initial_static_vertical_bias_soft_prior") {
@@ -1606,6 +1634,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.rtk_velocity_horizontal_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_velocity_delta_constraint") {
     config.enable_vertical_velocity_delta_constraint = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_acc_sigma_ug") {
+    config.vertical_velocity_delta_acc_sigma_mps2 = MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "vertical_velocity_delta_acc_sigma_mps2") {
     config.vertical_velocity_delta_acc_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_min_sigma_mps") {
@@ -1750,6 +1780,8 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_vertical_jump_bias = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_jump_bias_padding_s") {
     config.vertical_jump_bias_padding_s = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_bias_prior_sigma_ug") {
+    config.vertical_jump_bias_prior_sigma_mps2 = MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "vertical_jump_bias_prior_sigma_mps2") {
     config.vertical_jump_bias_prior_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_bias_velocity_sigma_mps") {
@@ -1762,6 +1794,9 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_jump_segmented_bias_min_segment_s = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_segmented_bias_max_segments") {
     config.vertical_jump_segmented_bias_max_segments = ParseInt(normalized_value);
+  } else if (normalized_key == "vertical_jump_segmented_bias_slope_merge_threshold_ug") {
+    config.vertical_jump_segmented_bias_slope_merge_threshold_mps2 =
+      MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "vertical_jump_segmented_bias_slope_merge_threshold_mps2") {
     config.vertical_jump_segmented_bias_slope_merge_threshold_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_bias_highfreq_sigma_scale") {
@@ -1782,6 +1817,9 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_jump_spectral_response_trigger_ratio = ParseDouble(normalized_value);
   } else if (normalized_key == "vertical_jump_spectral_response_full_ratio") {
     config.vertical_jump_spectral_response_full_ratio = ParseDouble(normalized_value);
+  } else if (normalized_key == "vertical_jump_spectral_bias_prior_max_sigma_ug") {
+    config.vertical_jump_spectral_bias_prior_max_sigma_mps2 =
+      MicroGToMps2(ParseDouble(normalized_value));
   } else if (normalized_key == "vertical_jump_spectral_bias_prior_max_sigma_mps2") {
     config.vertical_jump_spectral_bias_prior_max_sigma_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_jump_velocity_ramp_smoothing") {
@@ -1946,12 +1984,12 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "state_meas_sync_lower_bound_s=" << config.state_meas_sync_lower_bound_s << '\n'
     << "state_meas_sync_upper_bound_s=" << config.state_meas_sync_upper_bound_s << '\n'
     << "gravity_mps2=" << config.gravity_mps2 << '\n'
-    << "imu_sigma_acc=" << config.imu_sigma_acc << '\n'
-    << "imu_sigma_gyro=" << config.imu_sigma_gyro << '\n'
+    << "imu_sigma_acc_ug=" << Mps2ToMicroG(config.imu_sigma_acc) << '\n'
+    << "imu_sigma_gyro_dph=" << RadPerSecondToDegPerHour(config.imu_sigma_gyro) << '\n'
     << "integration_sigma=" << config.integration_sigma << '\n'
-    << "bias_acc_sigma=" << config.bias_acc_sigma << '\n'
+    << "bias_acc_sigma_ug=" << Mps2ToMicroG(config.bias_acc_sigma) << '\n'
     << "bias_gyro_sigma_dph=" << RadPerSecondToDegPerHour(config.bias_gyro_sigma) << '\n'
-    << "bias_acc_prior_sigma=" << config.bias_acc_prior_sigma << '\n'
+    << "bias_acc_prior_sigma_ug=" << Mps2ToMicroG(config.bias_acc_prior_sigma) << '\n'
     << "bias_gyro_prior_sigma_dph=" << RadPerSecondToDegPerHour(config.bias_gyro_prior_sigma) << '\n'
     << "enable_global_acc_bias=" << (config.enable_global_acc_bias ? "true" : "false") << '\n'
     << "global_acc_bias_tie_sigma_ug=" << Mps2ToMicroG(config.global_acc_bias_tie_sigma_mps2) << '\n'
@@ -1996,12 +2034,13 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "segment_feedback_attitude_gain=" << config.segment_feedback_attitude_gain << '\n'
     << "segment_feedback_velocity_gain=" << config.segment_feedback_velocity_gain << '\n'
     << "segment_feedback_position_gain=" << config.segment_feedback_position_gain << '\n'
-    << "segment_feedback_acc_sigma_mps2=" << config.segment_feedback_acc_sigma_mps2 << '\n'
-    << "segment_feedback_gyro_sigma_radps=" << config.segment_feedback_gyro_sigma_radps << '\n'
+    << "segment_feedback_acc_sigma_ug=" << Mps2ToMicroG(config.segment_feedback_acc_sigma_mps2) << '\n'
+    << "segment_feedback_gyro_sigma_dph="
+    << RadPerSecondToDegPerHour(config.segment_feedback_gyro_sigma_radps) << '\n'
     << "error_state_rotation_sigma_rad=" << config.error_state_rotation_sigma_rad << '\n'
     << "error_state_position_sigma_m=" << config.error_state_position_sigma_m << '\n'
     << "error_state_velocity_sigma_mps=" << config.error_state_velocity_sigma_mps << '\n'
-    << "error_state_acc_bias_sigma_mps2=" << config.error_state_acc_bias_sigma_mps2 << '\n'
+    << "error_state_acc_bias_sigma_ug=" << Mps2ToMicroG(config.error_state_acc_bias_sigma_mps2) << '\n'
     << "error_state_gyro_bias_sigma_dph="
     << RadPerSecondToDegPerHour(config.error_state_gyro_bias_sigma_radps) << '\n'
     << "stationary_window_s=" << config.stationary_window_s << '\n'
@@ -2200,13 +2239,15 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "imu_dual_vector_min_cross_norm=" << config.imu_dual_vector_min_cross_norm << '\n'
     << "enable_initial_static_zupt_zaru=" << (config.enable_initial_static_zupt_zaru ? "true" : "false") << '\n'
     << "initial_static_zupt_velocity_sigma_mps=" << config.initial_static_zupt_velocity_sigma_mps << '\n'
-    << "initial_static_zaru_sigma_radps=" << config.initial_static_zaru_sigma_radps << '\n'
+    << "initial_static_zaru_sigma_dph="
+    << RadPerSecondToDegPerHour(config.initial_static_zaru_sigma_radps) << '\n'
     << "enable_initial_static_zero_specific_force=" << (config.enable_initial_static_zero_specific_force ? "true" : "false") << '\n'
     << "enable_initial_static_vertical_specific_force="
     << (config.enable_initial_static_vertical_specific_force ? "true" : "false") << '\n'
-    << "initial_static_specific_force_sigma_mps2=" << config.initial_static_specific_force_sigma_mps2 << '\n'
-    << "initial_static_vertical_specific_force_sigma_mps2="
-    << config.initial_static_vertical_specific_force_sigma_mps2 << '\n'
+    << "initial_static_specific_force_sigma_ug="
+    << Mps2ToMicroG(config.initial_static_specific_force_sigma_mps2) << '\n'
+    << "initial_static_vertical_specific_force_sigma_ug="
+    << Mps2ToMicroG(config.initial_static_vertical_specific_force_sigma_mps2) << '\n'
     << "enable_initial_static_vertical_bias_soft_prior="
     << (config.enable_initial_static_vertical_bias_soft_prior ? "true" : "false") << '\n'
     << "initial_static_vertical_bias_global_tie_sigma_ug="
@@ -2340,7 +2381,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "rtk_velocity_horizontal_sigma_mps=" << config.rtk_velocity_horizontal_sigma_mps << '\n'
     << "enable_vertical_velocity_delta_constraint="
     << (config.enable_vertical_velocity_delta_constraint ? "true" : "false") << '\n'
-    << "vertical_velocity_delta_acc_sigma_mps2=" << config.vertical_velocity_delta_acc_sigma_mps2 << '\n'
+    << "vertical_velocity_delta_acc_sigma_ug="
+    << Mps2ToMicroG(config.vertical_velocity_delta_acc_sigma_mps2) << '\n'
     << "vertical_velocity_delta_min_sigma_mps=" << config.vertical_velocity_delta_min_sigma_mps << '\n'
     << "vertical_velocity_delta_jump_padding_s=" << config.vertical_velocity_delta_jump_padding_s << '\n'
     << "vertical_velocity_delta_skip_jump_padding="
@@ -2455,7 +2497,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.vertical_jump_impulse_position_velocity_sigma_m << '\n'
     << "enable_vertical_jump_bias=" << (config.enable_vertical_jump_bias ? "true" : "false") << '\n'
     << "vertical_jump_bias_padding_s=" << config.vertical_jump_bias_padding_s << '\n'
-    << "vertical_jump_bias_prior_sigma_mps2=" << config.vertical_jump_bias_prior_sigma_mps2 << '\n'
+    << "vertical_jump_bias_prior_sigma_ug="
+    << Mps2ToMicroG(config.vertical_jump_bias_prior_sigma_mps2) << '\n'
     << "vertical_jump_bias_velocity_sigma_mps=" << config.vertical_jump_bias_velocity_sigma_mps << '\n'
     << "vertical_jump_bias_position_velocity_sigma_m="
     << config.vertical_jump_bias_position_velocity_sigma_m << '\n'
@@ -2465,8 +2508,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.vertical_jump_segmented_bias_min_segment_s << '\n'
     << "vertical_jump_segmented_bias_max_segments="
     << config.vertical_jump_segmented_bias_max_segments << '\n'
-    << "vertical_jump_segmented_bias_slope_merge_threshold_mps2="
-    << config.vertical_jump_segmented_bias_slope_merge_threshold_mps2 << '\n'
+    << "vertical_jump_segmented_bias_slope_merge_threshold_ug="
+    << Mps2ToMicroG(config.vertical_jump_segmented_bias_slope_merge_threshold_mps2) << '\n'
     << "vertical_jump_bias_highfreq_sigma_scale="
     << config.vertical_jump_bias_highfreq_sigma_scale << '\n'
     << "vertical_jump_bias_highfreq_sigma_max_mps="
@@ -2483,8 +2526,8 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << config.vertical_jump_spectral_response_trigger_ratio << '\n'
     << "vertical_jump_spectral_response_full_ratio="
     << config.vertical_jump_spectral_response_full_ratio << '\n'
-    << "vertical_jump_spectral_bias_prior_max_sigma_mps2="
-    << config.vertical_jump_spectral_bias_prior_max_sigma_mps2 << '\n'
+    << "vertical_jump_spectral_bias_prior_max_sigma_ug="
+    << Mps2ToMicroG(config.vertical_jump_spectral_bias_prior_max_sigma_mps2) << '\n'
     << "enable_vertical_jump_velocity_ramp_smoothing="
     << (config.enable_vertical_jump_velocity_ramp_smoothing ? "true" : "false") << '\n'
     << "vertical_jump_velocity_ramp_sigma_mps=" << config.vertical_jump_velocity_ramp_sigma_mps << '\n'
