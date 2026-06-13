@@ -7,6 +7,8 @@
 namespace offline_lc_minimal {
 namespace {
 
+constexpr double kMinimumDirectSigmaMps = 1.0e-12;
+
 void ApplyOutputScale(VerticalVelocityDeltaSigmaResult &result, const double scale) {
   if (scale == 1.0) {
     return;
@@ -14,6 +16,14 @@ void ApplyOutputScale(VerticalVelocityDeltaSigmaResult &result, const double sca
   result.sigma_mps *= scale;
   result.sigma_floor_mps *= scale;
   result.sigma_ceiling_mps *= scale;
+}
+
+double ComputeDirectAccelerationSigmaMps(
+  const OfflineRunnerConfig &config,
+  const double positive_dt_s) {
+  return std::max(
+    kMinimumDirectSigmaMps,
+    config.vertical_velocity_delta_acc_sigma_mps2 * positive_dt_s);
 }
 
 }  // namespace
@@ -37,9 +47,7 @@ VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::ComputeWithout
   const double dt_s) const {
   const double positive_dt_s = std::max(dt_s, 0.0);
   VerticalVelocityDeltaSigmaResult result;
-  result.legacy_sigma_mps = std::max(
-    config_.vertical_velocity_delta_min_sigma_mps,
-    config_.vertical_velocity_delta_acc_sigma_mps2 * positive_dt_s);
+  result.legacy_sigma_mps = ComputeDirectAccelerationSigmaMps(config_, positive_dt_s);
 
   if (!config_.enable_vertical_velocity_delta_bias_consistent_sigma) {
     result.model = "legacy";
@@ -54,9 +62,7 @@ VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::ComputeWithout
     config_.vertical_velocity_delta_sigma_floor_mps,
     config_.vertical_velocity_delta_sigma_ceiling_mps,
     "bias_consistent");
-  result.legacy_sigma_mps = std::max(
-    config_.vertical_velocity_delta_min_sigma_mps,
-    config_.vertical_velocity_delta_acc_sigma_mps2 * positive_dt_s);
+  result.legacy_sigma_mps = ComputeDirectAccelerationSigmaMps(config_, positive_dt_s);
   return result;
 }
 
@@ -124,18 +130,13 @@ VerticalVelocityDeltaSigmaResult VerticalVelocityDeltaSigmaModel::ComputeBiasCon
   const double positive_dt_s = std::max(dt_s, 0.0);
   VerticalVelocityDeltaSigmaResult result;
   result.model = std::move(model);
-  result.legacy_sigma_mps = std::max(
-    config_.vertical_velocity_delta_min_sigma_mps,
-    config_.vertical_velocity_delta_acc_sigma_mps2 * positive_dt_s);
+  result.legacy_sigma_mps = ComputeDirectAccelerationSigmaMps(config_, positive_dt_s);
   result.bias_sigma_mps = bias_sigma_mps2 * positive_dt_s;
   result.attitude_sigma_mps = config_.gravity_mps2 * attitude_sigma_rad * positive_dt_s;
   result.sigma_floor_mps = floor_mps;
   result.sigma_ceiling_mps = ceiling_mps;
 
-  const double raw_sigma_mps = std::sqrt(
-    result.bias_sigma_mps * result.bias_sigma_mps +
-    result.attitude_sigma_mps * result.attitude_sigma_mps +
-    result.sigma_floor_mps * result.sigma_floor_mps);
+  const double raw_sigma_mps = result.legacy_sigma_mps;
   result.sigma_mps = std::clamp(raw_sigma_mps, result.sigma_floor_mps, result.sigma_ceiling_mps);
   result.clamped_floor = result.sigma_mps <= result.sigma_floor_mps * (1.0 + 1.0e-12);
   result.clamped_ceiling = result.sigma_mps >= result.sigma_ceiling_mps && raw_sigma_mps > result.sigma_ceiling_mps;

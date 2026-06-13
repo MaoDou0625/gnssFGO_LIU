@@ -184,7 +184,24 @@ void TestSigmaModelLegacyMatchesExistingFormula() {
   ExpectNear(long_dt.legacy_sigma_mps, 0.25, 1e-12, "legacy diagnostic sigma is wrong");
 
   const auto short_dt = model.Compute(0.01);
-  ExpectNear(short_dt.sigma_mps, 0.02, 1e-12, "legacy sigma should respect min sigma");
+  ExpectNear(
+    short_dt.sigma_mps,
+    0.005,
+    1e-12,
+    "legacy sigma should directly follow acc_sigma * dt");
+
+  config.vertical_velocity_delta_acc_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(10.0);
+  const auto ten_ug = offline_lc_minimal::VerticalVelocityDeltaSigmaModel(config).Compute(0.05);
+  config.vertical_velocity_delta_acc_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(1000.0);
+  const auto thousand_ug =
+    offline_lc_minimal::VerticalVelocityDeltaSigmaModel(config).Compute(0.05);
+  ExpectNear(
+    thousand_ug.sigma_mps / ten_ug.sigma_mps,
+    100.0,
+    1e-12,
+    "legacy sigma should scale linearly with vertical_velocity_delta_acc_sigma");
 }
 
 void TestSigmaModelBiasConsistentComponents() {
@@ -196,22 +213,34 @@ void TestSigmaModelBiasConsistentComponents() {
   config.vertical_velocity_delta_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(10.0);
   config.vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
   config.vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
-  config.vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+  config.vertical_velocity_delta_sigma_ceiling_mps = 1.0e-2;
 
   const offline_lc_minimal::VerticalVelocityDeltaSigmaModel model(config);
   const auto sigma = model.Compute(0.05);
   const double expected_bias_mps = offline_lc_minimal::MicroGToMps2(10.0) * 0.05;
   const double expected_attitude_mps = 9.80665 * 1.0e-4 * 0.05;
-  const double expected_sigma_mps = std::sqrt(
-    expected_bias_mps * expected_bias_mps +
-    expected_attitude_mps * expected_attitude_mps +
-    1.0e-5 * 1.0e-5);
+  const double expected_sigma_mps = 0.10 * 0.05;
 
   ExpectTrue(sigma.model == "bias_consistent", "bias-consistent sigma model should be reported");
   ExpectNear(sigma.legacy_sigma_mps, 0.005, 1e-12, "legacy comparison sigma is wrong");
   ExpectNear(sigma.bias_sigma_mps, expected_bias_mps, 1e-15, "bias sigma component is wrong");
   ExpectNear(sigma.attitude_sigma_mps, expected_attitude_mps, 1e-15, "attitude sigma component is wrong");
-  ExpectNear(sigma.sigma_mps, expected_sigma_mps, 1e-15, "bias-consistent sigma is wrong");
+  ExpectNear(sigma.sigma_mps, expected_sigma_mps, 1e-15, "bias-consistent sigma should follow acc sigma");
+
+  config.vertical_velocity_delta_sigma_floor_mps = 1.0e-12;
+  config.vertical_velocity_delta_sigma_ceiling_mps = 1.0;
+  config.vertical_velocity_delta_acc_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(10.0);
+  const auto ten_ug = offline_lc_minimal::VerticalVelocityDeltaSigmaModel(config).Compute(0.05);
+  config.vertical_velocity_delta_acc_sigma_mps2 =
+    offline_lc_minimal::MicroGToMps2(1000.0);
+  const auto thousand_ug =
+    offline_lc_minimal::VerticalVelocityDeltaSigmaModel(config).Compute(0.05);
+  ExpectNear(
+    thousand_ug.sigma_mps / ten_ug.sigma_mps,
+    100.0,
+    1e-12,
+    "bias-consistent sigma should scale linearly with vertical_velocity_delta_acc_sigma");
 }
 
 void TestSigmaModelOutputScalePreservesPhysicalComponents() {
@@ -325,11 +354,11 @@ void TestSigmaModelClampFlags() {
   ExpectTrue(floor_dominated.clamped_floor, "zero dt should be floor dominated");
   ExpectTrue(!floor_dominated.clamped_ceiling, "zero dt should not be ceiling clamped");
 
-  config.vertical_velocity_delta_attitude_sigma_rad = 1.0;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 1.0;
   const offline_lc_minimal::VerticalVelocityDeltaSigmaModel ceiling_model(config);
   const auto ceiling_clamped = ceiling_model.Compute(1.0);
   ExpectNear(ceiling_clamped.sigma_mps, 5.0e-4, 1e-15, "ceiling clamp sigma is wrong");
-  ExpectTrue(ceiling_clamped.clamped_ceiling, "large attitude sigma should clamp to ceiling");
+  ExpectTrue(ceiling_clamped.clamped_ceiling, "large acc sigma should clamp to ceiling");
 }
 
 void TestAdaptiveSigmaUsesStaticAndDynamicLimits() {
@@ -357,10 +386,7 @@ void TestAdaptiveSigmaUsesStaticAndDynamicLimits() {
   low_motion.motion_score = 0.0;
   const offline_lc_minimal::VerticalVelocityDeltaSigmaModel model(config);
   const auto adaptive_static = model.Compute(0.05, &low_motion);
-  const double expected_bias = offline_lc_minimal::MicroGToMps2(0.02) * 0.05;
-  const double expected_attitude = 9.80665 * 1.0e-5 * 0.05;
-  const double expected_static_sigma =
-    std::sqrt(expected_bias * expected_bias + expected_attitude * expected_attitude + 2.0e-6 * 2.0e-6);
+  const double expected_static_sigma = config.vertical_motion_adaptive_static_sigma_ceiling_mps;
   ExpectTrue(adaptive_static.model == "adaptive_static", "low motion should use static adaptive model");
   ExpectNear(
     adaptive_static.sigma_mps,
@@ -834,10 +860,7 @@ void TestBuilderAddsStaticInteriorWhenConfigured() {
   ExpectTrue(diagnostics[0].skip_reason == "ADDED", "static interior interval should be marked as added");
   ExpectTrue(diagnostics[0].sigma_model == "bias_consistent", "static interval should use bias-consistent sigma");
   ExpectTrue(diagnostics[0].bias_aware_factor, "static interval should use bias-aware dvz target");
-  const double expected_sigma_mps = std::sqrt(
-    std::pow(offline_lc_minimal::MicroGToMps2(10.0) * 0.5, 2.0) +
-    std::pow(config.gravity_mps2 * config.vertical_velocity_delta_attitude_sigma_rad * 0.5, 2.0) +
-    std::pow(config.vertical_velocity_delta_sigma_floor_mps, 2.0));
+  const double expected_sigma_mps = config.vertical_velocity_delta_sigma_ceiling_mps;
   ExpectNear(diagnostics[0].sigma_mps, expected_sigma_mps, 1e-15, "static interval sigma is wrong");
   ExpectNear(
     static_cast<double>(graph.at(0)->keys().size()),
@@ -1098,15 +1121,10 @@ void TestBuilderUsesBiasConsistentSigmaAndSummary() {
   request.diagnostics = &diagnostics;
   offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
 
-  const double expected_bias_mps = offline_lc_minimal::MicroGToMps2(10.0) * 0.05;
-  const double expected_attitude_mps = 9.80665 * 1.0e-4 * 0.05;
-  const double expected_sigma_mps = std::sqrt(
-    expected_bias_mps * expected_bias_mps +
-    expected_attitude_mps * expected_attitude_mps +
-    1.0e-5 * 1.0e-5);
+  const double expected_sigma_mps = config.vertical_velocity_delta_sigma_ceiling_mps;
   ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "bias-consistent interval should add a factor");
   ExpectTrue(summary.vertical_velocity_delta_bias_consistent_sigma_enabled, "summary should report sigma mode");
-  ExpectNear(diagnostics.front().sigma_mps, expected_sigma_mps, 1e-15, "builder should use bias sigma");
+  ExpectNear(diagnostics.front().sigma_mps, expected_sigma_mps, 1e-15, "builder should use direct acc sigma");
   ExpectNear(diagnostics.front().legacy_sigma_mps, 0.005, 1e-12, "builder should preserve legacy diagnostic");
   ExpectTrue(diagnostics.front().sigma_model == "bias_consistent", "diagnostic sigma model is wrong");
   ExpectNear(summary.vertical_velocity_delta_sigma_mean_mps, expected_sigma_mps, 1e-15, "summary mean sigma is wrong");
