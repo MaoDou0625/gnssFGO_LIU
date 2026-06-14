@@ -700,6 +700,19 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
       if (terminal_velocity_reference.has_value()) {
         outage_boundary_refs.push_back(*terminal_velocity_reference);
       }
+      const std::optional<RtkOutageBoundaryReferenceRow> terminal_horizontal_handoff_reference =
+        BuildRtkOutageTerminalHorizontalHandoffReference(
+          RtkOutageTerminalVelocityReferenceRequest{
+            &request_.config,
+            &request_.state_timestamps,
+            &outage_reference->reference_states,
+            &request_.dataset.imu_samples,
+            request_.imu_params,
+            &handoff_outage,
+            &post_first_boundary_reference});
+      if (terminal_horizontal_handoff_reference.has_value()) {
+        outage_boundary_refs.push_back(*terminal_horizontal_handoff_reference);
+      }
       const std::optional<RtkOutageBoundaryReferenceRow> terminal_vertical_handoff_reference =
         BuildRtkOutageTerminalVerticalHandoffReference(
           RtkOutageTerminalVelocityReferenceRequest{

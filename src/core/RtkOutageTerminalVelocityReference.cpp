@@ -264,4 +264,68 @@ BuildRtkOutageTerminalVerticalHandoffReference(
   return reference;
 }
 
+std::optional<RtkOutageBoundaryReferenceRow>
+BuildRtkOutageTerminalHorizontalHandoffReference(
+  const RtkOutageTerminalVelocityReferenceRequest &request) {
+  if (request.config == nullptr ||
+      request.state_timestamps == nullptr ||
+      request.outage == nullptr ||
+      request.post_boundary_reference == nullptr) {
+    throw std::runtime_error(
+      "RtkOutageTerminalHorizontalHandoffReference received an incomplete request");
+  }
+  const RtkOutageBoundaryReferenceRow &post_reference =
+    *request.post_boundary_reference;
+  if (!post_reference.valid ||
+      !post_reference.has_horizontal_position ||
+      !post_reference.has_horizontal_velocity ||
+      !std::isfinite(post_reference.target_time_s) ||
+      !post_reference.reference_horizontal_position_m.allFinite() ||
+      !post_reference.reference_horizontal_velocity_mps.allFinite()) {
+    return std::nullopt;
+  }
+
+  const std::optional<double> last_kept_time_s =
+    LastKeptOutageStateTime(
+      *request.state_timestamps,
+      *request.outage,
+      post_reference.target_time_s);
+  if (!last_kept_time_s.has_value()) {
+    return std::nullopt;
+  }
+  const double dt_s = post_reference.target_time_s - *last_kept_time_s;
+  if (dt_s <= kTimeEpsilonS || !std::isfinite(dt_s)) {
+    return std::nullopt;
+  }
+
+  RtkOutageBoundaryReferenceRow reference;
+  reference.window_index = request.outage->window_index;
+  reference.boundary_role = "OUTAGE_END_HORIZONTAL_HANDOFF";
+  reference.source_type = "POST_FIRST_HORIZONTAL_POSITION_VELOCITY_HANDOFF";
+  reference.target_time_s = *last_kept_time_s;
+  reference.reference_horizontal_position_m =
+    post_reference.reference_horizontal_position_m;
+  reference.reference_horizontal_velocity_mps =
+    post_reference.reference_horizontal_velocity_mps;
+  reference.has_horizontal_position = true;
+  reference.has_horizontal_velocity = true;
+  reference.has_horizontal_position_velocity_handoff = true;
+  reference.add_horizontal_position_constraint = false;
+  reference.add_horizontal_velocity_constraint = false;
+  reference.add_horizontal_position_velocity_handoff_constraint = true;
+  reference.horizontal_position_velocity_handoff_reference_time_s =
+    post_reference.target_time_s;
+  reference.horizontal_position_velocity_handoff_sigma_m =
+    request.config->stage2_horizontal_position_hold_sigma_m;
+  reference.valid =
+    std::isfinite(reference.horizontal_position_velocity_handoff_sigma_m) &&
+    reference.horizontal_position_velocity_handoff_sigma_m > 0.0;
+  reference.skip_reason =
+    reference.valid ? "OK" : "missing_terminal_horizontal_handoff_reference";
+  if (!reference.valid) {
+    return std::nullopt;
+  }
+  return reference;
+}
+
 }  // namespace offline_lc_minimal

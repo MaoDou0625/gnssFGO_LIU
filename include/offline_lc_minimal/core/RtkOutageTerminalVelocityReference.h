@@ -30,4 +30,8 @@ BuildRtkOutageTerminalVelocityReference(
 BuildRtkOutageTerminalVerticalHandoffReference(
   const RtkOutageTerminalVelocityReferenceRequest &request);
 
+[[nodiscard]] std::optional<RtkOutageBoundaryReferenceRow>
+BuildRtkOutageTerminalHorizontalHandoffReference(
+  const RtkOutageTerminalVelocityReferenceRequest &request);
+
 }  // namespace offline_lc_minimal

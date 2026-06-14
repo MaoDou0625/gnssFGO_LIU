@@ -978,7 +978,7 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
               "outage start attitude must use the pre optimized Rot3 branch");
 }
 
-void TestSegmentedBatchRunnerUsesPostFirstBoundaryWithoutHorizontalHandoff() {
+void TestSegmentedBatchRunnerUsesPostFirstBoundaryWithHorizontalHandoff() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_rtk_outage_smoothing = true;
   config.enable_rtk_outage_segmented_batch = true;
@@ -1136,10 +1136,13 @@ void TestSegmentedBatchRunnerUsesPostFirstBoundaryWithoutHorizontalHandoff() {
   std::size_t horizontal_handoff_count = 0U;
   const offline_lc_minimal::RtkOutageBoundaryReferenceRow *outage_end_reference = nullptr;
   const offline_lc_minimal::RtkOutageBoundaryReferenceRow *terminal_velocity_reference = nullptr;
+  const offline_lc_minimal::RtkOutageBoundaryReferenceRow *terminal_horizontal_handoff_reference =
+    nullptr;
   const offline_lc_minimal::RtkOutageBoundaryReferenceRow *terminal_vertical_handoff_reference = nullptr;
   for (const auto &reference : refs) {
     if (reference.boundary_role == "OUTAGE_END_HORIZONTAL_HANDOFF") {
       ++horizontal_handoff_count;
+      terminal_horizontal_handoff_reference = &reference;
     }
     if (reference.boundary_role == "OUTAGE_END") {
       outage_end_reference = &reference;
@@ -1150,8 +1153,8 @@ void TestSegmentedBatchRunnerUsesPostFirstBoundaryWithoutHorizontalHandoff() {
     }
   }
 
-  ExpectTrue(horizontal_handoff_count == 0U,
-             "outage child should not receive horizontal handoff references");
+  ExpectTrue(horizontal_handoff_count == 1U,
+             "outage child should receive one horizontal handoff reference");
   ExpectTrue(outage_end_reference != nullptr,
              "outage child should receive a post-first OUTAGE_END boundary");
   ExpectTrue(std::abs(outage_end_reference->target_time_s - 20.5) < 1e-12,
@@ -1180,6 +1183,29 @@ void TestSegmentedBatchRunnerUsesPostFirstBoundaryWithoutHorizontalHandoff() {
       terminal_velocity_reference->horizontal_velocity_sigma_mps -
       config.rtk_outage_velocity_delta_3d_sigma_mps) < 1e-15,
     "terminal velocity reference should use the outage velocity-delta sigma");
+  ExpectTrue(terminal_horizontal_handoff_reference != nullptr,
+             "outage child should receive a terminal horizontal position-velocity handoff");
+  ExpectTrue(std::abs(terminal_horizontal_handoff_reference->target_time_s - 20.45) < 1e-12,
+             "terminal horizontal handoff should target the final kept outage state");
+  ExpectTrue(
+    std::abs(
+      terminal_horizontal_handoff_reference
+        ->horizontal_position_velocity_handoff_reference_time_s - 20.5) < 1e-12,
+    "terminal horizontal handoff should reference the post-first boundary time");
+  ExpectTrue(
+    terminal_horizontal_handoff_reference->has_horizontal_position_velocity_handoff &&
+      terminal_horizontal_handoff_reference
+        ->add_horizontal_position_velocity_handoff_constraint,
+    "terminal horizontal handoff should add the xy position-velocity consistency factor");
+  ExpectTrue(!terminal_horizontal_handoff_reference->add_horizontal_position_constraint,
+             "terminal horizontal handoff should not add a direct position hold");
+  ExpectTrue(!terminal_horizontal_handoff_reference->add_horizontal_velocity_constraint,
+             "terminal horizontal handoff should not add a direct velocity hold");
+  ExpectTrue(
+    std::abs(
+      terminal_horizontal_handoff_reference->horizontal_position_velocity_handoff_sigma_m -
+      config.stage2_horizontal_position_hold_sigma_m) < 1e-15,
+    "terminal horizontal handoff should use the Stage2 horizontal position sigma");
   ExpectTrue(terminal_vertical_handoff_reference != nullptr,
              "outage child should receive a terminal vertical position-velocity handoff");
   ExpectTrue(std::abs(terminal_vertical_handoff_reference->target_time_s - 20.45) < 1e-12,
@@ -1518,8 +1544,8 @@ int main() {
       "TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timeline",
       TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timeline);
     RunTest(
-      "TestSegmentedBatchRunnerUsesPostFirstBoundaryWithoutHorizontalHandoff",
-      TestSegmentedBatchRunnerUsesPostFirstBoundaryWithoutHorizontalHandoff);
+      "TestSegmentedBatchRunnerUsesPostFirstBoundaryWithHorizontalHandoff",
+      TestSegmentedBatchRunnerUsesPostFirstBoundaryWithHorizontalHandoff);
     RunTest(
       "TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference",
       TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference);
