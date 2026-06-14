@@ -251,6 +251,17 @@ std::shared_ptr<const Stage2VelocityReference> WithBoundaryReferences(
   return mutable_reference;
 }
 
+std::shared_ptr<const Stage2VelocityReference> WithInitialValueBoundaryReferences(
+  std::shared_ptr<const Stage2VelocityReference> reference,
+  std::vector<RtkOutageBoundaryReferenceRow> boundary_references) {
+  auto mutable_reference = reference != nullptr
+    ? std::make_shared<Stage2VelocityReference>(*reference)
+    : std::make_shared<Stage2VelocityReference>();
+  mutable_reference->initial_value_boundary_references =
+    std::move(boundary_references);
+  return mutable_reference;
+}
+
 const TrajectoryRow *NearestTrajectoryRow(
   const std::vector<TrajectoryRow> &trajectory,
   const double time_s) {
@@ -602,7 +613,7 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
     }
     OfflineRunResult post_result = request_.run_once(
       std::move(post_config),
-      WithBoundaryReferences(
+      WithInitialValueBoundaryReferences(
         std::move(post_reference),
         std::move(post_boundary_refs)),
       nullptr,

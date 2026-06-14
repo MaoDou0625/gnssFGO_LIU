@@ -156,17 +156,38 @@ bool HasStage2ReferenceTimeline(const Stage2VelocityReference *reference) {
          (!reference->reference_states.empty() || !reference->trajectory.empty());
 }
 
+std::vector<RtkOutageBoundaryReferenceRow> InitialValueBoundaryReferences(
+  const Stage2VelocityReference *reference) {
+  if (reference == nullptr) {
+    return {};
+  }
+  std::vector<RtkOutageBoundaryReferenceRow> references;
+  references.reserve(
+    reference->boundary_references.size() +
+    reference->initial_value_boundary_references.size());
+  references.insert(
+    references.end(),
+    reference->boundary_references.begin(),
+    reference->boundary_references.end());
+  references.insert(
+    references.end(),
+    reference->initial_value_boundary_references.begin(),
+    reference->initial_value_boundary_references.end());
+  return references;
+}
+
 void ApplyInitialBoundaryReferenceToPriorTarget(
   const Stage2VelocityReference *reference,
   const double initial_time_s,
   gtsam::Pose3 &initial_pose_world,
   gtsam::Vector3 &initial_velocity,
   std::optional<double> &attitude_sigma_rad) {
-  if (reference == nullptr || reference->boundary_references.empty() ||
-      !std::isfinite(initial_time_s)) {
+  if (reference == nullptr || !std::isfinite(initial_time_s)) {
     return;
   }
-  for (const RtkOutageBoundaryReferenceRow &boundary : reference->boundary_references) {
+  const std::vector<RtkOutageBoundaryReferenceRow> boundary_references =
+    InitialValueBoundaryReferences(reference);
+  for (const RtkOutageBoundaryReferenceRow &boundary : boundary_references) {
     if (!boundary.valid ||
         !std::isfinite(boundary.target_time_s) ||
         std::abs(boundary.target_time_s - initial_time_s) > 1.0e-6) {
@@ -1921,10 +1942,11 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   rtk_outage_initial_request.initial_values = &optimization_initial_values;
   rtk_outage_initial_request.outage_windows = &run_result.rtk_outage_windows;
   RtkOutageInitialValueSmoother(std::move(rtk_outage_initial_request)).Apply();
-  if (active_stage2_reference != nullptr &&
-      !active_stage2_reference->boundary_references.empty()) {
+  const std::vector<RtkOutageBoundaryReferenceRow> initial_value_boundary_references =
+    InitialValueBoundaryReferences(active_stage2_reference);
+  if (!initial_value_boundary_references.empty()) {
     ApplyRtkOutageBoundaryPositionVelocityInitialValues(
-      active_stage2_reference->boundary_references,
+      initial_value_boundary_references,
       state_timestamps,
       optimization_initial_values);
   }

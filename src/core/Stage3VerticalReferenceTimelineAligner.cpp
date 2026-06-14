@@ -198,6 +198,8 @@ Stage3VerticalReferenceTimelineAlignResult AlignStage3VerticalReferencesToTimeli
 
   Stage3VerticalReferenceTimelineAlignResult result;
   result.stage2_reference.boundary_references = stage2_reference.boundary_references;
+  result.stage2_reference.initial_value_boundary_references =
+    stage2_reference.initial_value_boundary_references;
   result.stage2_reference.body_z_bias_reestimate_segments =
     stage2_reference.body_z_bias_reestimate_segments;
   result.stage2_reference.source_config = stage2_reference.source_config;

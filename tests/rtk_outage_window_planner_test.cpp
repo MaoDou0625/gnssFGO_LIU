@@ -918,6 +918,11 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
   ExpectTrue(calls[1].reference != nullptr, "post child should receive a boundary carrier");
   ExpectTrue(calls[1].reference->boundary_references.empty(),
              "post child should run like a normal post segment without special recovery boundary");
+  ExpectTrue(calls[1].reference->initial_value_boundary_references.size() == 1U,
+             "post child should receive exactly one recovery-derived initial value boundary");
+  ExpectTrue(calls[1].reference->initial_value_boundary_references.front().boundary_role ==
+               "POST_START",
+             "post initial value boundary should target POST_START");
   ExpectTrue(std::abs(calls[1].processing_start_time_s - 20.0) < 1e-12,
              "post child should start from the original outage end as GNSS sync support");
 
