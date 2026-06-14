@@ -35,6 +35,12 @@ MakePostStartBoundaryReferenceFromRecovery(
   const RtkOutageRecoveryReferenceRow &reference);
 
 [[nodiscard]] RtkOutageBoundaryReferenceRow
+MakePostStartBoundaryReferenceFromRecovery(
+  const OfflineRunnerConfig &config,
+  const RtkOutageRecoveryReferenceRow &reference,
+  double post_start_time_s);
+
+[[nodiscard]] RtkOutageBoundaryReferenceRow
 MakeOutageEndBoundaryReferenceFromRecovery(
   const OfflineRunnerConfig &config,
   const RtkOutageRecoveryReferenceRow &reference);

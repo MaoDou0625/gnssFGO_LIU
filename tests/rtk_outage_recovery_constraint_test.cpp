@@ -20,6 +20,7 @@
 #include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeReference.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryConstraintBuilder.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryInitialValueApplicator.h"
 #include "offline_lc_minimal/core/RtkOutagePreOutageVerticalFenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
@@ -762,6 +763,110 @@ void TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryPositionVelocity() {
              "recovery boundary should not invent an attitude reference");
   ExpectNear(boundary.target_time_s, 9.0, 1e-12,
              "recovery boundary time should match outage end");
+}
+
+void TestPostStartBoundaryReferenceFromRecoveryPropagatesToPostStart() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.rtk_outage_boundary_up_sigma_m = 0.01;
+  config.rtk_outage_boundary_vz_sigma_mps = 0.02;
+  config.stage2_horizontal_position_hold_sigma_m = 0.03;
+  config.stage2_horizontal_velocity_hold_sigma_mps = 0.04;
+
+  offline_lc_minimal::RtkOutageRecoveryReferenceRow recovery;
+  recovery.window_index = 3U;
+  recovery.outage_end_time_s = 9.0;
+  recovery.reference_up_m = 4.0;
+  recovery.reference_vz_mps = -0.5;
+  recovery.reference_horizontal_position_m = Eigen::Vector2d(2.0, -3.0);
+  recovery.reference_horizontal_velocity_mps = Eigen::Vector2d(0.1, -1.4);
+  recovery.valid = true;
+  recovery.skip_reason = "OK";
+
+  const offline_lc_minimal::RtkOutageBoundaryReferenceRow boundary =
+    offline_lc_minimal::MakePostStartBoundaryReferenceFromRecovery(
+      config,
+      recovery,
+      9.2);
+  ExpectTrue(boundary.boundary_role == "POST_START",
+             "recovery boundary should target post start");
+  ExpectNear(boundary.target_time_s, 9.2, 1e-12,
+             "post-start recovery boundary should target post first time");
+  ExpectTrue(boundary.has_up && boundary.add_up_constraint,
+             "post-start recovery boundary should constrain up");
+  ExpectTrue(boundary.has_vz && boundary.add_vz_constraint,
+             "post-start recovery boundary should constrain vz");
+  ExpectTrue(boundary.has_horizontal_position && boundary.add_horizontal_position_constraint,
+             "post-start recovery boundary should constrain horizontal position");
+  ExpectTrue(boundary.has_horizontal_velocity && boundary.add_horizontal_velocity_constraint,
+             "post-start recovery boundary should constrain horizontal velocity");
+  ExpectNear(boundary.reference_up_m, 3.9, 1e-12,
+             "post-start up should be propagated from recovery fit");
+  ExpectNear(boundary.reference_vz_mps, -0.5, 1e-12,
+             "post-start vz should keep recovery fit velocity");
+  ExpectNear(boundary.reference_horizontal_position_m.x(), 2.02, 1e-12,
+             "post-start east should be propagated from recovery fit");
+  ExpectNear(boundary.reference_horizontal_position_m.y(), -3.28, 1e-12,
+             "post-start north should be propagated from recovery fit");
+  ExpectNear(boundary.reference_horizontal_velocity_mps.x(), 0.1, 1e-12,
+             "post-start east velocity should keep recovery fit velocity");
+  ExpectNear(boundary.reference_horizontal_velocity_mps.y(), -1.4, 1e-12,
+             "post-start north velocity should keep recovery fit velocity");
+}
+
+void TestBoundaryInitialValueApplicatorAppliesPostStartPositionVelocity() {
+  const std::vector<double> timestamps{9.0, 9.05, 9.1, 9.15, 9.2};
+  offline_lc_minimal::RtkOutageBoundaryReferenceRow reference;
+  reference.window_index = 3U;
+  reference.boundary_role = "POST_START";
+  reference.source_type = "POST_RECOVERY_RTK";
+  reference.target_time_s = 9.2;
+  reference.valid = true;
+  reference.has_horizontal_position = true;
+  reference.has_horizontal_velocity = true;
+  reference.has_up = true;
+  reference.has_vz = true;
+  reference.reference_horizontal_position_m = Eigen::Vector2d(2.0, -3.0);
+  reference.reference_horizontal_velocity_mps = Eigen::Vector2d(0.1, -1.4);
+  reference.reference_up_m = 4.0;
+  reference.reference_vz_mps = -0.5;
+
+  gtsam::Values values;
+  for (std::size_t index = 0; index < timestamps.size(); ++index) {
+    values.insert(
+      gtsam::symbol_shorthand::X(index),
+      gtsam::Pose3(
+        gtsam::Rot3::Identity(),
+        gtsam::Point3(10.0, 20.0, 30.0)));
+    values.insert(
+      gtsam::symbol_shorthand::V(index),
+      gtsam::Vector3(1.0, 2.0, 3.0));
+  }
+
+  ApplyRtkOutageBoundaryPositionVelocityInitialValues(
+    std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow>{reference},
+    timestamps,
+    values);
+
+  const auto first_pose = values.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(0));
+  const auto post_pose = values.at<gtsam::Pose3>(gtsam::symbol_shorthand::X(4));
+  const auto first_velocity = values.at<gtsam::Vector3>(gtsam::symbol_shorthand::V(0));
+  const auto post_velocity = values.at<gtsam::Vector3>(gtsam::symbol_shorthand::V(4));
+  ExpectNear(first_pose.translation().z(), 30.0, 1e-12,
+             "post-start initial value should not update earlier states");
+  ExpectNear(first_velocity.z(), 3.0, 1e-12,
+             "post-start velocity initial value should not update earlier states");
+  ExpectNear(post_pose.translation().x(), 2.0, 1e-12,
+             "post-start initial value should update east");
+  ExpectNear(post_pose.translation().y(), -3.0, 1e-12,
+             "post-start initial value should update north");
+  ExpectNear(post_pose.translation().z(), 4.0, 1e-12,
+             "post-start initial value should update up");
+  ExpectNear(post_velocity.x(), 0.1, 1e-12,
+             "post-start initial value should update east velocity");
+  ExpectNear(post_velocity.y(), -1.4, 1e-12,
+             "post-start initial value should update north velocity");
+  ExpectNear(post_velocity.z(), -0.5, 1e-12,
+             "post-start initial value should update vertical velocity");
 }
 
 void TestBoundaryStateInitialValuesDoNotRequireAttitude() {
@@ -1748,6 +1853,12 @@ int main() {
     RunTest(
       "TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryPositionVelocity",
       TestOutageEndBoundaryReferenceFromRecoveryUsesRecoveryPositionVelocity);
+    RunTest(
+      "TestPostStartBoundaryReferenceFromRecoveryPropagatesToPostStart",
+      TestPostStartBoundaryReferenceFromRecoveryPropagatesToPostStart);
+    RunTest(
+      "TestBoundaryInitialValueApplicatorAppliesPostStartPositionVelocity",
+      TestBoundaryInitialValueApplicatorAppliesPostStartPositionVelocity);
     RunTest(
       "TestBoundaryStateInitialValuesDoNotRequireAttitude",
       TestBoundaryStateInitialValuesDoNotRequireAttitude);

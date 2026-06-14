@@ -43,6 +43,7 @@
 #include "offline_lc_minimal/core/RtkOutageBazReestimatePlanner.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeReference.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryConstraintBuilder.h"
+#include "offline_lc_minimal/core/RtkOutageBoundaryInitialValueApplicator.h"
 #include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutagePreOutageVerticalFenceBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageRecoveryConstraintBuilder.h"
@@ -1920,6 +1921,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   rtk_outage_initial_request.initial_values = &optimization_initial_values;
   rtk_outage_initial_request.outage_windows = &run_result.rtk_outage_windows;
   RtkOutageInitialValueSmoother(std::move(rtk_outage_initial_request)).Apply();
+  if (active_stage2_reference != nullptr &&
+      !active_stage2_reference->boundary_references.empty()) {
+    ApplyRtkOutageBoundaryPositionVelocityInitialValues(
+      active_stage2_reference->boundary_references,
+      state_timestamps,
+      optimization_initial_values);
+  }
 
   if (!run_result.body_z_bias_reestimate_segments.empty()) {
     BodyZBiasReestimateConstraintBuildRequest bias_reestimate_request;

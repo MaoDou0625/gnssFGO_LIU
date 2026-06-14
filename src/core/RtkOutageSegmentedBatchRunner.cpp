@@ -589,11 +589,22 @@ OfflineRunResult RtkOutageSegmentedBatchRunner::Run() const {
         post_config,
         *post_segment,
         request_.dynamic_start_time_s);
+    std::vector<RtkOutageBoundaryReferenceRow> post_boundary_refs;
+    if (recovery_reference != nullptr) {
+      RtkOutageBoundaryReferenceRow post_start_reference =
+        MakePostStartBoundaryReferenceFromRecovery(
+          request_.config,
+          *recovery_reference,
+          post_segment->start_time_s);
+      if (post_start_reference.valid) {
+        post_boundary_refs.push_back(std::move(post_start_reference));
+      }
+    }
     OfflineRunResult post_result = request_.run_once(
       std::move(post_config),
       WithBoundaryReferences(
         std::move(post_reference),
-        {}),
+        std::move(post_boundary_refs)),
       nullptr,
       request_.road_noise_state_reference,
       request_.dataset);

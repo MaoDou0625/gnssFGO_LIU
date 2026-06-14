@@ -100,12 +100,17 @@ void FitPositionAndVelocityAtBoundary(
 RtkOutageBoundaryReferenceRow MakeBoundaryReferenceFromRecovery(
   const OfflineRunnerConfig &config,
   const RtkOutageRecoveryReferenceRow &reference,
-  const std::string &boundary_role) {
+  const std::string &boundary_role,
+  const double target_time_s) {
+  const double dt_s =
+    std::isfinite(target_time_s) && std::isfinite(reference.outage_end_time_s)
+      ? target_time_s - reference.outage_end_time_s
+      : 0.0;
   RtkOutageBoundaryReferenceRow row;
   row.window_index = reference.window_index;
   row.boundary_role = boundary_role;
   row.source_type = "POST_RECOVERY_RTK";
-  row.target_time_s = reference.outage_end_time_s;
+  row.target_time_s = target_time_s;
   row.valid = reference.valid;
   row.has_up = reference.valid;
   row.has_vz = reference.valid;
@@ -119,9 +124,20 @@ RtkOutageBoundaryReferenceRow MakeBoundaryReferenceFromRecovery(
   row.add_ba_z_constraint = false;
   row.add_horizontal_position_constraint = row.has_horizontal_position;
   row.add_horizontal_velocity_constraint = row.has_horizontal_velocity;
-  row.reference_up_m = reference.reference_up_m;
+  row.reference_up_m =
+    std::isfinite(reference.reference_up_m) &&
+        std::isfinite(reference.reference_vz_mps) &&
+        std::isfinite(dt_s)
+      ? reference.reference_up_m + reference.reference_vz_mps * dt_s
+      : reference.reference_up_m;
   row.reference_vz_mps = reference.reference_vz_mps;
-  row.reference_horizontal_position_m = reference.reference_horizontal_position_m;
+  row.reference_horizontal_position_m =
+    reference.reference_horizontal_position_m.allFinite() &&
+        reference.reference_horizontal_velocity_mps.allFinite() &&
+        std::isfinite(dt_s)
+      ? reference.reference_horizontal_position_m +
+          reference.reference_horizontal_velocity_mps * dt_s
+      : reference.reference_horizontal_position_m;
   row.reference_horizontal_velocity_mps = reference.reference_horizontal_velocity_mps;
   row.up_sigma_m = config.rtk_outage_boundary_up_sigma_m;
   row.vz_sigma_mps = config.rtk_outage_boundary_vz_sigma_mps;
@@ -232,13 +248,31 @@ RtkOutageRecoveryReferenceBuilder::Build() const {
 RtkOutageBoundaryReferenceRow MakePostStartBoundaryReferenceFromRecovery(
   const OfflineRunnerConfig &config,
   const RtkOutageRecoveryReferenceRow &reference) {
-  return MakeBoundaryReferenceFromRecovery(config, reference, "POST_START");
+  return MakePostStartBoundaryReferenceFromRecovery(
+    config,
+    reference,
+    reference.outage_end_time_s);
+}
+
+RtkOutageBoundaryReferenceRow MakePostStartBoundaryReferenceFromRecovery(
+  const OfflineRunnerConfig &config,
+  const RtkOutageRecoveryReferenceRow &reference,
+  const double post_start_time_s) {
+  return MakeBoundaryReferenceFromRecovery(
+    config,
+    reference,
+    "POST_START",
+    post_start_time_s);
 }
 
 RtkOutageBoundaryReferenceRow MakeOutageEndBoundaryReferenceFromRecovery(
   const OfflineRunnerConfig &config,
   const RtkOutageRecoveryReferenceRow &reference) {
-  return MakeBoundaryReferenceFromRecovery(config, reference, "OUTAGE_END");
+  return MakeBoundaryReferenceFromRecovery(
+    config,
+    reference,
+    "OUTAGE_END",
+    reference.outage_end_time_s);
 }
 
 }  // namespace offline_lc_minimal
