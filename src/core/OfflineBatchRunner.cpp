@@ -28,6 +28,7 @@
 #include "offline_lc_minimal/core/BodyZNHCConstraintBuilder.h"
 #include "offline_lc_minimal/core/GnssFactorBuilder.h"
 #include "offline_lc_minimal/core/GraphTimelineBuilder.h"
+#include "offline_lc_minimal/core/HorizontalVelocityDeltaConstraintBuilder.h"
 #include "offline_lc_minimal/core/ImuIntegrationUtils.h"
 #include "offline_lc_minimal/core/InitialStaticBiasConstraintBuilder.h"
 #include "offline_lc_minimal/core/InitialStaticConstraintBuilder.h"
@@ -2209,6 +2210,13 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   rtk_outage_recovery_request.velocity_diagnostics =
     &run_result.rtk_outage_velocity_delta_3d_diagnostics;
   RtkOutageRecoveryConstraintBuilder(std::move(rtk_outage_recovery_request)).Build();
+
+  HorizontalVelocityDeltaConstraintBuildRequest horizontal_velocity_delta_request;
+  horizontal_velocity_delta_request.config = &config_;
+  horizontal_velocity_delta_request.propagation_records = &velocity_delta_records;
+  horizontal_velocity_delta_request.graph = &graph_with_gnss;
+  horizontal_velocity_delta_request.run_summary = &run_result.run_summary;
+  HorizontalVelocityDeltaConstraintBuilder(std::move(horizontal_velocity_delta_request)).Build();
 
   RtkOutageSmoothingConstraintBuildRequest rtk_outage_request;
   rtk_outage_request.config = &config_;

@@ -15,6 +15,7 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Units.h"
+#include "offline_lc_minimal/core/HorizontalVelocityDeltaConstraintBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryAttitudeHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageBoundaryBiasHandoff.h"
 #include "offline_lc_minimal/core/RtkOutageCausalReferenceBuilder.h"
@@ -26,6 +27,7 @@
 #include "offline_lc_minimal/core/RtkOutageRecoveryReferenceBuilder.h"
 #include "offline_lc_minimal/factor/AttitudeReferenceFactor.h"
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
+#include "offline_lc_minimal/factor/HorizontalVelocityDeltaFactor.h"
 #include "offline_lc_minimal/factor/HorizontalPositionVelocityHandoffFactor.h"
 #include "offline_lc_minimal/factor/VerticalPositionVelocityHandoffFactor.h"
 #include "offline_lc_minimal/factor/VelocityDeltaFactor.h"
@@ -136,6 +138,87 @@ void TestVelocityDeltaFactorUsesOnlyVelocityKeys() {
   ExpectTrue(factor.keys().size() == 2U, "3D velocity delta should connect only two velocity keys");
   ExpectTrue(factor.keys()[0] == gtsam::symbol_shorthand::V(1), "first key should be V_i");
   ExpectTrue(factor.keys()[1] == gtsam::symbol_shorthand::V(2), "second key should be V_j");
+}
+
+void TestHorizontalVelocityDeltaFactorUsesOnlyHorizontalComponents() {
+  const auto noise = gtsam::noiseModel::Isotropic::Sigma(2, 1.0);
+  const gtsam::Vector2 target_delta(1.0, -2.0);
+  const offline_lc_minimal::factor::HorizontalVelocityDeltaFactor factor(
+    gtsam::symbol_shorthand::V(1),
+    gtsam::symbol_shorthand::V(2),
+    target_delta,
+    noise);
+
+  gtsam::Matrix h_i;
+  gtsam::Matrix h_j;
+  const gtsam::Vector residual = factor.evaluateError(
+    gtsam::Vector3(0.0, 0.0, 10.0),
+    gtsam::Vector3(1.0, -2.0, -4.0),
+    h_i,
+    h_j);
+  ExpectNear(
+    residual.norm(),
+    0.0,
+    1e-12,
+    "matching horizontal delta velocity should have zero residual");
+  ExpectTrue(h_i.rows() == 2 && h_i.cols() == 3, "horizontal velocity jacobian size is wrong");
+  ExpectNear(h_i(0, 0), -1.0, 1e-12, "velocity_i x jacobian is wrong");
+  ExpectNear(h_i(1, 1), -1.0, 1e-12, "velocity_i y jacobian is wrong");
+  ExpectNear(h_i(0, 2), 0.0, 1e-12, "velocity_i z jacobian should be zero");
+  ExpectNear(h_j(0, 0), 1.0, 1e-12, "velocity_j x jacobian is wrong");
+  ExpectNear(h_j(1, 1), 1.0, 1e-12, "velocity_j y jacobian is wrong");
+  ExpectNear(h_j(1, 2), 0.0, 1e-12, "velocity_j z jacobian should be zero");
+  ExpectTrue(factor.keys().size() == 2U, "horizontal velocity delta should connect two velocity keys");
+  ExpectTrue(factor.keys()[0] == gtsam::symbol_shorthand::V(1), "first key should be V_i");
+  ExpectTrue(factor.keys()[1] == gtsam::symbol_shorthand::V(2), "second key should be V_j");
+}
+
+void TestHorizontalVelocityDeltaBuilderAddsAllActiveSegmentRecords() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_horizontal_velocity_delta_constraint = true;
+  config.rtk_valid_horizontal_velocity_delta_sigma_mps = 0.20;
+  const auto velocity_records = MakeVelocityRecords();
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+
+  offline_lc_minimal::HorizontalVelocityDeltaConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &velocity_records;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  offline_lc_minimal::HorizontalVelocityDeltaConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == velocity_records.size(),
+             "active horizontal velocity delta should add one factor per record");
+  ExpectTrue(summary.horizontal_velocity_delta_factor_count == velocity_records.size(),
+             "horizontal velocity delta summary count is wrong");
+  const auto first_factor =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::HorizontalVelocityDeltaFactor>(graph.at(0));
+  const auto last_factor =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::HorizontalVelocityDeltaFactor>(graph.at(3));
+  ExpectTrue(first_factor.get() != nullptr, "first horizontal velocity factor should be present");
+  ExpectTrue(last_factor.get() != nullptr, "last horizontal velocity factor should be present");
+  ExpectNear(first_factor->targetDeltaVMps().x(), 10.0, 1.0e-12,
+             "first horizontal velocity target x should come from IMU delta");
+  ExpectNear(first_factor->targetDeltaVMps().y(), 0.0, 1.0e-12,
+             "first horizontal velocity target y should come from IMU delta");
+  ExpectNear(last_factor->targetDeltaVMps().x(), 0.0, 1.0e-12,
+             "last horizontal velocity target x should come from IMU delta");
+  ExpectNear(last_factor->targetDeltaVMps().y(), 9.0, 1.0e-12,
+             "last horizontal velocity target y should come from IMU delta");
+
+  config.enable_horizontal_velocity_delta_constraint = false;
+  gtsam::NonlinearFactorGraph disabled_graph;
+  summary.horizontal_velocity_delta_factor_count = 0U;
+  offline_lc_minimal::HorizontalVelocityDeltaConstraintBuildRequest disabled_request;
+  disabled_request.config = &config;
+  disabled_request.propagation_records = &velocity_records;
+  disabled_request.graph = &disabled_graph;
+  disabled_request.run_summary = &summary;
+  offline_lc_minimal::HorizontalVelocityDeltaConstraintBuilder(std::move(disabled_request)).Build();
+  ExpectTrue(disabled_graph.empty(), "disabled horizontal velocity delta should add no factors");
+  ExpectTrue(summary.horizontal_velocity_delta_factor_count == 0U,
+             "disabled horizontal velocity delta should not update the summary count");
 }
 
 void TestHorizontalPositionVelocityHandoffFactorUsesTrapezoidVelocityDelta() {
@@ -1886,6 +1969,12 @@ int main() {
       "TestAttitudeHoldFactorIgnoresTranslationAndPenalizesAttitude",
       TestAttitudeHoldFactorIgnoresTranslationAndPenalizesAttitude);
     RunTest("TestVelocityDeltaFactorUsesOnlyVelocityKeys", TestVelocityDeltaFactorUsesOnlyVelocityKeys);
+    RunTest(
+      "TestHorizontalVelocityDeltaFactorUsesOnlyHorizontalComponents",
+      TestHorizontalVelocityDeltaFactorUsesOnlyHorizontalComponents);
+    RunTest(
+      "TestHorizontalVelocityDeltaBuilderAddsAllActiveSegmentRecords",
+      TestHorizontalVelocityDeltaBuilderAddsAllActiveSegmentRecords);
     RunTest(
       "TestHorizontalPositionVelocityHandoffFactorUsesTrapezoidVelocityDelta",
       TestHorizontalPositionVelocityHandoffFactorUsesTrapezoidVelocityDelta);

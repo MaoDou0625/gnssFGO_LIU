@@ -867,6 +867,15 @@ void TestPhase32RtkOutageSmootherConfigLoads() {
     std::abs(config.rtk_outage_velocity_delta_3d_sigma_mps - 0.20) < 1e-15,
     "phase32 outage 3D velocity delta sigma should load");
   ExpectTrue(
+    config.enable_rtk_valid_horizontal_velocity_delta_constraint,
+    "phase32 should enable RTK-valid horizontal velocity delta");
+  ExpectTrue(
+    !config.enable_horizontal_velocity_delta_constraint,
+    "phase32 top-level run should keep horizontal velocity delta inactive");
+  ExpectTrue(
+    std::abs(config.rtk_valid_horizontal_velocity_delta_sigma_mps - 0.05) < 1e-15,
+    "phase32 RTK-valid horizontal velocity delta sigma should load");
+  ExpectTrue(
     config.enable_rtk_vertical_drift_reference,
     "phase32 should keep RTK drift reference");
   ExpectTrue(
@@ -1134,6 +1143,15 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
   ExpectTrue(
     std::abs(config.rtk_outage_velocity_delta_3d_sigma_mps - 0.02) < 1e-15,
     "default outage 3D velocity sigma should keep outage boundary speeds IMU-continuous");
+  ExpectTrue(
+    config.enable_rtk_valid_horizontal_velocity_delta_constraint,
+    "default config should enable RTK-valid horizontal velocity delta");
+  ExpectTrue(
+    !config.enable_horizontal_velocity_delta_constraint,
+    "default top-level config should keep horizontal velocity delta inactive");
+  ExpectTrue(
+    std::abs(config.rtk_valid_horizontal_velocity_delta_sigma_mps - 0.05) < 1e-15,
+    "default RTK-valid horizontal velocity delta sigma should match the tuned value");
 }
 
 void TestOldCompatibilityKeysAreRejected() {
@@ -1660,6 +1678,12 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_preoutage_fence_stride_s", "0.4");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_preoutage_fence_up_sigma_m", "0.004");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_preoutage_fence_vz_sigma_mps", "0.005");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "enable_rtk_valid_horizontal_velocity_delta_constraint",
+    "false");
+  offline_lc_minimal::OverrideConfigField(config, "enable_horizontal_velocity_delta_constraint", "true");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_valid_horizontal_velocity_delta_sigma_mps", "0.015");
   ExpectTrue(
     !config.enable_rtk_vertical_drift_outage_segmentation,
     "RTK vertical drift outage segmentation flag should parse");
@@ -1720,6 +1744,15 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
   ExpectTrue(
     std::abs(config.rtk_outage_preoutage_fence_vz_sigma_mps - 0.005) < 1e-15,
     "pre-outage fence vz sigma should parse");
+  ExpectTrue(
+    !config.enable_rtk_valid_horizontal_velocity_delta_constraint,
+    "RTK-valid horizontal velocity delta parent flag should parse");
+  ExpectTrue(
+    config.enable_horizontal_velocity_delta_constraint,
+    "active horizontal velocity delta flag should parse");
+  ExpectTrue(
+    std::abs(config.rtk_valid_horizontal_velocity_delta_sigma_mps - 0.015) < 1e-15,
+    "RTK-valid horizontal velocity delta sigma should parse");
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
   ExpectTrue(
     serialized.find("enable_rtk_vertical_drift_outage_segmentation=false") != std::string::npos,
@@ -1774,6 +1807,16 @@ void TestRtkVerticalDriftGateWeightingConfigValidation() {
   ExpectTrue(
     serialized.find("rtk_outage_preoutage_fence_stride_s=0.4") != std::string::npos,
     "pre-outage fence stride should be serialized");
+  ExpectTrue(
+    serialized.find("enable_rtk_valid_horizontal_velocity_delta_constraint=false") !=
+      std::string::npos,
+    "RTK-valid horizontal velocity delta parent flag should be serialized");
+  ExpectTrue(
+    serialized.find("enable_horizontal_velocity_delta_constraint=true") != std::string::npos,
+    "active horizontal velocity delta flag should be serialized");
+  ExpectTrue(
+    serialized.find("rtk_valid_horizontal_velocity_delta_sigma_mps=0.015") != std::string::npos,
+    "RTK-valid horizontal velocity delta sigma should be serialized");
   offline_lc_minimal::ValidateConfig(config);
 
   config = offline_lc_minimal::DefaultConfig();
@@ -4468,6 +4511,8 @@ void TestRtkOutageRecoveryConfigValidation() {
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_relative_attitude_sigma_rad", "3e-4");
   offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_velocity_delta_3d", "true");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_velocity_delta_3d_sigma_mps", "0.35");
+  offline_lc_minimal::OverrideConfigField(config, "enable_horizontal_velocity_delta_constraint", "true");
+  offline_lc_minimal::OverrideConfigField(config, "rtk_valid_horizontal_velocity_delta_sigma_mps", "0.015");
   offline_lc_minimal::OverrideConfigField(config, "enable_rtk_outage_boundary_constraints", "true");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_recovery_reference_min_fix_samples", "6");
   offline_lc_minimal::OverrideConfigField(config, "rtk_outage_recovery_reference_max_duration_s", "1.5");
@@ -4494,6 +4539,12 @@ void TestRtkOutageRecoveryConfigValidation() {
   ExpectTrue(
     std::abs(config.rtk_outage_velocity_delta_3d_sigma_mps - 0.35) < 1e-12,
     "outage 3D velocity sigma should parse");
+  ExpectTrue(
+    config.enable_horizontal_velocity_delta_constraint,
+    "active horizontal velocity delta flag should parse");
+  ExpectTrue(
+    std::abs(config.rtk_valid_horizontal_velocity_delta_sigma_mps - 0.015) < 1e-12,
+    "RTK-valid horizontal velocity delta sigma should parse");
   ExpectTrue(config.enable_rtk_outage_boundary_constraints,
              "outage boundary constraint flag should parse");
   ExpectTrue(config.rtk_outage_recovery_reference_min_fix_samples == 6,
@@ -4545,6 +4596,16 @@ void TestRtkOutageRecoveryConfigValidation() {
     threw = std::string(exception.what()).find("RTK outage smoothing settings") != std::string::npos;
   }
   ExpectTrue(threw, "non-positive outage 3D velocity sigma should be rejected");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.rtk_valid_horizontal_velocity_delta_sigma_mps = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("RTK outage smoothing settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "non-positive RTK-valid horizontal velocity delta sigma should be rejected");
 
   config = offline_lc_minimal::DefaultConfig();
   config.rtk_outage_segmented_batch_max_outages = -1;

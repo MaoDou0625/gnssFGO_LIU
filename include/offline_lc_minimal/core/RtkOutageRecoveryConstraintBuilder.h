@@ -10,17 +10,10 @@
 
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Types.h"
+#include "offline_lc_minimal/core/VelocityDeltaPropagationRecord.h"
 #include "offline_lc_minimal/core/VerticalMotionConstraintBuilder.h"
 
 namespace offline_lc_minimal {
-
-struct VelocityDeltaPropagationRecord {
-  std::size_t state_index_i = 0;
-  std::size_t state_index_j = 0;
-  double start_time_s = 0.0;
-  double end_time_s = 0.0;
-  gtsam::Vector3 target_delta_v_mps = gtsam::Vector3::Zero();
-};
 
 struct RtkOutageRecoveryConstraintBuildRequest {
   const OfflineRunnerConfig *config = nullptr;

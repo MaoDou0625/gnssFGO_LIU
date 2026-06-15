@@ -486,6 +486,7 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.run_summary.rtk_outage_attitude_hold_factor_count = 0;
   assembled.run_summary.rtk_outage_relative_attitude_factor_count = 0;
   assembled.run_summary.rtk_outage_velocity_delta_3d_factor_count = 0;
+  assembled.run_summary.horizontal_velocity_delta_factor_count = 0;
   assembled.run_summary.body_z_bias_reestimate_segment_count = 0;
   assembled.run_summary.body_z_bias_reestimate_boundary_break_count = 0;
   assembled.run_summary.body_z_bias_reestimate_prior_factor_count = 0;
@@ -595,6 +596,8 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       piece.result.run_summary.rtk_outage_relative_attitude_factor_count;
     assembled.run_summary.rtk_outage_velocity_delta_3d_factor_count +=
       piece.result.run_summary.rtk_outage_velocity_delta_3d_factor_count;
+    assembled.run_summary.horizontal_velocity_delta_factor_count +=
+      piece.result.run_summary.horizontal_velocity_delta_factor_count;
     assembled.run_summary.body_z_bias_reestimate_segment_count +=
       piece.result.run_summary.body_z_bias_reestimate_segment_count;
     assembled.run_summary.body_z_bias_reestimate_boundary_break_count +=

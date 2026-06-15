@@ -184,6 +184,7 @@ struct RunSummary {
   std::size_t rtk_outage_attitude_hold_factor_count = 0;
   std::size_t rtk_outage_relative_attitude_factor_count = 0;
   std::size_t rtk_outage_velocity_delta_3d_factor_count = 0;
+  std::size_t horizontal_velocity_delta_factor_count = 0;
   double rtk_outage_attitude_hold_max_abs_residual_rad =
     std::numeric_limits<double>::quiet_NaN();
   double rtk_outage_relative_attitude_max_abs_residual_rad =
@@ -711,6 +712,8 @@ struct RunSummary {
         << rtk_outage_relative_attitude_factor_count << '\n'
         << "rtk_outage_velocity_delta_3d_factor_count="
         << rtk_outage_velocity_delta_3d_factor_count << '\n'
+        << "horizontal_velocity_delta_factor_count="
+        << horizontal_velocity_delta_factor_count << '\n'
         << "rtk_outage_attitude_hold_max_abs_residual_rad="
         << rtk_outage_attitude_hold_max_abs_residual_rad << '\n'
         << "rtk_outage_relative_attitude_max_abs_residual_rad="

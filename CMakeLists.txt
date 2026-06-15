@@ -74,6 +74,7 @@ add_library(offline_lc_minimal_lib
   src/core/GnssPreOutageQualityOverride.cpp
   src/core/GnssVerticalReferenceSelector.cpp
   src/core/GraphTimelineBuilder.cpp
+  src/core/HorizontalVelocityDeltaConstraintBuilder.cpp
   src/core/ImuIntegrationUtils.cpp
   src/core/ImuRateAvpReconstructor.cpp
   src/core/InitialStaticBiasConstraintBuilder.cpp

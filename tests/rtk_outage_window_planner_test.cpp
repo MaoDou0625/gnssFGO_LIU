@@ -694,6 +694,7 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
     bool initial_dynamic_static_detection_enabled = false;
     bool initial_dynamic_static_lowpass_protection_enabled = false;
     bool initial_dynamic_static_vz_constraint_enabled = false;
+    bool horizontal_velocity_delta_enabled = false;
   };
   std::vector<Call> calls;
 
@@ -724,7 +725,8 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
       child_config.enable_stage1_yaw_refinement,
       child_config.enable_initial_dynamic_static_detection,
       child_config.enable_initial_dynamic_static_lowpass_protection,
-      child_config.enable_initial_dynamic_static_vz_constraint});
+      child_config.enable_initial_dynamic_static_vz_constraint,
+      child_config.enable_horizontal_velocity_delta_constraint});
     offline_lc_minimal::OfflineRunResult result;
     result.trajectory = {
       MakeTrajectoryRow(child_config.processing_start_time_s, 0.0),
@@ -778,6 +780,15 @@ void TestSegmentedBatchRunnerPreservesAppliedStandalonePrefixFinalScales() {
       !calls[1].initial_dynamic_static_lowpass_protection_enabled &&
       !calls[1].initial_dynamic_static_vz_constraint_enabled,
     "outage child should disable initial dynamic static settings");
+  ExpectTrue(
+    calls[0].horizontal_velocity_delta_enabled,
+    "standalone prefix child should enable horizontal IMU delta-v constraints");
+  ExpectTrue(
+    !calls[1].horizontal_velocity_delta_enabled,
+    "outage child should not enable RTK-valid horizontal IMU delta-v constraints");
+  ExpectTrue(
+    calls[2].horizontal_velocity_delta_enabled,
+    "post child should enable horizontal IMU delta-v constraints");
   ExpectTrue(
     std::abs(calls[1].dvz_sigma_scale - 10.0) < 1e-15,
     "outage child should keep relaxed DVZ output sigma scale");

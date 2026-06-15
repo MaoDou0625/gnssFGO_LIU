@@ -73,6 +73,8 @@ OfflineRunnerConfig MakeStandalonePrefixChildConfig(
       GnssVerticalReferenceSource::kRtkDriftLowpass) {
     config.enable_rtk_vertical_lowpass_reference = false;
   }
+  config.enable_horizontal_velocity_delta_constraint =
+    config.enable_rtk_valid_horizontal_velocity_delta_constraint;
   config.processing_start_time_s = 0.0;
   if (source_outage != nullptr) {
     config.processing_end_time_s = source_outage->start_time_s;
@@ -101,6 +103,7 @@ OfflineRunnerConfig MakeChildConfig(
       GnssVerticalReferenceSource::kRtkDriftLowpass) {
     config.enable_rtk_vertical_lowpass_reference = false;
   }
+  config.enable_horizontal_velocity_delta_constraint = false;
   config.processing_start_time_s = segment.start_time_s;
   config.processing_end_time_s = segment.end_time_s;
 
@@ -114,6 +117,8 @@ OfflineRunnerConfig MakeChildConfig(
     } else {
       config.processing_start_time_s = segment.start_time_s;
     }
+    config.enable_horizontal_velocity_delta_constraint =
+      config.enable_rtk_valid_horizontal_velocity_delta_constraint;
     config.enable_rtk_outage_smoothing = false;
     config.enable_initial_static_subgraph = false;
   }

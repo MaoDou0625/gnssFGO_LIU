@@ -711,6 +711,7 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       !std::isfinite(config.rtk_outage_absolute_attitude_sigma_rad) ||
       !std::isfinite(config.rtk_outage_relative_attitude_sigma_rad) ||
       !std::isfinite(config.rtk_outage_velocity_delta_3d_sigma_mps) ||
+      !std::isfinite(config.rtk_valid_horizontal_velocity_delta_sigma_mps) ||
       config.rtk_outage_min_gap_s <= 0.0 ||
       config.rtk_outage_position_ramp_sigma_m <= 0.0 ||
       config.rtk_outage_velocity_delta_sigma_mps <= 0.0 ||
@@ -719,6 +720,7 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.rtk_outage_absolute_attitude_sigma_rad <= 0.0 ||
       config.rtk_outage_relative_attitude_sigma_rad <= 0.0 ||
       config.rtk_outage_velocity_delta_3d_sigma_mps <= 0.0 ||
+      config.rtk_valid_horizontal_velocity_delta_sigma_mps <= 0.0 ||
       config.rtk_outage_position_ramp_stride <= 0) {
     throw std::runtime_error("RTK outage smoothing settings must be positive");
   }
@@ -1626,6 +1628,12 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.enable_rtk_outage_velocity_delta_3d = ParseBool(normalized_value);
   } else if (normalized_key == "rtk_outage_velocity_delta_3d_sigma_mps") {
     config.rtk_outage_velocity_delta_3d_sigma_mps = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_rtk_valid_horizontal_velocity_delta_constraint") {
+    config.enable_rtk_valid_horizontal_velocity_delta_constraint = ParseBool(normalized_value);
+  } else if (normalized_key == "enable_horizontal_velocity_delta_constraint") {
+    config.enable_horizontal_velocity_delta_constraint = ParseBool(normalized_value);
+  } else if (normalized_key == "rtk_valid_horizontal_velocity_delta_sigma_mps") {
+    config.rtk_valid_horizontal_velocity_delta_sigma_mps = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_rtk_velocity_constraint") {
     config.enable_rtk_velocity_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "rtk_velocity_window_s") {
@@ -2375,6 +2383,12 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.enable_rtk_outage_velocity_delta_3d ? "true" : "false") << '\n'
     << "rtk_outage_velocity_delta_3d_sigma_mps="
     << config.rtk_outage_velocity_delta_3d_sigma_mps << '\n'
+    << "enable_rtk_valid_horizontal_velocity_delta_constraint="
+    << (config.enable_rtk_valid_horizontal_velocity_delta_constraint ? "true" : "false") << '\n'
+    << "enable_horizontal_velocity_delta_constraint="
+    << (config.enable_horizontal_velocity_delta_constraint ? "true" : "false") << '\n'
+    << "rtk_valid_horizontal_velocity_delta_sigma_mps="
+    << config.rtk_valid_horizontal_velocity_delta_sigma_mps << '\n'
     << "enable_rtk_velocity_constraint="
     << (config.enable_rtk_velocity_constraint ? "true" : "false") << '\n'
     << "rtk_velocity_window_s=" << config.rtk_velocity_window_s << '\n'
