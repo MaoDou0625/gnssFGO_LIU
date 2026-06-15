@@ -83,6 +83,7 @@ add_library(offline_lc_minimal_lib
   src/core/InitialStaticPositionConstraintBuilder.cpp
   src/core/InitialStaticRtkHeightConstraintBuilder.cpp
   src/core/LateStaticDetector.cpp
+  src/core/LateStaticReferenceEstimator.cpp
   src/core/LateStaticVerticalConstraintBuilder.cpp
   src/core/RunDiagnosticsBuilder.cpp
   src/core/OptimizationStagePolicy.cpp

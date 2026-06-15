@@ -13,6 +13,7 @@
 #include "offline_lc_minimal/core/InitialDynamicStaticConstraintBuilder.h"
 #include "offline_lc_minimal/core/InitialDynamicStaticDetector.h"
 #include "offline_lc_minimal/core/LateStaticDetector.h"
+#include "offline_lc_minimal/core/LateStaticReferenceEstimator.h"
 #include "offline_lc_minimal/core/LateStaticVerticalConstraintBuilder.h"
 #include "offline_lc_minimal/factor/StaticVerticalPositionHoldFactor.h"
 #include "offline_lc_minimal/factor/VerticalRtkFactors.h"
@@ -327,6 +328,51 @@ void TestLateStaticEstimatorAppliesGyroScale() {
     "acc norm std threshold should come from config");
 }
 
+void TestLateStaticReferenceEstimatorUsesWindowRtkHuberMean() {
+  std::vector<offline_lc_minimal::LateStaticWindowRow> windows(1U);
+  windows.front().start_time_s = 10.0;
+  windows.front().end_time_s = 15.0;
+  windows.front().duration_s = 5.0;
+  windows.front().valid = true;
+  windows.front().rtk_median_up_m = 1.0;
+  windows.front().rtk_up_range_m = 0.0;
+
+  std::vector<offline_lc_minimal::GnssSolutionSample> gnss;
+  const std::vector<double> up_values = {0.000, 0.001, 0.002, 0.003, 0.004, 0.100};
+  for (std::size_t i = 0; i < up_values.size(); ++i) {
+    auto sample = MakeGnssSample(10.0 + static_cast<double>(i), 0.0, up_values[i]);
+    sample.enu_position_m.z() = up_values[i];
+    gnss.push_back(sample);
+  }
+  auto outside = MakeGnssSample(20.0, 0.0, 5.0);
+  outside.enu_position_m.z() = 5.0;
+  gnss.push_back(outside);
+  auto no_solution = MakeGnssSample(12.0, 0.0, -5.0);
+  no_solution.enu_position_m.z() = -5.0;
+  no_solution.gnssfgo_type_code = 4;
+  gnss.push_back(no_solution);
+
+  offline_lc_minimal::LateStaticReferenceEstimationRequest request;
+  request.gnss_samples = &gnss;
+  request.windows = &windows;
+  request.should_use_rtkfix_sample =
+    [](const offline_lc_minimal::GnssSolutionSample &) { return true; };
+  request.corrected_time_s =
+    [](const offline_lc_minimal::GnssSolutionSample &sample) {
+      return sample.time_s;
+    };
+
+  offline_lc_minimal::LateStaticReferenceEstimator(std::move(request)).Estimate();
+
+  ExpectTrue(windows.front().valid, "window should remain valid with RTK samples");
+  ExpectTrue(windows.front().rtk_median_up_m > 0.0,
+             "Huber reference should use in-window RTK samples");
+  ExpectTrue(windows.front().rtk_median_up_m < 0.010,
+             "Huber reference should not be pulled to the large outlier");
+  ExpectTrue(std::abs(windows.front().rtk_up_range_m - 0.100) < 1e-12,
+             "RTK Up range should use all in-window RTKFIX samples");
+}
+
 void TestDetectorExcludesInitialStaticAndOutageWindows() {
   auto config = MakeLateStaticConfig();
   config.late_static_min_duration_s = 4.0;
@@ -601,6 +647,9 @@ int main() {
     RunTest(
       "TestLateStaticEstimatorAppliesGyroScale",
       TestLateStaticEstimatorAppliesGyroScale);
+    RunTest(
+      "TestLateStaticReferenceEstimatorUsesWindowRtkHuberMean",
+      TestLateStaticReferenceEstimatorUsesWindowRtkHuberMean);
     RunTest(
       "TestLateStaticVerticalBuilderAddsOnlyUpAndVzFactors",
       TestLateStaticVerticalBuilderAddsOnlyUpAndVzFactors);

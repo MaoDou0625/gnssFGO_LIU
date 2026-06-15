@@ -38,6 +38,7 @@
 #include "offline_lc_minimal/core/InitialStaticRtkHeightConstraintBuilder.h"
 #include "offline_lc_minimal/core/ImuRateAvpReconstructor.h"
 #include "offline_lc_minimal/core/LateStaticDetector.h"
+#include "offline_lc_minimal/core/LateStaticReferenceEstimator.h"
 #include "offline_lc_minimal/core/LateStaticVerticalConstraintBuilder.h"
 #include "offline_lc_minimal/core/RunDiagnosticsBuilder.h"
 #include "offline_lc_minimal/core/RtkOutageInitialValueSmoother.h"
@@ -1478,6 +1479,18 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       LateStaticWindowDetector(config_).Detect(
         late_static_thresholds,
         &run_result.late_static_feature_diagnostics);
+    LateStaticReferenceEstimationRequest late_static_reference_request;
+    late_static_reference_request.gnss_samples = &dataset.gnss_samples;
+    late_static_reference_request.windows = &run_result.late_static_windows;
+    late_static_reference_request.should_use_rtkfix_sample =
+      [&](const GnssSolutionSample &sample) {
+        return sample.has_enu_position && PassesGnssQualityFilters(sample);
+      };
+    late_static_reference_request.corrected_time_s =
+      [&](const GnssSolutionSample &sample) {
+        return CorrectedGnssTime(sample);
+      };
+    LateStaticReferenceEstimator(std::move(late_static_reference_request)).Estimate();
     run_result.run_summary.late_static_detection_enabled = true;
     run_result.run_summary.late_static_feature_window_count =
       run_result.late_static_feature_diagnostics.size();
