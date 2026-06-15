@@ -69,6 +69,12 @@ bool HasVelocityReference(const RtkOutageBoundaryReferenceRow &reference) {
          (reference.has_vz && std::isfinite(reference.reference_vz_mps));
 }
 
+bool IsUsableReference(const RtkOutageBoundaryReferenceRow &reference) {
+  return reference.valid &&
+         (reference.target_state_index >= 0 || std::isfinite(reference.target_time_s)) &&
+         (HasPositionReference(reference) || HasVelocityReference(reference));
+}
+
 gtsam::Point3 BoundaryPosition(
   const RtkOutageBoundaryReferenceRow &reference,
   const gtsam::Point3 &fallback) {
@@ -103,6 +109,12 @@ gtsam::Vector3 BoundaryVelocity(
   return velocity;
 }
 
+void TightenPositiveSigma(double candidate_sigma, double &target_sigma) {
+  if (std::isfinite(candidate_sigma) && candidate_sigma > 0.0) {
+    target_sigma = std::min(target_sigma, candidate_sigma);
+  }
+}
+
 }  // namespace
 
 void ApplyRtkOutageBoundaryPositionVelocityInitialValues(
@@ -117,9 +129,7 @@ void ApplyRtkOutageBoundaryPositionVelocityInitialValues(
   }
 
   for (const auto &reference : boundary_references) {
-    if (!reference.valid ||
-        (reference.target_state_index < 0 && !std::isfinite(reference.target_time_s)) ||
-        (!HasPositionReference(reference) && !HasVelocityReference(reference))) {
+    if (!IsUsableReference(reference)) {
       continue;
     }
     const std::size_t state_index = BoundaryStateIndex(state_timestamps, reference);
@@ -140,6 +150,58 @@ void ApplyRtkOutageBoundaryPositionVelocityInitialValues(
           reference,
           values.at<gtsam::Vector3>(velocity_key)));
     }
+  }
+}
+
+void ApplyRtkOutageBoundaryPriorTarget(
+  const std::vector<RtkOutageBoundaryReferenceRow> &boundary_references,
+  const double initial_time_s,
+  gtsam::Pose3 &initial_pose_world,
+  gtsam::Vector3 &initial_velocity,
+  gtsam::Vector6 &pose_sigmas,
+  gtsam::Vector3 &velocity_sigmas) {
+  if (boundary_references.empty() || !std::isfinite(initial_time_s)) {
+    return;
+  }
+
+  for (const auto &reference : boundary_references) {
+    if (!IsUsableReference(reference) ||
+        !std::isfinite(reference.target_time_s) ||
+        std::abs(reference.target_time_s - initial_time_s) > 1.0e-6) {
+      continue;
+    }
+
+    gtsam::Rot3 rotation = initial_pose_world.rotation();
+    if (reference.has_attitude &&
+        reference.reference_rotation.matrix().allFinite()) {
+      rotation = reference.reference_rotation;
+      TightenPositiveSigma(reference.attitude_sigma_rad, pose_sigmas(0));
+      TightenPositiveSigma(reference.attitude_sigma_rad, pose_sigmas(1));
+      TightenPositiveSigma(reference.attitude_sigma_rad, pose_sigmas(2));
+    }
+
+    initial_pose_world = gtsam::Pose3(
+      rotation,
+      BoundaryPosition(reference, initial_pose_world.translation()));
+    initial_velocity = BoundaryVelocity(reference, initial_velocity);
+
+    if (reference.has_horizontal_position &&
+        reference.reference_horizontal_position_m.allFinite()) {
+      TightenPositiveSigma(reference.horizontal_position_sigma_m, pose_sigmas(3));
+      TightenPositiveSigma(reference.horizontal_position_sigma_m, pose_sigmas(4));
+    }
+    if (reference.has_up && std::isfinite(reference.reference_up_m)) {
+      TightenPositiveSigma(reference.up_sigma_m, pose_sigmas(5));
+    }
+    if (reference.has_horizontal_velocity &&
+        reference.reference_horizontal_velocity_mps.allFinite()) {
+      TightenPositiveSigma(reference.horizontal_velocity_sigma_mps, velocity_sigmas(0));
+      TightenPositiveSigma(reference.horizontal_velocity_sigma_mps, velocity_sigmas(1));
+    }
+    if (reference.has_vz && std::isfinite(reference.reference_vz_mps)) {
+      TightenPositiveSigma(reference.vz_sigma_mps, velocity_sigmas(2));
+    }
+    return;
   }
 }
 

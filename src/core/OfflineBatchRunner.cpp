@@ -176,62 +176,6 @@ std::vector<RtkOutageBoundaryReferenceRow> InitialValueBoundaryReferences(
   return references;
 }
 
-void ApplyInitialBoundaryReferenceToPriorTarget(
-  const Stage2VelocityReference *reference,
-  const double initial_time_s,
-  gtsam::Pose3 &initial_pose_world,
-  gtsam::Vector3 &initial_velocity,
-  std::optional<double> &attitude_sigma_rad) {
-  if (reference == nullptr || !std::isfinite(initial_time_s)) {
-    return;
-  }
-  const std::vector<RtkOutageBoundaryReferenceRow> boundary_references =
-    InitialValueBoundaryReferences(reference);
-  for (const RtkOutageBoundaryReferenceRow &boundary : boundary_references) {
-    if (!boundary.valid ||
-        !std::isfinite(boundary.target_time_s) ||
-        std::abs(boundary.target_time_s - initial_time_s) > 1.0e-6) {
-      continue;
-    }
-
-    gtsam::Point3 translation = initial_pose_world.translation();
-    if (boundary.has_horizontal_position &&
-        boundary.reference_horizontal_position_m.allFinite()) {
-      translation = gtsam::Point3(
-        boundary.reference_horizontal_position_m.x(),
-        boundary.reference_horizontal_position_m.y(),
-        translation.z());
-    }
-    if (boundary.has_up && std::isfinite(boundary.reference_up_m)) {
-      translation = gtsam::Point3(
-        translation.x(),
-        translation.y(),
-        boundary.reference_up_m);
-    }
-
-    gtsam::Rot3 rotation = initial_pose_world.rotation();
-    if (boundary.has_attitude &&
-        boundary.reference_rotation.matrix().allFinite()) {
-      rotation = boundary.reference_rotation;
-      if (std::isfinite(boundary.attitude_sigma_rad) &&
-          boundary.attitude_sigma_rad > 0.0) {
-        attitude_sigma_rad = boundary.attitude_sigma_rad;
-      }
-    }
-    initial_pose_world = gtsam::Pose3(rotation, translation);
-
-    if (boundary.has_horizontal_velocity &&
-        boundary.reference_horizontal_velocity_mps.allFinite()) {
-      initial_velocity.x() = boundary.reference_horizontal_velocity_mps.x();
-      initial_velocity.y() = boundary.reference_horizontal_velocity_mps.y();
-    }
-    if (boundary.has_vz && std::isfinite(boundary.reference_vz_mps)) {
-      initial_velocity.z() = boundary.reference_vz_mps;
-    }
-    return;
-  }
-}
-
 }  // namespace
 
 OfflineBatchRunner::OfflineBatchRunner(OfflineRunnerConfig config)
@@ -741,13 +685,6 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       initial_position_enu.z()));
   gtsam::Vector3 initial_velocity = gtsam::Vector3::Zero();
   const gtsam::imuBias::ConstantBias initial_bias = initial_pose.imu_bias;
-  std::optional<double> initial_boundary_attitude_sigma_rad;
-  ApplyInitialBoundaryReferenceToPriorTarget(
-    active_stage2_reference,
-    state_timestamps.front(),
-    initial_pose_world,
-    initial_velocity,
-    initial_boundary_attitude_sigma_rad);
   const std::size_t initial_imu_index = FindNearestImuIndex(dataset.imu_samples, state_timestamps.front());
   const gtsam::Vector3 initial_omega =
     initial_bias.correctGyroscope(dataset.imu_samples[initial_imu_index].gyro_radps);
@@ -762,9 +699,15 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       config_.initial_position_sigma_m,
       config_.initial_position_sigma_m,
       config_.initial_position_sigma_m).finished();
-  if (initial_boundary_attitude_sigma_rad.has_value()) {
-    pose_sigmas.head<3>().setConstant(*initial_boundary_attitude_sigma_rad);
-  }
+  gtsam::Vector3 velocity_sigmas =
+    gtsam::Vector3::Constant(config_.initial_velocity_sigma_mps);
+  ApplyRtkOutageBoundaryPriorTarget(
+    InitialValueBoundaryReferences(active_stage2_reference),
+    state_timestamps.front(),
+    initial_pose_world,
+    initial_velocity,
+    pose_sigmas,
+    velocity_sigmas);
 
   graph.add(gtsam::PriorFactor<gtsam::Pose3>(
     X(0),
@@ -773,7 +716,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   graph.add(gtsam::PriorFactor<gtsam::Vector3>(
     V(0),
     initial_velocity,
-    gtsam::noiseModel::Isotropic::Sigma(3, config_.initial_velocity_sigma_mps)));
+    gtsam::noiseModel::Diagonal::Sigmas(velocity_sigmas)));
   graph.add(gtsam::PriorFactor<gtsam::imuBias::ConstantBias>(
     B(0),
     initial_bias,

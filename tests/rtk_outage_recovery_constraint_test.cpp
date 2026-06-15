@@ -869,6 +869,73 @@ void TestBoundaryInitialValueApplicatorAppliesPostStartPositionVelocity() {
              "post-start initial value should update vertical velocity");
 }
 
+void TestBoundaryPriorTargetUsesPostStartPositionVelocitySigmas() {
+  offline_lc_minimal::RtkOutageBoundaryReferenceRow reference;
+  reference.window_index = 3U;
+  reference.boundary_role = "POST_START";
+  reference.source_type = "POST_RECOVERY_RTK";
+  reference.target_time_s = 9.2;
+  reference.valid = true;
+  reference.has_attitude = true;
+  reference.has_horizontal_position = true;
+  reference.has_horizontal_velocity = true;
+  reference.has_up = true;
+  reference.has_vz = true;
+  reference.reference_rotation = gtsam::Rot3::Ypr(0.3, -0.2, 0.1);
+  reference.reference_horizontal_position_m = Eigen::Vector2d(2.0, -3.0);
+  reference.reference_horizontal_velocity_mps = Eigen::Vector2d(0.1, -1.4);
+  reference.reference_up_m = 4.0;
+  reference.reference_vz_mps = -0.5;
+  reference.attitude_sigma_rad = 0.004;
+  reference.horizontal_position_sigma_m = 0.05;
+  reference.up_sigma_m = 0.006;
+  reference.horizontal_velocity_sigma_mps = 0.001;
+  reference.vz_sigma_mps = 0.02;
+
+  gtsam::Pose3 initial_pose(
+    gtsam::Rot3::Identity(),
+    gtsam::Point3(10.0, 20.0, 30.0));
+  gtsam::Vector3 initial_velocity(1.0, 2.0, 3.0);
+  gtsam::Vector6 pose_sigmas =
+    (gtsam::Vector6() << 1.0, 1.0, 2.0, 5.0, 5.0, 5.0).finished();
+  gtsam::Vector3 velocity_sigmas(4.0, 4.0, 4.0);
+
+  ApplyRtkOutageBoundaryPriorTarget(
+    std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow>{reference},
+    9.2,
+    initial_pose,
+    initial_velocity,
+    pose_sigmas,
+    velocity_sigmas);
+
+  ExpectNear(initial_pose.translation().x(), 2.0, 1e-12,
+             "post-start prior should update east");
+  ExpectNear(initial_pose.translation().y(), -3.0, 1e-12,
+             "post-start prior should update north");
+  ExpectNear(initial_pose.translation().z(), 4.0, 1e-12,
+             "post-start prior should update up");
+  ExpectNear(initial_pose.rotation().ypr().x(), 0.3, 1e-12,
+             "post-start prior should update yaw");
+  ExpectNear(initial_velocity.x(), 0.1, 1e-12,
+             "post-start prior should update east velocity");
+  ExpectNear(initial_velocity.y(), -1.4, 1e-12,
+             "post-start prior should update north velocity");
+  ExpectNear(initial_velocity.z(), -0.5, 1e-12,
+             "post-start prior should update vertical velocity");
+  ExpectNear(pose_sigmas(0), 0.004, 1e-12,
+             "post-start prior should use attitude sigma");
+  ExpectNear(pose_sigmas(3), 0.05, 1e-12,
+             "post-start prior should use horizontal position sigma");
+  ExpectNear(pose_sigmas(5), 0.006, 1e-12,
+             "post-start prior should use up sigma");
+  ExpectNear(velocity_sigmas(0), 0.001, 1e-12,
+             "post-start prior should use horizontal velocity sigma");
+  ExpectNear(velocity_sigmas(1), 0.001, 1e-12,
+             "post-start prior should use horizontal velocity sigma on north");
+  ExpectNear(velocity_sigmas(2), 0.02, 1e-12,
+             "post-start prior should use vertical velocity sigma");
+}
+
 void TestBoundaryStateInitialValuesDoNotRequireAttitude() {
   const std::vector<double> timestamps{0.0, 1.0, 2.0};
   std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> refs(2U);
@@ -1859,6 +1926,9 @@ int main() {
     RunTest(
       "TestBoundaryInitialValueApplicatorAppliesPostStartPositionVelocity",
       TestBoundaryInitialValueApplicatorAppliesPostStartPositionVelocity);
+    RunTest(
+      "TestBoundaryPriorTargetUsesPostStartPositionVelocitySigmas",
+      TestBoundaryPriorTargetUsesPostStartPositionVelocitySigmas);
     RunTest(
       "TestBoundaryStateInitialValuesDoNotRequireAttitude",
       TestBoundaryStateInitialValuesDoNotRequireAttitude);
