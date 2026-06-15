@@ -952,7 +952,7 @@ void TestBoundaryInitialValueApplicatorAppliesPostStartPositionVelocity() {
              "post-start initial value should update vertical velocity");
 }
 
-void TestBoundaryPriorTargetUsesPostStartPositionVelocitySigmas() {
+void TestBoundaryPriorTargetKeepsPostStartPositionVelocityPriorsLoose() {
   offline_lc_minimal::RtkOutageBoundaryReferenceRow reference;
   reference.window_index = 3U;
   reference.boundary_role = "POST_START";
@@ -1007,16 +1007,18 @@ void TestBoundaryPriorTargetUsesPostStartPositionVelocitySigmas() {
              "post-start prior should update vertical velocity");
   ExpectNear(pose_sigmas(0), 0.004, 1e-12,
              "post-start prior should use attitude sigma");
-  ExpectNear(pose_sigmas(3), 0.05, 1e-12,
-             "post-start prior should use horizontal position sigma");
-  ExpectNear(pose_sigmas(5), 0.006, 1e-12,
-             "post-start prior should use up sigma");
-  ExpectNear(velocity_sigmas(0), 0.001, 1e-12,
-             "post-start prior should use horizontal velocity sigma");
-  ExpectNear(velocity_sigmas(1), 0.001, 1e-12,
-             "post-start prior should use horizontal velocity sigma on north");
-  ExpectNear(velocity_sigmas(2), 0.02, 1e-12,
-             "post-start prior should use vertical velocity sigma");
+  ExpectNear(pose_sigmas(3), 5.0, 1e-12,
+             "post-start initial position should not tighten east prior sigma");
+  ExpectNear(pose_sigmas(4), 5.0, 1e-12,
+             "post-start initial position should not tighten north prior sigma");
+  ExpectNear(pose_sigmas(5), 5.0, 1e-12,
+             "post-start initial position should not tighten up prior sigma");
+  ExpectNear(velocity_sigmas(0), 4.0, 1e-12,
+             "post-start initial velocity should not tighten east velocity prior sigma");
+  ExpectNear(velocity_sigmas(1), 4.0, 1e-12,
+             "post-start initial velocity should not tighten north velocity prior sigma");
+  ExpectNear(velocity_sigmas(2), 4.0, 1e-12,
+             "post-start initial velocity should not tighten vertical velocity prior sigma");
 }
 
 void TestBoundaryStateInitialValuesDoNotRequireAttitude() {
@@ -2174,8 +2176,8 @@ int main() {
       "TestBoundaryInitialValueApplicatorAppliesPostStartPositionVelocity",
       TestBoundaryInitialValueApplicatorAppliesPostStartPositionVelocity);
     RunTest(
-      "TestBoundaryPriorTargetUsesPostStartPositionVelocitySigmas",
-      TestBoundaryPriorTargetUsesPostStartPositionVelocitySigmas);
+      "TestBoundaryPriorTargetKeepsPostStartPositionVelocityPriorsLoose",
+      TestBoundaryPriorTargetKeepsPostStartPositionVelocityPriorsLoose);
     RunTest(
       "TestBoundaryStateInitialValuesDoNotRequireAttitude",
       TestBoundaryStateInitialValuesDoNotRequireAttitude);

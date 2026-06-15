@@ -160,6 +160,7 @@ void ApplyRtkOutageBoundaryPriorTarget(
   gtsam::Vector3 &initial_velocity,
   gtsam::Vector6 &pose_sigmas,
   gtsam::Vector3 &velocity_sigmas) {
+  (void)velocity_sigmas;
   if (boundary_references.empty() || !std::isfinite(initial_time_s)) {
     return;
   }
@@ -184,23 +185,6 @@ void ApplyRtkOutageBoundaryPriorTarget(
       rotation,
       BoundaryPosition(reference, initial_pose_world.translation()));
     initial_velocity = BoundaryVelocity(reference, initial_velocity);
-
-    if (reference.has_horizontal_position &&
-        reference.reference_horizontal_position_m.allFinite()) {
-      TightenPositiveSigma(reference.horizontal_position_sigma_m, pose_sigmas(3));
-      TightenPositiveSigma(reference.horizontal_position_sigma_m, pose_sigmas(4));
-    }
-    if (reference.has_up && std::isfinite(reference.reference_up_m)) {
-      TightenPositiveSigma(reference.up_sigma_m, pose_sigmas(5));
-    }
-    if (reference.has_horizontal_velocity &&
-        reference.reference_horizontal_velocity_mps.allFinite()) {
-      TightenPositiveSigma(reference.horizontal_velocity_sigma_mps, velocity_sigmas(0));
-      TightenPositiveSigma(reference.horizontal_velocity_sigma_mps, velocity_sigmas(1));
-    }
-    if (reference.has_vz && std::isfinite(reference.reference_vz_mps)) {
-      TightenPositiveSigma(reference.vz_sigma_mps, velocity_sigmas(2));
-    }
     return;
   }
 }
