@@ -34,6 +34,7 @@ void RefreshReferenceValidity(RtkOutageBoundaryReferenceRow &reference) {
   reference.valid =
     reference.has_up || reference.has_vz || reference.has_ba_z ||
     reference.has_horizontal_position || reference.has_horizontal_velocity ||
+    reference.has_horizontal_velocity_delta ||
     reference.has_horizontal_position_velocity_handoff ||
     reference.has_vertical_position_velocity_handoff || reference.has_attitude;
   if (!reference.valid) {

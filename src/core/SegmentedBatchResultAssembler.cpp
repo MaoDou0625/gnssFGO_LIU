@@ -480,6 +480,7 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
   assembled.run_summary.rtk_outage_boundary_baz_factor_count = 0;
   assembled.run_summary.rtk_outage_boundary_horizontal_position_factor_count = 0;
   assembled.run_summary.rtk_outage_boundary_horizontal_velocity_factor_count = 0;
+  assembled.run_summary.rtk_outage_boundary_horizontal_velocity_delta_factor_count = 0;
   assembled.run_summary.rtk_outage_boundary_horizontal_position_velocity_handoff_factor_count = 0;
   assembled.run_summary.rtk_outage_boundary_vertical_position_velocity_handoff_factor_count = 0;
   assembled.run_summary.rtk_outage_boundary_attitude_factor_count = 0;
@@ -584,6 +585,8 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
       piece.result.run_summary.rtk_outage_boundary_horizontal_position_factor_count;
     assembled.run_summary.rtk_outage_boundary_horizontal_velocity_factor_count +=
       piece.result.run_summary.rtk_outage_boundary_horizontal_velocity_factor_count;
+    assembled.run_summary.rtk_outage_boundary_horizontal_velocity_delta_factor_count +=
+      piece.result.run_summary.rtk_outage_boundary_horizontal_velocity_delta_factor_count;
     assembled.run_summary.rtk_outage_boundary_horizontal_position_velocity_handoff_factor_count +=
       piece.result.run_summary.rtk_outage_boundary_horizontal_position_velocity_handoff_factor_count;
     assembled.run_summary.rtk_outage_boundary_vertical_position_velocity_handoff_factor_count +=

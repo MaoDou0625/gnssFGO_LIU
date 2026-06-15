@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -17,6 +18,7 @@
 #include "offline_lc_minimal/factor/AttitudeHoldFactor.h"
 #include "offline_lc_minimal/factor/HorizontalHoldFactor.h"
 #include "offline_lc_minimal/factor/HorizontalPositionVelocityHandoffFactor.h"
+#include "offline_lc_minimal/factor/HorizontalVelocityDeltaFactor.h"
 #include "offline_lc_minimal/factor/VerticalAccelBiasPriorFactor.h"
 #include "offline_lc_minimal/factor/VerticalPositionVelocityHandoffFactor.h"
 #include "offline_lc_minimal/factor/VerticalRtkFactors.h"
@@ -90,6 +92,61 @@ bool CanAddVector2Factor(
          std::isfinite(sigma) && sigma > 0.0;
 }
 
+bool CanAddHorizontalVelocityDeltaFactor(
+  const RtkOutageBoundaryReferenceRow &reference) {
+  return reference.add_horizontal_velocity_delta_constraint &&
+         reference.has_horizontal_velocity_delta &&
+         std::isfinite(reference.horizontal_velocity_delta_sigma_mps) &&
+         reference.horizontal_velocity_delta_sigma_mps > 0.0;
+}
+
+const VelocityDeltaPropagationRecord *FindIncomingVelocityDeltaRecord(
+  const std::vector<VelocityDeltaPropagationRecord> &records,
+  const std::size_t state_index) {
+  const auto it = std::find_if(
+    records.begin(),
+    records.end(),
+    [state_index](const VelocityDeltaPropagationRecord &record) {
+      return record.state_index_j == state_index &&
+             record.target_delta_v_mps.allFinite();
+    });
+  return it == records.end() ? nullptr : &(*it);
+}
+
+const VelocityDeltaPropagationRecord *FindOutgoingVelocityDeltaRecord(
+  const std::vector<VelocityDeltaPropagationRecord> &records,
+  const std::size_t state_index) {
+  const auto it = std::find_if(
+    records.begin(),
+    records.end(),
+    [state_index](const VelocityDeltaPropagationRecord &record) {
+      return record.state_index_i == state_index &&
+             record.target_delta_v_mps.allFinite();
+    });
+  return it == records.end() ? nullptr : &(*it);
+}
+
+const VelocityDeltaPropagationRecord *FindBoundaryVelocityDeltaRecord(
+  const std::vector<VelocityDeltaPropagationRecord> &records,
+  const RtkOutageBoundaryReferenceRow &reference,
+  const std::size_t state_index) {
+  if (reference.boundary_role == "OUTAGE_END_TERMINAL_VELOCITY") {
+    const VelocityDeltaPropagationRecord *outgoing =
+      FindOutgoingVelocityDeltaRecord(records, state_index);
+    if (outgoing != nullptr) {
+      return outgoing;
+    }
+  }
+  return FindIncomingVelocityDeltaRecord(records, state_index);
+}
+
+gtsam::Vector2 HorizontalTargetDeltaMps(
+  const VelocityDeltaPropagationRecord &record) {
+  return (gtsam::Vector2()
+    << record.target_delta_v_mps.x(),
+       record.target_delta_v_mps.y()).finished();
+}
+
 Eigen::Vector3d Rot3ToYpr(const gtsam::Rot3 &rotation) {
   const auto ypr = rotation.ypr();
   return Eigen::Vector3d(ypr.x(), ypr.y(), ypr.z());
@@ -147,6 +204,7 @@ RtkOutageBoundaryDiagnosticRow MakeDiagnostic(
   row.horizontal_position_sigma_m = reference.horizontal_position_sigma_m;
   row.reference_horizontal_velocity_mps = reference.reference_horizontal_velocity_mps;
   row.horizontal_velocity_sigma_mps = reference.horizontal_velocity_sigma_mps;
+  row.horizontal_velocity_delta_sigma_mps = reference.horizontal_velocity_delta_sigma_mps;
   row.horizontal_position_velocity_handoff_reference_time_s =
     reference.horizontal_position_velocity_handoff_reference_time_s;
   row.horizontal_position_velocity_handoff_dt_s =
@@ -218,6 +276,7 @@ void RtkOutageBoundaryConstraintBuilder::Build() const {
   request_.run_summary->rtk_outage_boundary_reference_count +=
     request_.boundary_references->size();
 
+  std::set<std::pair<std::size_t, std::size_t>> added_horizontal_velocity_delta_pairs;
   for (const auto &reference : *request_.boundary_references) {
     const std::size_t state_index =
       BoundaryStateIndex(*request_.state_timestamps, reference);
@@ -302,6 +361,51 @@ void RtkOutageBoundaryConstraintBuilder::Build() const {
       ++request_.run_summary->rtk_outage_boundary_horizontal_velocity_factor_count;
     }
 
+    const bool requested_horizontal_velocity_delta =
+      CanAddHorizontalVelocityDeltaFactor(reference);
+    bool add_horizontal_velocity_delta = false;
+    bool missing_horizontal_velocity_delta_record = false;
+    bool duplicate_horizontal_velocity_delta_record = false;
+    if (requested_horizontal_velocity_delta &&
+        request_.velocity_delta_records != nullptr) {
+      const VelocityDeltaPropagationRecord *record =
+        FindBoundaryVelocityDeltaRecord(
+          *request_.velocity_delta_records,
+          reference,
+          state_index);
+      if (record != nullptr) {
+        const std::pair<std::size_t, std::size_t> pair{
+          record->state_index_i,
+          record->state_index_j};
+        if (added_horizontal_velocity_delta_pairs.insert(pair).second) {
+          request_.graph->add(factor::HorizontalVelocityDeltaFactor(
+            symbol::V(record->state_index_i),
+            symbol::V(record->state_index_j),
+            HorizontalTargetDeltaMps(*record),
+            gtsam::noiseModel::Isotropic::Sigma(
+              2,
+              reference.horizontal_velocity_delta_sigma_mps)));
+          diagnostic.horizontal_velocity_delta_factor_added = true;
+          diagnostic.horizontal_velocity_delta_state_index_i = record->state_index_i;
+          diagnostic.horizontal_velocity_delta_state_index_j = record->state_index_j;
+          diagnostic.horizontal_velocity_delta_time_i_s = record->start_time_s;
+          diagnostic.horizontal_velocity_delta_time_j_s = record->end_time_s;
+          diagnostic.target_horizontal_velocity_delta_mps =
+            Eigen::Vector2d(
+              record->target_delta_v_mps.x(),
+              record->target_delta_v_mps.y());
+          ++request_.run_summary->rtk_outage_boundary_horizontal_velocity_delta_factor_count;
+          add_horizontal_velocity_delta = true;
+        } else {
+          duplicate_horizontal_velocity_delta_record = true;
+        }
+      } else {
+        missing_horizontal_velocity_delta_record = true;
+      }
+    } else if (requested_horizontal_velocity_delta) {
+      missing_horizontal_velocity_delta_record = true;
+    }
+
     const bool add_horizontal_position_velocity_handoff =
       CanAddHorizontalPositionVelocityHandoffFactor(reference, state_time_s);
     if (add_horizontal_position_velocity_handoff) {
@@ -372,9 +476,16 @@ void RtkOutageBoundaryConstraintBuilder::Build() const {
     }
 
     if (add_up || add_vz || add_ba_z || add_horizontal_position ||
-        add_horizontal_velocity || add_horizontal_position_velocity_handoff ||
+        add_horizontal_velocity || add_horizontal_velocity_delta ||
+        add_horizontal_position_velocity_handoff ||
         add_vertical_position_velocity_handoff || add_attitude) {
       diagnostic.skip_reason = "ADDED";
+    } else if (missing_horizontal_velocity_delta_record &&
+               (diagnostic.skip_reason == "UNSET" || diagnostic.skip_reason == "OK")) {
+      diagnostic.skip_reason = "missing_horizontal_velocity_delta_record";
+    } else if (duplicate_horizontal_velocity_delta_record &&
+               (diagnostic.skip_reason == "UNSET" || diagnostic.skip_reason == "OK")) {
+      diagnostic.skip_reason = "duplicate_horizontal_velocity_delta_record";
     } else if (diagnostic.skip_reason == "UNSET" || diagnostic.skip_reason == "OK") {
       diagnostic.skip_reason = "no_enabled_boundary_reference";
     }
@@ -412,6 +523,23 @@ void PopulateRtkOutageBoundaryDiagnostics(
         row.optimized_horizontal_velocity_mps - row.reference_horizontal_velocity_mps;
       row.horizontal_velocity_residual_norm_mps =
         row.horizontal_velocity_residual_mps.norm();
+    }
+    if (row.horizontal_velocity_delta_factor_added) {
+      const auto velocity_i =
+        optimized_values.at<gtsam::Vector3>(
+          symbol::V(row.horizontal_velocity_delta_state_index_i));
+      const auto velocity_j =
+        optimized_values.at<gtsam::Vector3>(
+          symbol::V(row.horizontal_velocity_delta_state_index_j));
+      row.optimized_horizontal_velocity_delta_mps =
+        Eigen::Vector2d(
+          velocity_j.x() - velocity_i.x(),
+          velocity_j.y() - velocity_i.y());
+      row.horizontal_velocity_delta_residual_mps =
+        row.optimized_horizontal_velocity_delta_mps -
+        row.target_horizontal_velocity_delta_mps;
+      row.horizontal_velocity_delta_residual_norm_mps =
+        row.horizontal_velocity_delta_residual_mps.norm();
     }
     if (row.horizontal_position_velocity_handoff_factor_added) {
       const auto pose = optimized_values.at<gtsam::Pose3>(symbol::X(row.target_state_index));

@@ -979,8 +979,11 @@ void TestSegmentedBatchRunnerPassesBoundaryAttitudeReferenceWithoutStage2Timelin
              "outage end should target the first used RTK boundary state");
   ExpectTrue(refs[2].has_horizontal_position && refs[2].add_horizontal_position_constraint,
               "outage end should constrain the duplicated post-first horizontal position");
-  ExpectTrue(refs[2].has_horizontal_velocity && refs[2].add_horizontal_velocity_constraint,
-              "outage end should constrain the duplicated post-first horizontal velocity");
+  ExpectTrue(refs[2].has_horizontal_velocity && !refs[2].add_horizontal_velocity_constraint,
+              "outage end should keep post-first velocity as a reference without a direct hold");
+  ExpectTrue(refs[2].has_horizontal_velocity_delta &&
+               refs[2].add_horizontal_velocity_delta_constraint,
+             "outage end should constrain the adjacent horizontal velocity delta");
   ExpectTrue(std::abs(refs[2].reference_horizontal_velocity_mps.x() - 0.1) < 1e-12,
               "outage end should receive nonzero east velocity from post probe");
   ExpectTrue(std::abs(refs[2].reference_horizontal_velocity_mps.y() + 1.4) < 1e-12,
@@ -1171,8 +1174,11 @@ void TestSegmentedBatchRunnerUsesPostFirstBoundaryWithHorizontalHandoff() {
   ExpectTrue(std::abs(outage_end_reference->target_time_s - 20.5) < 1e-12,
              "outage end boundary should target the first actually used RTKFIX state");
   ExpectTrue(outage_end_reference->has_horizontal_velocity &&
-               outage_end_reference->add_horizontal_velocity_constraint,
-             "outage end boundary should constrain duplicated post-first velocity");
+               !outage_end_reference->add_horizontal_velocity_constraint,
+             "outage end boundary should keep duplicated post-first velocity as a reference only");
+  ExpectTrue(outage_end_reference->has_horizontal_velocity_delta &&
+               outage_end_reference->add_horizontal_velocity_delta_constraint,
+             "outage end boundary should constrain adjacent horizontal velocity delta");
   ExpectTrue(outage_end_reference->has_horizontal_position &&
                outage_end_reference->add_horizontal_position_constraint,
              "outage end boundary should constrain duplicated post-first position");
@@ -1181,8 +1187,11 @@ void TestSegmentedBatchRunnerUsesPostFirstBoundaryWithHorizontalHandoff() {
   ExpectTrue(std::abs(terminal_velocity_reference->target_time_s - 20.45) < 1e-12,
              "terminal velocity reference should target the final kept outage state");
   ExpectTrue(terminal_velocity_reference->has_horizontal_velocity &&
-               terminal_velocity_reference->add_horizontal_velocity_constraint,
-             "terminal velocity reference should constrain final kept outage horizontal velocity");
+               !terminal_velocity_reference->add_horizontal_velocity_constraint,
+             "terminal velocity reference should keep final kept outage horizontal velocity as a reference only");
+  ExpectTrue(terminal_velocity_reference->has_horizontal_velocity_delta &&
+               terminal_velocity_reference->add_horizontal_velocity_delta_constraint,
+             "terminal velocity reference should constrain adjacent horizontal velocity delta");
   ExpectTrue(terminal_velocity_reference->has_vz &&
                terminal_velocity_reference->add_vz_constraint,
              "terminal velocity reference should constrain final kept outage vertical velocity");
@@ -1191,7 +1200,7 @@ void TestSegmentedBatchRunnerUsesPostFirstBoundaryWithHorizontalHandoff() {
     "terminal velocity reference should use the IMU delta when IMU coverage is available");
   ExpectTrue(
     std::abs(
-      terminal_velocity_reference->horizontal_velocity_sigma_mps -
+      terminal_velocity_reference->horizontal_velocity_delta_sigma_mps -
       config.rtk_outage_velocity_delta_3d_sigma_mps) < 1e-15,
     "terminal velocity reference should use the outage velocity-delta sigma");
   ExpectTrue(terminal_horizontal_handoff_reference != nullptr,
@@ -1346,8 +1355,11 @@ void TestSegmentedBatchRunnerKeepsAttitudeHandoffWithoutRecoveryReference() {
                outage_refs[2].add_horizontal_position_constraint,
              "outage end should constrain duplicated post-first horizontal position");
   ExpectTrue(outage_refs[2].has_horizontal_velocity &&
-               outage_refs[2].add_horizontal_velocity_constraint,
-             "outage end should constrain duplicated post-first horizontal velocity");
+               !outage_refs[2].add_horizontal_velocity_constraint,
+             "outage end should not add a direct horizontal velocity hold");
+  ExpectTrue(outage_refs[2].has_horizontal_velocity_delta &&
+               outage_refs[2].add_horizontal_velocity_delta_constraint,
+             "outage end should constrain adjacent horizontal velocity delta");
 }
 
 void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {

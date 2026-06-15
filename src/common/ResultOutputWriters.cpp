@@ -888,6 +888,7 @@ void WriteRtkOutageBoundaryDiagnosticsCsv(
     << "window_index,boundary_role,source_type,target_state_index,target_time_s,"
        "valid,up_factor_added,vz_factor_added,ba_z_factor_added,"
        "horizontal_position_factor_added,horizontal_velocity_factor_added,"
+       "horizontal_velocity_delta_factor_added,"
        "horizontal_position_velocity_handoff_factor_added,"
        "vertical_position_velocity_handoff_factor_added,"
        "attitude_factor_added,attitude_constraint_type,"
@@ -897,6 +898,12 @@ void WriteRtkOutageBoundaryDiagnosticsCsv(
        "reference_ve_mps,reference_vn_mps,optimized_ve_mps,optimized_vn_mps,"
        "horizontal_velocity_residual_east_mps,horizontal_velocity_residual_north_mps,"
        "horizontal_velocity_residual_norm_mps,horizontal_velocity_sigma_mps,"
+       "horizontal_velocity_delta_state_index_i,horizontal_velocity_delta_state_index_j,"
+       "horizontal_velocity_delta_time_i_s,horizontal_velocity_delta_time_j_s,"
+       "target_horizontal_velocity_delta_east_mps,target_horizontal_velocity_delta_north_mps,"
+       "optimized_horizontal_velocity_delta_east_mps,optimized_horizontal_velocity_delta_north_mps,"
+       "horizontal_velocity_delta_residual_east_mps,horizontal_velocity_delta_residual_north_mps,"
+       "horizontal_velocity_delta_residual_norm_mps,horizontal_velocity_delta_sigma_mps,"
        "horizontal_position_velocity_handoff_reference_time_s,"
        "horizontal_position_velocity_handoff_dt_s,"
        "horizontal_position_velocity_handoff_residual_east_m,"
@@ -927,6 +934,7 @@ void WriteRtkOutageBoundaryDiagnosticsCsv(
            << (row.ba_z_factor_added ? 1 : 0) << ','
            << (row.horizontal_position_factor_added ? 1 : 0) << ','
            << (row.horizontal_velocity_factor_added ? 1 : 0) << ','
+           << (row.horizontal_velocity_delta_factor_added ? 1 : 0) << ','
            << (row.horizontal_position_velocity_handoff_factor_added ? 1 : 0) << ','
            << (row.vertical_position_velocity_handoff_factor_added ? 1 : 0) << ','
            << (row.attitude_factor_added ? 1 : 0) << ','
@@ -947,6 +955,18 @@ void WriteRtkOutageBoundaryDiagnosticsCsv(
            << row.horizontal_velocity_residual_mps.y() << ','
            << row.horizontal_velocity_residual_norm_mps << ','
            << row.horizontal_velocity_sigma_mps << ','
+           << row.horizontal_velocity_delta_state_index_i << ','
+           << row.horizontal_velocity_delta_state_index_j << ','
+           << row.horizontal_velocity_delta_time_i_s << ','
+           << row.horizontal_velocity_delta_time_j_s << ','
+           << row.target_horizontal_velocity_delta_mps.x() << ','
+           << row.target_horizontal_velocity_delta_mps.y() << ','
+           << row.optimized_horizontal_velocity_delta_mps.x() << ','
+           << row.optimized_horizontal_velocity_delta_mps.y() << ','
+           << row.horizontal_velocity_delta_residual_mps.x() << ','
+           << row.horizontal_velocity_delta_residual_mps.y() << ','
+           << row.horizontal_velocity_delta_residual_norm_mps << ','
+           << row.horizontal_velocity_delta_sigma_mps << ','
            << row.horizontal_position_velocity_handoff_reference_time_s << ','
            << row.horizontal_position_velocity_handoff_dt_s << ','
            << row.horizontal_position_velocity_handoff_residual_m.x() << ','

@@ -13,6 +13,7 @@ void RefreshReferenceValidity(RtkOutageBoundaryReferenceRow &reference) {
   reference.valid =
     reference.has_up || reference.has_vz || reference.has_ba_z ||
     reference.has_horizontal_position || reference.has_horizontal_velocity ||
+    reference.has_horizontal_velocity_delta ||
     reference.has_horizontal_position_velocity_handoff ||
     reference.has_vertical_position_velocity_handoff || reference.has_attitude;
   if (!reference.valid) {
@@ -72,6 +73,9 @@ void StripNonVerticalBoundaryReferences(
   reference.reference_horizontal_velocity_mps =
     Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
   reference.horizontal_velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  reference.has_horizontal_velocity_delta = false;
+  reference.add_horizontal_velocity_delta_constraint = false;
+  reference.horizontal_velocity_delta_sigma_mps = std::numeric_limits<double>::quiet_NaN();
 }
 
 }  // namespace

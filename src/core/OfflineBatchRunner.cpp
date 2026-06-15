@@ -1579,6 +1579,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
   run_result.run_summary.rtk_outage_boundary_baz_factor_count = 0;
   run_result.run_summary.rtk_outage_boundary_horizontal_position_factor_count = 0;
   run_result.run_summary.rtk_outage_boundary_horizontal_velocity_factor_count = 0;
+  run_result.run_summary.rtk_outage_boundary_horizontal_velocity_delta_factor_count = 0;
   run_result.run_summary.rtk_outage_boundary_horizontal_position_velocity_handoff_factor_count = 0;
   run_result.run_summary.rtk_outage_boundary_vertical_position_velocity_handoff_factor_count = 0;
   run_result.run_summary.rtk_outage_boundary_attitude_factor_count = 0;
@@ -1918,6 +1919,7 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     boundary_request.config = &config_;
     boundary_request.state_timestamps = &state_timestamps;
     boundary_request.boundary_references = &active_stage2_reference->boundary_references;
+    boundary_request.velocity_delta_records = &velocity_delta_records;
     boundary_request.tilt_reference_states = &base_graph_optimized_reference_states;
     boundary_request.graph = &graph_with_gnss;
     boundary_request.run_summary = &run_result.run_summary;

@@ -552,6 +552,7 @@ struct RtkOutageBoundaryReferenceRow {
   bool has_ba_z = false;
   bool has_horizontal_position = false;
   bool has_horizontal_velocity = false;
+  bool has_horizontal_velocity_delta = false;
   bool has_horizontal_position_velocity_handoff = false;
   bool has_vertical_position_velocity_handoff = false;
   bool has_attitude = false;
@@ -560,6 +561,7 @@ struct RtkOutageBoundaryReferenceRow {
   bool add_ba_z_constraint = false;
   bool add_horizontal_position_constraint = false;
   bool add_horizontal_velocity_constraint = false;
+  bool add_horizontal_velocity_delta_constraint = false;
   bool add_horizontal_position_velocity_handoff_constraint = false;
   bool add_vertical_position_velocity_handoff_constraint = false;
   bool add_attitude_constraint = false;
@@ -576,6 +578,8 @@ struct RtkOutageBoundaryReferenceRow {
   double ba_z_sigma_mps2 = std::numeric_limits<double>::quiet_NaN();
   double horizontal_position_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double horizontal_velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  double horizontal_velocity_delta_sigma_mps =
+    std::numeric_limits<double>::quiet_NaN();
   double horizontal_position_velocity_handoff_reference_time_s =
     std::numeric_limits<double>::quiet_NaN();
   double horizontal_position_velocity_handoff_sigma_m =
@@ -635,6 +639,7 @@ struct RtkOutageBoundaryDiagnosticRow {
   bool ba_z_factor_added = false;
   bool horizontal_position_factor_added = false;
   bool horizontal_velocity_factor_added = false;
+  bool horizontal_velocity_delta_factor_added = false;
   bool horizontal_position_velocity_handoff_factor_added = false;
   bool vertical_position_velocity_handoff_factor_added = false;
   bool attitude_factor_added = false;
@@ -655,6 +660,22 @@ struct RtkOutageBoundaryDiagnosticRow {
     Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
   double horizontal_velocity_residual_norm_mps = std::numeric_limits<double>::quiet_NaN();
   double horizontal_velocity_sigma_mps = std::numeric_limits<double>::quiet_NaN();
+  std::size_t horizontal_velocity_delta_state_index_i = 0;
+  std::size_t horizontal_velocity_delta_state_index_j = 0;
+  double horizontal_velocity_delta_time_i_s =
+    std::numeric_limits<double>::quiet_NaN();
+  double horizontal_velocity_delta_time_j_s =
+    std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector2d target_horizontal_velocity_delta_mps =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector2d optimized_horizontal_velocity_delta_mps =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector2d horizontal_velocity_delta_residual_mps =
+    Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double horizontal_velocity_delta_residual_norm_mps =
+    std::numeric_limits<double>::quiet_NaN();
+  double horizontal_velocity_delta_sigma_mps =
+    std::numeric_limits<double>::quiet_NaN();
   double horizontal_position_velocity_handoff_reference_time_s =
     std::numeric_limits<double>::quiet_NaN();
   double horizontal_position_velocity_handoff_dt_s =

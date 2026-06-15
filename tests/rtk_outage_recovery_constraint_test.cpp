@@ -1159,12 +1159,14 @@ void TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude() {
   references.front().has_ba_z = true;
   references.front().has_horizontal_position = true;
   references.front().has_horizontal_velocity = true;
+  references.front().has_horizontal_velocity_delta = true;
   references.front().has_attitude = true;
   references.front().add_up_constraint = true;
   references.front().add_vz_constraint = true;
   references.front().add_ba_z_constraint = true;
   references.front().add_horizontal_position_constraint = true;
-  references.front().add_horizontal_velocity_constraint = true;
+  references.front().add_horizontal_velocity_constraint = false;
+  references.front().add_horizontal_velocity_delta_constraint = true;
   references.front().add_attitude_constraint = true;
   references.front().reference_up_m = 10.0;
   references.front().reference_vz_mps = -0.1;
@@ -1179,8 +1181,18 @@ void TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude() {
   references.front().horizontal_position_sigma_m = config.stage2_horizontal_position_hold_sigma_m;
   references.front().horizontal_velocity_sigma_mps =
     config.stage2_horizontal_velocity_hold_sigma_mps;
+  references.front().horizontal_velocity_delta_sigma_mps =
+    config.rtk_outage_velocity_delta_3d_sigma_mps;
   references.front().attitude_sigma_rad = config.rtk_outage_absolute_attitude_sigma_rad;
   references.front().skip_reason = "OK";
+
+  std::vector<offline_lc_minimal::VelocityDeltaPropagationRecord> velocity_delta_records{
+    offline_lc_minimal::VelocityDeltaPropagationRecord{
+      0U,
+      1U,
+      0.0,
+      1.0,
+      gtsam::Vector3(0.0, 0.0, 0.0)}};
 
   gtsam::NonlinearFactorGraph graph;
   offline_lc_minimal::RunSummary summary;
@@ -1189,6 +1201,7 @@ void TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude() {
   request.config = &config;
   request.state_timestamps = &timestamps;
   request.boundary_references = &references;
+  request.velocity_delta_records = &velocity_delta_records;
   request.graph = &graph;
   request.run_summary = &summary;
   request.diagnostics = &diagnostics;
@@ -1196,7 +1209,7 @@ void TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude() {
 
   ExpectTrue(
     graph.size() == 6U,
-    "boundary should add up, vz, ba_z, horizontal position, horizontal velocity, and attitude factors");
+    "boundary should add up, vz, ba_z, horizontal position, horizontal velocity delta, and attitude factors");
   ExpectTrue(summary.rtk_outage_boundary_up_factor_count == 1U,
              "up factor count is wrong");
   ExpectTrue(summary.rtk_outage_boundary_vz_factor_count == 1U,
@@ -1205,8 +1218,10 @@ void TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude() {
              "ba_z factor count is wrong");
   ExpectTrue(summary.rtk_outage_boundary_horizontal_position_factor_count == 1U,
              "horizontal position factor count is wrong");
-  ExpectTrue(summary.rtk_outage_boundary_horizontal_velocity_factor_count == 1U,
-             "horizontal velocity factor count is wrong");
+  ExpectTrue(summary.rtk_outage_boundary_horizontal_velocity_factor_count == 0U,
+             "boundary should not add a direct horizontal velocity hold");
+  ExpectTrue(summary.rtk_outage_boundary_horizontal_velocity_delta_factor_count == 1U,
+             "horizontal velocity delta factor count is wrong");
   ExpectTrue(summary.rtk_outage_boundary_attitude_factor_count == 1U,
              "attitude factor count is wrong");
 
@@ -1293,8 +1308,8 @@ void TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude() {
     diagnostics);
   ExpectTrue(diagnostics.front().horizontal_position_residual_norm_m > 0.4,
              "boundary diagnostics should report horizontal position residual");
-  ExpectTrue(diagnostics.front().horizontal_velocity_residual_norm_mps > 0.3,
-             "boundary diagnostics should report horizontal velocity residual");
+  ExpectTrue(diagnostics.front().horizontal_velocity_delta_residual_norm_mps > 0.3,
+             "boundary diagnostics should report horizontal velocity delta residual");
   offline_lc_minimal::PopulateRtkOutageBoundaryDiagnostics(
     shifted_vertical_values,
     diagnostics);
@@ -1304,6 +1319,149 @@ void TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude() {
              "boundary diagnostics should report vz residual");
   ExpectNear(diagnostics.front().ba_z_residual_ug, 100.0, 1.0e-9,
              "boundary diagnostics should report ba_z residual in ug");
+}
+
+void TestBoundaryConstraintBuilderUsesAdjacentHorizontalVelocityDeltaRecords() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_boundary_constraints = true;
+  config.rtk_outage_velocity_delta_3d_sigma_mps = 0.04;
+
+  const std::vector<double> timestamps{0.0, 1.0, 2.0};
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> references(2U);
+  references[0].window_index = 5U;
+  references[0].boundary_role = "OUTAGE_START";
+  references[0].source_type = "PRE_TERMINAL";
+  references[0].target_time_s = 1.0;
+  references[0].valid = true;
+  references[0].has_horizontal_velocity = true;
+  references[0].has_horizontal_velocity_delta = true;
+  references[0].add_horizontal_velocity_delta_constraint = true;
+  references[0].reference_horizontal_velocity_mps = Eigen::Vector2d(1.0, 2.0);
+  references[0].horizontal_velocity_delta_sigma_mps =
+    config.rtk_outage_velocity_delta_3d_sigma_mps;
+  references[0].skip_reason = "OK";
+
+  references[1].window_index = 5U;
+  references[1].boundary_role = "OUTAGE_END_TERMINAL_VELOCITY";
+  references[1].source_type = "POST_FIRST_MINUS_IMU_DELTA";
+  references[1].target_time_s = 1.0;
+  references[1].valid = true;
+  references[1].has_horizontal_velocity = true;
+  references[1].has_horizontal_velocity_delta = true;
+  references[1].add_horizontal_velocity_delta_constraint = true;
+  references[1].reference_horizontal_velocity_mps = Eigen::Vector2d(3.0, 4.0);
+  references[1].horizontal_velocity_delta_sigma_mps =
+    config.rtk_outage_velocity_delta_3d_sigma_mps;
+  references[1].skip_reason = "OK";
+
+  const std::vector<offline_lc_minimal::VelocityDeltaPropagationRecord> velocity_delta_records{
+    offline_lc_minimal::VelocityDeltaPropagationRecord{
+      0U,
+      1U,
+      0.0,
+      1.0,
+      gtsam::Vector3(0.4, -0.2, 0.0)},
+    offline_lc_minimal::VelocityDeltaPropagationRecord{
+      1U,
+      2U,
+      1.0,
+      2.0,
+      gtsam::Vector3(-0.3, 0.6, 0.0)}};
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::RtkOutageBoundaryDiagnosticRow> diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.boundary_references = &references;
+  request.velocity_delta_records = &velocity_delta_records;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.size() == 2U, "two horizontal velocity delta factors expected");
+  ExpectTrue(
+    summary.rtk_outage_boundary_horizontal_velocity_delta_factor_count == 2U,
+    "horizontal velocity delta boundary factor count is wrong");
+  ExpectTrue(
+    summary.rtk_outage_boundary_horizontal_velocity_factor_count == 0U,
+    "direct horizontal velocity boundary holds should not be added");
+  ExpectTrue(diagnostics.size() == 2U, "two diagnostics expected");
+  ExpectTrue(
+    diagnostics[0].horizontal_velocity_delta_state_index_i == 0U &&
+      diagnostics[0].horizontal_velocity_delta_state_index_j == 1U,
+    "outage start should use the incoming adjacent velocity delta record");
+  ExpectTrue(
+    diagnostics[1].horizontal_velocity_delta_state_index_i == 1U &&
+      diagnostics[1].horizontal_velocity_delta_state_index_j == 2U,
+    "terminal outage end should use the outgoing adjacent velocity delta record");
+
+  const auto start_factor =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::HorizontalVelocityDeltaFactor>(
+      graph.at(0));
+  const auto terminal_factor =
+    boost::dynamic_pointer_cast<offline_lc_minimal::factor::HorizontalVelocityDeltaFactor>(
+      graph.at(1));
+  ExpectTrue(start_factor.get() != nullptr, "start factor should be a horizontal delta factor");
+  ExpectTrue(terminal_factor.get() != nullptr,
+             "terminal factor should be a horizontal delta factor");
+  ExpectNear(start_factor->targetDeltaVMps().x(), 0.4, 1.0e-12,
+             "start factor east delta target is wrong");
+  ExpectNear(start_factor->targetDeltaVMps().y(), -0.2, 1.0e-12,
+             "start factor north delta target is wrong");
+  ExpectNear(terminal_factor->targetDeltaVMps().x(), -0.3, 1.0e-12,
+             "terminal factor east delta target is wrong");
+  ExpectNear(terminal_factor->targetDeltaVMps().y(), 0.6, 1.0e-12,
+             "terminal factor north delta target is wrong");
+}
+
+void TestBoundaryConstraintBuilderReportsMissingHorizontalVelocityDeltaRecord() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_rtk_outage_boundary_constraints = true;
+  config.rtk_outage_velocity_delta_3d_sigma_mps = 0.04;
+
+  const std::vector<double> timestamps{0.0, 1.0};
+  std::vector<offline_lc_minimal::RtkOutageBoundaryReferenceRow> references(1U);
+  references.front().window_index = 6U;
+  references.front().boundary_role = "OUTAGE_END";
+  references.front().source_type = "POST_RECOVERY_OPTIMIZED";
+  references.front().target_time_s = 1.0;
+  references.front().valid = true;
+  references.front().has_horizontal_velocity = true;
+  references.front().has_horizontal_velocity_delta = true;
+  references.front().add_horizontal_velocity_constraint = false;
+  references.front().add_horizontal_velocity_delta_constraint = true;
+  references.front().reference_horizontal_velocity_mps = Eigen::Vector2d(1.0, 2.0);
+  references.front().horizontal_velocity_delta_sigma_mps =
+    config.rtk_outage_velocity_delta_3d_sigma_mps;
+  references.front().skip_reason = "OK";
+
+  const std::vector<offline_lc_minimal::VelocityDeltaPropagationRecord> velocity_delta_records;
+
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::RtkOutageBoundaryDiagnosticRow> diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuildRequest request;
+  request.config = &config;
+  request.state_timestamps = &timestamps;
+  request.boundary_references = &references;
+  request.velocity_delta_records = &velocity_delta_records;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::RtkOutageBoundaryConstraintBuilder(std::move(request)).Build();
+
+  ExpectTrue(graph.empty(), "missing velocity delta record should not add a factor");
+  ExpectTrue(
+    summary.rtk_outage_boundary_horizontal_velocity_factor_count == 0U &&
+      summary.rtk_outage_boundary_horizontal_velocity_delta_factor_count == 0U,
+    "missing velocity delta record should not increment velocity factor counts");
+  ExpectTrue(diagnostics.size() == 1U, "one diagnostic expected");
+  ExpectTrue(
+    diagnostics.front().skip_reason == "missing_horizontal_velocity_delta_record",
+    "missing velocity delta record should be explicit in diagnostics");
 }
 
 void TestBoundaryConstraintBuilderAddsHorizontalPositionVelocityHandoff() {
@@ -2027,6 +2185,12 @@ int main() {
     RunTest(
       "TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude",
       TestBoundaryConstraintBuilderConstrainsUpVzBazAndAttitude);
+    RunTest(
+      "TestBoundaryConstraintBuilderUsesAdjacentHorizontalVelocityDeltaRecords",
+      TestBoundaryConstraintBuilderUsesAdjacentHorizontalVelocityDeltaRecords);
+    RunTest(
+      "TestBoundaryConstraintBuilderReportsMissingHorizontalVelocityDeltaRecord",
+      TestBoundaryConstraintBuilderReportsMissingHorizontalVelocityDeltaRecord);
     RunTest(
       "TestBoundaryConstraintBuilderAddsHorizontalPositionVelocityHandoff",
       TestBoundaryConstraintBuilderAddsHorizontalPositionVelocityHandoff);
