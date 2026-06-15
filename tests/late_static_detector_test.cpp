@@ -146,6 +146,8 @@ offline_lc_minimal::OfflineRunnerConfig MakeLateStaticConfig() {
   config.late_static_window_s = 5.0;
   config.late_static_stride_s = 5.0;
   config.late_static_min_duration_s = 8.0;
+  config.late_static_gyro_threshold_scale = 1.05;
+  config.late_static_acc_norm_std_threshold_mps2 = 0.001;
   config.late_static_min_rtkfix_samples = 5;
   config.late_static_merge_gap_s = 5.0;
   config.late_static_exclude_initial_static = true;
@@ -203,6 +205,126 @@ void TestDataDrivenDetectorFindsLateStaticAndRejectsDynamic() {
       ExpectTrue(!feature.pass_all, "moving windows should not pass static gates");
     }
   }
+}
+
+offline_lc_minimal::LateStaticFeatureDiagnosticRow MakeFeatureRow(
+  const double start_time_s,
+  const double end_time_s,
+  const double rtk_speed_rms_mps,
+  const double rtk_range_m,
+  const double gyro_rms_radps,
+  const double gyro_p95_radps,
+  const double acc_std_mps2) {
+  offline_lc_minimal::LateStaticFeatureDiagnosticRow row;
+  row.window_start_time_s = start_time_s;
+  row.window_end_time_s = end_time_s;
+  row.window_center_time_s = 0.5 * (start_time_s + end_time_s);
+  row.valid_features = true;
+  row.rtk_horizontal_speed_rms_mps = rtk_speed_rms_mps;
+  row.rtk_horizontal_range_m = rtk_range_m;
+  row.rtk_up_median_m = 1.0;
+  row.rtk_up_range_m = 0.002;
+  row.imu_gyro_norm_rms_radps = gyro_rms_radps;
+  row.imu_gyro_norm_p95_radps = gyro_p95_radps;
+  row.imu_acc_norm_std_mps2 = acc_std_mps2;
+  return row;
+}
+
+void TestLateStaticGyroScaleAndAccelStdGate() {
+  auto config = MakeLateStaticConfig();
+  config.late_static_stride_s = 0.5;
+  config.late_static_merge_gap_s = 2.0;
+  config.late_static_min_duration_s = 8.0;
+
+  std::vector<offline_lc_minimal::LateStaticFeatureDiagnosticRow> features;
+  for (int i = 0; i < 24; ++i) {
+    const double start_time_s = 0.5 * static_cast<double>(i);
+    const bool stop_transition = i < 4;
+    features.push_back(
+      MakeFeatureRow(
+        start_time_s,
+        start_time_s + 5.0,
+        0.01,
+        0.01,
+        0.000124,
+        0.000195,
+        stop_transition ? 0.12 : 0.0004));
+  }
+
+  offline_lc_minimal::LateStaticThresholdSet thresholds;
+  thresholds.valid = true;
+  thresholds.rtk_speed_rms_threshold_mps = 0.13;
+  thresholds.rtk_horizontal_range_threshold_m = 0.12;
+  thresholds.gyro_rms_threshold_radps = 0.00012182 * config.late_static_gyro_threshold_scale;
+  thresholds.gyro_p95_threshold_radps = 0.00019201 * config.late_static_gyro_threshold_scale;
+  thresholds.acc_norm_std_threshold_mps2 = config.late_static_acc_norm_std_threshold_mps2;
+
+  const auto windows =
+    offline_lc_minimal::LateStaticWindowDetector(config).Detect(thresholds, &features);
+
+  ExpectTrue(!windows.empty(), "gyro scale should accept quiet terminal static windows");
+  ExpectTrue(windows.front().start_time_s >= 2.0,
+             "acc norm std gate should reject stop-transition windows");
+  for (const auto &feature : features) {
+    if (feature.window_start_time_s < 2.0) {
+      ExpectTrue(!feature.pass_acc_std, "high accel std transition windows should fail");
+      ExpectTrue(!feature.pass_all, "transition windows should not pass all gates");
+    }
+  }
+}
+
+void TestLateStaticEstimatorAppliesGyroScale() {
+  auto base_config = MakeLateStaticConfig();
+  base_config.late_static_gyro_threshold_scale = 1.0;
+  auto scaled_config = base_config;
+  scaled_config.late_static_gyro_threshold_scale = 1.05;
+
+  std::vector<offline_lc_minimal::LateStaticFeatureDiagnosticRow> features;
+  for (int i = 0; i < 12; ++i) {
+    features.push_back(
+      MakeFeatureRow(
+        static_cast<double>(i),
+        static_cast<double>(i) + 5.0,
+        0.01,
+        0.01,
+        0.0001,
+        0.00018,
+        0.0004));
+  }
+  for (int i = 12; i < 24; ++i) {
+    features.push_back(
+      MakeFeatureRow(
+        static_cast<double>(i),
+        static_cast<double>(i) + 5.0,
+        1.0,
+        5.0,
+        0.01,
+        0.02,
+        0.12));
+  }
+
+  const auto base_thresholds =
+    offline_lc_minimal::DataDrivenStaticThresholdEstimator(base_config).Estimate(features);
+  const auto scaled_thresholds =
+    offline_lc_minimal::DataDrivenStaticThresholdEstimator(scaled_config).Estimate(features);
+
+  ExpectTrue(base_thresholds.valid && scaled_thresholds.valid,
+             "threshold estimator should produce valid thresholds");
+  ExpectTrue(
+    std::abs(
+      scaled_thresholds.gyro_rms_threshold_radps -
+      base_thresholds.gyro_rms_threshold_radps * 1.05) < 1e-15,
+    "gyro RMS threshold should be scaled");
+  ExpectTrue(
+    std::abs(
+      scaled_thresholds.gyro_p95_threshold_radps -
+      base_thresholds.gyro_p95_threshold_radps * 1.05) < 1e-15,
+    "gyro P95 threshold should be scaled");
+  ExpectTrue(
+    std::abs(
+      scaled_thresholds.acc_norm_std_threshold_mps2 -
+      scaled_config.late_static_acc_norm_std_threshold_mps2) < 1e-15,
+    "acc norm std threshold should come from config");
 }
 
 void TestDetectorExcludesInitialStaticAndOutageWindows() {
@@ -473,6 +595,12 @@ int main() {
     RunTest(
       "TestInitialStaticPrefixIsSuppressedUntilDynamicEvidence",
       TestInitialStaticPrefixIsSuppressedUntilDynamicEvidence);
+    RunTest(
+      "TestLateStaticGyroScaleAndAccelStdGate",
+      TestLateStaticGyroScaleAndAccelStdGate);
+    RunTest(
+      "TestLateStaticEstimatorAppliesGyroScale",
+      TestLateStaticEstimatorAppliesGyroScale);
     RunTest(
       "TestLateStaticVerticalBuilderAddsOnlyUpAndVzFactors",
       TestLateStaticVerticalBuilderAddsOnlyUpAndVzFactors);

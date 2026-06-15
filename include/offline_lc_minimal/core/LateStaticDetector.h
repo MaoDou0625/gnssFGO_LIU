@@ -29,6 +29,7 @@ struct LateStaticThresholdSet {
   double rtk_horizontal_range_threshold_m = 0.0;
   double gyro_rms_threshold_radps = 0.0;
   double gyro_p95_threshold_radps = 0.0;
+  double acc_norm_std_threshold_mps2 = 0.0;
   std::vector<LateStaticThresholdDiagnosticRow> diagnostics;
 };
 

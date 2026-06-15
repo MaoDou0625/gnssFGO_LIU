@@ -264,6 +264,35 @@ LateStaticThresholdDiagnosticRow MakeThresholdRow(
   return row;
 }
 
+OtsuResult ApplyThresholdScale(OtsuResult result, const double scale) {
+  if (result.valid) {
+    result.value_threshold *= scale;
+    result.log_threshold =
+      result.value_threshold > 0.0 ? std::log10(result.value_threshold)
+                                   : std::numeric_limits<double>::quiet_NaN();
+  }
+  return result;
+}
+
+LateStaticThresholdDiagnosticRow MakeFixedThresholdRow(
+  const std::string &feature_name,
+  const double threshold_value,
+  const std::size_t sample_count) {
+  LateStaticThresholdDiagnosticRow row;
+  row.feature_name = feature_name;
+  row.method = "fixed_config";
+  row.valid = std::isfinite(threshold_value) && threshold_value > 0.0;
+  row.threshold_value = threshold_value;
+  row.log_threshold_value =
+    threshold_value > 0.0 ? std::log10(threshold_value)
+                          : std::numeric_limits<double>::quiet_NaN();
+  row.sample_count = sample_count;
+  row.static_side_count = sample_count;
+  row.dynamic_side_count = 0U;
+  row.skip_reason = row.valid ? "OK" : "INVALID_THRESHOLD";
+  return row;
+}
+
 struct ActiveWindow {
   double start_time_s = std::numeric_limits<double>::quiet_NaN();
   double end_time_s = std::numeric_limits<double>::quiet_NaN();
@@ -444,7 +473,7 @@ DataDrivenStaticThresholdEstimator::DataDrivenStaticThresholdEstimator(
 LateStaticThresholdSet DataDrivenStaticThresholdEstimator::Estimate(
   const std::vector<LateStaticFeatureDiagnosticRow> &features) const {
   LateStaticThresholdSet thresholds;
-  thresholds.diagnostics.reserve(4U);
+  thresholds.diagnostics.reserve(5U);
   if (!config_.enable_late_static_detection) {
     return thresholds;
   }
@@ -453,6 +482,7 @@ LateStaticThresholdSet DataDrivenStaticThresholdEstimator::Estimate(
   std::vector<double> rtk_ranges;
   std::vector<double> gyro_rms_values;
   std::vector<double> gyro_p95_values;
+  std::vector<double> acc_norm_std_values;
   for (const auto &row : features) {
     if (!row.valid_features || row.overlaps_rtk_outage) {
       continue;
@@ -461,13 +491,20 @@ LateStaticThresholdSet DataDrivenStaticThresholdEstimator::Estimate(
     rtk_ranges.push_back(row.rtk_horizontal_range_m);
     gyro_rms_values.push_back(row.imu_gyro_norm_rms_radps);
     gyro_p95_values.push_back(row.imu_gyro_norm_p95_radps);
+    acc_norm_std_values.push_back(row.imu_acc_norm_std_mps2);
   }
 
   const std::string method = Lowercase(config_.late_static_threshold_method);
   const OtsuResult rtk_speed = EstimateLogOtsuThreshold(std::move(rtk_speeds));
   const OtsuResult rtk_range = EstimateLogOtsuThreshold(std::move(rtk_ranges));
-  const OtsuResult gyro_rms = EstimateLogOtsuThreshold(std::move(gyro_rms_values));
-  const OtsuResult gyro_p95 = EstimateLogOtsuThreshold(std::move(gyro_p95_values));
+  const OtsuResult gyro_rms =
+    ApplyThresholdScale(
+      EstimateLogOtsuThreshold(std::move(gyro_rms_values)),
+      config_.late_static_gyro_threshold_scale);
+  const OtsuResult gyro_p95 =
+    ApplyThresholdScale(
+      EstimateLogOtsuThreshold(std::move(gyro_p95_values)),
+      config_.late_static_gyro_threshold_scale);
   thresholds.diagnostics.push_back(
     MakeThresholdRow("rtk_horizontal_speed_rms_mps", method, rtk_speed));
   thresholds.diagnostics.push_back(
@@ -476,12 +513,20 @@ LateStaticThresholdSet DataDrivenStaticThresholdEstimator::Estimate(
     MakeThresholdRow("imu_gyro_norm_rms_radps", method, gyro_rms));
   thresholds.diagnostics.push_back(
     MakeThresholdRow("imu_gyro_norm_p95_radps", method, gyro_p95));
+  thresholds.diagnostics.push_back(
+    MakeFixedThresholdRow(
+      "imu_acc_norm_std_mps2",
+      config_.late_static_acc_norm_std_threshold_mps2,
+      acc_norm_std_values.size()));
   thresholds.valid =
-    rtk_speed.valid && rtk_range.valid && gyro_rms.valid && gyro_p95.valid;
+    rtk_speed.valid && rtk_range.valid && gyro_rms.valid && gyro_p95.valid &&
+    thresholds.diagnostics.back().valid;
   thresholds.rtk_speed_rms_threshold_mps = rtk_speed.value_threshold;
   thresholds.rtk_horizontal_range_threshold_m = rtk_range.value_threshold;
   thresholds.gyro_rms_threshold_radps = gyro_rms.value_threshold;
   thresholds.gyro_p95_threshold_radps = gyro_p95.value_threshold;
+  thresholds.acc_norm_std_threshold_mps2 =
+    config_.late_static_acc_norm_std_threshold_mps2;
   return thresholds;
 }
 
@@ -528,10 +573,11 @@ std::vector<LateStaticWindowRow> LateStaticWindowDetector::Detect(
       row.imu_gyro_norm_rms_radps <= thresholds.gyro_rms_threshold_radps;
     row.pass_gyro_p95 =
       row.imu_gyro_norm_p95_radps <= thresholds.gyro_p95_threshold_radps;
-    row.pass_acc_std = true;
+    row.pass_acc_std =
+      row.imu_acc_norm_std_mps2 <= thresholds.acc_norm_std_threshold_mps2;
     row.pass_all =
       row.pass_rtk_speed_rms && row.pass_rtk_range &&
-      row.pass_gyro_rms && row.pass_gyro_p95;
+      row.pass_gyro_rms && row.pass_gyro_p95 && row.pass_acc_std;
 
     const bool excluded_initial =
       config_.late_static_exclude_initial_static && row.overlaps_initial_static;

@@ -4679,6 +4679,8 @@ void TestStage1YawRefinementConfigValidation() {
   offline_lc_minimal::OverrideConfigField(config, "late_static_stride_s", "0.75");
   offline_lc_minimal::OverrideConfigField(config, "late_static_min_duration_s", "9.0");
   offline_lc_minimal::OverrideConfigField(config, "late_static_threshold_method", "log_otsu");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_gyro_threshold_scale", "1.08");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_acc_norm_std_threshold_mps2", "0.002");
   offline_lc_minimal::OverrideConfigField(config, "late_static_min_rtkfix_samples", "12");
   offline_lc_minimal::OverrideConfigField(config, "late_static_merge_gap_s", "1.5");
   offline_lc_minimal::OverrideConfigField(config, "late_static_exclude_initial_static", "false");
@@ -4729,6 +4731,10 @@ void TestStage1YawRefinementConfigValidation() {
              "late-static min duration should parse");
   ExpectTrue(config.late_static_threshold_method == "log_otsu",
              "late-static threshold method should parse");
+  ExpectTrue(std::abs(config.late_static_gyro_threshold_scale - 1.08) < 1e-12,
+             "late-static gyro threshold scale should parse");
+  ExpectTrue(std::abs(config.late_static_acc_norm_std_threshold_mps2 - 0.002) < 1e-12,
+             "late-static accel norm std threshold should parse");
   ExpectTrue(config.late_static_min_rtkfix_samples == 12,
              "late-static min RTKFIX sample count should parse");
   ExpectTrue(std::abs(config.late_static_merge_gap_s - 1.5) < 1e-12,
@@ -4804,6 +4810,26 @@ void TestStage1YawRefinementConfigValidation() {
     threw = std::string(exception.what()).find("late-static detection settings") != std::string::npos;
   }
   ExpectTrue(threw, "late-static min RTKFIX sample count should be rejected below two");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.late_static_gyro_threshold_scale = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("late-static detection settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "late-static gyro threshold scale should be positive");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.late_static_acc_norm_std_threshold_mps2 = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("late-static detection settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "late-static accel norm std threshold should be positive");
 
   config = offline_lc_minimal::DefaultConfig();
   config.late_static_height_hold_sigma_m = 0.0;

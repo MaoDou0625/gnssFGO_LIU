@@ -314,6 +314,8 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
   if (!std::isfinite(config.late_static_window_s) ||
       !std::isfinite(config.late_static_stride_s) ||
       !std::isfinite(config.late_static_min_duration_s) ||
+      !std::isfinite(config.late_static_gyro_threshold_scale) ||
+      !std::isfinite(config.late_static_acc_norm_std_threshold_mps2) ||
       !std::isfinite(config.late_static_merge_gap_s) ||
       !std::isfinite(config.late_static_vz_sigma_mps) ||
       !std::isfinite(config.late_static_up_sigma_m) ||
@@ -321,6 +323,8 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.late_static_window_s <= 0.0 ||
       config.late_static_stride_s <= 0.0 ||
       config.late_static_min_duration_s <= 0.0 ||
+      config.late_static_gyro_threshold_scale <= 0.0 ||
+      config.late_static_acc_norm_std_threshold_mps2 <= 0.0 ||
       config.late_static_min_rtkfix_samples <= 1 ||
       config.late_static_merge_gap_s < 0.0 ||
       config.late_static_vz_sigma_mps <= 0.0 ||
@@ -1224,6 +1228,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.late_static_min_duration_s = ParseDouble(normalized_value);
   } else if (normalized_key == "late_static_threshold_method") {
     config.late_static_threshold_method = StripQuotes(std::string(normalized_value));
+  } else if (normalized_key == "late_static_gyro_threshold_scale") {
+    config.late_static_gyro_threshold_scale = ParseDouble(normalized_value);
+  } else if (normalized_key == "late_static_acc_norm_std_threshold_mps2") {
+    config.late_static_acc_norm_std_threshold_mps2 = ParseDouble(normalized_value);
   } else if (normalized_key == "late_static_min_rtkfix_samples") {
     config.late_static_min_rtkfix_samples = ParseInt(normalized_value);
   } else if (normalized_key == "late_static_merge_gap_s") {
@@ -2085,6 +2093,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << "late_static_stride_s=" << config.late_static_stride_s << '\n'
     << "late_static_min_duration_s=" << config.late_static_min_duration_s << '\n'
     << "late_static_threshold_method=" << config.late_static_threshold_method << '\n'
+    << "late_static_gyro_threshold_scale="
+    << config.late_static_gyro_threshold_scale << '\n'
+    << "late_static_acc_norm_std_threshold_mps2="
+    << config.late_static_acc_norm_std_threshold_mps2 << '\n'
     << "late_static_min_rtkfix_samples=" << config.late_static_min_rtkfix_samples << '\n'
     << "late_static_merge_gap_s=" << config.late_static_merge_gap_s << '\n'
     << "late_static_exclude_initial_static="
