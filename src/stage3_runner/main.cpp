@@ -166,6 +166,7 @@ int main(int argc, char **argv) {
 
     OfflineRunnerConfig stage3_config =
       MakeStage3HeightOptimizationConfig(config);
+    ApplyOverrides(args, stage3_config);
     ValidateConfig(stage3_config);
     if (stage3_config.imu_path.empty() || stage3_config.gnss_path.empty()) {
       throw std::runtime_error("both imu_path and gnss_path must be provided");

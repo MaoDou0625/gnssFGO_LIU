@@ -1306,6 +1306,8 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
     offline_lc_minimal::Stage3VerticalReferenceConstraintMode stage3_constraint_mode =
       offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope;
     double stage3_anchor_sigma_m = 0.0;
+    double stage3_envelope_half_width_m = 0.0;
+    bool enable_stage3_envelope_center_pull = false;
     bool enable_stage3_stage2_increment_hold = false;
     double stage3_stage2_increment_sigma_m = 0.0;
     double stage3_stage2_increment_jump_sigma_m = 0.0;
@@ -1361,6 +1363,8 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
       run_config.stage3_disable_stage2_vehicle_nhc_constraint,
       run_config.stage3_vertical_reference_constraint_mode,
       run_config.stage3_vertical_anchor_sigma_m,
+      run_config.stage3_vertical_envelope_half_width_m,
+      run_config.enable_stage3_vertical_envelope_center_pull,
       run_config.enable_stage3_stage2_vertical_increment_hold,
       run_config.stage3_stage2_vertical_increment_sigma_m,
       run_config.stage3_stage2_vertical_increment_jump_sigma_m,
@@ -1469,13 +1473,21 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
     "Stage3 child config should clear wrapper-only vehicle NHC switches");
   ExpectTrue(
     calls[1].stage3_constraint_mode ==
-      offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kGaussian,
-    "Stage3 pass should force gaussian low-frequency delta anchors");
+      offline_lc_minimal::Stage3VerticalReferenceConstraintMode::kEnvelope,
+    "Stage3 pass should force envelope low-frequency delta anchors");
   ExpectNear(
     calls[1].stage3_anchor_sigma_m,
     0.001,
     1.0e-15,
-    "Stage3 pass should force the validated low-frequency delta anchor sigma");
+    "Stage3 pass should preserve the mapped-reference fallback sigma");
+  ExpectNear(
+    calls[1].stage3_envelope_half_width_m,
+    0.005,
+    1.0e-15,
+    "Stage3 pass should force the tuned envelope half-width");
+  ExpectTrue(
+    !calls[1].enable_stage3_envelope_center_pull,
+    "Stage3 pass should disable center-pull so single-member Stage3 stays close to Stage2");
   ExpectTrue(
     calls[1].enable_stage3_stage2_increment_hold,
     "Stage3 pass should force Stage2 vertical increment inheritance");
