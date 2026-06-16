@@ -136,9 +136,14 @@ Optional overrides:
   --shared-reference runs/shared_reference/shared_vertical_reference.csv \
   --shared-reference-line runs/shared_reference/shared_reference_line.csv \
   --output-dir runs/member_a_stage3_shared \
-  --set stage3_vertical_anchor_sigma_m=0.001 \
+  --set stage3_vertical_envelope_half_width_m=0.005 \
+  --set stage3_vertical_envelope_sigma_m=0.003 \
   --verbose
 ```
+
+The Stage3-only runner applies command-line `--set` overrides after the final
+Stage3 policy is created, so explicit overrides can intentionally replace the
+v2.3 tuned values.
 
 Stage3-only behavior:
 
@@ -148,9 +153,13 @@ Stage3-only behavior:
 - the vertical target is `Stage2 + lowfreq(z_shared - Stage2)` after projecting
   each Stage2 state to the shared reference line, so the Stage2 short-wave height
   texture is preserved while the absolute correction stays low-frequency;
-- the final pass uses a Gaussian Stage3 anchor plus Stage2 vertical increment
-  and jump-shape inheritance; this keeps `Stage3 - Stage2` low-frequency for IRI
-  instead of allowing millimeter-scale high-frequency residual spikes;
+- the final pass uses a tuned Stage3 envelope gate
+  (`stage3_vertical_reference_constraint_mode=envelope`,
+  `stage3_vertical_envelope_half_width_m=0.005`,
+  `stage3_vertical_envelope_sigma_m=0.003`) with center-pull disabled, plus
+  Stage2 vertical increment and jump-shape inheritance; this keeps
+  `Stage3 - Stage2` low-frequency for IRI instead of allowing millimeter-scale
+  high-frequency residual spikes;
 - IMU, vertical jump, vertical velocity, and vertical bias factors remain in the
   optimization.
 

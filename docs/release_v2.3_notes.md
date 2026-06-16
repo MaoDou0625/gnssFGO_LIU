@@ -7,10 +7,16 @@ system default. The default behavior now keeps Stage2 as the source of attitude,
 horizontal position, horizontal velocity, and bias continuity, while Stage3 only
 performs low-frequency absolute-height correction.
 
-The release also aligns the C++ fallback defaults in
-`include/offline_lc_minimal/common/Config.h` with `config/default_offline.cfg`.
-This matters for command-line or test paths that construct `DefaultConfig()`
-without loading the default cfg file.
+The current v2.3 line also includes the Stage3 height-reference envelope tuning
+that landed after the `v2.3` tag. For the final Stage3 pass, the authoritative
+policy is `MakeStage3HeightOptimizationConfig()`, not a direct replay of every
+field in `config/default_offline.cfg`.
+
+Formal release runs should load `config/default_offline.cfg`. The C++ defaults
+in `include/offline_lc_minimal/common/Config.h` are fallback values for tests and
+ad-hoc construction paths, and they are not a complete copy of the release cfg.
+Stage-specific policy helpers, especially `MakeStage3HeightOptimizationConfig()`,
+are the final authority for child Stage2/Stage3 passes.
 
 ## Default Stage2/Stage3 Policy
 
@@ -27,19 +33,28 @@ Stage3 is enabled by default and uses the low-frequency shared-height strategy:
 enable_stage3_vertical_reference_optimization=true
 stage3_vertical_reference_smoothing_method=spline_baseline
 stage3_vertical_reference_lowpass_cutoff_hz=0.01
+stage3_vertical_reference_constraint_mode=gaussian
 stage3_vertical_anchor_sigma_m=0.001
 stage3_disable_stage2_vehicle_nhc_constraint=true
 ```
 
-The final Stage3 pass keeps `Stage3 - Stage2` low-frequency:
+The final Stage3 pass then forces the tuned low-frequency delta policy:
 
 ```text
+stage3_vertical_reference_constraint_mode=envelope
+stage3_vertical_envelope_half_width_m=0.005
+stage3_vertical_envelope_sigma_m=0.003
+enable_stage3_vertical_envelope_center_pull=false
 enable_stage3_stage2_vertical_increment_hold=true
 stage3_stage2_vertical_increment_sigma_m=0.0002
 stage3_stage2_vertical_increment_jump_sigma_m=0.0005
 enable_stage3_stage2_jump_shape_hold=true
 stage3_stage2_jump_shape_sigma_m=0.0005
 ```
+
+`stage3_vertical_anchor_sigma_m=0.001` remains the fallback sigma for mapped
+reference rows and Gaussian compatibility paths, but the current final pass uses
+the 5 mm envelope gate with the 3 mm envelope sigma.
 
 The older Stage3 jump regularizers remain disabled by default:
 
@@ -75,7 +90,8 @@ wsl bash -lc 'cd /mnt/d/Code/offline_lc_minimal && cmake --build build -j4'
 wsl bash -lc 'cd /mnt/d/Code/offline_lc_minimal && LD_LIBRARY_PATH=/home/xunyi/.local/offline_lc_minimal/gtsam/lib ctest --test-dir build --output-on-failure'
 ```
 
-The rtk_err_11 validation outputs are under:
+The historical rtk_err_11 validation outputs used to establish the
+`IRI(stage2 - stage3)` measurement method are under:
 
 ```text
 runs/road_noise_state_verify_20260609/132613_stage3_lowfreq_delta_policy_default
@@ -84,7 +100,7 @@ runs/road_noise_state_verify_20260609/stage2_stage3_iri_lowfreq_delta_policy_def
 runs/road_noise_state_verify_20260609/stage2_stage3_height_lowfreq_delta_policy_default
 ```
 
-Measured `IRI(stage2 - stage3)`:
+Historical measured `IRI(stage2 - stage3)` for the low-frequency delta policy:
 
 ```text
 dataset  20 m mm/m  50 m mm/m

@@ -30,7 +30,13 @@ config/default_offline.cfg
 include/offline_lc_minimal/common/Config.h
 ```
 
-v2.3 已将 Stage2/Stage3 的关键默认值在上述两个位置保持一致。命令行未显式加载 cfg 时，不会回退到旧 Stage3 策略。
+正式运行和 release 验证以 `config/default_offline.cfg` 为准。`Config.h` 中的
+`OfflineRunnerConfig{}` 是代码兜底默认值，主要服务测试和临时构造路径，不是
+release cfg 的完整复制。
+
+注意：`config/default_offline.cfg` 描述的是基础配置和内嵌 Stage3
+参考规划默认值；真正进入 Stage3 final 优化前，`MakeStage3HeightOptimizationConfig()`
+会再次收窄配置，强制关闭竞争项并应用当前 v2.3 的低频高程策略。
 
 ## Stage2 默认策略
 
@@ -106,11 +112,17 @@ stage3_vertical_reference_spline_anchor_weight=100000
 stage3_vertical_reference_spline_slope_weight=1000
 stage3_vertical_reference_constraint_mode=gaussian
 stage3_vertical_anchor_sigma_m=0.001
+stage3_disable_stage2_vehicle_nhc_constraint=true
 ```
 
-Stage3-only 入口会通过 `MakeStage3HeightOptimizationConfig()` 强制最终优化遵守以下策略：
+`MakeStage3HeightOptimizationConfig()` 会强制最终优化遵守以下策略：
 
 ```text
+stage3_vertical_reference_constraint_mode=envelope
+stage3_vertical_envelope_half_width_m=0.005
+stage3_vertical_envelope_sigma_m=0.003
+enable_stage3_vertical_envelope_center_pull=false
+stage3_vertical_anchor_sigma_m=0.001
 enable_stage3_stage2_vertical_increment_hold=true
 stage3_stage2_vertical_increment_sigma_m=0.0002
 stage3_stage2_vertical_increment_jump_sigma_m=0.0005
@@ -127,6 +139,7 @@ Stage3 final 会关闭竞争项：
 - RTK drift / outage 垂向参考；
 - Stage3 内部重新分段的 RTK outage batch；
 - body-z NHC / vehicle NHC / 姿态和水平重优化；
+- late-static、initial-static RTK height、initial-dynamic-static 等 raw RTK 垂向拉拽；
 - 旧 Stage3 jump velocity / high-frequency height regularizer。
 
 这些关闭项的原因是 Stage3 的职责已经收窄为高程低频校正。姿态、水平位置和水平速度应继承 Stage2，不应在 Stage3 被重新解释。
@@ -142,6 +155,11 @@ Stage3 final 会关闭竞争项：
   --output-dir runs/member_a_stage3
 ```
 
+`offline_lc_stage3_runner` 会在读取 cfg 后应用一次命令行 override，生成
+Stage3 final 配置后再应用一次 override。因此外部 Stage3-only 调用中的显式
+`--set` 可以覆盖上述强制策略；发布默认建议保持 5 mm envelope gate、3 mm sigma
+和关闭 center-pull。
+
 ## 为什么 Stage3 要约束 `Stage3 - Stage2`
 
 当前验证发现：
@@ -150,10 +168,11 @@ Stage3 final 会关闭竞争项：
 - 旧 Stage3 final 允许在 envelope / center-pull 的毫米级自由度内产生高频残差；
 - 这些残差虽然幅值不大，但其 IRI 可以达到 `1 mm/m` 量级，会破坏 Stage2 两组数据原本较高的短波相关性。
 
-v2.3 采用两层保护：
+v2.3 采用三层保护：
 
 1. 参考目标只使用 `z_stage2 + lowfreq(z_shared - z_stage2)`。
-2. 优化中加入 Stage2 相邻垂向增量继承和 jump shape 继承。
+2. Stage3 final 使用 5 mm envelope gate 和 3 mm envelope sigma，并关闭 center-pull，避免单组 Stage3 被额外拉出 Stage2 短波形状。
+3. 优化中加入 Stage2 相邻垂向增量继承和 jump shape 继承。
 
 因此 Stage3 仍能校正绝对高程，但 `Stage3 - Stage2` 不应再携带大量短波毛刺。
 
@@ -177,6 +196,12 @@ summary.txt
 ```text
 stage3_vertical_reference_mean_abs_residual_m
 stage3_vertical_reference_max_abs_residual_m
+stage3_vertical_reference_constraint_mode
+stage3_vertical_envelope_half_width_m
+stage3_vertical_envelope_sigma_m
+stage3_vertical_reference_center_pull_factor_count
+stage3_vertical_envelope_outside_gate_count
+stage3_vertical_envelope_max_abs_overflow_residual_m
 stage3_stage2_vertical_increment_mean_abs_residual_m
 stage3_stage2_vertical_increment_max_abs_residual_m
 stage3_stage2_jump_shape_mean_abs_residual_m
@@ -199,14 +224,14 @@ IRI(z_stage2 - z_stage3)
 - 按 `0.25 m` 距离间隔重采样；
 - 使用 Sroubek/Sorel IRI 实现，非重叠 `20 m` 和 `50 m` 窗口。
 
-本次验证中，v2.3 默认策略得到：
+历史 `lowfreq_delta_policy_default` 验证中，低频 delta 策略得到：
 
 | 数据 | 20 m `IRI(stage2-stage3)` | 50 m `IRI(stage2-stage3)` |
 | --- | ---: | ---: |
 | 132613 | 0.2123 mm/m | 0.2026 mm/m |
 | 181436 | 0.2025 mm/m | 0.1967 mm/m |
 
-旧策略约为：
+旧的非低频 delta 策略约为：
 
 | 数据 | 20 m `IRI(stage2-stage3)` | 50 m `IRI(stage2-stage3)` |
 | --- | ---: | ---: |

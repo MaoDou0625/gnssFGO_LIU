@@ -15,6 +15,9 @@ Algorithm notes:
 
 - [OFFLINE_IMU_GNSS_CURRENT_VS_ORIGINAL.md](OFFLINE_IMU_GNSS_CURRENT_VS_ORIGINAL.md)
 - [OFFLINE_IMU_GNSS_PRECISION_ENHANCEMENT.md](OFFLINE_IMU_GNSS_PRECISION_ENHANCEMENT.md)
+- [docs/release_v2.3_notes.md](docs/release_v2.3_notes.md)
+- [docs/stage2_stage3_default_v2.3_workflow.md](docs/stage2_stage3_default_v2.3_workflow.md)
+- [docs/stage1_to_stage3_pipeline_and_modules.md](docs/stage1_to_stage3_pipeline_and_modules.md)
 - [docs/shared_vertical_reference_workflow.md](docs/shared_vertical_reference_workflow.md)
 
 ## Architecture
@@ -159,6 +162,11 @@ pipeline into Stage2, shared distance-domain height reference generation, and
 Stage3-only optimization. This keeps each member's Stage2 attitude, horizontal
 position, horizontal velocity, and bias references, while using one common
 `z_shared(s)` vertical target for all members.
+
+The current v2.3 final Stage3 policy uses the tuned low-frequency delta path:
+`Stage2 + lowfreq(z_shared - Stage2)`, a 5 mm Stage3 envelope gate with 3 mm
+sigma, center-pull disabled, and Stage2 vertical-increment / jump-shape
+inheritance.
 
 See [docs/stage2_stage3_default_v2.3_workflow.md](docs/stage2_stage3_default_v2.3_workflow.md)
 for the current default parameters, diagnostics, and IRI validation method.
