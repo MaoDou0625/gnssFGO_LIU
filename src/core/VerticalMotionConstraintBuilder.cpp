@@ -11,6 +11,7 @@
 
 #include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaContextScalePlanner.h"
+#include "offline_lc_minimal/core/VerticalVelocityDeltaTargetPlanner.h"
 #include "offline_lc_minimal/common/Units.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaBiasFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaFactor.h"
@@ -141,7 +142,11 @@ void VerticalMotionConstraintBuilder::Build() const {
         record,
         sigma,
         scale_decision,
-        TargetDeltaVzMps(record, dt_s),
+        PlanVerticalVelocityDeltaTarget(
+          *request_.config,
+          record.target_delta_vz_mps,
+          dt_s,
+          stability_entry),
         request_.outer_pass,
         stability_entry);
     const bool used_clamped_target_fallback =
@@ -242,17 +247,6 @@ bool VerticalMotionConstraintBuilder::OverlapsJumpPadding(
     }
   }
   return false;
-}
-
-double VerticalMotionConstraintBuilder::TargetDeltaVzMps(
-  const VerticalVelocityDeltaPropagationRecord &record,
-  const double dt_s) const {
-  if (dt_s <= 0.0 || !std::isfinite(dt_s) || !std::isfinite(record.target_delta_vz_mps)) {
-    return record.target_delta_vz_mps;
-  }
-  const double limit_mps =
-    request_.config->vertical_velocity_delta_target_acc_limit_mps2 * dt_s;
-  return std::clamp(record.target_delta_vz_mps, -limit_mps, limit_mps);
 }
 
 void PopulateVerticalVelocityDeltaDiagnostics(

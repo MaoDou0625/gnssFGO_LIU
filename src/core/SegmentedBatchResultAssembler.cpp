@@ -745,6 +745,14 @@ OfflineRunResult SegmentedBatchResultAssembler::Assemble() const {
           return row.vertical_reference_skip_reason != "OK" &&
                  row.vertical_reference_skip_reason != "UNSET";
         }));
+  assembled.run_summary.vertical_velocity_delta_target_clamped_count =
+    static_cast<std::size_t>(
+      std::count_if(
+        assembled.vertical_velocity_delta_diagnostics.begin(),
+        assembled.vertical_velocity_delta_diagnostics.end(),
+        [](const VerticalVelocityDeltaDiagnosticRow &row) {
+          return row.factor_added && row.target_clamped;
+        }));
   return assembled;
 }
 

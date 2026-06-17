@@ -603,6 +603,18 @@ offline_lc_minimal::GnssFactorRecord MakeGnssFactorRecord(
   return row;
 }
 
+offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow MakeVerticalVelocityDeltaDiagnostic(
+  const double start_time_s,
+  const double end_time_s,
+  const bool target_clamped) {
+  offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow row;
+  row.start_time_s = start_time_s;
+  row.end_time_s = end_time_s;
+  row.factor_added = true;
+  row.target_clamped = target_clamped;
+  return row;
+}
+
 offline_lc_minimal::AttitudeReferenceDiagnosticRow MakeAttitudeReferenceDiagnostic(
   const double time_s,
   const std::size_t state_index) {
@@ -1437,6 +1449,9 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
     MakeRelativeYawReferenceDiagnostic(25.0, 30.0, 4U)};
   post_result.gnss_factor_records = {
     MakeGnssFactorRecord(25.0, "stage2_lowpass", "STAGE2_LOWPASS_REFERENCE_UNAVAILABLE")};
+  post_result.vertical_velocity_delta_diagnostics = {
+    MakeVerticalVelocityDeltaDiagnostic(25.0, 25.05, true),
+    MakeVerticalVelocityDeltaDiagnostic(26.0, 26.05, false)};
   post_result.run_summary.gnss_vertical_reference_source = "stage2_lowpass";
   offline_lc_minimal::LateStaticWindowRow post_initial_dynamic_window;
   post_initial_dynamic_window.window_index = 1U;
@@ -1505,6 +1520,8 @@ void TestSegmentedBatchAssemblerSplicesTrajectoryWithoutBoundaryDuplicates() {
              "assembled summary should count selected vertical references");
   ExpectTrue(assembled.run_summary.gnss_vertical_reference_skipped_count == 1U,
              "assembled summary should count skipped vertical references");
+  ExpectTrue(assembled.run_summary.vertical_velocity_delta_target_clamped_count == 1U,
+             "assembled summary should count clamped vertical velocity delta targets");
   ExpectTrue(assembled.run_summary.rtk_outage_attitude_hold_factor_count == 2U,
              "assembled summary should count outage attitude hold factors");
   ExpectTrue(assembled.run_summary.rtk_outage_relative_attitude_factor_count == 1U,

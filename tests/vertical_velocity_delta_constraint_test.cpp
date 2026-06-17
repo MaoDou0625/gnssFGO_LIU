@@ -16,6 +16,7 @@
 #include "offline_lc_minimal/core/VerticalMotionStabilityEstimator.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaContextScalePlanner.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
+#include "offline_lc_minimal/core/VerticalVelocityDeltaTargetPlanner.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaBiasFactor.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaFactor.h"
 
@@ -624,6 +625,136 @@ void TestBuilderUsesAdaptiveMotionProfileSigma() {
     diagnostics.front().sigma_mps,
     1e-15,
     "adaptive sigma diagnostic should match factor sigma");
+}
+
+void TestLowSpeedVerticalHandoffClampsTargetDelta() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_vertical_motion_adaptive_reweighting = true;
+  config.vertical_velocity_delta_target_acc_limit_mps2 = 0.85;
+  config.vertical_motion_adaptive_static_horizontal_speed_rms_mps = 0.15;
+  config.vertical_motion_adaptive_static_target_acc_rms_mps2 = 0.03;
+
+  offline_lc_minimal::VerticalMotionAdaptiveReweightingDiagnosticRow low_speed_handoff;
+  low_speed_handoff.horizontal_speed_rms_mps = 0.10;
+  low_speed_handoff.target_vertical_acc_rms_mps2 = 0.02;
+  low_speed_handoff.motion_score = 1.0;
+
+  const double target = offline_lc_minimal::PlanVerticalVelocityDeltaTarget(
+    config,
+    0.008491646647841404,
+    0.05,
+    &low_speed_handoff);
+
+  ExpectNear(target, 0.0015, 1e-12, "low-speed handoff should use the static target acceleration limit");
+
+  low_speed_handoff.horizontal_speed_rms_mps = 0.20;
+  const double dynamic_target = offline_lc_minimal::PlanVerticalVelocityDeltaTarget(
+    config,
+    0.008491646647841404,
+    0.05,
+    &low_speed_handoff);
+  ExpectNear(
+    dynamic_target,
+    0.008491646647841404,
+    1e-15,
+    "dynamic intervals should preserve targets within the global acceleration limit");
+
+  low_speed_handoff.horizontal_speed_rms_mps = 0.10;
+  config.enable_vertical_motion_adaptive_reweighting = false;
+  const double disabled_target = offline_lc_minimal::PlanVerticalVelocityDeltaTarget(
+    config,
+    0.008491646647841404,
+    0.05,
+    &low_speed_handoff);
+  ExpectNear(
+    disabled_target,
+    0.008491646647841404,
+    1e-15,
+    "disabled adaptive reweighting should preserve targets within the global acceleration limit");
+
+  config.enable_vertical_motion_adaptive_reweighting = true;
+  const double no_profile_target = offline_lc_minimal::PlanVerticalVelocityDeltaTarget(
+    config,
+    0.008491646647841404,
+    0.05,
+    nullptr);
+  ExpectNear(
+    no_profile_target,
+    0.008491646647841404,
+    1e-15,
+    "missing stability profile should preserve targets within the global acceleration limit");
+
+  low_speed_handoff.in_jump_padding = true;
+  const double jump_padding_target = offline_lc_minimal::PlanVerticalVelocityDeltaTarget(
+    config,
+    0.008491646647841404,
+    0.05,
+    &low_speed_handoff);
+  ExpectNear(
+    jump_padding_target,
+    0.008491646647841404,
+    1e-15,
+    "jump padding should preserve targets within the global acceleration limit");
+}
+
+void TestBuilderClampsLowSpeedVerticalHandoffTarget() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.enable_vertical_motion_adaptive_reweighting = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.10;
+  config.vertical_velocity_delta_min_sigma_mps = 0.003;
+  config.vertical_velocity_delta_target_acc_limit_mps2 = 0.85;
+  config.vertical_motion_adaptive_static_horizontal_speed_rms_mps = 0.15;
+  config.vertical_motion_adaptive_static_target_acc_rms_mps2 = 0.03;
+
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {1, 2, 331.85, 331.90, 0.008491646647841404, 0.0},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  offline_lc_minimal::VerticalMotionAdaptiveReweightingDiagnosticRow profile_row;
+  profile_row.state_index_i = 1;
+  profile_row.state_index_j = 2;
+  profile_row.motion_score = 1.0;
+  profile_row.horizontal_speed_rms_mps = 0.10;
+  profile_row.target_vertical_acc_rms_mps2 = 0.02;
+  profile_row.dvz_sigma_before_mps =
+    offline_lc_minimal::VerticalVelocityDeltaSigmaModel(config).Compute(0.05).sigma_mps;
+  const offline_lc_minimal::VerticalMotionStabilityProfile profile{profile_row};
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.stability_profile = &profile;
+  request.dynamic_start_index = 1;
+  request.outer_pass = 1;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "low-speed handoff interval should add a factor");
+  ExpectTrue(diagnostics.front().factor_added, "low-speed handoff diagnostic should mark factor added");
+  ExpectNear(
+    diagnostics.front().raw_target_delta_vz_mps,
+    0.008491646647841404,
+    1e-15,
+    "raw target should be preserved");
+  ExpectNear(
+    diagnostics.front().target_delta_vz_mps,
+    0.0015,
+    1e-12,
+    "low-speed handoff target should be clamped");
+  ExpectTrue(diagnostics.front().target_clamped, "low-speed handoff clamp should be reported");
+  ExpectNear(
+    static_cast<double>(summary.vertical_velocity_delta_target_clamped_count),
+    1.0,
+    0.0,
+    "low-speed handoff clamp count is wrong");
 }
 
 void TestBuilderUsesContextScaleForRoughBiasIntervals() {
@@ -1264,6 +1395,12 @@ int main() {
       "TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary",
       TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary);
     RunTest("TestBuilderUsesAdaptiveMotionProfileSigma", TestBuilderUsesAdaptiveMotionProfileSigma);
+    RunTest(
+      "TestLowSpeedVerticalHandoffClampsTargetDelta",
+      TestLowSpeedVerticalHandoffClampsTargetDelta);
+    RunTest(
+      "TestBuilderClampsLowSpeedVerticalHandoffTarget",
+      TestBuilderClampsLowSpeedVerticalHandoffTarget);
     RunTest(
       "TestBuilderUsesContextScaleForRoughBiasIntervals",
       TestBuilderUsesContextScaleForRoughBiasIntervals);
