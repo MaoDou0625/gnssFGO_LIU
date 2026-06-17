@@ -1020,6 +1020,9 @@ void TestDefaultOfflineConfigUsesSplineStage3Reference() {
     std::abs(config.vertical_velocity_delta_sigma_scale - 100.0) < 1e-15,
     "default vertical velocity delta output sigma scale should be 100");
   ExpectTrue(
+    std::abs(config.vertical_velocity_delta_sigma_ceiling_mps - 5.0e-5) < 1e-15,
+    "default vertical velocity delta sigma ceiling should be 0.05 mm/s before output scale");
+  ExpectTrue(
     config.enable_vertical_velocity_delta_context_sigma_scale,
     "default config should enable context-aware vertical velocity delta sigma scaling");
   ExpectTrue(

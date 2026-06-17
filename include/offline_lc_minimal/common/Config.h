@@ -311,7 +311,7 @@ struct OfflineRunnerConfig {
   double vertical_velocity_delta_bias_sigma_mps2 = 9.80665e-5;
   double vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
   double vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
-  double vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+  double vertical_velocity_delta_sigma_ceiling_mps = 5.0e-5;
   double vertical_velocity_delta_sigma_scale = 1.0;
   bool enable_vertical_velocity_delta_context_sigma_scale = false;
   double vertical_velocity_delta_context_normal_sigma_scale = 1.0;
