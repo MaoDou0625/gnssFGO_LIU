@@ -119,6 +119,9 @@ struct OfflineRunnerConfig {
   std::string late_static_threshold_method = "log_otsu";
   double late_static_gyro_threshold_scale = 1.05;
   double late_static_acc_norm_std_threshold_mps2 = 0.001;
+  bool enable_late_static_initial_acc_norm_std_threshold = true;
+  double late_static_initial_acc_norm_std_scale = 1.2;
+  int late_static_initial_acc_norm_std_min_sample_count = 100;
   int late_static_min_rtkfix_samples = 10;
   double late_static_merge_gap_s = 2.0;
   bool late_static_exclude_initial_static = true;

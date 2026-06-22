@@ -4684,6 +4684,11 @@ void TestStage1YawRefinementConfigValidation() {
   offline_lc_minimal::OverrideConfigField(config, "late_static_threshold_method", "log_otsu");
   offline_lc_minimal::OverrideConfigField(config, "late_static_gyro_threshold_scale", "1.08");
   offline_lc_minimal::OverrideConfigField(config, "late_static_acc_norm_std_threshold_mps2", "0.002");
+  offline_lc_minimal::OverrideConfigField(
+    config, "enable_late_static_initial_acc_norm_std_threshold", "false");
+  offline_lc_minimal::OverrideConfigField(config, "late_static_initial_acc_norm_std_scale", "1.25");
+  offline_lc_minimal::OverrideConfigField(
+    config, "late_static_initial_acc_norm_std_min_sample_count", "200");
   offline_lc_minimal::OverrideConfigField(config, "late_static_min_rtkfix_samples", "12");
   offline_lc_minimal::OverrideConfigField(config, "late_static_merge_gap_s", "1.5");
   offline_lc_minimal::OverrideConfigField(config, "late_static_exclude_initial_static", "false");
@@ -4738,6 +4743,12 @@ void TestStage1YawRefinementConfigValidation() {
              "late-static gyro threshold scale should parse");
   ExpectTrue(std::abs(config.late_static_acc_norm_std_threshold_mps2 - 0.002) < 1e-12,
              "late-static accel norm std threshold should parse");
+  ExpectTrue(!config.enable_late_static_initial_acc_norm_std_threshold,
+             "late-static initial accel norm std threshold flag should parse");
+  ExpectTrue(std::abs(config.late_static_initial_acc_norm_std_scale - 1.25) < 1e-12,
+             "late-static initial accel norm std scale should parse");
+  ExpectTrue(config.late_static_initial_acc_norm_std_min_sample_count == 200,
+             "late-static initial accel norm std min sample count should parse");
   ExpectTrue(config.late_static_min_rtkfix_samples == 12,
              "late-static min RTKFIX sample count should parse");
   ExpectTrue(std::abs(config.late_static_merge_gap_s - 1.5) < 1e-12,
@@ -4833,6 +4844,26 @@ void TestStage1YawRefinementConfigValidation() {
     threw = std::string(exception.what()).find("late-static detection settings") != std::string::npos;
   }
   ExpectTrue(threw, "late-static accel norm std threshold should be positive");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.late_static_initial_acc_norm_std_scale = 0.0;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("late-static detection settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "late-static initial accel norm std scale should be positive");
+
+  config = offline_lc_minimal::DefaultConfig();
+  config.late_static_initial_acc_norm_std_min_sample_count = 1;
+  threw = false;
+  try {
+    offline_lc_minimal::ValidateConfig(config);
+  } catch (const std::runtime_error &exception) {
+    threw = std::string(exception.what()).find("late-static detection settings") != std::string::npos;
+  }
+  ExpectTrue(threw, "late-static initial accel norm std min sample count should reject one");
 
   config = offline_lc_minimal::DefaultConfig();
   config.late_static_height_hold_sigma_m = 0.0;

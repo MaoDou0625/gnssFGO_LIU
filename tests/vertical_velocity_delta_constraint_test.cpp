@@ -139,6 +139,40 @@ offline_lc_minimal::BodyZBiasReestimateSegmentRow MakeBiasSegment(
   return segment;
 }
 
+void TestStaticMotionWindowPlannerMergesStaticSources() {
+  offline_lc_minimal::LateStaticWindowRow initial_dynamic_window;
+  initial_dynamic_window.valid = true;
+  initial_dynamic_window.start_time_s = 13.0;
+  initial_dynamic_window.end_time_s = 18.0;
+
+  offline_lc_minimal::LateStaticWindowRow late_window;
+  late_window.valid = true;
+  late_window.start_time_s = 19.0;
+  late_window.end_time_s = 25.0;
+
+  const std::vector<offline_lc_minimal::LateStaticWindowRow> initial_dynamic_windows{
+    initial_dynamic_window};
+  const std::vector<offline_lc_minimal::LateStaticWindowRow> late_windows{late_window};
+  const auto windows =
+    offline_lc_minimal::BuildStaticMotionWindows(
+      offline_lc_minimal::StaticMotionWindowPlanRequest{
+        0.0,
+        10.0,
+        &initial_dynamic_windows,
+        &late_windows,
+        2.0});
+
+  ExpectTrue(windows.size() == 2U, "alignment and detected static spans should form two merged windows");
+  ExpectNear(windows[0].start_time_s, 0.0, 1e-12, "alignment static start is wrong");
+  ExpectNear(windows[0].end_time_s, 10.0, 1e-12, "alignment static end is wrong");
+  ExpectNear(windows[1].start_time_s, 13.0, 1e-12, "detected static start is wrong");
+  ExpectNear(windows[1].end_time_s, 25.0, 1e-12, "detected static end is wrong");
+  ExpectTrue(windows[1].source_window_count == 2U, "detected static source count should merge");
+  ExpectTrue(
+    offline_lc_minimal::IntervalOverlapsStaticMotionWindow(24.9, 25.1, windows),
+    "boundary intervals should overlap the merged static window");
+}
+
 void TestBuilderAddsDynamicBoundaryAndDynamicNonJumpIntervals() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -566,6 +600,69 @@ void TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary() {
   ExpectTrue(diagnostics[0].skip_reason == "STATIC_INTERIOR", "static interior interval should be skipped");
   ExpectTrue(diagnostics[1].factor_added, "last static to first dynamic interval should receive a factor");
   ExpectTrue(diagnostics[1].skip_reason == "ADDED", "boundary interval should be marked as added");
+}
+
+void TestBuilderUsesUnifiedStaticWindowsForDetectedStaticDvz() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.enable_vertical_velocity_delta_initial_static_constraint = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.5;
+  config.vertical_velocity_delta_min_sigma_mps = 0.02;
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {10, 11, 100.0, 100.5, 0.01},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  const std::vector<offline_lc_minimal::StaticMotionWindow> static_motion_windows{
+    {99.0, 101.0, 1U},
+  };
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.static_motion_windows = &static_motion_windows;
+  request.dynamic_start_index = 0;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "detected static interval should receive a DVZ factor");
+  ExpectNear(
+    static_cast<double>(summary.vertical_velocity_delta_static_factor_count),
+    1.0,
+    0.0,
+    "detected static interval should be counted as static DVZ");
+  ExpectTrue(diagnostics.front().factor_added, "detected static interval should be added");
+
+  config.enable_vertical_velocity_delta_initial_static_constraint = false;
+  gtsam::NonlinearFactorGraph skipped_graph;
+  offline_lc_minimal::RunSummary skipped_summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> skipped_diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest skipped_request;
+  skipped_request.config = &config;
+  skipped_request.propagation_records = &records;
+  skipped_request.jump_windows = &jump_windows;
+  skipped_request.static_motion_windows = &static_motion_windows;
+  skipped_request.dynamic_start_index = 0;
+  skipped_request.graph = &skipped_graph;
+  skipped_request.run_summary = &skipped_summary;
+  skipped_request.diagnostics = &skipped_diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(skipped_request)).Build();
+
+  ExpectNear(static_cast<double>(skipped_graph.size()), 0.0, 0.0, "disabled static DVZ should skip detected static intervals");
+  ExpectNear(
+    static_cast<double>(skipped_summary.vertical_velocity_delta_skipped_static_count),
+    1.0,
+    0.0,
+    "detected static interval should use the static skip counter");
+  ExpectTrue(
+    skipped_diagnostics.front().skip_reason == "STATIC_INTERIOR",
+    "detected static interval should use static skip reason");
 }
 
 void TestBuilderUsesAdaptiveMotionProfileSigma() {
@@ -1392,8 +1489,14 @@ int main() {
       "TestBuilderAddsDynamicBoundaryAndDynamicNonJumpIntervals",
       TestBuilderAddsDynamicBoundaryAndDynamicNonJumpIntervals);
     RunTest(
+      "TestStaticMotionWindowPlannerMergesStaticSources",
+      TestStaticMotionWindowPlannerMergesStaticSources);
+    RunTest(
       "TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary",
       TestBuilderSkipsStaticInteriorButAddsStaticDynamicBoundary);
+    RunTest(
+      "TestBuilderUsesUnifiedStaticWindowsForDetectedStaticDvz",
+      TestBuilderUsesUnifiedStaticWindowsForDetectedStaticDvz);
     RunTest("TestBuilderUsesAdaptiveMotionProfileSigma", TestBuilderUsesAdaptiveMotionProfileSigma);
     RunTest(
       "TestLowSpeedVerticalHandoffClampsTargetDelta",

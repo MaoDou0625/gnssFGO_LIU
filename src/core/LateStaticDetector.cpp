@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <utility>
 
+#include "offline_lc_minimal/core/LateStaticAccelThresholdEstimator.h"
+
 namespace offline_lc_minimal {
 namespace {
 
@@ -274,25 +276,6 @@ OtsuResult ApplyThresholdScale(OtsuResult result, const double scale) {
   return result;
 }
 
-LateStaticThresholdDiagnosticRow MakeFixedThresholdRow(
-  const std::string &feature_name,
-  const double threshold_value,
-  const std::size_t sample_count) {
-  LateStaticThresholdDiagnosticRow row;
-  row.feature_name = feature_name;
-  row.method = "fixed_config";
-  row.valid = std::isfinite(threshold_value) && threshold_value > 0.0;
-  row.threshold_value = threshold_value;
-  row.log_threshold_value =
-    threshold_value > 0.0 ? std::log10(threshold_value)
-                          : std::numeric_limits<double>::quiet_NaN();
-  row.sample_count = sample_count;
-  row.static_side_count = sample_count;
-  row.dynamic_side_count = 0U;
-  row.skip_reason = row.valid ? "OK" : "INVALID_THRESHOLD";
-  return row;
-}
-
 struct ActiveWindow {
   double start_time_s = std::numeric_limits<double>::quiet_NaN();
   double end_time_s = std::numeric_limits<double>::quiet_NaN();
@@ -471,7 +454,10 @@ DataDrivenStaticThresholdEstimator::DataDrivenStaticThresholdEstimator(
     : config_(config) {}
 
 LateStaticThresholdSet DataDrivenStaticThresholdEstimator::Estimate(
-  const std::vector<LateStaticFeatureDiagnosticRow> &features) const {
+  const std::vector<LateStaticFeatureDiagnosticRow> &features,
+  const std::vector<ImuSample> *imu_samples,
+  const double alignment_start_time_s,
+  const double alignment_end_time_s) const {
   LateStaticThresholdSet thresholds;
   thresholds.diagnostics.reserve(5U);
   if (!config_.enable_late_static_detection) {
@@ -482,7 +468,6 @@ LateStaticThresholdSet DataDrivenStaticThresholdEstimator::Estimate(
   std::vector<double> rtk_ranges;
   std::vector<double> gyro_rms_values;
   std::vector<double> gyro_p95_values;
-  std::vector<double> acc_norm_std_values;
   for (const auto &row : features) {
     if (!row.valid_features || row.overlaps_rtk_outage) {
       continue;
@@ -491,7 +476,6 @@ LateStaticThresholdSet DataDrivenStaticThresholdEstimator::Estimate(
     rtk_ranges.push_back(row.rtk_horizontal_range_m);
     gyro_rms_values.push_back(row.imu_gyro_norm_rms_radps);
     gyro_p95_values.push_back(row.imu_gyro_norm_p95_radps);
-    acc_norm_std_values.push_back(row.imu_acc_norm_std_mps2);
   }
 
   const std::string method = Lowercase(config_.late_static_threshold_method);
@@ -513,11 +497,15 @@ LateStaticThresholdSet DataDrivenStaticThresholdEstimator::Estimate(
     MakeThresholdRow("imu_gyro_norm_rms_radps", method, gyro_rms));
   thresholds.diagnostics.push_back(
     MakeThresholdRow("imu_gyro_norm_p95_radps", method, gyro_p95));
+  const LateStaticAccelThresholdEstimate accel_threshold =
+    EstimateLateStaticAccelNormStdThreshold(
+      LateStaticAccelThresholdRequest{
+        &config_,
+        imu_samples,
+        alignment_start_time_s,
+        alignment_end_time_s});
   thresholds.diagnostics.push_back(
-    MakeFixedThresholdRow(
-      "imu_acc_norm_std_mps2",
-      config_.late_static_acc_norm_std_threshold_mps2,
-      acc_norm_std_values.size()));
+    MakeLateStaticAccelNormStdThresholdDiagnostic(accel_threshold));
   thresholds.valid =
     rtk_speed.valid && rtk_range.valid && gyro_rms.valid && gyro_p95.valid &&
     thresholds.diagnostics.back().valid;
@@ -525,8 +513,7 @@ LateStaticThresholdSet DataDrivenStaticThresholdEstimator::Estimate(
   thresholds.rtk_horizontal_range_threshold_m = rtk_range.value_threshold;
   thresholds.gyro_rms_threshold_radps = gyro_rms.value_threshold;
   thresholds.gyro_p95_threshold_radps = gyro_p95.value_threshold;
-  thresholds.acc_norm_std_threshold_mps2 =
-    config_.late_static_acc_norm_std_threshold_mps2;
+  thresholds.acc_norm_std_threshold_mps2 = accel_threshold.threshold_mps2;
   return thresholds;
 }
 

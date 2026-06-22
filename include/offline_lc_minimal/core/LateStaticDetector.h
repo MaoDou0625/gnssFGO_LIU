@@ -48,7 +48,10 @@ class DataDrivenStaticThresholdEstimator {
   explicit DataDrivenStaticThresholdEstimator(const OfflineRunnerConfig &config);
 
   [[nodiscard]] LateStaticThresholdSet Estimate(
-    const std::vector<LateStaticFeatureDiagnosticRow> &features) const;
+    const std::vector<LateStaticFeatureDiagnosticRow> &features,
+    const std::vector<ImuSample> *imu_samples = nullptr,
+    double alignment_start_time_s = 0.0,
+    double alignment_end_time_s = 0.0) const;
 
  private:
   const OfflineRunnerConfig &config_;

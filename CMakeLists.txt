@@ -82,6 +82,7 @@ add_library(offline_lc_minimal_lib
   src/core/InitialDynamicStaticDetector.cpp
   src/core/InitialStaticPositionConstraintBuilder.cpp
   src/core/InitialStaticRtkHeightConstraintBuilder.cpp
+  src/core/LateStaticAccelThresholdEstimator.cpp
   src/core/LateStaticDetector.cpp
   src/core/LateStaticReferenceEstimator.cpp
   src/core/LateStaticVerticalConstraintBuilder.cpp
@@ -143,6 +144,7 @@ add_library(offline_lc_minimal_lib
   src/core/Stage3VerticalReferenceSmoother.cpp
   src/core/Stage3VerticalReferenceTimelineAligner.cpp
   src/core/SegmentedBatchResultAssembler.cpp
+  src/core/StaticMotionWindowPlanner.cpp
   src/core/StaticImuAlignment.cpp
   src/core/TrajectoryResultBuilder.cpp
   src/core/TrajectoryInitializer.cpp

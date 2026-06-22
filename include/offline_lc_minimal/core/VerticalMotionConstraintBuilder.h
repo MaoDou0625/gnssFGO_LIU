@@ -10,6 +10,7 @@
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/Types.h"
 #include "offline_lc_minimal/core/BodyZJumpConstraintWindowPlanner.h"
+#include "offline_lc_minimal/core/StaticMotionWindowPlanner.h"
 #include "offline_lc_minimal/core/VerticalMotionStabilityProfile.h"
 
 namespace offline_lc_minimal {
@@ -29,6 +30,7 @@ struct VerticalMotionConstraintBuildRequest {
   const std::vector<BodyZSeedJumpWindowRow> *jump_windows = nullptr;
   const std::vector<RtkOutageWindowRow> *rtk_outage_windows = nullptr;
   const std::vector<BodyZBiasReestimateSegmentRow> *bias_reestimate_segments = nullptr;
+  const std::vector<StaticMotionWindow> *static_motion_windows = nullptr;
   const VerticalMotionStabilityProfile *stability_profile = nullptr;
   std::optional<double> gnss_support_end_time_s;
   std::size_t dynamic_start_index = 0;

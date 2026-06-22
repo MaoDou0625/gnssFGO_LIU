@@ -328,6 +328,64 @@ void TestLateStaticEstimatorAppliesGyroScale() {
     "acc norm std threshold should come from config");
 }
 
+void TestLateStaticEstimatorUsesInitialStaticAccelStdThreshold() {
+  auto config = MakeLateStaticConfig();
+  config.late_static_initial_acc_norm_std_scale = 1.2;
+  config.late_static_initial_acc_norm_std_min_sample_count = 10;
+
+  std::vector<offline_lc_minimal::LateStaticFeatureDiagnosticRow> features;
+  for (int i = 0; i < 12; ++i) {
+    features.push_back(
+      MakeFeatureRow(
+        static_cast<double>(i),
+        static_cast<double>(i) + 5.0,
+        0.01,
+        0.01,
+        0.0001,
+        0.00018,
+        0.04));
+  }
+  for (int i = 12; i < 24; ++i) {
+    features.push_back(
+      MakeFeatureRow(
+        static_cast<double>(i),
+        static_cast<double>(i) + 5.0,
+        1.0,
+        5.0,
+        0.01,
+        0.02,
+        0.12));
+  }
+
+  std::vector<offline_lc_minimal::ImuSample> imu_samples;
+  for (int i = 0; i < 120; ++i) {
+    offline_lc_minimal::ImuSample sample;
+    sample.time_s = 0.5 * static_cast<double>(i);
+    sample.gyro_radps = Eigen::Vector3d::Zero();
+    const double alternating_noise_mps2 = (i % 2 == 0) ? -0.1 : 0.1;
+    sample.accel_mps2 = Eigen::Vector3d(0.0, 0.0, 9.81 + alternating_noise_mps2);
+    imu_samples.push_back(sample);
+  }
+
+  const auto thresholds =
+    offline_lc_minimal::DataDrivenStaticThresholdEstimator(config).Estimate(
+      features,
+      &imu_samples,
+      0.0,
+      60.0);
+
+  ExpectTrue(thresholds.valid, "threshold estimator should accept initial static IMU data");
+  ExpectTrue(
+    std::abs(thresholds.acc_norm_std_threshold_mps2 - 0.12) < 1e-12,
+    "acc norm std threshold should scale the initial static accel norm std");
+  ExpectTrue(
+    thresholds.diagnostics.back().method == "initial_static_scaled",
+    "acc norm std diagnostic should report initial-static threshold source");
+  ExpectTrue(
+    thresholds.diagnostics.back().sample_count == 120U,
+    "acc norm std diagnostic should report initial static IMU sample count");
+}
+
 void TestLateStaticReferenceEstimatorUsesWindowRtkHuberMean() {
   std::vector<offline_lc_minimal::LateStaticWindowRow> windows(1U);
   windows.front().start_time_s = 10.0;
@@ -647,6 +705,9 @@ int main() {
     RunTest(
       "TestLateStaticEstimatorAppliesGyroScale",
       TestLateStaticEstimatorAppliesGyroScale);
+    RunTest(
+      "TestLateStaticEstimatorUsesInitialStaticAccelStdThreshold",
+      TestLateStaticEstimatorUsesInitialStaticAccelStdThreshold);
     RunTest(
       "TestLateStaticReferenceEstimatorUsesWindowRtkHuberMean",
       TestLateStaticReferenceEstimatorUsesWindowRtkHuberMean);

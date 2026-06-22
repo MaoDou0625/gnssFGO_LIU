@@ -73,6 +73,7 @@
 #include "offline_lc_minimal/core/Stage3VerticalReferenceTimelineAligner.h"
 #include "offline_lc_minimal/core/Stage1YawRefinementRunner.h"
 #include "offline_lc_minimal/core/Stage2LowfreqVerticalReferenceOptimizationRunner.h"
+#include "offline_lc_minimal/core/StaticMotionWindowPlanner.h"
 #include "offline_lc_minimal/core/TrajectoryResultBuilder.h"
 #include "offline_lc_minimal/core/TrajectoryInitializer.h"
 #include "offline_lc_minimal/core/VerticalAdaptiveReweightingLoop.h"
@@ -1472,7 +1473,10 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       LateStaticFeatureExtractor(std::move(late_static_request)).Extract();
     const LateStaticThresholdSet late_static_thresholds =
       DataDrivenStaticThresholdEstimator(config_).Estimate(
-        run_result.late_static_feature_diagnostics);
+        run_result.late_static_feature_diagnostics,
+        &dataset.imu_samples,
+        alignment_start_time_s,
+        alignment_end_time_s);
     run_result.late_static_threshold_diagnostics =
       late_static_thresholds.diagnostics;
     run_result.late_static_windows =
@@ -2124,12 +2128,22 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
       std::max(*vertical_velocity_delta_support_end_time_s, record.corrected_time_s);
   }
 
+  const std::vector<StaticMotionWindow> static_motion_windows =
+    BuildStaticMotionWindows(
+      StaticMotionWindowPlanRequest{
+        alignment_start_time_s,
+        alignment_end_time_s,
+        &run_result.initial_dynamic_static_windows,
+        &run_result.late_static_windows,
+        config_.late_static_merge_gap_s});
+
   VerticalMotionConstraintBuildRequest vertical_motion_request;
   vertical_motion_request.config = &config_;
   vertical_motion_request.propagation_records = &vertical_velocity_delta_records;
   vertical_motion_request.jump_windows = &run_result.body_z_seed_jump_windows;
   vertical_motion_request.rtk_outage_windows = &run_result.rtk_outage_windows;
   vertical_motion_request.bias_reestimate_segments = &run_result.body_z_bias_reestimate_segments;
+  vertical_motion_request.static_motion_windows = &static_motion_windows;
   vertical_motion_request.stability_profile = active_stability_profile_ptr;
   vertical_motion_request.gnss_support_end_time_s = vertical_velocity_delta_support_end_time_s;
   vertical_motion_request.dynamic_start_index = graph_timeline.dynamic_start_index;
