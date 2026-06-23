@@ -113,7 +113,7 @@ void TestProjectPointToSharedReferenceLine() {
   ExpectNear(projection.lateral_offset_m, 3.0, 1e-12, "lateral offset should be signed distance");
 }
 
-void TestSharedReferenceKeepsRtkAndUsesDebiasedBridge() {
+void TestSharedReferenceUsesStage2NavOnlyBridge() {
   offline_lc_minimal::SharedVerticalReferenceBuildRequest request;
   request.grid_spacing_m = 1.0;
   request.sigma_m = 0.02;
@@ -124,38 +124,47 @@ void TestSharedReferenceKeepsRtkAndUsesDebiasedBridge() {
     offline_lc_minimal::BuildSharedVerticalReference(std::move(request));
 
   ExpectTrue(reference.rows.size() >= 5U, "shared reference should cover the longest member");
-  ExpectNear(reference.rows[0].reference_up_m, 100.0, 0.02, "start should remain RTK dominated");
-  ExpectNear(reference.rows[4].reference_up_m, 104.0, 0.02, "end should remain RTK dominated");
+  ExpectNear(reference.rows[0].reference_up_m, 101.0, 0.02, "start should use Stage2 nav median");
+  ExpectNear(reference.rows[4].reference_up_m, 105.0, 0.02, "end should use Stage2 nav median");
   ExpectTrue(
-    reference.rows[0].source == "RTK_OFFSET_BRIDGE",
-    "start source should use smoothed RTK bridge");
+    reference.rows[0].source == "NAV_BRIDGE",
+    "start source should use Stage2 nav bridge");
   ExpectTrue(
-    reference.rows[4].source == "RTK_OFFSET_BRIDGE",
-    "end source should use smoothed RTK bridge");
-  ExpectNear(reference.rows[2].reference_up_m, 102.0, 0.03, "middle should use de-biased Stage2 bridge");
+    reference.rows[4].source == "NAV_BRIDGE",
+    "end source should use Stage2 nav bridge");
+  ExpectNear(reference.rows[2].reference_up_m, 103.0, 0.03, "middle should use Stage2 nav median");
   ExpectTrue(
-    reference.rows[2].source == "NAV_BRIDGE_OFFSET",
-    "middle source should use interpolated RTK offset over nav bridge");
+    reference.rows[2].rtk_weight == 0.0,
+    "shared reference should not assign RTK weight");
 }
 
-void TestSharedReferenceSmoothsNoisyRtkBins() {
+void TestSharedReferenceIgnoresRtkSamples() {
   offline_lc_minimal::SharedVerticalReferenceBuildRequest request;
   request.grid_spacing_m = 1.0;
   request.sigma_m = 0.02;
   request.members.push_back(MakeMember("A", 0.0, 0.0));
   request.members.push_back(MakeMember("B", 0.0, 0.2));
+  const auto without_extra_rtk =
+    offline_lc_minimal::BuildSharedVerticalReference(request);
+
   request.members.front().gnss_samples.push_back(MakeRtkSample(1.0, 101.0, 1.0));
-  request.members.front().gnss_samples.push_back(MakeRtkSample(2.0, 102.20, 2.0));
+  request.members.front().gnss_samples.push_back(MakeRtkSample(2.0, 112.20, 2.0));
   request.members.front().gnss_samples.push_back(MakeRtkSample(3.0, 103.0, 3.0));
 
-  const auto reference =
+  const auto with_extra_rtk =
     offline_lc_minimal::BuildSharedVerticalReference(std::move(request));
 
+  ExpectTrue(
+    without_extra_rtk.rows.size() == with_extra_rtk.rows.size(),
+    "RTK samples should not change reference row count");
   ExpectNear(
-    reference.rows[2].reference_up_m,
-    102.0,
-    0.06,
-    "noisy one-bin RTK height should be low-frequency corrected instead of copied");
+    with_extra_rtk.rows[2].reference_up_m,
+    without_extra_rtk.rows[2].reference_up_m,
+    1.0e-12,
+    "RTK samples should not change shared reference height");
+  ExpectTrue(
+    with_extra_rtk.rows[2].rtk_weight == 0.0,
+    "RTK samples should not receive shared reference weight");
 }
 
 void TestSharedReferenceRejectsSingleMember() {
@@ -177,11 +186,11 @@ int main() {
   try {
     RunTest("TestProjectPointToSharedReferenceLine", TestProjectPointToSharedReferenceLine);
     RunTest(
-      "TestSharedReferenceKeepsRtkAndUsesDebiasedBridge",
-      TestSharedReferenceKeepsRtkAndUsesDebiasedBridge);
+      "TestSharedReferenceUsesStage2NavOnlyBridge",
+      TestSharedReferenceUsesStage2NavOnlyBridge);
     RunTest(
-      "TestSharedReferenceSmoothsNoisyRtkBins",
-      TestSharedReferenceSmoothsNoisyRtkBins);
+      "TestSharedReferenceIgnoresRtkSamples",
+      TestSharedReferenceIgnoresRtkSamples);
     RunTest("TestSharedReferenceRejectsSingleMember", TestSharedReferenceRejectsSingleMember);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';

@@ -14,7 +14,6 @@
 #include "offline_lc_minimal/common/Config.h"
 #include "offline_lc_minimal/common/ResultOutputWriters.h"
 #include "offline_lc_minimal/core/SharedVerticalReferenceBuilder.h"
-#include "offline_lc_minimal/io/TextDatasetLoader.h"
 #include "offline_lc_minimal/io/TrajectoryCsvReader.h"
 
 namespace offline_lc_minimal {
@@ -165,19 +164,12 @@ std::vector<SharedVerticalReferenceMember> LoadMembers(
     if (!manifest_row.gnss_path.empty()) {
       config.gnss_path = manifest_row.gnss_path.string();
     }
-    if (config.imu_path.empty() || config.gnss_path.empty()) {
-      throw std::runtime_error(
-        "manifest member " + manifest_row.member_id +
-        " config must provide imu_path and gnss_path");
-    }
     ValidateConfig(config);
-    DataSet dataset = TextDatasetLoader::Load(config);
 
     SharedVerticalReferenceMember member;
     member.member_id = manifest_row.member_id;
     member.config = config;
     member.trajectory = ReadTrajectoryCsvRows(manifest_row.stage2_trajectory_path);
-    member.gnss_samples = std::move(dataset.gnss_samples);
     members.push_back(std::move(member));
   }
   return members;

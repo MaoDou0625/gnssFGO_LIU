@@ -6,22 +6,18 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
-#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
 #include "offline_lc_minimal/common/GeoUtils.h"
+#include "offline_lc_minimal/core/SharedVerticalReferenceComposer.h"
 
 namespace offline_lc_minimal {
 namespace {
 
 constexpr double kDistanceEpsilonM = 1.0e-6;
-constexpr double kTimeEpsilonS = 1.0e-9;
-constexpr double kOffsetSmoothingRadiusM = 12.0;
-constexpr double kOffsetHuberScaleM = 0.015;
-constexpr double kFinalReferenceSmoothingRadiusM = 4.0;
 
 struct CommonTrajectoryPoint {
   double time_s = 0.0;
@@ -31,9 +27,7 @@ struct CommonTrajectoryPoint {
 
 struct CommonMember {
   std::string member_id;
-  OfflineRunnerConfig config;
   std::vector<CommonTrajectoryPoint> trajectory;
-  std::vector<GnssSolutionSample> gnss_samples;
   bool direction_flipped = false;
 };
 
@@ -160,153 +154,6 @@ std::vector<double> MedianByBin(const std::vector<std::vector<double>> &values_b
   return medians;
 }
 
-std::vector<double> FillFiniteSeriesByInterpolation(
-  std::vector<double> values,
-  const double fallback_value) {
-  std::vector<std::size_t> finite_indices;
-  for (std::size_t index = 0; index < values.size(); ++index) {
-    if (std::isfinite(values[index])) {
-      finite_indices.push_back(index);
-    }
-  }
-  if (finite_indices.empty()) {
-    std::fill(values.begin(), values.end(), fallback_value);
-    return values;
-  }
-  for (std::size_t index = 0; index < values.size(); ++index) {
-    if (std::isfinite(values[index])) {
-      continue;
-    }
-    const auto right_it =
-      std::lower_bound(finite_indices.begin(), finite_indices.end(), index);
-    if (right_it == finite_indices.begin()) {
-      values[index] = values[*right_it];
-    } else if (right_it == finite_indices.end()) {
-      values[index] = values[finite_indices.back()];
-    } else {
-      const std::size_t right = *right_it;
-      const std::size_t left = *(right_it - 1);
-      const double alpha =
-        static_cast<double>(index - left) /
-        std::max(static_cast<double>(right - left), 1.0);
-      values[index] = (1.0 - alpha) * values[left] + alpha * values[right];
-    }
-  }
-  return values;
-}
-
-std::vector<double> SmoothRtkOffset(
-  const std::vector<double> &offset_m,
-  const double grid_spacing_m) {
-  if (offset_m.empty()) {
-    return {};
-  }
-  const double radius_m = std::max(kOffsetSmoothingRadiusM, 4.0 * grid_spacing_m);
-  const double sigma_m = std::max(0.5 * radius_m, grid_spacing_m);
-  const int radius_bins =
-    std::max(1, static_cast<int>(std::ceil(radius_m / grid_spacing_m)));
-  std::vector<double> smoothed(offset_m.size(), std::numeric_limits<double>::quiet_NaN());
-  for (std::size_t index = 0; index < offset_m.size(); ++index) {
-    std::vector<double> local_values;
-    const int begin = std::max(0, static_cast<int>(index) - radius_bins);
-    const int end =
-      std::min(static_cast<int>(offset_m.size()) - 1, static_cast<int>(index) + radius_bins);
-    local_values.reserve(static_cast<std::size_t>(end - begin + 1));
-    for (int candidate = begin; candidate <= end; ++candidate) {
-      if (std::isfinite(offset_m[static_cast<std::size_t>(candidate)])) {
-        local_values.push_back(offset_m[static_cast<std::size_t>(candidate)]);
-      }
-    }
-    const double local_center = Median(local_values);
-    if (!std::isfinite(local_center)) {
-      continue;
-    }
-
-    double weight_sum = 0.0;
-    double weighted_sum = 0.0;
-    for (int candidate = begin; candidate <= end; ++candidate) {
-      const double value = offset_m[static_cast<std::size_t>(candidate)];
-      if (!std::isfinite(value)) {
-        continue;
-      }
-      const double distance_m =
-        std::abs(static_cast<double>(candidate) - static_cast<double>(index)) *
-        grid_spacing_m;
-      const double gaussian_weight =
-        std::exp(-0.5 * std::pow(distance_m / sigma_m, 2.0));
-      const double residual_m = std::abs(value - local_center);
-      const double robust_weight =
-        residual_m <= kOffsetHuberScaleM
-          ? 1.0
-          : kOffsetHuberScaleM / std::max(residual_m, kDistanceEpsilonM);
-      const double weight = gaussian_weight * robust_weight;
-      weight_sum += weight;
-      weighted_sum += weight * value;
-    }
-    if (weight_sum > 0.0) {
-      smoothed[index] = weighted_sum / weight_sum;
-    }
-  }
-  return FillFiniteSeriesByInterpolation(std::move(smoothed), 0.0);
-}
-
-void SmoothReferenceRows(
-  std::vector<SharedVerticalReferenceRow> &rows,
-  const double grid_spacing_m) {
-  if (rows.empty()) {
-    return;
-  }
-  const double radius_m =
-    std::max(kFinalReferenceSmoothingRadiusM, 2.0 * grid_spacing_m);
-  const double sigma_m = std::max(0.5 * radius_m, grid_spacing_m);
-  const int radius_bins =
-    std::max(1, static_cast<int>(std::ceil(radius_m / grid_spacing_m)));
-  std::vector<double> smoothed(rows.size(), std::numeric_limits<double>::quiet_NaN());
-  for (std::size_t index = 0; index < rows.size(); ++index) {
-    double weight_sum = 0.0;
-    double weighted_sum = 0.0;
-    double weighted_x_sum = 0.0;
-    double weighted_xx_sum = 0.0;
-    double weighted_xy_sum = 0.0;
-    const int begin = std::max(0, static_cast<int>(index) - radius_bins);
-    const int end =
-      std::min(static_cast<int>(rows.size()) - 1, static_cast<int>(index) + radius_bins);
-    for (int candidate = begin; candidate <= end; ++candidate) {
-      const double value = rows[static_cast<std::size_t>(candidate)].reference_up_m;
-      if (!std::isfinite(value)) {
-        continue;
-      }
-      const double distance_m =
-        std::abs(static_cast<double>(candidate) - static_cast<double>(index)) *
-        grid_spacing_m;
-      const double weight =
-        std::exp(-0.5 * std::pow(distance_m / sigma_m, 2.0));
-      const double x_m =
-        (static_cast<double>(candidate) - static_cast<double>(index)) *
-        grid_spacing_m;
-      weight_sum += weight;
-      weighted_sum += weight * value;
-      weighted_x_sum += weight * x_m;
-      weighted_xx_sum += weight * x_m * x_m;
-      weighted_xy_sum += weight * x_m * value;
-    }
-    if (weight_sum > 0.0) {
-      const double determinant =
-        weight_sum * weighted_xx_sum - weighted_x_sum * weighted_x_sum;
-      smoothed[index] =
-        determinant > kDistanceEpsilonM
-          ? (weighted_sum * weighted_xx_sum -
-             weighted_x_sum * weighted_xy_sum) / determinant
-          : weighted_sum / weight_sum;
-    }
-  }
-  for (std::size_t index = 0; index < rows.size(); ++index) {
-    if (std::isfinite(smoothed[index])) {
-      rows[index].reference_up_m = smoothed[index];
-    }
-  }
-}
-
 GeoReference MakeCommonGeoReference(
   const std::vector<SharedVerticalReferenceMember> &members) {
   for (const auto &member : members) {
@@ -339,8 +186,6 @@ std::vector<CommonMember> BuildCommonMembers(
   for (const auto &input_member : request.members) {
     CommonMember member;
     member.member_id = input_member.member_id;
-    member.config = input_member.config;
-    member.gnss_samples = input_member.gnss_samples;
     member.trajectory.reserve(input_member.trajectory.size());
     for (const auto &row : input_member.trajectory) {
       if (!row.has_geodetic) {
@@ -436,69 +281,6 @@ std::size_t GridIndex(const double s_m, const double grid_spacing_m) {
   return static_cast<std::size_t>(std::llround(s_m / grid_spacing_m));
 }
 
-bool TimeWithinProcessingRange(const OfflineRunnerConfig &config, const double corrected_time_s) {
-  if (config.processing_start_time_s > 0.0 &&
-      corrected_time_s + kTimeEpsilonS < config.processing_start_time_s) {
-    return false;
-  }
-  if (config.processing_end_time_s > 0.0 &&
-      corrected_time_s > config.processing_end_time_s + kTimeEpsilonS) {
-    return false;
-  }
-  return true;
-}
-
-bool IsUsableRtkFixForSharedReference(
-  const OfflineRunnerConfig &config,
-  const GnssSolutionSample &sample) {
-  if (!sample.has_valid_position() || sample.fix_type() != GnssFixType::kRtkFix) {
-    return false;
-  }
-  if (config.required_best_sol_status_code > 0 &&
-      sample.best_sol_status_code != config.required_best_sol_status_code) {
-    return false;
-  }
-  if (config.drop_nonfinite_sigma && !sample.has_finite_sigma()) {
-    return false;
-  }
-  return TimeWithinProcessingRange(config, sample.time_s - config.gnss_time_offset_s);
-}
-
-void FillMissingRowsByInterpolation(std::vector<SharedVerticalReferenceRow> &rows) {
-  std::vector<std::size_t> finite_indices;
-  for (std::size_t index = 0; index < rows.size(); ++index) {
-    if (std::isfinite(rows[index].reference_up_m)) {
-      finite_indices.push_back(index);
-    }
-  }
-  if (finite_indices.empty()) {
-    throw std::runtime_error("shared vertical reference has no finite observations");
-  }
-  for (std::size_t index = 0; index < rows.size(); ++index) {
-    if (std::isfinite(rows[index].reference_up_m)) {
-      continue;
-    }
-    const auto right_it =
-      std::lower_bound(finite_indices.begin(), finite_indices.end(), index);
-    if (right_it == finite_indices.begin()) {
-      rows[index].reference_up_m = rows[*right_it].reference_up_m;
-    } else if (right_it == finite_indices.end()) {
-      rows[index].reference_up_m = rows[finite_indices.back()].reference_up_m;
-    } else {
-      const std::size_t right = *right_it;
-      const std::size_t left = *(right_it - 1);
-      const double alpha =
-        (rows[index].s_m - rows[left].s_m) /
-        std::max(rows[right].s_m - rows[left].s_m, kDistanceEpsilonM);
-      rows[index].reference_up_m =
-        (1.0 - alpha) * rows[left].reference_up_m +
-        alpha * rows[right].reference_up_m;
-    }
-    rows[index].source = "INTERPOLATED";
-    rows[index].sample_count = 0U;
-  }
-}
-
 }  // namespace
 
 SharedReferenceProjection ProjectPointToSharedReferenceLine(
@@ -557,72 +339,16 @@ SharedVerticalReference BuildSharedVerticalReference(
   const double max_s_m = result.reference_line.back().s_m;
   const std::size_t grid_count =
     static_cast<std::size_t>(std::floor(max_s_m / request.grid_spacing_m)) + 1U;
-  std::vector<std::vector<double>> rtk_up_by_bin(grid_count);
   std::vector<std::vector<double>> nav_up_by_bin(grid_count);
 
   for (const auto &member : members) {
-    for (const auto &sample : member.gnss_samples) {
-      SharedVerticalReferenceProjectionDiagnosticRow diagnostic;
-      diagnostic.member_id = member.member_id;
-      diagnostic.sample_kind = "RTKFIX";
-      diagnostic.time_s = sample.time_s - member.config.gnss_time_offset_s;
-      const Eigen::Vector3d enu =
-        geo_reference.Forward(sample.lat_rad, sample.lon_rad, sample.h_m);
-      diagnostic.raw_up_m = sample.h_m;
-      if (!IsUsableRtkFixForSharedReference(member.config, sample)) {
-        diagnostic.used = false;
-        diagnostic.source = "RTK_REJECTED";
-        result.projection_diagnostics.push_back(diagnostic);
-        continue;
-      }
-      const SharedReferenceProjection projection =
-        ProjectPointToSharedReferenceLine(enu.head<2>(), result.reference_line);
-      diagnostic.s_m = projection.s_m;
-      diagnostic.lateral_offset_m = projection.lateral_offset_m;
-      if (!projection.valid || projection.s_m < -0.5 * request.grid_spacing_m ||
-          projection.s_m > max_s_m + 0.5 * request.grid_spacing_m) {
-        diagnostic.source = "OUTSIDE_REFERENCE_LINE";
-        result.projection_diagnostics.push_back(diagnostic);
-        continue;
-      }
-      const std::size_t bin = GridIndex(projection.s_m, request.grid_spacing_m);
-      if (bin < rtk_up_by_bin.size()) {
-        rtk_up_by_bin[bin].push_back(sample.h_m);
-        diagnostic.used = true;
-        diagnostic.corrected_up_m = sample.h_m;
-        diagnostic.source = "RTK";
-      }
-      result.projection_diagnostics.push_back(diagnostic);
-    }
-  }
-
-  const std::vector<double> rtk_median_by_bin = MedianByBin(rtk_up_by_bin);
-
-  for (const auto &member : members) {
-    std::vector<double> offset_samples;
-    for (const auto &point : member.trajectory) {
-      const SharedReferenceProjection projection =
-        ProjectPointToSharedReferenceLine(point.xy_m, result.reference_line);
-      if (!projection.valid || projection.s_m < -0.5 * request.grid_spacing_m ||
-          projection.s_m > max_s_m + 0.5 * request.grid_spacing_m) {
-        continue;
-      }
-      const std::size_t bin = GridIndex(projection.s_m, request.grid_spacing_m);
-      if (bin < rtk_median_by_bin.size() && std::isfinite(rtk_median_by_bin[bin])) {
-        offset_samples.push_back(rtk_median_by_bin[bin] - point.up_m);
-      }
-    }
-    const double nav_offset_m = std::isfinite(Median(offset_samples))
-      ? Median(offset_samples)
-      : 0.0;
-
     for (const auto &point : member.trajectory) {
       SharedVerticalReferenceProjectionDiagnosticRow diagnostic;
       diagnostic.member_id = member.member_id;
       diagnostic.sample_kind = "STAGE2_NAV";
       diagnostic.time_s = point.time_s;
       diagnostic.raw_up_m = point.up_m;
-      diagnostic.corrected_up_m = point.up_m + nav_offset_m;
+      diagnostic.corrected_up_m = point.up_m;
       const SharedReferenceProjection projection =
         ProjectPointToSharedReferenceLine(point.xy_m, result.reference_line);
       diagnostic.s_m = projection.s_m;
@@ -644,47 +370,16 @@ SharedVerticalReference BuildSharedVerticalReference(
   }
 
   const std::vector<double> nav_median_by_bin = MedianByBin(nav_up_by_bin);
-  const std::vector<double> nav_bridge_by_bin =
-    FillFiniteSeriesByInterpolation(nav_median_by_bin, std::numeric_limits<double>::quiet_NaN());
-  std::vector<double> rtk_offset_by_bin(grid_count, std::numeric_limits<double>::quiet_NaN());
+  std::vector<std::size_t> nav_sample_count_by_bin(grid_count, 0U);
   for (std::size_t bin = 0; bin < grid_count; ++bin) {
-    if (std::isfinite(rtk_median_by_bin[bin]) &&
-        std::isfinite(nav_bridge_by_bin[bin])) {
-      rtk_offset_by_bin[bin] = rtk_median_by_bin[bin] - nav_bridge_by_bin[bin];
-    }
+    nav_sample_count_by_bin[bin] = nav_up_by_bin[bin].size();
   }
-  const std::vector<double> smoothed_offset_by_bin =
-    SmoothRtkOffset(
-      FillFiniteSeriesByInterpolation(std::move(rtk_offset_by_bin), 0.0),
-      request.grid_spacing_m);
-
-  result.rows.reserve(grid_count);
-  for (std::size_t bin = 0; bin < grid_count; ++bin) {
-    SharedVerticalReferenceRow row;
-    row.s_m = static_cast<double>(bin) * request.grid_spacing_m;
-    row.sigma_m = request.sigma_m;
-    if (std::isfinite(nav_bridge_by_bin[bin]) &&
-        bin < smoothed_offset_by_bin.size() &&
-        std::isfinite(smoothed_offset_by_bin[bin])) {
-      row.reference_up_m = nav_bridge_by_bin[bin] + smoothed_offset_by_bin[bin];
-      row.source =
-        std::isfinite(rtk_median_by_bin[bin]) ? "RTK_OFFSET_BRIDGE" : "NAV_BRIDGE_OFFSET";
-      row.rtk_weight = std::isfinite(rtk_median_by_bin[bin]) ? 1.0 : 0.0;
-      row.nav_bridge_weight = 1.0;
-      row.sample_count = rtk_up_by_bin[bin].size();
-      if (row.sample_count == 0U) {
-        row.sample_count = nav_up_by_bin[bin].size();
-      }
-    } else {
-      row.reference_up_m = rtk_median_by_bin[bin];
-      row.source = std::isfinite(row.reference_up_m) ? "RTK_FALLBACK" : "UNOBSERVED";
-      row.rtk_weight = std::isfinite(row.reference_up_m) ? 1.0 : 0.0;
-      row.sample_count = rtk_up_by_bin[bin].size();
-    }
-    result.rows.push_back(row);
-  }
-  FillMissingRowsByInterpolation(result.rows);
-  SmoothReferenceRows(result.rows, request.grid_spacing_m);
+  SharedVerticalReferenceCompositionRequest composition_request;
+  composition_request.grid_spacing_m = request.grid_spacing_m;
+  composition_request.sigma_m = request.sigma_m;
+  composition_request.nav_up_by_bin = nav_median_by_bin;
+  composition_request.nav_sample_count_by_bin = std::move(nav_sample_count_by_bin);
+  result.rows = ComposeNavOnlySharedVerticalReference(std::move(composition_request));
   return result;
 }
 
