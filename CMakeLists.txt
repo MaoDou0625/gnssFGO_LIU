@@ -161,6 +161,7 @@ add_library(offline_lc_minimal_lib
   src/core/VerticalMotionStabilityEstimator.cpp
   src/core/VerticalMotionStabilityProfile.cpp
   src/core/VerticalMotionConstraintBuilder.cpp
+  src/core/VerticalVelocityDeltaBiasTargetAdjuster.cpp
   src/core/VerticalPositionVelocityConsistencyConstraintBuilder.cpp
   src/core/VerticalVelocityDeltaContextScalePlanner.cpp
   src/core/VerticalVelocityDeltaSigmaModel.cpp

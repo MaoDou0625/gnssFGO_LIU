@@ -14,6 +14,7 @@
 #include "offline_lc_minimal/core/VerticalAccelBiasGmConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalMotionConstraintBuilder.h"
 #include "offline_lc_minimal/core/VerticalMotionStabilityEstimator.h"
+#include "offline_lc_minimal/core/VerticalVelocityDeltaBiasTargetAdjuster.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaContextScalePlanner.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaTargetPlanner.h"
@@ -136,6 +137,16 @@ offline_lc_minimal::BodyZBiasReestimateSegmentRow MakeBiasSegment(
   segment.source_type = source_type;
   segment.start_time_s = start_time_s;
   segment.end_time_s = end_time_s;
+  return segment;
+}
+
+offline_lc_minimal::BodyZBiasReestimateSegmentRow MakeBiasSegment(
+  const std::string &source_type,
+  const double start_time_s,
+  const double end_time_s,
+  const double prior_target_ba_z_mps2) {
+  auto segment = MakeBiasSegment(source_type, start_time_s, end_time_s);
+  segment.prior_target_ba_z_mps2 = prior_target_ba_z_mps2;
   return segment;
 }
 
@@ -374,6 +385,68 @@ void TestContextScalePlannerClassifiesRoughOutageAndJump() {
   const auto rough = planner.Evaluate(4.2, 4.25);
   ExpectTrue(rough.context == "ROUGH_BIAS", "rough bias interval should be classified");
   ExpectNear(rough.output_sigma_scale, 1000.0, 1e-12, "rough context scale is wrong");
+
+  const std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> road_high_noise_segments{
+    MakeBiasSegment("ROAD_HIGH_NOISE", 6.0, 7.0),
+  };
+  const offline_lc_minimal::VerticalVelocityDeltaContextScalePlanner road_high_noise_planner({
+    &config,
+    &jump_windows,
+    &outage_windows,
+    &road_high_noise_segments,
+  });
+  const auto road_high_noise = road_high_noise_planner.Evaluate(6.2, 6.25);
+  ExpectTrue(
+    road_high_noise.context == "ROUGH_BIAS",
+    "ROAD_HIGH_NOISE interval should use rough bias context");
+  ExpectNear(
+    road_high_noise.output_sigma_scale,
+    1000.0,
+    1e-12,
+    "ROAD_HIGH_NOISE context scale is wrong");
+}
+
+void TestBiasTargetAdjusterAppliesReestimateBazBeforeClamp() {
+  const double reference_ba_z_mps2 = 0.01;
+  const double reestimated_ba_z_mps2 = 0.03;
+  const std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> segments{
+    MakeBiasSegment("ROAD_HIGH_NOISE", 0.5, 2.0, reestimated_ba_z_mps2),
+  };
+
+  const auto adjusted =
+    offline_lc_minimal::AdjustVerticalVelocityDeltaTargetForBiasReestimate({
+      1.0,
+      1.5,
+      0.10,
+      reference_ba_z_mps2,
+      &segments});
+
+  ExpectTrue(adjusted.applied, "bias reestimate should be applied inside the segment");
+  ExpectNear(
+    adjusted.target_delta_vz_mps,
+    0.09,
+    1e-12,
+    "target should be corrected by reestimated ba_z before clamping");
+  ExpectNear(
+    adjusted.reference_ba_z_mps2,
+    reestimated_ba_z_mps2,
+    1e-12,
+    "bias-aware reference should move to the reestimated ba_z");
+
+  const auto outside =
+    offline_lc_minimal::AdjustVerticalVelocityDeltaTargetForBiasReestimate({
+      2.5,
+      3.0,
+      0.10,
+      reference_ba_z_mps2,
+      &segments});
+  ExpectTrue(!outside.applied, "bias reestimate should not affect intervals outside the segment");
+  ExpectNear(outside.target_delta_vz_mps, 0.10, 1e-12, "outside target should remain unchanged");
+  ExpectNear(
+    outside.reference_ba_z_mps2,
+    reference_ba_z_mps2,
+    1e-12,
+    "outside reference should remain unchanged");
 }
 
 void TestSigmaModelClampFlags() {
@@ -1418,6 +1491,69 @@ void TestBuilderUsesBiasAwareVelocityDeltaFactor() {
   ExpectNear(diagnostics.front().residual_mps, 0.0, 1e-12, "bias-aware diagnostic residual is wrong");
 }
 
+void TestBuilderAppliesBiasReestimateBeforeDvzTargetClamp() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.enable_vertical_velocity_delta_bias_aware_target = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.5;
+  config.vertical_velocity_delta_min_sigma_mps = 0.02;
+  config.vertical_velocity_delta_target_acc_limit_mps2 = 1.0;
+  const double reference_ba_z_mps2 = 0.01;
+  const double reestimated_ba_z_mps2 = 0.03;
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {1, 2, 1.0, 1.5, 0.10, reference_ba_z_mps2},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  const std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> bias_segments{
+    MakeBiasSegment("ROAD_HIGH_NOISE", 0.5, 2.0, reestimated_ba_z_mps2),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.bias_reestimate_segments = &bias_segments;
+  request.dynamic_start_index = 1;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "reestimated interval should receive a factor");
+  ExpectNear(
+    diagnostics.front().raw_target_delta_vz_mps,
+    0.09,
+    1e-12,
+    "raw diagnostic target should already include reestimated ba_z correction");
+  ExpectNear(
+    diagnostics.front().target_delta_vz_mps,
+    0.09,
+    1e-12,
+    "clamped target should be based on the reestimated ba_z correction");
+  ExpectNear(
+    diagnostics.front().reference_ba_z_ug,
+    offline_lc_minimal::Mps2ToMicroG(reestimated_ba_z_mps2),
+    1e-9,
+    "diagnostic reference ba_z should use the reestimated target");
+
+  gtsam::Values values;
+  values.insert(gtsam::symbol_shorthand::V(1), gtsam::Vector3(0.0, 0.0, 1.0));
+  values.insert(gtsam::symbol_shorthand::V(2), gtsam::Vector3(0.0, 0.0, 1.09));
+  values.insert(
+    gtsam::symbol_shorthand::B(1),
+    gtsam::imuBias::ConstantBias(
+      gtsam::Vector3(0.0, 0.0, reestimated_ba_z_mps2),
+      gtsam::Vector3::Zero()));
+  offline_lc_minimal::PopulateVerticalVelocityDeltaDiagnostics(values, diagnostics);
+
+  ExpectNear(diagnostics.front().bias_delta_velocity_correction_mps, 0.0, 1e-12, "applied bias should not be counted twice");
+  ExpectNear(diagnostics.front().residual_mps, 0.0, 1e-12, "reestimated target should close with matching ba_z");
+}
+
 void TestBuilderUsesLegacySigmaForClampedTargetInBiasConsistentMode() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -1476,6 +1612,9 @@ int main() {
     RunTest(
       "TestContextScalePlannerClassifiesRoughOutageAndJump",
       TestContextScalePlannerClassifiesRoughOutageAndJump);
+    RunTest(
+      "TestBiasTargetAdjusterAppliesReestimateBazBeforeClamp",
+      TestBiasTargetAdjusterAppliesReestimateBazBeforeClamp);
     RunTest("TestSigmaModelClampFlags", TestSigmaModelClampFlags);
     RunTest("TestAdaptiveSigmaUsesStaticAndDynamicLimits", TestAdaptiveSigmaUsesStaticAndDynamicLimits);
     RunTest("TestAdaptiveSigmaIntermediateScoreRespectsFloor", TestAdaptiveSigmaIntermediateScoreRespectsFloor);
@@ -1531,6 +1670,9 @@ int main() {
     RunTest("TestBuilderClampsVelocityDeltaTarget", TestBuilderClampsVelocityDeltaTarget);
     RunTest("TestBuilderUsesBiasConsistentSigmaAndSummary", TestBuilderUsesBiasConsistentSigmaAndSummary);
     RunTest("TestBuilderUsesBiasAwareVelocityDeltaFactor", TestBuilderUsesBiasAwareVelocityDeltaFactor);
+    RunTest(
+      "TestBuilderAppliesBiasReestimateBeforeDvzTargetClamp",
+      TestBuilderAppliesBiasReestimateBeforeDvzTargetClamp);
     RunTest(
       "TestBuilderUsesLegacySigmaForClampedTargetInBiasConsistentMode",
       TestBuilderUsesLegacySigmaForClampedTargetInBiasConsistentMode);

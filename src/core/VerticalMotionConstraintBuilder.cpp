@@ -11,6 +11,7 @@
 
 #include "offline_lc_minimal/core/VerticalVelocityDeltaSigmaModel.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaContextScalePlanner.h"
+#include "offline_lc_minimal/core/VerticalVelocityDeltaBiasTargetAdjuster.h"
 #include "offline_lc_minimal/core/VerticalVelocityDeltaTargetPlanner.h"
 #include "offline_lc_minimal/common/Units.h"
 #include "offline_lc_minimal/factor/VerticalVelocityDeltaBiasFactor.h"
@@ -129,22 +130,32 @@ void VerticalMotionConstraintBuilder::Build() const {
   request_.diagnostics->reserve(request_.diagnostics->size() + request_.propagation_records->size());
   for (const auto &record : *request_.propagation_records) {
     const double dt_s = record.end_time_s - record.start_time_s;
+    const VerticalVelocityDeltaBiasTargetAdjustment bias_adjustment =
+      AdjustVerticalVelocityDeltaTargetForBiasReestimate({
+        record.start_time_s,
+        record.end_time_s,
+        record.target_delta_vz_mps,
+        record.reference_ba_z_mps2,
+        request_.bias_reestimate_segments});
+    VerticalVelocityDeltaPropagationRecord adjusted_record = record;
+    adjusted_record.target_delta_vz_mps = bias_adjustment.target_delta_vz_mps;
+    adjusted_record.reference_ba_z_mps2 = bias_adjustment.reference_ba_z_mps2;
     const auto *stability_entry = FindStabilityProfileEntry(
       request_.stability_profile,
-      record.state_index_i,
-      record.state_index_j);
+      adjusted_record.state_index_i,
+      adjusted_record.state_index_j);
     const VerticalVelocityDeltaContextScaleDecision scale_decision =
       context_scale_planner.Evaluate(record.start_time_s, record.end_time_s);
     const VerticalVelocityDeltaSigmaResult sigma =
       sigma_model.Compute(dt_s, stability_entry, scale_decision.output_sigma_scale);
     VerticalVelocityDeltaDiagnosticRow row =
       MakeDiagnosticRow(
-        record,
+        adjusted_record,
         sigma,
         scale_decision,
         PlanVerticalVelocityDeltaTarget(
           *request_.config,
-          record.target_delta_vz_mps,
+          adjusted_record.target_delta_vz_mps,
           dt_s,
           stability_entry),
         request_.outer_pass,
@@ -171,7 +182,7 @@ void VerticalMotionConstraintBuilder::Build() const {
       request_.diagnostics->push_back(row);
       continue;
     }
-    if (dt_s <= 0.0 || !std::isfinite(dt_s) || !std::isfinite(record.target_delta_vz_mps)) {
+    if (dt_s <= 0.0 || !std::isfinite(dt_s) || !std::isfinite(adjusted_record.target_delta_vz_mps)) {
       row.skip_reason = "INVALID_INTERVAL";
       ++request_.run_summary->vertical_velocity_delta_skipped_invalid_count;
       request_.diagnostics->push_back(row);
@@ -223,7 +234,7 @@ void VerticalMotionConstraintBuilder::Build() const {
         symbol::V(record.state_index_j),
         symbol::B(record.state_index_i),
         row.target_delta_vz_mps,
-        record.reference_ba_z_mps2,
+        adjusted_record.reference_ba_z_mps2,
         dt_s,
         noise));
     } else {

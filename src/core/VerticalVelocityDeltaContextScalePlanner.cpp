@@ -1,4 +1,5 @@
 #include "offline_lc_minimal/core/VerticalVelocityDeltaContextScalePlanner.h"
+#include "offline_lc_minimal/core/BodyZBiasReestimateSourcePolicy.h"
 
 #include <algorithm>
 #include <cmath>
@@ -25,7 +26,8 @@ bool IsFiniteInterval(const double start_time_s, const double end_time_s) {
 
 bool IsRoughBiasSource(const BodyZBiasReestimateSegmentRow &segment) {
   return segment.source_type == "BODY_Z_BIAS" ||
-         segment.source_type == "ROUGH_ROAD";
+         segment.source_type == "ROUGH_ROAD" ||
+         IsRoadHighNoiseBiasReestimateSource(segment);
 }
 
 std::string JoinContextLabels(const std::vector<std::string> &labels) {
