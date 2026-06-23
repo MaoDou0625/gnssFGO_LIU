@@ -1234,11 +1234,23 @@ OfflineRunResult OfflineBatchRunner::Run(DataSet dataset) const {
     run_result.body_z_bias_reestimate_segments =
       active_stage2_reference->body_z_bias_reestimate_segments;
   } else if (use_road_noise_baz_reestimate) {
+    RoadNoiseBiasReestimatePlannerOptions road_noise_bias_options;
+    road_noise_bias_options.min_high_noise_duration_s =
+      config_.road_noise_state_min_segment_s;
+    road_noise_bias_options.propagation_records =
+      &vertical_velocity_delta_records;
+    road_noise_bias_options.enable_delta_estimation =
+      config_.enable_road_noise_state_baz_delta_estimation;
+    road_noise_bias_options.delta_estimate_options.min_record_count =
+      static_cast<std::size_t>(config_.road_noise_state_baz_delta_min_record_count);
+    road_noise_bias_options.delta_estimate_options.mad_scale =
+      config_.road_noise_state_baz_delta_mad_scale;
+    road_noise_bias_options.delta_estimate_options.max_abs_bias_delta_mps2 =
+      config_.road_noise_state_baz_delta_max_abs_mps2;
     run_result.body_z_bias_reestimate_segments =
       PlanRoadNoiseBiasReestimateSegments(
         run_result.road_noise_state_segments,
-        RoadNoiseBiasReestimatePlannerOptions{
-          config_.road_noise_state_min_segment_s});
+        road_noise_bias_options);
   } else {
     run_result.body_z_bias_reestimate_segments = PlanBodyZBiasReestimateSegments(
       run_result.body_z_seed_bias_windows,

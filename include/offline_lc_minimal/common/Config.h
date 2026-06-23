@@ -67,6 +67,10 @@ struct OfflineRunnerConfig {
   int road_noise_state_min_sample_count = 20;
   double road_noise_state_min_segment_s = 10.0;
   double road_noise_state_hysteresis_ratio = 0.10;
+  bool enable_road_noise_state_baz_delta_estimation = true;
+  int road_noise_state_baz_delta_min_record_count = 20;
+  double road_noise_state_baz_delta_mad_scale = 3.0;
+  double road_noise_state_baz_delta_max_abs_mps2 = 1.0;
   double body_z_jump_min_score_mps = 0.008;
   double body_z_jump_min_separation_s = 0.50;
   double body_z_jump_max_window_duration_s = 1.50;

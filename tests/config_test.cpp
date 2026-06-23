@@ -1183,6 +1183,10 @@ void TestBodyZJumpDetectionFlagLoads() {
   offline_lc_minimal::OverrideConfigField(config, "road_noise_state_min_sample_count", "12");
   offline_lc_minimal::OverrideConfigField(config, "road_noise_state_min_segment_s", "8.0");
   offline_lc_minimal::OverrideConfigField(config, "road_noise_state_hysteresis_ratio", "0.12");
+  offline_lc_minimal::OverrideConfigField(config, "enable_road_noise_state_baz_delta_estimation", "true");
+  offline_lc_minimal::OverrideConfigField(config, "road_noise_state_baz_delta_min_record_count", "9");
+  offline_lc_minimal::OverrideConfigField(config, "road_noise_state_baz_delta_mad_scale", "2.5");
+  offline_lc_minimal::OverrideConfigField(config, "road_noise_state_baz_delta_max_abs_mps2", "0.75");
   ExpectTrue(config.enable_body_z_jump_detection, "new body-z detection flag should load");
   ExpectTrue(
     std::abs(config.attitude_reference_relative_yaw_sigma_rad - 0.02) < 1e-15,
@@ -1214,6 +1218,18 @@ void TestBodyZJumpDetectionFlagLoads() {
   ExpectTrue(
     std::abs(config.road_noise_state_hysteresis_ratio - 0.12) < 1e-15,
     "road-noise hysteresis ratio should parse");
+  ExpectTrue(
+    config.enable_road_noise_state_baz_delta_estimation,
+    "road-noise ba_z delta estimation flag should parse");
+  ExpectTrue(
+    config.road_noise_state_baz_delta_min_record_count == 9,
+    "road-noise ba_z delta min record count should parse");
+  ExpectTrue(
+    std::abs(config.road_noise_state_baz_delta_mad_scale - 2.5) < 1e-15,
+    "road-noise ba_z delta MAD scale should parse");
+  ExpectTrue(
+    std::abs(config.road_noise_state_baz_delta_max_abs_mps2 - 0.75) < 1e-15,
+    "road-noise ba_z delta clamp should parse");
 }
 
 void TestBodyZRequiresGnssAfterOverrides() {

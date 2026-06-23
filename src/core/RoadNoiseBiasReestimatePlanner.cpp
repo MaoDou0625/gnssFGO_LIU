@@ -53,6 +53,16 @@ std::vector<BodyZBiasReestimateSegmentRow> PlanRoadNoiseBiasReestimateSegments(
     row.end_time_s = road_segment.end_time_s;
     row.duration_s = duration_s;
     row.detected_bias_delta_mps2 = 0.0;
+    if (options.enable_delta_estimation &&
+        options.propagation_records != nullptr) {
+      const RoadNoiseBiasDeltaEstimate estimate = EstimateRoadNoiseBiasDelta(
+        row,
+        *options.propagation_records,
+        options.delta_estimate_options);
+      if (estimate.estimated) {
+        row.detected_bias_delta_mps2 = estimate.bias_delta_mps2;
+      }
+    }
     segments.push_back(std::move(row));
   }
   return segments;

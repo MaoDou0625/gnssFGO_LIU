@@ -110,6 +110,7 @@ add_library(offline_lc_minimal_lib
   src/core/RtkVelocityConstraintBuilder.cpp
   src/core/RtkOutageBazReestimatePlanner.cpp
   src/core/RtkOutageWindowPlanner.cpp
+  src/core/RoadNoiseBiasDeltaEstimator.cpp
   src/core/RoadNoiseBiasReestimatePlanner.cpp
   src/core/RoadNoiseStateEstimator.cpp
   src/core/RoadNoiseStateReference.cpp
