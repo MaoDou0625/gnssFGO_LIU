@@ -1489,11 +1489,26 @@ void TestStage3RunnerRunsStage2OnceThenStage3WithoutRecursion() {
     !calls[1].enable_stage3_envelope_center_pull,
     "Stage3 pass should disable center-pull so single-member Stage3 stays close to Stage2");
   ExpectTrue(
-    !calls[1].enable_stage3_stage2_increment_hold,
-    "Stage3 pass should use only the shared-reference envelope for height");
+    calls[1].enable_stage3_stage2_increment_hold,
+    "Stage3 pass should force Stage2 vertical increment inheritance");
+  ExpectNear(
+    calls[1].stage3_stage2_increment_sigma_m,
+    0.0002,
+    1.0e-15,
+    "Stage3 pass should force the validated normal increment sigma");
+  ExpectNear(
+    calls[1].stage3_stage2_increment_jump_sigma_m,
+    0.0005,
+    1.0e-15,
+    "Stage3 pass should force the validated jump increment sigma");
   ExpectTrue(
-    !calls[1].enable_stage3_stage2_jump_shape_hold,
-    "Stage3 pass should not add Stage2 jump shape inheritance when using envelope-only height");
+    calls[1].enable_stage3_stage2_jump_shape_hold,
+    "Stage3 pass should keep Stage2 jump shape inheritance enabled");
+  ExpectNear(
+    calls[1].stage3_stage2_jump_shape_sigma_m,
+    0.0005,
+    1.0e-15,
+    "Stage3 pass should force the validated jump shape sigma");
   ExpectTrue(calls[1].has_stage2_reference, "Stage3 pass should receive Stage2 reference");
   ExpectTrue(calls[1].has_stage3_reference, "Stage3 pass should receive Stage3 reference");
   ExpectTrue(
