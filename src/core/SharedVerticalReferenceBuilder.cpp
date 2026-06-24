@@ -23,6 +23,7 @@ struct CommonTrajectoryPoint {
   double time_s = 0.0;
   Eigen::Vector2d xy_m = Eigen::Vector2d::Zero();
   double up_m = std::numeric_limits<double>::quiet_NaN();
+  double vz_mps = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct CommonMember {
@@ -199,6 +200,7 @@ std::vector<CommonMember> BuildCommonMembers(
       point.time_s = row.trajectory.time_s;
       point.xy_m = enu.head<2>();
       point.up_m = row.h_m;
+      point.vz_mps = row.trajectory.enu_velocity_mps.z();
       member.trajectory.push_back(point);
     }
     if (member.trajectory.size() < 2U) {
@@ -344,6 +346,7 @@ SharedVerticalReference BuildSharedVerticalReference(
 
   for (const auto &member : members) {
     std::vector<std::vector<double>> member_up_values_by_bin(grid_count);
+    std::vector<std::vector<double>> member_vz_values_by_bin(grid_count);
     for (const auto &point : member.trajectory) {
       SharedVerticalReferenceProjectionDiagnosticRow diagnostic;
       diagnostic.member_id = member.member_id;
@@ -364,6 +367,9 @@ SharedVerticalReference BuildSharedVerticalReference(
       const std::size_t bin = GridIndex(projection.s_m, request.grid_spacing_m);
       if (bin < member_up_values_by_bin.size()) {
         member_up_values_by_bin[bin].push_back(diagnostic.corrected_up_m);
+        if (std::isfinite(point.vz_mps)) {
+          member_vz_values_by_bin[bin].push_back(point.vz_mps);
+        }
         diagnostic.used = true;
         diagnostic.source = "NAV_BRIDGE";
       }
@@ -372,6 +378,7 @@ SharedVerticalReference BuildSharedVerticalReference(
     SharedVerticalReferenceMemberHeightGrid height_grid;
     height_grid.member_id = member.member_id;
     height_grid.up_by_bin = MedianByBin(member_up_values_by_bin);
+    height_grid.vz_mps_by_bin = MedianByBin(member_vz_values_by_bin);
     height_grid.sample_count_by_bin.resize(grid_count, 0U);
     for (std::size_t bin = 0; bin < grid_count; ++bin) {
       height_grid.sample_count_by_bin[bin] = member_up_values_by_bin[bin].size();

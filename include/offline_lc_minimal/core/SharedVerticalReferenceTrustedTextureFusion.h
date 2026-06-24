@@ -11,6 +11,7 @@ namespace offline_lc_minimal {
 struct SharedVerticalReferenceMemberHeightGrid {
   std::string member_id;
   std::vector<double> up_by_bin;
+  std::vector<double> vz_mps_by_bin;
   std::vector<std::size_t> sample_count_by_bin;
 };
 

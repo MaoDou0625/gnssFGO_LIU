@@ -47,11 +47,12 @@ double LonAtDistance(const double s_m) {
 offline_lc_minimal::TrajectoryCsvRow MakeTrajectoryCsvRow(
   const double s_m,
   const double height_m,
-  const double lateral_m = 0.0) {
+  const double lateral_m = 0.0,
+  const double vz_mps = 0.0) {
   offline_lc_minimal::TrajectoryCsvRow row;
   row.trajectory.time_s = s_m;
   row.trajectory.enu_position_m = Eigen::Vector3d(s_m, lateral_m, height_m - 100.0);
-  row.trajectory.enu_velocity_mps = Eigen::Vector3d(1.0, 0.0, 0.0);
+  row.trajectory.enu_velocity_mps = Eigen::Vector3d(1.0, 0.0, vz_mps);
   row.lat_rad = kLat0Rad + lateral_m / kEarthRadiusM;
   row.lon_rad = LonAtDistance(s_m);
   row.h_m = height_m;
@@ -102,7 +103,8 @@ offline_lc_minimal::SharedVerticalReferenceMember MakeMemberFromHeights(
   const std::string &id,
   const std::vector<double> &heights_m,
   const double lateral_m,
-  const std::vector<bool> *keep_sample = nullptr) {
+  const std::vector<bool> *keep_sample = nullptr,
+  const std::vector<double> *vz_mps_by_sample = nullptr) {
   offline_lc_minimal::SharedVerticalReferenceMember member;
   member.member_id = id;
   member.config = offline_lc_minimal::DefaultConfig();
@@ -116,7 +118,10 @@ offline_lc_minimal::SharedVerticalReferenceMember MakeMemberFromHeights(
       MakeTrajectoryCsvRow(
         static_cast<double>(index),
         heights_m[index],
-        lateral_m));
+        lateral_m,
+        vz_mps_by_sample != nullptr && index < vz_mps_by_sample->size()
+          ? (*vz_mps_by_sample)[index]
+          : 0.0));
   }
   return member;
 }
@@ -162,21 +167,27 @@ void TestSharedReferenceUsesStage2NavOnlyBridge() {
     "shared reference should not assign RTK weight");
 }
 
-void TestTrustedTextureFusionPrefersLowerVariationSource() {
+void TestTrustedTextureFusionPrefersLowerVelocityDeltaSource() {
   std::vector<double> smooth_heights;
   std::vector<double> disturbed_heights;
+  std::vector<double> smooth_vz_mps;
+  std::vector<double> disturbed_vz_mps;
   for (int s = 0; s <= 120; ++s) {
     const double s_m = static_cast<double>(s);
     const double base_height_m =
       100.0 + 0.02 * s_m + 0.01 * std::sin(s_m / 7.0);
+    double disturbed_vz_mps_value = 0.0;
     double disturbed_height_m = base_height_m;
     if (s >= 40 && s <= 55) {
       const double phase =
         (s_m - 40.0) / 15.0 * std::numbers::pi;
       disturbed_height_m += 0.12 * std::sin(phase);
+      disturbed_vz_mps_value = 0.06 * std::sin(phase);
     }
     smooth_heights.push_back(base_height_m);
     disturbed_heights.push_back(disturbed_height_m);
+    smooth_vz_mps.push_back(0.0);
+    disturbed_vz_mps.push_back(disturbed_vz_mps_value);
   }
 
   offline_lc_minimal::SharedVerticalReferenceBuildRequest request;
@@ -184,8 +195,10 @@ void TestTrustedTextureFusionPrefersLowerVariationSource() {
   request.sigma_m = 0.02;
   request.trusted_texture_lowpass_radius_m = 20.0;
   request.trusted_texture_source_margin_min = 0.03;
-  request.members.push_back(MakeMemberFromHeights("disturbed", disturbed_heights, 0.0));
-  request.members.push_back(MakeMemberFromHeights("smooth", smooth_heights, 0.2));
+  request.members.push_back(
+    MakeMemberFromHeights("disturbed", disturbed_heights, 0.0, nullptr, &disturbed_vz_mps));
+  request.members.push_back(
+    MakeMemberFromHeights("smooth", smooth_heights, 0.2, nullptr, &smooth_vz_mps));
 
   const auto reference =
     offline_lc_minimal::BuildSharedVerticalReference(std::move(request));
@@ -197,11 +210,11 @@ void TestTrustedTextureFusionPrefersLowerVariationSource() {
   ExpectTrue(
     std::abs(fused_height - smooth_heights[check_index]) <
       0.20 * disturbance_m,
-    "trusted texture fusion should strongly move the local valley toward the lower-variation member");
+    "trusted texture fusion should strongly move the local valley toward the lower-dvz member");
   ExpectTrue(
     std::abs(fused_height - smooth_heights[check_index]) <
       std::abs(fused_height - disturbed_heights[check_index]),
-    "trusted texture fusion should be closer to the lower-variation member");
+    "trusted texture fusion should be closer to the lower-dvz member");
 }
 
 void TestTrustedTextureFusionDoesNotTrustLongInterpolatedGap() {
@@ -297,8 +310,8 @@ int main() {
       "TestSharedReferenceIgnoresRtkSamples",
       TestSharedReferenceIgnoresRtkSamples);
     RunTest(
-      "TestTrustedTextureFusionPrefersLowerVariationSource",
-      TestTrustedTextureFusionPrefersLowerVariationSource);
+      "TestTrustedTextureFusionPrefersLowerVelocityDeltaSource",
+      TestTrustedTextureFusionPrefersLowerVelocityDeltaSource);
     RunTest(
       "TestTrustedTextureFusionDoesNotTrustLongInterpolatedGap",
       TestTrustedTextureFusionDoesNotTrustLongInterpolatedGap);

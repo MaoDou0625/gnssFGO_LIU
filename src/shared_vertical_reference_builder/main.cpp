@@ -232,7 +232,7 @@ int main(int argc, char **argv) {
       output_dir / "shared_vertical_reference_summary.txt",
       "reference_member_id=" + reference.reference_member_id + "\n" +
       "reference_row_count=" + std::to_string(reference.rows.size()) + "\n" +
-      "reference_method=trusted_texture_dvz_increment_fusion\n" +
+      "reference_method=trusted_stage2_vz_delta_source_fusion\n" +
       "trusted_texture_lowpass_radius_m=" +
         std::to_string(request.trusted_texture_lowpass_radius_m) + "\n" +
       "trusted_texture_source_margin_min=" +
