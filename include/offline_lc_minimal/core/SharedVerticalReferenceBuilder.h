@@ -25,7 +25,7 @@ struct SharedVerticalReferenceBuildRequest {
   double grid_spacing_m = 1.0;
   double sigma_m = 0.015;
   double trusted_texture_lowpass_radius_m = 20.0;
-  double trusted_texture_source_margin_min = 0.03;
+  double trusted_texture_source_margin_min = 0.0;
 };
 
 struct SharedReferenceLinePoint {

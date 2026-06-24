@@ -11,13 +11,14 @@ namespace {
 constexpr double kDistanceEpsilonM = 1.0e-6;
 constexpr double kConfidenceWindowM = 31.0;
 constexpr double kConfidenceSmoothRadiusM = 2.0;
-constexpr double kGateGoodConfidence = 0.90;
-constexpr double kGateBadConfidence = 0.55;
+constexpr double kGateGoodConfidence = 0.95;
+constexpr double kGateBadConfidence = 0.75;
 constexpr double kCorrelationGoodOffset = 0.05;
 constexpr double kCorrelationSpan = 0.40;
-constexpr double kSourceStrengthScale = 0.12;
-constexpr double kSoftSourceTemperature = 2.0e-4;
-constexpr double kDerivativeScoreWeight = 0.05;
+constexpr double kSourceStrengthScale = 0.04;
+constexpr double kSoftSourceTemperature = 4.0e-5;
+constexpr double kSourceScoreSmoothingRadiusM = 30.0;
+constexpr double kFinalReferenceSmoothingRadiusM = 4.0;
 constexpr double kTrustedObservationGapScaleM = 3.0;
 constexpr double kTrustedObservationMinWeight = 0.25;
 
@@ -466,8 +467,8 @@ std::vector<double> BuildTextureConfidence(
         }
         const double r =
           LocalCorrelation(
-            profiles[a].texture_gradient,
-            profiles[b].texture_gradient,
+            profiles[a].texture_gradient_delta,
+            profiles[b].texture_gradient_delta,
             index,
             radius_bins);
         if (IsFinite(r)) {
@@ -528,13 +529,7 @@ double SourceScore(
   if (!HasTrustedObservation(profile, index)) {
     return std::numeric_limits<double>::quiet_NaN();
   }
-  const double delta_rms = LocalRms(profile.texture_gradient_delta, index, radius_bins);
-  const double gradient_rms = LocalRms(profile.texture_gradient, index, radius_bins);
-  if (!IsFinite(delta_rms) && !IsFinite(gradient_rms)) {
-    return std::numeric_limits<double>::quiet_NaN();
-  }
-  return (IsFinite(delta_rms) ? delta_rms : 0.0) +
-         kDerivativeScoreWeight * (IsFinite(gradient_rms) ? gradient_rms : 0.0);
+  return LocalRms(profile.texture_gradient_delta, index, radius_bins);
 }
 
 std::vector<double> SourceWeights(
@@ -647,6 +642,48 @@ std::vector<MemberTextureProfile> BuildProfiles(
   return profiles;
 }
 
+std::vector<std::vector<double>> BuildSmoothedSourceScores(
+  const std::vector<MemberTextureProfile> &profiles,
+  const std::size_t grid_count,
+  const int source_radius_bins,
+  const double grid_spacing_m) {
+  std::vector<std::vector<double>> scores_by_member;
+  scores_by_member.reserve(profiles.size());
+  for (const auto &profile : profiles) {
+    std::vector<double> raw_scores(grid_count, std::numeric_limits<double>::quiet_NaN());
+    for (std::size_t bin = 0; bin < grid_count; ++bin) {
+      raw_scores[bin] =
+        SourceScore(profile, bin, source_radius_bins);
+    }
+    std::vector<double> smoothed_scores =
+      SmoothScalarSeries(raw_scores, grid_spacing_m, kSourceScoreSmoothingRadiusM);
+    for (std::size_t bin = 0; bin < grid_count; ++bin) {
+      if (!HasTrustedObservation(profile, bin)) {
+        smoothed_scores[bin] = std::numeric_limits<double>::quiet_NaN();
+      }
+    }
+    scores_by_member.push_back(std::move(smoothed_scores));
+  }
+  return scores_by_member;
+}
+
+void SmoothReferenceRows(
+  std::vector<SharedVerticalReferenceRow> &rows,
+  const double grid_spacing_m) {
+  std::vector<double> reference_up_m;
+  reference_up_m.reserve(rows.size());
+  for (const auto &row : rows) {
+    reference_up_m.push_back(row.reference_up_m);
+  }
+  const std::vector<double> smoothed =
+    LocalLinearSmooth(reference_up_m, grid_spacing_m, kFinalReferenceSmoothingRadiusM);
+  for (std::size_t index = 0; index < rows.size(); ++index) {
+    if (IsFinite(smoothed[index])) {
+      rows[index].reference_up_m = smoothed[index];
+    }
+  }
+}
+
 }  // namespace
 
 std::vector<SharedVerticalReferenceRow> ComposeTrustedTextureSharedVerticalReference(
@@ -676,8 +713,12 @@ std::vector<SharedVerticalReferenceRow> ComposeTrustedTextureSharedVerticalRefer
     BuildCommonSeries(profiles, grid_count, &MemberTextureProfile::lowpass_up_m);
   std::vector<double> common_texture =
     BuildCommonSeries(profiles, grid_count, &MemberTextureProfile::texture_m);
+  std::vector<double> common_texture_gradient =
+    BuildCommonSeries(profiles, grid_count, &MemberTextureProfile::texture_gradient);
   common_lowpass = FillFiniteSeriesByInterpolation(std::move(common_lowpass));
   common_texture = FillFiniteSeriesByInterpolation(std::move(common_texture));
+  common_texture_gradient =
+    FillFiniteSeriesByInterpolation(std::move(common_texture_gradient));
 
   const std::vector<double> confidence =
     BuildTextureConfidence(profiles, grid_count, request.grid_spacing_m);
@@ -685,9 +726,17 @@ std::vector<SharedVerticalReferenceRow> ComposeTrustedTextureSharedVerticalRefer
     BuildSourceGate(confidence, request.grid_spacing_m);
   const int source_radius_bins =
     std::max(1, static_cast<int>(std::ceil(request.lowpass_radius_m / request.grid_spacing_m)));
+  const std::vector<std::vector<double>> source_scores_by_member =
+    BuildSmoothedSourceScores(
+      profiles,
+      grid_count,
+      source_radius_bins,
+      request.grid_spacing_m);
 
-  std::vector<SharedVerticalReferenceRow> rows;
-  rows.reserve(grid_count);
+  std::vector<double> shared_texture_gradient(
+    grid_count,
+    std::numeric_limits<double>::quiet_NaN());
+  std::vector<std::size_t> sample_counts(grid_count, 0U);
   for (std::size_t bin = 0; bin < grid_count; ++bin) {
     std::vector<double> scores(profiles.size(), std::numeric_limits<double>::quiet_NaN());
     std::size_t sample_count = 0U;
@@ -696,22 +745,62 @@ std::vector<SharedVerticalReferenceRow> ComposeTrustedTextureSharedVerticalRefer
       if (bin < profile.sample_count_by_bin.size()) {
         sample_count += profile.sample_count_by_bin[bin];
       }
-      scores[member_index] = SourceScore(profile, bin, source_radius_bins);
+      if (member_index < source_scores_by_member.size() &&
+          bin < source_scores_by_member[member_index].size()) {
+        scores[member_index] = source_scores_by_member[member_index][bin];
+      }
     }
     const std::vector<double> source_weights =
       SourceWeights(scores, request.source_margin_min);
-    const double trusted_texture =
+    const double trusted_texture_gradient =
       WeightedMemberValue(
         profiles,
         source_weights,
         bin,
-        &MemberTextureProfile::texture_m);
+        &MemberTextureProfile::texture_gradient);
     const double gate = source_gate[bin];
-    double shared_texture = common_texture[bin];
-    if (IsFinite(trusted_texture)) {
-      shared_texture = (1.0 - gate) * common_texture[bin] + gate * trusted_texture;
+    shared_texture_gradient[bin] = common_texture_gradient[bin];
+    if (IsFinite(trusted_texture_gradient)) {
+      shared_texture_gradient[bin] =
+        (1.0 - gate) * common_texture_gradient[bin] +
+        gate * trusted_texture_gradient;
     }
-    double reference_up_m = common_lowpass[bin] + shared_texture;
+    sample_counts[bin] = sample_count;
+  }
+
+  std::vector<double> shared_texture = common_texture;
+  if (!shared_texture.empty()) {
+    shared_texture.front() = common_texture.front();
+    for (std::size_t bin = 1; bin < shared_texture.size(); ++bin) {
+      if (IsFinite(shared_texture_gradient[bin - 1U]) &&
+          IsFinite(shared_texture_gradient[bin])) {
+        shared_texture[bin] =
+          shared_texture[bin - 1U] +
+          0.5 * (shared_texture_gradient[bin - 1U] + shared_texture_gradient[bin]) *
+            request.grid_spacing_m;
+      }
+    }
+    std::vector<double> texture_offset;
+    texture_offset.reserve(shared_texture.size());
+    for (std::size_t bin = 0; bin < shared_texture.size(); ++bin) {
+      if (IsFinite(shared_texture[bin]) && IsFinite(common_texture[bin])) {
+        texture_offset.push_back(shared_texture[bin] - common_texture[bin]);
+      }
+    }
+    const double offset_m = Median(std::move(texture_offset));
+    if (IsFinite(offset_m)) {
+      for (double &value : shared_texture) {
+        if (IsFinite(value)) {
+          value -= offset_m;
+        }
+      }
+    }
+  }
+
+  std::vector<SharedVerticalReferenceRow> rows;
+  rows.reserve(grid_count);
+  for (std::size_t bin = 0; bin < grid_count; ++bin) {
+    double reference_up_m = common_lowpass[bin] + shared_texture[bin];
     const auto [min_height, max_height] = ActiveHeightEnvelope(profiles, bin);
     if (IsFinite(min_height) && IsFinite(max_height) && min_height <= max_height) {
       reference_up_m = std::clamp(reference_up_m, min_height, max_height);
@@ -722,12 +811,13 @@ std::vector<SharedVerticalReferenceRow> ComposeTrustedTextureSharedVerticalRefer
     row.reference_up_m = reference_up_m;
     row.sigma_m = request.sigma_m;
     row.source =
-      sample_count > 0U ? "TRUSTED_TEXTURE_FUSION" : "TRUSTED_TEXTURE_FUSION_INTERPOLATED";
+      sample_counts[bin] > 0U ? "TRUSTED_TEXTURE_FUSION" : "TRUSTED_TEXTURE_FUSION_INTERPOLATED";
     row.rtk_weight = 0.0;
     row.nav_bridge_weight = 1.0;
-    row.sample_count = sample_count;
+    row.sample_count = sample_counts[bin];
     rows.push_back(row);
   }
+  SmoothReferenceRows(rows, request.grid_spacing_m);
   return rows;
 }
 
