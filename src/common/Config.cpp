@@ -752,6 +752,8 @@ void ValidateConfig(const OfflineRunnerConfig &config) {
       config.vertical_velocity_delta_min_sigma_mps <= 0.0 ||
       config.vertical_velocity_delta_jump_padding_s <= 0.0 ||
       config.vertical_velocity_delta_target_acc_limit_mps2 <= 0.0 ||
+      !std::isfinite(config.vertical_velocity_delta_high_noise_target_acc_limit_scale) ||
+      config.vertical_velocity_delta_high_noise_target_acc_limit_scale <= 0.0 ||
       config.vertical_velocity_delta_bias_sigma_mps2 <= 0.0 ||
       config.vertical_velocity_delta_attitude_sigma_rad <= 0.0 ||
       config.vertical_velocity_delta_sigma_floor_mps <= 0.0 ||
@@ -1684,6 +1686,10 @@ void OverrideConfigField(OfflineRunnerConfig &config, const std::string_view key
     config.vertical_velocity_delta_skip_jump_padding = ParseBool(normalized_value);
   } else if (normalized_key == "vertical_velocity_delta_target_acc_limit_mps2") {
     config.vertical_velocity_delta_target_acc_limit_mps2 = ParseDouble(normalized_value);
+  } else if (normalized_key == "enable_vertical_velocity_delta_high_noise_target_acc_limit_scale") {
+    config.enable_vertical_velocity_delta_high_noise_target_acc_limit_scale = ParseBool(normalized_value);
+  } else if (normalized_key == "vertical_velocity_delta_high_noise_target_acc_limit_scale") {
+    config.vertical_velocity_delta_high_noise_target_acc_limit_scale = ParseDouble(normalized_value);
   } else if (normalized_key == "enable_vertical_velocity_delta_initial_static_constraint") {
     config.enable_vertical_velocity_delta_initial_static_constraint = ParseBool(normalized_value);
   } else if (normalized_key == "enable_vertical_velocity_delta_bias_consistent_sigma") {
@@ -2451,6 +2457,10 @@ std::string ConfigToString(const OfflineRunnerConfig &config) {
     << (config.vertical_velocity_delta_skip_jump_padding ? "true" : "false") << '\n'
     << "vertical_velocity_delta_target_acc_limit_mps2="
     << config.vertical_velocity_delta_target_acc_limit_mps2 << '\n'
+    << "enable_vertical_velocity_delta_high_noise_target_acc_limit_scale="
+    << (config.enable_vertical_velocity_delta_high_noise_target_acc_limit_scale ? "true" : "false") << '\n'
+    << "vertical_velocity_delta_high_noise_target_acc_limit_scale="
+    << config.vertical_velocity_delta_high_noise_target_acc_limit_scale << '\n'
     << "enable_vertical_velocity_delta_initial_static_constraint="
     << (config.enable_vertical_velocity_delta_initial_static_constraint ? "true" : "false") << '\n'
     << "enable_vertical_velocity_delta_bias_consistent_sigma="

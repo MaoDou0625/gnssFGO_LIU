@@ -148,6 +148,8 @@ void VerticalMotionConstraintBuilder::Build() const {
       context_scale_planner.Evaluate(record.start_time_s, record.end_time_s);
     const VerticalVelocityDeltaSigmaResult sigma =
       sigma_model.Compute(dt_s, stability_entry, scale_decision.output_sigma_scale);
+    const VerticalVelocityDeltaTargetContext target_context{
+      scale_decision.overlaps_road_high_noise_bias};
     VerticalVelocityDeltaDiagnosticRow row =
       MakeDiagnosticRow(
         adjusted_record,
@@ -157,7 +159,8 @@ void VerticalMotionConstraintBuilder::Build() const {
           *request_.config,
           adjusted_record.target_delta_vz_mps,
           dt_s,
-          stability_entry),
+          stability_entry,
+          &target_context),
         request_.outer_pass,
         stability_entry);
     const bool used_clamped_target_fallback =

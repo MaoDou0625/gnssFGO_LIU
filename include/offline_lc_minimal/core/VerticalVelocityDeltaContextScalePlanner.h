@@ -22,6 +22,7 @@ struct VerticalVelocityDeltaContextScaleDecision {
   bool overlaps_jump = false;
   bool overlaps_rtk_outage = false;
   bool overlaps_rough_bias = false;
+  bool overlaps_road_high_noise_bias = false;
 };
 
 class VerticalVelocityDeltaContextScalePlanner {
@@ -37,6 +38,7 @@ class VerticalVelocityDeltaContextScalePlanner {
   [[nodiscard]] bool OverlapsJump(double start_time_s, double end_time_s) const;
   [[nodiscard]] bool OverlapsRtkOutage(double start_time_s, double end_time_s) const;
   [[nodiscard]] bool OverlapsRoughBias(double start_time_s, double end_time_s) const;
+  [[nodiscard]] bool OverlapsRoadHighNoiseBias(double start_time_s, double end_time_s) const;
 
   VerticalVelocityDeltaContextScaleRequest request_;
 };

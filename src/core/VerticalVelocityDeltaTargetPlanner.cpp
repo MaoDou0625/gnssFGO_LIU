@@ -37,16 +37,31 @@ namespace {
            config.vertical_motion_adaptive_static_target_acc_rms_mps2;
 }
 
+[[nodiscard]] double TargetAccelerationLimitMps2(
+  const OfflineRunnerConfig &config,
+  const VerticalVelocityDeltaTargetContext *target_context) {
+  double acceleration_limit_mps2 =
+    config.vertical_velocity_delta_target_acc_limit_mps2;
+  if (target_context != nullptr &&
+      target_context->overlaps_road_high_noise_bias &&
+      config.enable_vertical_velocity_delta_high_noise_target_acc_limit_scale) {
+    acceleration_limit_mps2 *=
+      config.vertical_velocity_delta_high_noise_target_acc_limit_scale;
+  }
+  return acceleration_limit_mps2;
+}
+
 }  // namespace
 
 double PlanVerticalVelocityDeltaTarget(
   const OfflineRunnerConfig &config,
   const double raw_target_delta_vz_mps,
   const double dt_s,
-  const VerticalMotionAdaptiveReweightingDiagnosticRow *stability_entry) {
+  const VerticalMotionAdaptiveReweightingDiagnosticRow *stability_entry,
+  const VerticalVelocityDeltaTargetContext *target_context) {
   double target_delta_vz_mps = ClampWithAccelerationLimit(
     raw_target_delta_vz_mps,
-    config.vertical_velocity_delta_target_acc_limit_mps2,
+    TargetAccelerationLimitMps2(config, target_context),
     dt_s);
 
   if (IsLowSpeedVerticalHandoff(config, stability_entry)) {

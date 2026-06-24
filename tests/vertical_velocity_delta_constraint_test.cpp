@@ -867,6 +867,124 @@ void TestLowSpeedVerticalHandoffClampsTargetDelta() {
     "jump padding should preserve targets within the global acceleration limit");
 }
 
+void TestHighNoiseContextWidensTargetClampOnly() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.vertical_velocity_delta_target_acc_limit_mps2 = 0.85;
+  config.enable_vertical_velocity_delta_high_noise_target_acc_limit_scale = true;
+  config.vertical_velocity_delta_high_noise_target_acc_limit_scale = 3.0;
+
+  const double raw_target_delta_vz_mps = 0.10;
+  const double dt_s = 0.05;
+  const double normal_target = offline_lc_minimal::PlanVerticalVelocityDeltaTarget(
+    config,
+    raw_target_delta_vz_mps,
+    dt_s,
+    nullptr);
+  offline_lc_minimal::VerticalVelocityDeltaTargetContext high_noise_context;
+  high_noise_context.overlaps_road_high_noise_bias = true;
+  const double high_noise_target = offline_lc_minimal::PlanVerticalVelocityDeltaTarget(
+    config,
+    raw_target_delta_vz_mps,
+    dt_s,
+    nullptr,
+    &high_noise_context);
+
+  ExpectNear(normal_target, 0.0425, 1e-12, "normal context should use the base target clamp");
+  ExpectNear(high_noise_target, 0.10, 1e-12, "high-noise context should widen the target clamp");
+}
+
+void TestBuilderWidensTargetClampOnlyForRoadHighNoise() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.5;
+  config.vertical_velocity_delta_min_sigma_mps = 0.02;
+  config.vertical_velocity_delta_target_acc_limit_mps2 = 0.1;
+  config.enable_vertical_velocity_delta_high_noise_target_acc_limit_scale = true;
+  config.vertical_velocity_delta_high_noise_target_acc_limit_scale = 4.0;
+  config.vertical_velocity_delta_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(10.0);
+  config.vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
+  config.vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
+  config.vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+  config.enable_vertical_velocity_delta_context_sigma_scale = true;
+  config.vertical_velocity_delta_context_normal_sigma_scale = 2.0;
+  config.vertical_velocity_delta_context_rough_sigma_scale = 10.0;
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {1, 2, 10.0, 10.5, 0.18, 0.0},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  const std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> bias_segments{
+    MakeBiasSegment("ROAD_HIGH_NOISE", 9.0, 11.0),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.bias_reestimate_segments = &bias_segments;
+  request.dynamic_start_index = 1;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "high-noise interval should add a factor");
+  ExpectTrue(!diagnostics.front().target_clamped, "high-noise scale should wrap this target");
+  ExpectNear(diagnostics.front().target_delta_vz_mps, 0.18, 1e-12, "high-noise target should be preserved");
+  ExpectTrue(diagnostics.front().sigma_context == "ROUGH_BIAS", "high-noise should keep rough context");
+  ExpectNear(diagnostics.front().sigma_output_scale, 10.0, 1e-12, "rough sigma context should be unchanged");
+}
+
+void TestBuilderWidensHighNoiseTargetClampWhenContextSigmaDisabled() {
+  auto config = offline_lc_minimal::DefaultConfig();
+  config.enable_body_z_jump_detection = true;
+  config.enable_vertical_velocity_delta_constraint = true;
+  config.enable_vertical_velocity_delta_bias_consistent_sigma = true;
+  config.vertical_velocity_delta_acc_sigma_mps2 = 0.5;
+  config.vertical_velocity_delta_min_sigma_mps = 0.02;
+  config.vertical_velocity_delta_target_acc_limit_mps2 = 0.1;
+  config.enable_vertical_velocity_delta_high_noise_target_acc_limit_scale = true;
+  config.vertical_velocity_delta_high_noise_target_acc_limit_scale = 4.0;
+  config.vertical_velocity_delta_bias_sigma_mps2 = offline_lc_minimal::MicroGToMps2(10.0);
+  config.vertical_velocity_delta_attitude_sigma_rad = 1.0e-4;
+  config.vertical_velocity_delta_sigma_floor_mps = 1.0e-5;
+  config.vertical_velocity_delta_sigma_ceiling_mps = 5.0e-4;
+  config.enable_vertical_velocity_delta_context_sigma_scale = false;
+  config.vertical_velocity_delta_sigma_scale = 3.0;
+  config.vertical_velocity_delta_context_rough_sigma_scale = 10.0;
+  const std::vector<offline_lc_minimal::VerticalVelocityDeltaPropagationRecord> records{
+    {1, 2, 10.0, 10.5, 0.18, 0.0},
+  };
+  const std::vector<offline_lc_minimal::BodyZSeedJumpWindowRow> jump_windows;
+  const std::vector<offline_lc_minimal::BodyZBiasReestimateSegmentRow> bias_segments{
+    MakeBiasSegment("ROAD_HIGH_NOISE", 9.0, 11.0),
+  };
+  gtsam::NonlinearFactorGraph graph;
+  offline_lc_minimal::RunSummary summary;
+  std::vector<offline_lc_minimal::VerticalVelocityDeltaDiagnosticRow> diagnostics;
+
+  offline_lc_minimal::VerticalMotionConstraintBuildRequest request;
+  request.config = &config;
+  request.propagation_records = &records;
+  request.jump_windows = &jump_windows;
+  request.bias_reestimate_segments = &bias_segments;
+  request.dynamic_start_index = 1;
+  request.graph = &graph;
+  request.run_summary = &summary;
+  request.diagnostics = &diagnostics;
+  offline_lc_minimal::VerticalMotionConstraintBuilder(std::move(request)).Build();
+
+  ExpectNear(static_cast<double>(graph.size()), 1.0, 0.0, "high-noise interval should add a factor");
+  ExpectTrue(!diagnostics.front().target_clamped, "high-noise clamp scale should not depend on context sigma scaling");
+  ExpectNear(diagnostics.front().target_delta_vz_mps, 0.18, 1e-12, "high-noise target should be preserved");
+  ExpectTrue(diagnostics.front().sigma_context == "GLOBAL", "disabled context sigma should keep global diagnostics");
+  ExpectNear(diagnostics.front().sigma_output_scale, 3.0, 1e-12, "disabled context sigma should keep global sigma scale");
+}
+
 void TestBuilderClampsLowSpeedVerticalHandoffTarget() {
   auto config = offline_lc_minimal::DefaultConfig();
   config.enable_body_z_jump_detection = true;
@@ -1640,6 +1758,15 @@ int main() {
     RunTest(
       "TestLowSpeedVerticalHandoffClampsTargetDelta",
       TestLowSpeedVerticalHandoffClampsTargetDelta);
+    RunTest(
+      "TestHighNoiseContextWidensTargetClampOnly",
+      TestHighNoiseContextWidensTargetClampOnly);
+    RunTest(
+      "TestBuilderWidensTargetClampOnlyForRoadHighNoise",
+      TestBuilderWidensTargetClampOnlyForRoadHighNoise);
+    RunTest(
+      "TestBuilderWidensHighNoiseTargetClampWhenContextSigmaDisabled",
+      TestBuilderWidensHighNoiseTargetClampWhenContextSigmaDisabled);
     RunTest(
       "TestBuilderClampsLowSpeedVerticalHandoffTarget",
       TestBuilderClampsLowSpeedVerticalHandoffTarget);

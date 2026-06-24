@@ -312,6 +312,8 @@ struct OfflineRunnerConfig {
   double vertical_velocity_delta_jump_padding_s = 0.25;
   bool vertical_velocity_delta_skip_jump_padding = true;
   double vertical_velocity_delta_target_acc_limit_mps2 = 0.85;
+  bool enable_vertical_velocity_delta_high_noise_target_acc_limit_scale = true;
+  double vertical_velocity_delta_high_noise_target_acc_limit_scale = 4.0;
   bool enable_vertical_velocity_delta_initial_static_constraint = false;
   bool enable_vertical_velocity_delta_bias_consistent_sigma = false;
   bool enable_vertical_velocity_delta_bias_aware_target = false;

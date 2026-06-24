@@ -60,6 +60,11 @@ VerticalVelocityDeltaContextScalePlanner::Evaluate(
   VerticalVelocityDeltaContextScaleDecision decision;
   decision.output_sigma_scale =
     request_.config->vertical_velocity_delta_sigma_scale;
+  decision.overlaps_jump = OverlapsJump(start_time_s, end_time_s);
+  decision.overlaps_rtk_outage = OverlapsRtkOutage(start_time_s, end_time_s);
+  decision.overlaps_rough_bias = OverlapsRoughBias(start_time_s, end_time_s);
+  decision.overlaps_road_high_noise_bias =
+    OverlapsRoadHighNoiseBias(start_time_s, end_time_s);
   if (!request_.config->enable_vertical_velocity_delta_context_sigma_scale) {
     decision.context = "GLOBAL";
     return decision;
@@ -67,9 +72,6 @@ VerticalVelocityDeltaContextScalePlanner::Evaluate(
 
   decision.output_sigma_scale =
     request_.config->vertical_velocity_delta_context_normal_sigma_scale;
-  decision.overlaps_jump = OverlapsJump(start_time_s, end_time_s);
-  decision.overlaps_rtk_outage = OverlapsRtkOutage(start_time_s, end_time_s);
-  decision.overlaps_rough_bias = OverlapsRoughBias(start_time_s, end_time_s);
 
   std::vector<std::string> labels;
   if (decision.overlaps_jump) {
@@ -153,6 +155,25 @@ bool VerticalVelocityDeltaContextScalePlanner::OverlapsRoughBias(
   }
   for (const auto &segment : *request_.bias_reestimate_segments) {
     if (!IsRoughBiasSource(segment)) {
+      continue;
+    }
+    if (IsFiniteInterval(segment.start_time_s, segment.end_time_s) &&
+        IntervalsOverlap(start_time_s, end_time_s, segment.start_time_s, segment.end_time_s)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool VerticalVelocityDeltaContextScalePlanner::OverlapsRoadHighNoiseBias(
+  const double start_time_s,
+  const double end_time_s) const {
+  if (request_.bias_reestimate_segments == nullptr ||
+      !IsFiniteInterval(start_time_s, end_time_s)) {
+    return false;
+  }
+  for (const auto &segment : *request_.bias_reestimate_segments) {
+    if (!IsRoadHighNoiseBiasReestimateSource(segment)) {
       continue;
     }
     if (IsFiniteInterval(segment.start_time_s, segment.end_time_s) &&

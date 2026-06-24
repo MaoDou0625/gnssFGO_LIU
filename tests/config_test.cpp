@@ -88,6 +88,12 @@ void TestPhase3SmokeConfigLoads() {
   ExpectTrue(
     std::abs(config.vertical_velocity_delta_target_acc_limit_mps2 - 0.85) < 1e-12,
     "velocity delta target acceleration limit should load");
+  ExpectTrue(
+    config.enable_vertical_velocity_delta_high_noise_target_acc_limit_scale,
+    "high-noise velocity delta target acceleration limit scale should default on");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_high_noise_target_acc_limit_scale - 4.0) < 1e-12,
+    "high-noise velocity delta target acceleration limit scale should default to 4");
 }
 
 void TestPhase4SmokeConfigLoads() {
@@ -3129,6 +3135,14 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
     "0.75");
   offline_lc_minimal::OverrideConfigField(
     config,
+    "enable_vertical_velocity_delta_high_noise_target_acc_limit_scale",
+    "true");
+  offline_lc_minimal::OverrideConfigField(
+    config,
+    "vertical_velocity_delta_high_noise_target_acc_limit_scale",
+    "4.0");
+  offline_lc_minimal::OverrideConfigField(
+    config,
     "vertical_velocity_delta_skip_jump_padding",
     "false");
   ExpectTrue(
@@ -3185,6 +3199,12 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
     std::abs(config.vertical_velocity_delta_context_jump_extra_padding_s - 0.75) < 1e-15,
     "vertical velocity delta jump context extra padding should parse");
   ExpectTrue(
+    config.enable_vertical_velocity_delta_high_noise_target_acc_limit_scale,
+    "high-noise velocity delta target acceleration limit scale flag should parse");
+  ExpectTrue(
+    std::abs(config.vertical_velocity_delta_high_noise_target_acc_limit_scale - 4.0) < 1e-15,
+    "high-noise velocity delta target acceleration limit scale should parse");
+  ExpectTrue(
     !config.vertical_velocity_delta_skip_jump_padding,
     "vertical velocity delta jump padding skip flag should parse");
   const std::string serialized = offline_lc_minimal::ConfigToString(config);
@@ -3236,6 +3256,12 @@ void TestStage2LowfreqVerticalReferenceConfigValidation() {
   ExpectTrue(
     serialized.find("vertical_velocity_delta_context_jump_extra_padding_s=0.75") != std::string::npos,
     "vertical velocity delta jump context extra padding should serialize");
+  ExpectTrue(
+    serialized.find("enable_vertical_velocity_delta_high_noise_target_acc_limit_scale=true") != std::string::npos,
+    "high-noise velocity delta target acceleration limit scale flag should serialize");
+  ExpectTrue(
+    serialized.find("vertical_velocity_delta_high_noise_target_acc_limit_scale=4") != std::string::npos,
+    "high-noise velocity delta target acceleration limit scale should serialize");
   ExpectTrue(
     serialized.find("vertical_velocity_delta_skip_jump_padding=false") != std::string::npos,
     "vertical velocity delta jump padding skip flag should serialize");
