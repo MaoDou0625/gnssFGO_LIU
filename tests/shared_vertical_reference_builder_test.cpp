@@ -1,5 +1,6 @@
 #include <cmath>
 #include <iostream>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -97,6 +98,29 @@ offline_lc_minimal::SharedVerticalReferenceMember MakeMember(
   return member;
 }
 
+offline_lc_minimal::SharedVerticalReferenceMember MakeMemberFromHeights(
+  const std::string &id,
+  const std::vector<double> &heights_m,
+  const double lateral_m,
+  const std::vector<bool> *keep_sample = nullptr) {
+  offline_lc_minimal::SharedVerticalReferenceMember member;
+  member.member_id = id;
+  member.config = offline_lc_minimal::DefaultConfig();
+  member.config.required_best_sol_status_code = 1;
+  member.config.drop_nonfinite_sigma = true;
+  for (std::size_t index = 0; index < heights_m.size(); ++index) {
+    if (keep_sample != nullptr && index < keep_sample->size() && !(*keep_sample)[index]) {
+      continue;
+    }
+    member.trajectory.push_back(
+      MakeTrajectoryCsvRow(
+        static_cast<double>(index),
+        heights_m[index],
+        lateral_m));
+  }
+  return member;
+}
+
 void TestProjectPointToSharedReferenceLine() {
   std::vector<offline_lc_minimal::SharedReferenceLinePoint> line{
     {0.0, 0.0, 0.0},
@@ -127,15 +151,96 @@ void TestSharedReferenceUsesStage2NavOnlyBridge() {
   ExpectNear(reference.rows[0].reference_up_m, 101.0, 0.02, "start should use Stage2 nav median");
   ExpectNear(reference.rows[4].reference_up_m, 105.0, 0.02, "end should use Stage2 nav median");
   ExpectTrue(
-    reference.rows[0].source == "NAV_BRIDGE",
-    "start source should use Stage2 nav bridge");
+    reference.rows[0].source == "TRUSTED_TEXTURE_FUSION",
+    "start source should use trusted Stage2 texture fusion");
   ExpectTrue(
-    reference.rows[4].source == "NAV_BRIDGE",
-    "end source should use Stage2 nav bridge");
+    reference.rows[4].source == "TRUSTED_TEXTURE_FUSION",
+    "end source should use trusted Stage2 texture fusion");
   ExpectNear(reference.rows[2].reference_up_m, 103.0, 0.03, "middle should use Stage2 nav median");
   ExpectTrue(
     reference.rows[2].rtk_weight == 0.0,
     "shared reference should not assign RTK weight");
+}
+
+void TestTrustedTextureFusionPrefersLowerVariationSource() {
+  std::vector<double> smooth_heights;
+  std::vector<double> disturbed_heights;
+  for (int s = 0; s <= 120; ++s) {
+    const double s_m = static_cast<double>(s);
+    const double base_height_m =
+      100.0 + 0.02 * s_m + 0.01 * std::sin(s_m / 7.0);
+    double disturbed_height_m = base_height_m;
+    if (s >= 40 && s <= 55) {
+      const double phase =
+        (s_m - 40.0) / 15.0 * std::numbers::pi;
+      disturbed_height_m += 0.12 * std::sin(phase);
+    }
+    smooth_heights.push_back(base_height_m);
+    disturbed_heights.push_back(disturbed_height_m);
+  }
+
+  offline_lc_minimal::SharedVerticalReferenceBuildRequest request;
+  request.grid_spacing_m = 1.0;
+  request.sigma_m = 0.02;
+  request.trusted_texture_lowpass_radius_m = 20.0;
+  request.trusted_texture_source_margin_min = 0.03;
+  request.members.push_back(MakeMemberFromHeights("disturbed", disturbed_heights, 0.0));
+  request.members.push_back(MakeMemberFromHeights("smooth", smooth_heights, 0.2));
+
+  const auto reference =
+    offline_lc_minimal::BuildSharedVerticalReference(std::move(request));
+
+  const std::size_t check_index = 48U;
+  const double fused_height = reference.rows[check_index].reference_up_m;
+  const double disturbance_m =
+    std::abs(disturbed_heights[check_index] - smooth_heights[check_index]);
+  ExpectTrue(
+    std::abs(fused_height - smooth_heights[check_index]) <
+      0.20 * disturbance_m,
+    "trusted texture fusion should strongly move the local valley toward the lower-variation member");
+  ExpectTrue(
+    std::abs(fused_height - smooth_heights[check_index]) <
+      std::abs(fused_height - disturbed_heights[check_index]),
+    "trusted texture fusion should be closer to the lower-variation member");
+}
+
+void TestTrustedTextureFusionDoesNotTrustLongInterpolatedGap() {
+  std::vector<double> measured_heights;
+  std::vector<double> gap_heights;
+  std::vector<bool> gap_keep_sample;
+  for (int s = 0; s <= 120; ++s) {
+    const double s_m = static_cast<double>(s);
+    const double base_height_m =
+      100.0 + 0.015 * s_m + 0.008 * std::sin(s_m / 8.0);
+    double measured_height_m = base_height_m;
+    if (s >= 40 && s <= 55) {
+      const double phase =
+        (s_m - 40.0) / 15.0 * std::numbers::pi;
+      measured_height_m += 0.10 * std::sin(phase);
+    }
+    measured_heights.push_back(measured_height_m);
+    gap_heights.push_back(base_height_m);
+    gap_keep_sample.push_back(!(s >= 36 && s <= 60));
+  }
+
+  offline_lc_minimal::SharedVerticalReferenceBuildRequest request;
+  request.grid_spacing_m = 1.0;
+  request.sigma_m = 0.02;
+  request.trusted_texture_lowpass_radius_m = 20.0;
+  request.trusted_texture_source_margin_min = 0.03;
+  request.members.push_back(MakeMemberFromHeights("measured", measured_heights, 0.0));
+  request.members.push_back(
+    MakeMemberFromHeights("gap", gap_heights, 0.2, &gap_keep_sample));
+
+  const auto reference =
+    offline_lc_minimal::BuildSharedVerticalReference(std::move(request));
+
+  const std::size_t check_index = 48U;
+  const double fused_height = reference.rows[check_index].reference_up_m;
+  ExpectTrue(
+    std::abs(fused_height - measured_heights[check_index]) <
+      std::abs(fused_height - gap_heights[check_index]),
+    "trusted texture fusion should not prefer a long interpolated member gap");
 }
 
 void TestSharedReferenceIgnoresRtkSamples() {
@@ -191,6 +296,12 @@ int main() {
     RunTest(
       "TestSharedReferenceIgnoresRtkSamples",
       TestSharedReferenceIgnoresRtkSamples);
+    RunTest(
+      "TestTrustedTextureFusionPrefersLowerVariationSource",
+      TestTrustedTextureFusionPrefersLowerVariationSource);
+    RunTest(
+      "TestTrustedTextureFusionDoesNotTrustLongInterpolatedGap",
+      TestTrustedTextureFusionDoesNotTrustLongInterpolatedGap);
     RunTest("TestSharedReferenceRejectsSingleMember", TestSharedReferenceRejectsSingleMember);
   } catch (const std::exception &exception) {
     std::cerr << exception.what() << '\n';

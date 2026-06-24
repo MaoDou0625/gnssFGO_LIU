@@ -12,7 +12,7 @@
 #include <utility>
 
 #include "offline_lc_minimal/common/GeoUtils.h"
-#include "offline_lc_minimal/core/SharedVerticalReferenceComposer.h"
+#include "offline_lc_minimal/core/SharedVerticalReferenceTrustedTextureFusion.h"
 
 namespace offline_lc_minimal {
 namespace {
@@ -339,9 +339,11 @@ SharedVerticalReference BuildSharedVerticalReference(
   const double max_s_m = result.reference_line.back().s_m;
   const std::size_t grid_count =
     static_cast<std::size_t>(std::floor(max_s_m / request.grid_spacing_m)) + 1U;
-  std::vector<std::vector<double>> nav_up_by_bin(grid_count);
+  std::vector<SharedVerticalReferenceMemberHeightGrid> member_height_grids;
+  member_height_grids.reserve(members.size());
 
   for (const auto &member : members) {
+    std::vector<std::vector<double>> member_up_values_by_bin(grid_count);
     for (const auto &point : member.trajectory) {
       SharedVerticalReferenceProjectionDiagnosticRow diagnostic;
       diagnostic.member_id = member.member_id;
@@ -360,26 +362,30 @@ SharedVerticalReference BuildSharedVerticalReference(
         continue;
       }
       const std::size_t bin = GridIndex(projection.s_m, request.grid_spacing_m);
-      if (bin < nav_up_by_bin.size()) {
-        nav_up_by_bin[bin].push_back(diagnostic.corrected_up_m);
+      if (bin < member_up_values_by_bin.size()) {
+        member_up_values_by_bin[bin].push_back(diagnostic.corrected_up_m);
         diagnostic.used = true;
         diagnostic.source = "NAV_BRIDGE";
       }
       result.projection_diagnostics.push_back(diagnostic);
     }
+    SharedVerticalReferenceMemberHeightGrid height_grid;
+    height_grid.member_id = member.member_id;
+    height_grid.up_by_bin = MedianByBin(member_up_values_by_bin);
+    height_grid.sample_count_by_bin.resize(grid_count, 0U);
+    for (std::size_t bin = 0; bin < grid_count; ++bin) {
+      height_grid.sample_count_by_bin[bin] = member_up_values_by_bin[bin].size();
+    }
+    member_height_grids.push_back(std::move(height_grid));
   }
 
-  const std::vector<double> nav_median_by_bin = MedianByBin(nav_up_by_bin);
-  std::vector<std::size_t> nav_sample_count_by_bin(grid_count, 0U);
-  for (std::size_t bin = 0; bin < grid_count; ++bin) {
-    nav_sample_count_by_bin[bin] = nav_up_by_bin[bin].size();
-  }
-  SharedVerticalReferenceCompositionRequest composition_request;
-  composition_request.grid_spacing_m = request.grid_spacing_m;
-  composition_request.sigma_m = request.sigma_m;
-  composition_request.nav_up_by_bin = nav_median_by_bin;
-  composition_request.nav_sample_count_by_bin = std::move(nav_sample_count_by_bin);
-  result.rows = ComposeNavOnlySharedVerticalReference(std::move(composition_request));
+  SharedVerticalReferenceTrustedTextureFusionRequest fusion_request;
+  fusion_request.grid_spacing_m = request.grid_spacing_m;
+  fusion_request.sigma_m = request.sigma_m;
+  fusion_request.lowpass_radius_m = request.trusted_texture_lowpass_radius_m;
+  fusion_request.source_margin_min = request.trusted_texture_source_margin_min;
+  fusion_request.members = std::move(member_height_grids);
+  result.rows = ComposeTrustedTextureSharedVerticalReference(std::move(fusion_request));
   return result;
 }
 

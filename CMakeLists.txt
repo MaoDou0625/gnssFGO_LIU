@@ -125,7 +125,7 @@ add_library(offline_lc_minimal_lib
   src/core/StageAttitudeDebug.cpp
   src/core/StageAttitudeReference.cpp
   src/core/SharedVerticalReferenceBuilder.cpp
-  src/core/SharedVerticalReferenceComposer.cpp
+  src/core/SharedVerticalReferenceTrustedTextureFusion.cpp
   src/core/Stage2AttitudeHoldBuilder.cpp
   src/core/Stage2HorizontalHoldBuilder.cpp
   src/core/Stage2LowfreqVerticalReferenceOptimizationRunner.cpp
